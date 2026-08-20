@@ -4,45 +4,32 @@
 
 ### Counter collection today
 
-`rocprof-compute` maps the requested analysis metrics to hardware counters and uses its
-architecture-aware `perfmon_coalesce` policy to pack those counters into groups that each fit one
-hardware pass. The groups are materialized as `perfmon/pmc_perf_*.yaml` buckets. Their count
-therefore determines how many counter-collection passes are needed.
+`rocprof-compute` maps the requested analysis metrics to hardware counters and
+packs those counters into groups that each fit one hardware pass. The number of
+groups therefore determines how many counter-collection passes are needed.
 
-The profiling layer can invoke `rocprofv3`, or `rocprofiler-sdk` with or without the
+The profiling layer can invoke `rocprofv3`,`rocprofiler-sdk`, or
 `rocprof-compute` native collector. All three configurations consume the same buckets. Application
-replay and single-bucket collection work across them; iteration multiplexing is limited to
-`rocprofiler-sdk` with the native collector.
+replay work across them; iteration multiplexing is limited to native collector.
 
-The `--kernel <regex>` and `--dispatch <range>` filters are existing capabilities on all
-three configurations. Kernel filtering resolves at code-object load time by constructing the
-target kernel-ID set. Dispatch filtering resolves at dispatch time against a logical-dispatch
-index maintained per kernel.
 
 | Strategy | Execution model | What it covers | What it does not cover |
 | --- | --- | --- | --- |
-| **Application replay** (default for multiple buckets) | Launch and run the complete workload once per bucket, then combine the collected counters. | Collects every bucket across corresponding replayed dispatch occurrences without estimating missing counters from other occurrences. | Repeats process startup, runtime initialization, host work, and the workload itself. Multi-bucket live attach is rejected, and communicating multi-rank workloads currently trigger a warning because the complete application is repeated. |
-| **Iteration multiplexing** | Launch the workload once for counter collection and use the native collector to rotate buckets across different comparable dispatch occurrences. Analysis imputes the counters missing from each occurrence. | Avoids repeated application launches for workloads with enough repeated, stable dispatches. | Does not collect every bucket from one logical dispatch. One-off or undersampled kernels cannot produce a complete metric set, and imputation introduces an accuracy trade-off. It also requires the native collector. |
-| **Single-bucket collection** | Launch the workload once for counter collection and collect the one bucket. This is the ordinary one-pass case, not a separate replay mode. | Provides the requested counters without replay or imputation when they fit one hardware pass. | Cannot provide a full report when the requested counters require multiple buckets. |
+| **Application replay** | Launch and run the complete workload once per bucket, then combine the collected counters. | Collects every bucket across corresponding replayed dispatch occurrences without estimating missing counters from other occurrences. | Repeats process startup, runtime initialization, host work, and the workload itself. Multi-bucket live attach is rejected, and communicating multi-rank workloads currently trigger a warning. |
+| **Iteration multiplexing** | Launch the workload once for counter collection and use the native collector to rotate buckets across different comparable dispatch occurrences. Analysis imputes the counters missing from each occurrence. | Avoids repeated application launches for workloads with enough dispatches. | Does not collect every bucket from one logical dispatch. Undersampled kernels cannot produce a complete metric set. It also requires the native collector. |
 
 Application replay is therefore the only current strategy that covers a multi-bucket request
-without cross-dispatch imputation, but its unit of repetition is the entire workload. Iteration
-multiplexing changes that cost by distributing the buckets across dispatches; it does not replay a
-single dispatch against the same starting state.
+without cross-dispatch imputation.
 
 ### Co-active profiling services
 
 Counter collection never runs alone. Every counter invocation must yield kernel-dispatch records;
-those records supply the kernel counts and durations in Top Stats and the rows in
-`pmc_dispatch_info.csv`. The SDK backend explicitly enables kernel dispatch tracing and adds
-marker or ROCTx tracing for a framework-selected run. The current `rocprofv3` framework option
-selects marker tracing in place of its ordinary kernel-trace option, so its replay adapter must
-verify that the marker configuration yields the required dispatch rows or enable both services.
-Marker regions are consumed by the ML API trace analysis.
+those records supply the kernel counts and durations. The SDK backend explicitly enables kernel dispatch tracing and adds
+marker or ROCTx tracing for a framework-selected run.
 
 The native collector also subscribes to code-object tracing, but those events describe load-time
 objects rather than individual dispatches and are not multiplied by kernel replay. PC sampling runs
-in a separate invocation and roofline counters use the ordinary counter-bucket path.
+in a separate invocation.
 
 ### Proposed SDK replay mechanism
 
@@ -110,48 +97,29 @@ agent is discovered and captured separately. While replay is active, ordinary di
 reader side of the same per-agent lock, while replay windows on different agents can proceed
 concurrently.
 
-### Assumptions and constraints
-
-- The `rocprof-compute` design assumes homogeneous target agents. They use the same counter
-  definitions and therefore the same bucket and pass count. This is a design assumption, not an SDK
-  restriction: the proposed callback is per dispatch, the tool can return different counts for
-  different agents, and the SDK supports those per-dispatch counts.
-- PR 8622 is open and unmerged. The HLD targets its proposed interface, so the integration may need
-  adjustment when the upstream contract lands; no released SDK version floor can be named yet.
-
 ## Problem statement
 
 When a counter request produces *N* hardware-pass buckets, where *N* is greater than one,
 application replay launches and runs the complete workload once per bucket. Counter collection
-therefore repeats process startup, runtime initialization, host-side work, and the workload itself
-*N* times even though each run collects only one bucket. This repeated full-workload work is
-undesirable for workloads with large startup cost.
+therefore repeats process startup, runtime initialization, host-side work, and the kernel run
+*N* times even though only the kernel needs to be profiled *N* times. This repeated full-workload work
+is undesirable for workloads with large startup cost.
 
-Iteration multiplexing avoids those launches, but it obtains the buckets from different dispatch
-occurrences and fills each occurrence's missing counters during analysis. It does not cover the need
-to collect every bucket through repeated executions of one logical dispatch within a single
+Iteration multiplexing avoids those launches, but it obtains the counters from different dispatches
+and fills each dispatch's missing counters during analysis. It does not cover the need
+to collect every counter through repeated executions of one logical dispatch within a single
 workload run.
 
-Kernel replay is intended to fill that gap as an opt-in mode. It retains the same *N* buckets, runs
+Kernel replay is intended to fill that gap. It retains the same *N* buckets, runs
 the workload once, and executes each replay-eligible dispatch in *N* passes, with one bucket collected
-per pass. Application replay remains the default.
+per pass.
 
 Replay also multiplies co-active per-dispatch services. Without explicit handling, kernel dispatch
 tracing emits *N* records for one logical dispatch. Top Stats would then report an inflated dispatch
-count and aggregate GPU duration, and `pmc_dispatch_info.csv` would expose the duplicated rows.
+count and aggregate GPU duration.
 
-Filtering exposes a separate callback-ordering defect on the native collector. Its counter-dispatch
-callback runs once per replay pass and currently increments the per-kernel dispatch index there. An
-*N*-pass replay therefore consumes *N* indices for one logical dispatch, so `--dispatch 3` can
-select the third pass of the first dispatch rather than the third logical dispatch and label the
-wrong work as requested. Because both filters currently reject work in that later callback, after
-the pass count has been chosen, an excluded dispatch would still pay the snapshot, restore, and
-replay-window costs before its counters were discarded.
-
-The motivation is qualitative. No measured startup-cost data, speedup, overhead bound, or break-even
-point is available. Kernel replay removes repeated full-workload launches but adds snapshot,
-restoration, dispatch replay, and isolation costs. There is therefore no claim that it will be
-faster for every workload.
+Kernel replay removes repeated full-workload launches but adds snapshot,
+restoration, dispatch replay, and isolation costs. Therefore it may not be faster for every workload.
 
 The following flow compares counter collection for *N* greater than one. It does not include
 separate profiler invocations outside counter collection.
@@ -160,11 +128,11 @@ separate profiler invocations outside counter collection.
 flowchart LR
     Buckets["N hardware-counter buckets<br/>N greater than 1"]
 
-    subgraph Application["Current default: application replay"]
+    subgraph Application["Application replay"]
         direction TB
         AppSelect["Choose bucket i"]
         AppLaunch["Launch profiling and the full workload"]
-        AppRun["Run process startup, runtime initialization,<br/>host work, and the entire workload"]
+        AppRun["Run process startup, runtime initialization,<br/>host work, and kernel execution"]
         AppCollect["Collect bucket i"]
         AppDone{"All N buckets collected?"}
         AppResult["Counter collection complete<br/>N full workload launches"]
@@ -174,19 +142,19 @@ flowchart LR
         AppDone -- yes --> AppResult
     end
 
-    subgraph Kernel["Proposed opt-in: kernel replay"]
+    subgraph Kernel["Kernel replay"]
         direction TB
         KernelLaunch["Launch profiling and the full workload once"]
         KernelSetup["Run process startup and runtime initialization once"]
-        KernelDispatch{"Next workload dispatch?"}
-        KernelOrdinary["Execute ordinary dispatch once"]
-        KernelReplay["Execute replay-eligible dispatch in N passes<br/>one counter bucket per pass"]
+        KernelDispatch{"Next kernel dispatch?"}
+        KernelOrdinary["Execute unselected dispatch once"]
+        KernelReplay["Execute selected dispatch in N passes<br/>one counter bucket per pass"]
         KernelContinue["Continue host-side workload execution"]
         KernelResult["Counter collection complete<br/>one full workload launch"]
 
         KernelLaunch --> KernelSetup --> KernelDispatch
-        KernelDispatch -- ordinary or not selected --> KernelOrdinary --> KernelContinue
-        KernelDispatch -- selected and replay-eligible --> KernelReplay --> KernelContinue
+        KernelDispatch -- not selected --> KernelOrdinary --> KernelContinue
+        KernelDispatch -- selected --> KernelReplay --> KernelContinue
         KernelContinue --> KernelDispatch
         KernelDispatch -- workload complete --> KernelResult
     end
@@ -197,52 +165,60 @@ flowchart LR
 
 ## Requirements
 
-`P0` requirements are necessary for correct and compatible counter collection. `P1` requirements
-are necessary for a usable experimental mode but do not define counter correctness. Both priorities
-are normative.
-
 ### Functional requirements
 
-| ID | Priority | Requirement | Decision trace |
-| --- | --- | --- | --- |
-| FR-01 | P0 | `rocprof-compute profile` shall expose `--replay-mode {application,kernel}`, default to `application`, and require explicit selection of kernel replay. `--iteration-multiplexing` and its policy argument shall remain independent. | Plan—Purpose, CLI, iteration multiplexing; Initial Q3; Final Q18 |
-| FR-02 | P0 | For *N* counter buckets, kernel-replay mode shall use one workload invocation for counter collection and collect one bucket in each of *N* passes for every replay-eligible dispatch. No user-supplied pass count shall be required. | Plan—Purpose, bucketing; Initial Q3/Q6 |
-| FR-03 | P0 | Kernel replay shall support `rocprofv3`, `rocprofiler-sdk` with the native collector, and `rocprofiler-sdk` without it. An unavailable backend configuration shall produce a hard error naming a supported alternative rather than falling back. | Plan—Backends, failure paths; Initial Q4/Q5 |
-| FR-04 | P0 | Kernel replay shall preserve the bucket membership used by application replay. The pass count shall equal the bucket count, every bucket shall fit one hardware pass, and `_ACCUM` pairing, TCC grouping, and same-bucket priority shall remain unchanged. | Plan—Bucketing; Initial Q6/Q7 |
-| FR-05 | P0 | One kernel-replay invocation shall produce a consolidated `results_*.csv` artifact that the existing workload join and analysis path can consume without an analysis-side contract change. | Plan—Output (Q7 reversal); Final Q7 |
-| FR-06 | P0 | All passes of one logical dispatch shall resolve to one `Dispatch_ID` group containing the complete counter set. Start and end timestamps shall follow the same cross-pass normalization semantics used for application-replay results. | Plan—Dispatch identity; Initial Q10 |
-| FR-07 | P0 | Kernel replay combined with `--iteration-multiplexing`, `--attach-pid`, or `--pc-sampling` shall produce a hard error. `--roof-only`, `--set`, and `--block` shall continue to interoperate unchanged. | Plan—PC sampling (Q3 reversal), failure paths; Final Q3/Q20 |
-| FR-08 | P0 | Kernel replay shall produce a hard error when the installed SDK predates the supported version floor and shall state the required version. | Plan—version-floor open question; Initial Q12; HLD questionnaire Q20 |
-| FR-09 | P0 | Kernel replay shall support homogeneous multi-agent configurations and shall produce a hard error identifying heterogeneous agents. | Plan—Failure paths; HLD questionnaire Q15; Final Q20 |
-| FR-10 | P0 | Kernel replay shall remain available for multi-rank workloads and shall retain the multi-rank warning. | Plan—Multi-rank; Final Q1–Q2 |
-| FR-11 | P0 | If the SDK declines a device-memory snapshot, `rocprof-compute` shall abandon the profile without retry, reject the incomplete data, and recommend application replay in the diagnostic. | Plan—Failure paths; Final Q8–Q10 |
-| FR-12 | P0 | If the upstream replay mechanism aborts the workload, `rocprof-compute` shall report the failed run without attempting recovery or analysis of partial output. | Plan—Failure paths; HLD questionnaire Q10; Final Q20 |
-| FR-13 | P0 | If an agent has no usable counter profiles, `rocprof-compute` shall diagnose the condition rather than silently degrading that dispatch to one pass. | Plan—Failure paths; Final Q16 |
-| FR-14 | P0 | Kernel replay shall expose one kernel-dispatch trace record per logical dispatch, so Top Stats and `pmc_dispatch_info.csv` preserve non-replay semantics by reporting one dispatch and its pass-0 logical duration rather than replay-multiplied values. | Plan v2—kernel-trace deduplication, Phase 2 requirements |
-| FR-15 | P0 | Roofline counter collection shall follow the selected replay mode through the ordinary counter-bucket path without special handling. | Plan v2—roofline |
-| FR-16 | P0 | Kernel filtering shall compose with kernel replay on the native collector. A dispatch whose kernel is excluded by `--kernel` shall not be replayed and shall incur no snapshot or restore. | Plan v3—native kernel filtering |
-| FR-17 | P0 | Dispatch filtering shall compose with kernel replay on the native collector. `--dispatch` indices shall count logical dispatches, not replay passes, so an index selects the same work whether or not kernel replay is selected. An excluded dispatch shall not be replayed. | Plan v3—logical dispatch indexing |
-
-The concrete SDK version in FR-08 remains a placeholder until PR 8622 merges. The version value is
-an external dependency; version-gated failure behavior is settled. FR-10 does not settle whether
-collective-bearing dispatches must be excluded; that policy remains an open question.
-
-FR-16 and FR-17 are separate because the filters resolve at different times and can fail
-independently: correcting kernel-regex exclusion does not correct a pass-indexed `--dispatch`,
-and vice versa. They guarantee filter composition only for the native collector. Filtered kernel
-replay on the two non-native configurations is not claimed here and remains an open question.
+- `rocprof-compute profile` shall expose `--replay-mode {application,kernel}`, default to
+  `application`, and require explicit selection of kernel replay. `--iteration-multiplexing` and its
+  policy argument shall remain independent.
+- For *N* counter buckets, kernel-replay mode shall use one workload invocation for counter
+  collection and collect one bucket in each of *N* passes for every replay-eligible dispatch. No
+  user-supplied pass count shall be required.
+- Kernel replay shall support `rocprofv3`, native collector, and `rocprofiler-sdk`.
+- Kernel replay shall preserve the counter bucket membership used by application replay. The pass count
+  shall equal the bucket count, every bucket shall fit one hardware pass, and `_ACCUM` pairing, TCC
+  grouping, and same-bucket priority shall remain unchanged.
+- One kernel-replay invocation shall produce a consolidated `results_*.csv` artifact that the
+  existing workload join and analysis path can consume without an analysis-side contract change.
+- All passes of one logical dispatch shall resolve to one `Dispatch_ID` group containing the
+  complete counter set. Start and end timestamps shall follow the same cross-pass normalization
+  semantics used for application-replay results.
+- Kernel replay combined with `--iteration-multiplexing`, `--attach-pid`, or `--pc-sampling` shall
+  produce a hard error. `--roof-only`, `--set`, and `--block` shall continue to interoperate
+  unchanged.
+- Kernel replay shall produce a hard error when the installed SDK predates the supported version
+  floor and shall state the required version.
+- Kernel replay shall remain available for multi-rank workloads.
+- If the SDK declines a device-memory snapshot, `rocprof-compute` shall abandon the profile without
+  retry and recommend application replay in the diagnostic.
+- If the upstream replay mechanism aborts, `rocprof-compute` shall report the failed run
+  without attempting recovery.
+- If an agent has no usable counter profiles, `rocprof-compute` shall diagnose the condition rather
+  than silently degrading that dispatch to one pass.
+- Kernel replay shall expose one kernel-dispatch trace record per logical dispatch, so Top Stats and
+  `pmc_dispatch_info.csv` preserve non-replay semantics by reporting one dispatch and its pass-0
+  logical duration rather than replay-multiplied values.
+- Kernel filtering shall compose with kernel replay on the native collector. A dispatch whose kernel
+  is excluded shall not be replayed and shall incur no snapshot or restore.
+- Dispatch filtering shall compose with kernel replay on the native collector. `--dispatch` indices
+  shall count logical dispatches, not replay passes, so an index selects the same work whether or not
+  kernel replay is selected. An excluded dispatch shall not be replayed.
 
 ### Non-functional requirements
 
-| ID | Priority | Requirement | Decision trace |
-| --- | --- | --- | --- |
-| NFR-01 | P0 | For state covered by the replay-equivalence guarantee, a counter present in more than one bucket shall have the same value across passes of the same dispatch. Cache-sensitive counters are outside this invariant because cache state is not restored. | Plan—Validation and cache-state limitation; Initial Q14/Q15 |
-| NFR-02 | P0 | Kernel replay shall fail closed whenever it cannot provide a complete bucket set. Silently partial counter data shall not reach analysis. | Plan—Failure paths; Final Q9/Q16 |
-| NFR-03 | P0 | Kernel replay shall guarantee equivalent replay state only for tracked coarse-grained VRAM and module-scope device or constant state. It shall make no equivalence guarantee for unified, managed, or `hipMallocAsync` memory, HIP graphs, multi-packet or multi-dispatch submissions, unfenced asynchronous SDMA copies, or cache state, and may require host memory equal to the tracked device footprint. | Plan—Phase 4 limitations; Initial Q14; HLD questionnaire Q23 |
-| NFR-04 | P0 | Workflows that do not select kernel replay shall retain their current collection behavior, and kernel-replay output shall preserve the existing analysis input contract. | Plan—Purpose, output; Initial Q3; Final Q7 |
-| NFR-05 | P1 | Diagnostics shall identify the selected replay mode, the bucket-to-pass mapping, and the specific failure condition. | Plan—Phase 5 debuggability; Final Q8–Q10/Q16/Q20 |
-| NFR-06 | P1 | CLI help shall identify kernel replay as experimental. | Plan—CLI; Final Q19 |
-| NFR-07 | P1 | Kernel-replay performance shall be evaluated qualitatively. The system shall make no wall-time speedup guarantee and shall have no symbolic or numeric replay-overhead acceptance bound. | Plan—Cost model; Initial Q16; Final Q21 |
+- For state covered by the replay-equivalence guarantee, a counter present in more than one bucket
+  shall have the same value across passes of the same dispatch. Cache-sensitive counters are outside
+  this invariant because cache state is not restored.
+- Kernel replay shall fail closed whenever it cannot provide a complete bucket set. Silently partial
+  counter data shall not be collected.
+- Kernel replay shall guarantee equivalent replay state only for tracked coarse-grained VRAM and
+  module-scope device or constant state. It shall make no equivalence guarantee for unified,
+  managed, or `hipMallocAsync` memory, HIP graphs, multi-packet or multi-dispatch submissions,
+  unfenced asynchronous SDMA copies, or cache state, and may require host memory equal to the tracked
+  device footprint.
+- Workflows that do not select kernel replay shall retain their current collection behavior, and
+  kernel-replay output shall preserve the existing analysis input contract.
+- Diagnostics shall identify the selected replay mode, the bucket-to-pass mapping, and the specific
+  failure condition.
 
 ## Design
 
@@ -543,15 +519,8 @@ snapshot-decline diagnostic also recommends application replay.
 
 ## Open questions
 
-1. **SDK version floor.** Which released ROCm SDK version will first contain the kernel-replay
-   contract after PR 8622 merges, and what concrete minimum should the CLI diagnostic require?
-2. **Measured startup cost.** Which representative workloads show that avoiding repeated startup
-   outweighs snapshot, restoration, isolation, and replay overhead? No speedup or break-even claim
-   can be made until those measurements exist.
 3. **Collective-bearing kernels.** Should dispatches participating in inter-process collectives be
-   excluded from kernel replay, despite retaining multi-rank support and its existing warning?
-4. **Snapshot-decline detection.** Can the upstream SDK expose a structured status for a declined
-   snapshot instead of requiring `rocprof-compute` to classify a fragile log string?
+   excluded from kernel replay?
 5. **Marker and ROCTx semantics.** Host regions are emitted once but span all replay passes, so
    their durations include replay overhead and are not comparable with a non-replay run. Should the
    combination be corrected, annotated, or rejected?
