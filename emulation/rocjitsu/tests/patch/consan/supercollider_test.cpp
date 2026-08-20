@@ -3976,6 +3976,44 @@ TEST(ConSan, ProbeLdsCheckTrapModeAlignsCdna4B32AutoReportTuple) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSan, Gfx950B128AutoReportReusesReadbackAtAccvgprBoundary) {
+  std::vector<uint32_t> text_words = {
+      0xD9BE0000u,
+      0x0000040Du, // ds_write_b128 v13, v[4:7]
+  };
+  // Keep the complete 16-register ordinary bank live across the store. The
+  // accumulator boundary prevents descriptor growth, reproducing the compact
+  // CLIP matmul kernel that exposed the former three-VGPR report overhead.
+  for (uint16_t vgpr = 0u; vgpr < 16u; ++vgpr) {
+    text_words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "gfx950_b128_auto_report", /*vgpr_granulated=*/7u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.report_buffer_address = 0x1234567887654321ull;
+  options.report_marker = 0xABCDEF01u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
+  EXPECT_EQ(patch->scratch_vgpr, 0u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 4u);
+  EXPECT_EQ(patch->required_private_segment_size, 16u);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4U16ReadInPlace) {
   const std::array<uint32_t, 13> text_words = {
       0xD8780004u,

@@ -966,9 +966,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         continue;
       }
       const uint16_t vcc_save_sgpr_width = sc_vcc_save_sgpr_width(arch);
+      const bool reuse_readback_for_report =
+          lds_report_action_reuses_readback(options, static_cast<uint16_t>(*required_vgprs));
       const uint32_t probe_scratch_vgprs =
           *required_vgprs + lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address) +
-          report_alignment_padding + report_action_scratch_vgprs(options) +
+          (reuse_readback_for_report
+               ? 0u
+               : report_alignment_padding + report_action_scratch_vgprs(options)) +
           (lds_load_clobbers_address(site) ? 1u : 0u);
       const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
       uint64_t requested_words = (lds_load_clobbers_address(site) ? 1u : 0u) + 2u +
@@ -2181,8 +2185,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     };
     const std::unordered_set<const ConSanLdsSite *> required_relay_routed_sites =
         relay_routed_sites;
-    const size_t relay_layout_inputs = saturated_add(
-        required_relay_routed_sites.size(), relay_reservoir_candidates.size());
+    const size_t relay_layout_inputs =
+        saturated_add(required_relay_routed_sites.size(), relay_reservoir_candidates.size());
     MeteredPlanningWork relay_layout_work(
         options.lds_relay_layout_planning_work_limit.for_inputs(relay_layout_inputs),
         &result.planning_work_telemetry.lds_relay_layout_work_count,
@@ -2305,14 +2309,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         reservoir.placement = *placement;
       }
       SoppBranchRelayPlanningWorkTelemetry relay_work;
-      auto plan = plan_forward_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
-                                                  error_out, &relay_work,
-                                                  {.total =
-                                                       options.sopp_relay_planning_work_limit});
+      auto plan = plan_forward_sopp_branch_relays(
+          source_offsets, relay_offsets, island_offsets, error_out, &relay_work,
+          {.total = options.sopp_relay_planning_work_limit});
       accumulate_saturated(result.planning_work_telemetry.sopp_relay_work_count,
-                               relay_work.work_count);
+                           relay_work.work_count);
       accumulate_saturated(result.planning_work_telemetry.sopp_relay_exhaustion_count,
-                               relay_work.exhaustion_count);
+                           relay_work.exhaustion_count);
       if (!plan)
         return std::nullopt;
       return RelayLayoutAttempt{std::move(routed_sites), std::move(body_relay_slots),
@@ -2438,8 +2441,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         ScRelayReservoir trial_reservoir = selected_relay_reservoirs.back();
         selected_relay_reservoirs.pop_back();
         if (relay_layout_exhausted) {
-          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
-                                     trial_error);
+          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " + trial_error);
           return;
         }
         if (!trial || trial->relay_plan.rejected_source_indices.size() >= old_rejected) {
@@ -2581,8 +2583,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         if (relay_layout_exhausted) {
           selected_wide_composite_relay_donors = std::move(original_wide);
           selected_relay_reservoirs = std::move(original_reservoirs);
-          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
-                                     prune_error);
+          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " + prune_error);
           return;
         }
         if (pruned_attempt && pruned_attempt->relay_plan.rejected_source_indices.empty()) {
@@ -2901,13 +2902,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     // finite candidate, and one final materialized-only replay; correct
     // progress never reaches it.
     MeteredPlanningWork convergence_work(
-        options.lds_convergence_planning_work_limit.for_inputs(
-            branch_reservoir_candidates.size()),
+        options.lds_convergence_planning_work_limit.for_inputs(branch_reservoir_candidates.size()),
         &result.planning_work_telemetry.lds_convergence_work_count,
         &result.planning_work_telemetry.lds_convergence_exhaustion_count);
-    const auto charge_convergence = [&]() {
-      return convergence_work.consume();
-    };
+    const auto charge_convergence = [&]() { return convergence_work.consume(); };
     bool convergence_terminated = false;
     for (size_t iteration = 0u; charge_convergence(); ++iteration) {
       const bool initial_iteration = iteration == 0u;

@@ -655,6 +655,16 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
   return options.report_buffer_address ? 3u : 0u;
 }
 
+[[nodiscard]] bool lds_report_action_reuses_readback(const ConSanOptions &options,
+                                                     uint16_t readback_vgprs) {
+  // The automatic SuperCollider report is an idempotent one-word marker. Once
+  // a comparison has found a mismatch, its LDS readback values need not
+  // survive the marker store: clobbering them can only cause another marker
+  // store in a later chunk. Reuse a wide readback tuple instead of requiring
+  // three additional ordinary VGPRs at an AccVGPR boundary.
+  return options.report_buffer_address.has_value() && readback_vgprs >= 3u;
+}
+
 [[nodiscard]] std::optional<uint32_t> mismatch_action_word_count(const ConSanOptions &options,
                                                                  rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors,
@@ -794,13 +804,17 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   const auto gfx1250_two_address = gfx1250_two_address_expansion_plan(original_bytes, site, arch);
   const uint16_t compare_scratch_vgpr =
       static_cast<uint16_t>(scratch_vgpr + static_cast<uint16_t>(*required_vgprs));
-  uint16_t report_scratch_vgpr = static_cast<uint16_t>(
+  const uint16_t core_scratch_end = static_cast<uint16_t>(
       compare_scratch_vgpr + lds_check_trap_extra_scratch_vgprs(site, gfx1250_two_address));
-  if (options.report_buffer_address && consan_arch_requires_even_vgpr_tuples(arch) &&
-      report_scratch_vgpr % 2u != 0)
+  const bool reuse_readback_for_report =
+      lds_report_action_reuses_readback(options, static_cast<uint16_t>(*required_vgprs));
+  uint16_t report_scratch_vgpr = reuse_readback_for_report ? scratch_vgpr : core_scratch_end;
+  if (!reuse_readback_for_report && options.report_buffer_address &&
+      consan_arch_requires_even_vgpr_tuples(arch) && report_scratch_vgpr % 2u != 0)
     ++report_scratch_vgpr;
-  const uint16_t saved_address_vgpr = static_cast<uint16_t>(
+  const uint16_t report_scratch_end = static_cast<uint16_t>(
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
+  const uint16_t saved_address_vgpr = std::max(core_scratch_end, report_scratch_end);
   if (site.kind == ConSanLdsAccessKind::Read) {
     if (site.dst_accvgpr && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
       duplicate_load[0] &= ~(uint32_t{1} << 25u);
