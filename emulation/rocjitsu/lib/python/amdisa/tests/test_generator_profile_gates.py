@@ -1606,7 +1606,7 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
     )
     _run_multi(args)
 
-    vop3p = (tmp_path / 'cdna3' / 'vop3p.cpp').read_text()
+    vop3p = (tmp_path / 'cdna3' / 'vop3p_exec.cpp').read_text()
     body = _generated_method_body(
         vop3p,
         'VMfmaF3216x16x8Xf32Vop3pMfma',
