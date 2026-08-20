@@ -228,6 +228,7 @@ class Workload:
     tensile_expected_numeric_rows: int | None = None
     tensile_streamk_fixed_grid: int | None = None
     tensile_streamk_mode: int | None = None
+    tensile_minimum_timed_ms: float = EMPIRICAL_MINIMUM_TIMED_MS
     self_timed_device_minimum_ms: float | None = None
     warm_timing_mode: str | None = None
     empirical_device_timed_minimum_ms: float | None = None
@@ -465,6 +466,10 @@ WORKLOADS = (
         tensile_expected_numeric_rows=1,
         tensile_streamk_fixed_grid=4,
         tensile_streamk_mode=3,
+        # This is a one-row functional smoke, not an empirical timing row.
+        # Retain a positive device-timing canary without requiring the
+        # aggregate duration used by repeated performance measurements.
+        tensile_minimum_timed_ms=5.0,
     ),
     Workload(
         id="tensile-gfx950-lds-positive",
@@ -2528,7 +2533,7 @@ def _workload_command(
             "--repetitions",
             "1",
             "--minimum-timed-ms",
-            str(EMPIRICAL_MINIMUM_TIMED_MS),
+            str(workload.tensile_minimum_timed_ms),
             "--label",
             f"{workload.id}-{phase}",
         ]

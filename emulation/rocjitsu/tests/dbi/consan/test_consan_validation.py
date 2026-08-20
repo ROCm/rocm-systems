@@ -4379,6 +4379,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.run_timeout_seconds, 60)
         self.assertEqual(workload.tensile_inner_timeout_seconds, 55)
         self.assertEqual(workload.tensile_expected_numeric_rows, 1)
+        self.assertEqual(workload.tensile_minimum_timed_ms, 5.0)
         self.assertEqual(
             command[command.index("--config") + 1],
             (
@@ -4391,6 +4392,7 @@ class ConSanValidationTest(unittest.TestCase):
             str(workload.tensile_inner_timeout_seconds),
         )
         self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "1")
+        self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "5.0")
         self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
         self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
 
