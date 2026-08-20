@@ -115,9 +115,11 @@ TEST(ChannelDefaults, Gfx1250_PoolFollowsCollectiveChannels)
 
 TEST(ChannelDefaults, Gfx1250_SaturateOnByDefault)
 {
-    // pow2Down(256 / 8 ranks) = 32, tiling the pool without wrapping.
+    // pow2Down(pool / nRanks), tiling the pool without wrapping. Computed rather than
+    // hardcoded: MAXCHANNELS is 512 in an ENABLE_WARP_SPEED build and 256 otherwise.
     const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8);
-    EXPECT_EQ(r.p2pnChannelsPerPeer, 32);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 8));
+    EXPECT_GT(r.p2pnChannelsPerPeer, kInputChannelsPerPeer) << "saturate should raise the per-peer count";
     ExpectPoolInvariant(r);
 }
 
