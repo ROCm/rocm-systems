@@ -1327,7 +1327,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // Saturates gridDim.x for alltoall-style workloads. On by default for gfx1250,
   // which needs the larger per-peer count to use its full pool; opt-in elsewhere.
   int saturateP2p = (int)rcclParamSaturateP2pNChannels();
-  if (saturateP2p == RCCL_VALUE_UNSET) saturateP2p = isGfx1250 ? 1 : 0;
+  if (saturateP2p == RCCL_VALUE_UNSET) {
+    saturateP2p = isGfx1250 ? 1 : 0;
+  }
   if (saturateP2p && comm->nRanks > 0) {
     int target = std::max(1, comm->p2pnChannels / comm->nRanks);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
