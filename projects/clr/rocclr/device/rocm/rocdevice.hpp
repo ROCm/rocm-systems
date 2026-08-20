@@ -603,6 +603,19 @@ class Device : public NullDevice {
     bool deviceMemRingBuf = false;
     //! Largest barrier-bit slot shared by every VirtualGPU using this physical queue.
     std::shared_ptr<std::atomic<uint64_t>> largestAqlBarrierBitSlot;
+    //! Index of the last AQL slot whose doorbell was rung on this physical queue, shared by
+    //! every VirtualGPU that may be multiplexed onto it. Several VirtualGPUs can share one
+    //! pooled hw queue (see queuePool_), and hsa_queue_add_write_index_screlease() only
+    //! reserves a slot -- it doesn't wait for that slot's packet to actually be written. Without
+    //! this, a producer holding a later slot can ring the doorbell (or otherwise make the GPU
+    //! re-read the write index) before an earlier slot's packet content/header is visible,
+    //! which can hand the command processor a torn or stale packet. VirtualGPU::
+    //! WaitDoorbellTurn()/ringQueueDoorbell() serialize doorbell publication into strict
+    //! reservation order to close that window. Initialized to (uint64_t)-1 -- "nothing rung
+    //! yet" -- which relies on well-defined uint64_t wraparound: the first reservation on a
+    //! fresh queue starts at slot 0, and 0 - 1 wraps to UINT64_MAX, exactly matching this
+    //! sentinel, so the very first wait succeeds immediately with no special-casing.
+    std::shared_ptr<std::atomic<uint64_t>> doorbellTicket;
   };
 
   //! Acquire HSA queue. This method can create a new HSA queue or

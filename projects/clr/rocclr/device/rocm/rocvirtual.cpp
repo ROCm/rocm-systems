@@ -1250,6 +1250,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     use_movdir64b_ = roc_device_.info().movdir64b_ && device_mem_ring_buf_;
     doorbell_ptr_ = extras.doorbellPtr;
     largest_aql_barrier_bit_slot_ = extras.largestAqlBarrierBitSlot;
+    doorbell_ticket_ = extras.doorbellTicket;
     metadata_preloader_.SetQueueBase(extras.metadataRingBuffer,
                                      roc_device_.MetadataVersionHeader());
   } else {
@@ -1257,6 +1258,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     use_movdir64b_ = false;
     doorbell_ptr_ = nullptr;
     largest_aql_barrier_bit_slot_.reset();
+    doorbell_ticket_.reset();
     metadata_preloader_.SetQueueBase(nullptr, roc_device_.MetadataVersionHeader());
   }
 }
@@ -1417,11 +1419,27 @@ void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
 }
 
 // ================================================================================================
-void VirtualGPU::ringQueueDoorbell(uint64_t index) {
-  if (doorbell_ptr_) {
-    amd::ringDoorbell(doorbell_ptr_, index, use_movdir64b_);
-  } else {
-    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+void VirtualGPU::WaitDoorbellTurn(uint64_t start_slot) {
+  if (!doorbell_ticket_) {
+    return;
+  }
+  const uint64_t previous_slot = start_slot - 1;
+  while (doorbell_ticket_->load(std::memory_order_acquire) != previous_slot) {
+    amd::Os::spinPause();
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::ringQueueDoorbell(uint64_t index, bool actually_ring) {
+  if (actually_ring) {
+    if (doorbell_ptr_) {
+      amd::ringDoorbell(doorbell_ptr_, index, use_movdir64b_);
+    } else {
+      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+    }
+  }
+  if (doorbell_ticket_) {
+    doorbell_ticket_->store(index, std::memory_order_release);
   }
 }
 
@@ -1486,6 +1504,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const bool header_requested_barrier = (header & kBarrierBit) != 0;
   AqlSlotReservation reservation = ReserveAqlSlots(1);
   const uint64_t index = reservation.start_slot;
+  WaitDoorbellTurn(index);
   adjustHeader(header);
   if (header_requested_barrier) {
     OptimizeStreamOrderingBarrier(header, reservation);
@@ -1549,8 +1568,10 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
+  // The ticket still advances even when the hardware doorbell write itself is skipped --
+  // see ringQueueDoorbell()'s actually_ring parameter.
+  ringQueueDoorbell(index, ring_doorbell);
   if (ring_doorbell) {
-    ringQueueDoorbell(index);
     skippedDispatches_ = 0;
   } else {
     ++skippedDispatches_;
@@ -1763,6 +1784,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // the yield never fires.
   AqlSlotReservation reservation = ReserveAqlSlots(numPackets);
   const uint64_t startIndex = reservation.start_slot;
+  // Wait once for the whole reservation, not per chunk: every chunk below is published by
+  // this same thread in increasing order, so only the first chunk's publication can race
+  // another producer sharing this hw queue.
+  WaitDoorbellTurn(startIndex);
   if (firstHeaderRequestedBarrier) {
     OptimizeStreamOrderingBarrier(firstHeader, reservation);
   }
@@ -2015,11 +2040,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
     }
 
-    if (doorbell_ptr_) {
-      amd::ringDoorbell(doorbell_ptr_, startIndex + chunkEnd - 1);
-    } else {
-      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
-    }
+    // Publication for this reservation was already ordered by the single WaitDoorbellTurn()
+    // call above, so this (and every other chunk's) ring just needs to advance the ticket --
+    // route through ringQueueDoorbell() instead of writing the doorbell directly so that
+    // advance happens.
+    ringQueueDoorbell(startIndex + chunkEnd - 1);
 
     chunkStart = chunkEnd;
   }
@@ -2099,6 +2124,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   AqlSlotReservation reservation = ReserveAqlSlots(1);
   const uint64_t index = reservation.start_slot;
+  WaitDoorbellTurn(index);
   OptimizeStreamOrderingBarrier(packetHeader, reservation);
   RecordAqlPacketHeader(reservation, 0, packetHeader);
   CompleteAqlSubmission(reservation);
@@ -2202,6 +2228,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   AqlSlotReservation reservation = ReserveAqlSlots(1);
   const uint64_t index = reservation.start_slot;
+  WaitDoorbellTurn(index);
   OptimizeStreamOrderingBarrier(packetHeader, reservation);
   RecordAqlPacketHeader(reservation, 0, packetHeader);
   CompleteAqlSubmission(reservation);

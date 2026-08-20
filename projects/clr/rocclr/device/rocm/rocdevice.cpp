@@ -3573,6 +3573,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
+    extras.doorbellTicket = std::make_shared<std::atomic<uint64_t>>(static_cast<uint64_t>(-1));
     hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                            &extras.metadataRingBuffer);
     if (DEBUG_CLR_DIRECT_DOORBELL) {

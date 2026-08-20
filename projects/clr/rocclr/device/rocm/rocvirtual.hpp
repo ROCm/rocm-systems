@@ -759,8 +759,25 @@ class VirtualGPU : public device::VirtualDevice {
   void writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
                                uint16_t header, uint16_t rest, uint64_t slot_index);
 
-  //! Ring the queue doorbell via direct UC store or ROCr signal.
-  void ringQueueDoorbell(uint64_t index);
+  //! Ring the queue doorbell via direct UC store or ROCr signal, then advance
+  //! doorbell_ticket_ to `index`. When actually_ring is false the hardware doorbell write
+  //! is skipped (see DEBUG_CLR_DOORBELL_SKIP), but the ticket still advances -- ordering
+  //! must progress regardless of whether this particular call touches the hardware, or a
+  //! later producer's WaitDoorbellTurn() on this shared queue would spin forever waiting
+  //! on a slot whose "turn" never gets marked done. Caller must have already waited its
+  //! turn via WaitDoorbellTurn() for the reservation `index` belongs to.
+  void ringQueueDoorbell(uint64_t index, bool actually_ring = true);
+
+  //! Blocks until every earlier reservation on this shared hw queue has been fully
+  //! published (see Device::QueueExtras::doorbellTicket), so this reservation is now the
+  //! front of the queue in strict reservation order. A no-op when doorbell_ticket_ is
+  //! null (queue not shared/tracked). Call exactly once per reservation, right after
+  //! ReserveAqlSlots() -- not once per doorbell ring: a single reservation may publish
+  //! across multiple ringQueueDoorbell() calls (e.g. the chunked batch-dispatch path),
+  //! and only the *first* publication for a reservation can race another producer; later
+  //! publications within the same reservation are only ever issued by this same thread,
+  //! in increasing order, so they need no further wait.
+  void WaitDoorbellTurn(uint64_t start_slot);
 
   //! Snapshot shared barrier state before atomically reserving AQL queue slots.
   AqlSlotReservation ReserveAqlSlots(size_t packet_count);
@@ -904,6 +921,10 @@ class VirtualGPU : public device::VirtualDevice {
   volatile uint64_t* doorbell_ptr_ = nullptr;
   //! Largest barrier-bit slot shared by every VirtualGPU using the physical HW queue.
   std::shared_ptr<std::atomic<uint64_t>> largest_aql_barrier_bit_slot_;
+  //! Doorbell publication ticket shared by every VirtualGPU using the physical HW queue --
+  //! see Device::QueueExtras::doorbellTicket for why this exists, and WaitDoorbellTurn()/
+  //! ringQueueDoorbell() below for how it's used.
+  std::shared_ptr<std::atomic<uint64_t>> doorbell_ticket_;
   //! Final AQL slot submitted by this stream, or kInvalidAqlSlot before its first packet.
   uint64_t last_aql_packet_slot_ = kInvalidAqlSlot;
   alignas(64) hsa_barrier_and_packet_t barrier_packet_ {};
