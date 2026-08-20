@@ -79,7 +79,9 @@ do_hipify() {
 do_configure() {
   echo "==> Configure host tests  (BUILD_TYPE=$BUILD_TYPE  ROCM_PATH=$ROCM_PATH)"
   cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH"
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DROCM_PATH="$ROCM_PATH" \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 }
 
 do_build() {
