@@ -45,8 +45,8 @@ def main() -> None:
 
     if args.workload_dir is not None:
         loaded = load_membw_metrics(args.workload_dir, arch)
-        metric_values = loaded.metric_values
-        metric_units = loaded.metric_units
+        metric_values = loaded.values
+        metric_units = loaded.units
         availability = loaded.availability
         availability_reason = loaded.availability_reason
     else:

@@ -9,12 +9,8 @@ from typing import Optional
 import pandas as pd
 
 import config
-from membw.metric_extract import (
-    check_metric_availability,
-    extract_metric_units,
-    extract_metric_values,
-)
-from membw.models import MEMBW_TABLE_IDS, MembwMetricResult
+from membw.metric_extract import MetricExtractionResult, extract_membw_metrics
+from membw.models import MEMBW_TABLE_IDS
 from membw.tree_spec import collect_metric_keys, load_tree_spec
 from utils import file_io, schema
 from utils.logger import console_log, console_warning
@@ -27,7 +23,7 @@ from utils.utils_common import canonical_config_arch
 def load_membw_metrics(
     workload_dir: Path,
     arch: str,
-) -> MembwMetricResult:
+) -> MetricExtractionResult:
     """Load and evaluate membw metrics from a workload directory."""
     sys_info = _load_sys_info(workload_dir)
     arch_configs = _build_membw_arch_configs(arch, sys_info)
@@ -52,20 +48,11 @@ def load_membw_metrics(
 
     tree_spec = load_tree_spec(arch)
     metric_keys = collect_metric_keys(tree_spec)
-    metric_values = extract_metric_values(membw_dfs, metric_keys)
-    metric_units = extract_metric_units(membw_dfs)
-    availability, availability_reason = check_metric_availability(
-        membw_dfs, metric_keys
-    )
+    extraction = extract_membw_metrics(membw_dfs, metric_keys)
 
-    _log_metric_availability(metric_keys, metric_values)
+    _log_metric_availability(metric_keys, extraction.values)
 
-    return MembwMetricResult(
-        metric_values=metric_values,
-        metric_units=metric_units,
-        availability=availability,
-        availability_reason=availability_reason,
-    )
+    return extraction
 
 
 # --- Private helpers ---

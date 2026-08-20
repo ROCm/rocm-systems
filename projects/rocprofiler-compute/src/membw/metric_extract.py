@@ -4,6 +4,7 @@
 """Extract pre-computed metric values from panel 3000 DataFrames."""
 
 import math
+from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
@@ -15,70 +16,69 @@ _VALUE_COL = "Avg"
 _UNIT_COL = "Unit"
 
 
-def extract_metric_values(
+@dataclass(frozen=True)
+class MetricExtractionResult:
+    """Combined result of a single-pass metric extraction."""
+
+    values: dict[str, Optional[float]]
+    units: dict[str, str]
+    availability: str
+    availability_reason: Optional[str]
+
+
+def extract_membw_metrics(
     dfs: dict[int, pd.DataFrame],
     metric_keys: frozenset[str],
-) -> dict[str, Optional[float]]:
-    """Look up each metric key in panel 3000 DataFrames.
-
-    Missing keys or NaN values map to None.
-    """
-    lookup = _build_metric_lookup(dfs)
-    return {key: lookup.get(key) for key in metric_keys}
-
-
-def extract_metric_units(
-    dfs: dict[int, pd.DataFrame],
-) -> dict[str, str]:
-    """Build a metric-key-to-unit mapping from panel 3000 DataFrames."""
-    units: dict[str, str] = {}
-    for table_id in MEMBW_TABLE_IDS:
-        if table_id not in dfs:
-            continue
-        df = dfs[table_id]
-        if _METRIC_COL not in df.columns or _UNIT_COL not in df.columns:
-            continue
-        for name, unit in zip(df[_METRIC_COL], df[_UNIT_COL]):
-            if name not in units:
-                units[name] = str(unit)
-    return units
-
-
-def check_metric_availability(
-    dfs: dict[int, pd.DataFrame],
-    metric_keys: frozenset[str],
-) -> tuple[str, Optional[str]]:
-    """Determine data availability for tree evaluation."""
+) -> MetricExtractionResult:
+    """Extract values, units, and availability in a single pass."""
     available_table_ids = [tid for tid in MEMBW_TABLE_IDS if tid in dfs]
     if not available_table_ids:
-        return ("unavailable", "no panel 3000 data")
+        return MetricExtractionResult(
+            values={key: None for key in metric_keys},
+            units={},
+            availability="unavailable",
+            availability_reason="no panel 3000 data",
+        )
 
-    lookup = _build_metric_lookup(dfs)
-    present = metric_keys & frozenset(lookup)
-    if present == metric_keys:
-        return ("full", None)
-    missing = sorted(metric_keys - present)
-    return ("partial", f"missing: {', '.join(missing)}")
+    all_values: dict[str, Optional[float]] = {}
+    all_units: dict[str, str] = {}
 
-
-# --- Private helpers ---
-
-
-def _build_metric_lookup(
-    dfs: dict[int, pd.DataFrame],
-) -> dict[str, Optional[float]]:
-    """Build a flat metric-key-to-value mapping across MEMBW tables."""
-    result: dict[str, Optional[float]] = {}
-    for table_id in MEMBW_TABLE_IDS:
-        if table_id not in dfs:
-            continue
+    for table_id in available_table_ids:
         df = dfs[table_id]
-        if _METRIC_COL not in df.columns or _VALUE_COL not in df.columns:
+        has_metric = _METRIC_COL in df.columns
+        has_value = _VALUE_COL in df.columns
+        has_unit = _UNIT_COL in df.columns
+        if not has_metric:
             continue
-        for name, value in zip(df[_METRIC_COL], df[_VALUE_COL]):
-            if name not in result:
-                result[name] = _sanitize_value(value)
-    return result
+        cols = list(
+            zip(
+                df[_METRIC_COL],
+                df[_VALUE_COL] if has_value else [None] * len(df),
+                df[_UNIT_COL] if has_unit else [""] * len(df),
+            )
+        )
+        for name, value, unit in cols:
+            if name not in all_values and has_value:
+                all_values[name] = _sanitize_value(value)
+            if name not in all_units and has_unit:
+                all_units[name] = str(unit)
+
+    values = {key: all_values.get(key) for key in metric_keys}
+    present = metric_keys & frozenset(k for k, v in all_values.items() if v is not None)
+    if present == metric_keys:
+        availability = "full"
+        availability_reason = None
+    else:
+        missing = sorted(metric_keys - present)
+        availability = "partial"
+        availability_reason = f"missing: {', '.join(missing)}"
+
+    return MetricExtractionResult(
+        values=values,
+        units=all_units,
+        availability=availability,
+        availability_reason=availability_reason,
+    )
 
 
 def _sanitize_value(value: object) -> Optional[float]:

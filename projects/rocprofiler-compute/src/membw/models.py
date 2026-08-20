@@ -1,10 +1,44 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Data structures for memory bandwidth bottleneck analysis."""
+"""Data structures for memory bandwidth bottleneck analysis.
+
+Pipeline overview (models in CAPS, stages in brackets)::
+
+          TREE_SPEC                 METRIC_EXTRACTION_RESULT
+           .roots: NODE_SPEC        .values  .units
+           .thresholds
+           .guidance_templates
+              |                        |
+              +----------+  +----------+
+                         v  v
+                   [_resolve_node]  merge spec + runtime data
+                         |
+                         v
+                   RESOLVED_NODE   concrete values per node:
+                    .spec            value, threshold, op, unit
+                    .value
+                    .threshold
+                    .op, .unit
+                         |
+                         v
+                   [_evaluate_node]  pure logic, no lookups
+                         |
+                         v
+                   BOTTLENECK_NODE   active / inactive / indet.
+                    .supporting:
+                      SUPPORTING_METRIC  (evidence for display)
+                    .children:
+                      BOTTLENECK_NODE
+                         |
+                         v
+                   MEMBW_ANALYSIS_RESULT    final output
+                    .nodes
+                    .guidance_blocks
+"""
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 MEMBW_TABLE_IDS: tuple[int, ...] = (3001, 3012, 3018)
 
@@ -29,6 +63,7 @@ class BottleneckNode:
     state: Literal["active", "inactive", "indeterminate"]
     supporting: tuple[SupportingMetric, ...]
     children: tuple["BottleneckNode", ...]
+    guidance_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -40,16 +75,6 @@ class MemBwAnalysisResult:
     availability_reason: Optional[str]
     nodes: tuple[BottleneckNode, ...]
     guidance_blocks: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class MembwMetricResult:
-    """Result of loading and evaluating membw metrics from a workload."""
-
-    metric_values: dict[str, Optional[float]]
-    metric_units: dict[str, str]
-    availability: Literal["full", "partial", "unavailable"]
-    availability_reason: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -66,6 +91,23 @@ class NodeSpec:
     requires_parent: bool
     requires_siblings_false: tuple[str, ...]
     children: tuple["NodeSpec", ...]
+
+    @property
+    def is_catch_all(self) -> bool:
+        """True when this node activates only if all listed siblings are inactive."""
+        return self.requires_parent and len(self.requires_siblings_false) > 0
+
+
+@dataclass(frozen=True)
+class ResolvedNode:
+    """A node with all metric/threshold references resolved to concrete values."""
+
+    spec: NodeSpec
+    value: Optional[float]
+    threshold: Optional[float]
+    op: Optional[Callable[[float, float], bool]]
+    unit: str
+    children: tuple["ResolvedNode", ...]
 
 
 @dataclass(frozen=True)
