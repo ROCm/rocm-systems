@@ -54,7 +54,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test_madengine:
@@ -136,10 +135,6 @@ jobs:
           source "${WORK_DIR}/venv/bin/activate"
           pip install --upgrade pip
 
-      - name: Login to container registry
-        run: |
-          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
       - name: Run MADEngine workload
         timeout-minutes: 210
         env:
@@ -164,7 +159,6 @@ jobs:
             --nodes "${{ inputs.nodes }}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
-            --registry "ghcr.io/rocm/rocm-systems" \
             $NOTIFY_ARGS
 
       - name: Upload results
