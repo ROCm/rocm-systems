@@ -43,37 +43,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: manual
-          registries: |
-            - url: https://ghcr.io/v2/
-              packages:
-                - amd-sit-sast-scv/cpp-queries
-              token: ${{ secrets.CODEQL_PACKAGES_TOKEN }}
-          config: |
-            queries:
-              - uses: security-extended
-            packs:
-              - amd-sit-sast-scv/cpp-queries:src/driver/BannedFunctions.ql
-
-      - name: Set Project Directory
+      # AMD's custom query pack (amd-sit-sast-scv/cpp-queries) ships inside this bundle --
+      # no GHCR login or token needed to pull it.
+      - name: Download and extract CodeQL bundle
+        shell: bash
         run: |
-          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
-
-          if [ -z "$TARGET_DIR" ]; then
-            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
-            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
-          fi
-
-          if [ -z "$TARGET_DIR" ]; then
-             echo "Could not find CMakeLists.txt for CUID."
-             exit 1
-          fi
-
-          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+          curl -sS -o codeql-bundle-win64.tar.gz \
+            "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-win64.tar.gz"
+          tar -xzf codeql-bundle-win64.tar.gz
+          ./codeql/codeql.exe --version
+      # Pack/suite version numbers change over time, so find the suite instead of hardcoding its path
+      - name: Locate AMD custom query suite
+        shell: bash
+        run: |
+          QLPACKS_ROOT=$(./codeql/codeql.exe resolve qlpacks --format=json | jq -r '.[][]')
+          AMD_SUITE=$(find $QLPACKS_ROOT -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
+          echo "Using AMD suite: $AMD_SUITE"
+          echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
+      # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
+      - name: Create CodeQL database
+        shell: bash
+        run: |
+          ./codeql/codeql.exe database create codeqldb --language=${{ matrix.language }} --source-root=.
 
       - name: Build and Install OpenSSL 3.0 (if needed)
         run: |
@@ -103,18 +94,18 @@ jobs:
              echo "OpenSSL 3.0+ already installed."
           fi
 
-      - name: Build CUID
-        run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
-          make -j $(nproc)
-
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        shell: bash
+        run: |
+          mkdir -p sarif-results
+          ./codeql/codeql.exe database analyze codeqldb \
+            security-extended "$AMD_SUITE" \
+            --format=sarifv2.1.0 \
+            --sarif-category "/language:${{ matrix.language }}" \
+            --output=sarif-results/cpp.sarif
+      # Upload SARIF to GitHub Security > Code scanning alerts tab
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
+          sarif_file: sarif-results/cpp.sarif
           category: "/language:${{ matrix.language }}"
-          upload: true
