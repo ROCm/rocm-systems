@@ -10,18 +10,11 @@
 
 #include <array>
 #include <cstdint>
-#include <initializer_list>
-#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
 #include "fakes/p2p_fakes.h"
-
-// Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
-// to be #undef'd. p2p.cc's transitive includes would otherwise be the first
-// to see them, and the shim below would land too late.
-#include "alloc.h"
 
 // Same pattern for param.h: pull it in now so we can #undef NCCL_PARAM and
 // replace it with a redirector that routes every generated ncclParamXxx()
