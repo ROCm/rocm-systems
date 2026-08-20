@@ -11,7 +11,7 @@
 #ifdef RCCL_HAS_RMA_IB_PROXY
 
 #include "RmaMPITestBase.hpp"
-#include "GinMultiSegmentHelpers.hpp"
+#include "RmaMultiSegmentHelpers.hpp"
 #include "../../HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 
@@ -29,7 +29,7 @@ namespace
 
 // Mirrors NCCL_RMA_MAX_SEGMENTS in src/transport/net_ib/gin.cc (not exposed to
 // the test target); update if the backend cap changes.
-constexpr int    kGinMaxSegments = 16;
+constexpr int    kRmaMaxSegments = 16;
 
 constexpr size_t kSegRequestBytes = 2u * 1024 * 1024;
 constexpr int    kNumSegments     = 4;
@@ -62,7 +62,7 @@ inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
 
 } // namespace
 
-// GIN proxy fixture + NCCL INFO log capture to confirm the per-segment path
+// RMA proxy fixture + NCCL INFO log capture to confirm the per-segment path
 // fired (vs single-MR fallback when cuMem enumeration is unavailable).
 class RmaMultiSegmentMPITest : public RmaMPITestBase
 {
@@ -404,7 +404,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
     if (SyncSkip(!AllTookMultiSegPath()))
-        GTEST_SKIP() << "DeepEP window did not take the multi-segment GIN registration path";
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     Barrier();
     if (worldRank_ == 0)
@@ -452,7 +452,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
     if (SyncSkip(!AllTookMultiSegPath()))
-        GTEST_SKIP() << "DeepEP window did not take the multi-segment GIN registration path";
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     for (int i = 0; i < kIterations; ++i)
     {
@@ -527,7 +527,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
     if (SyncSkip(!AllTookMultiSegPath()))
-        GTEST_SKIP() << "hybrid window did not take the multi-segment GIN path";
+        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     Barrier();
     void* req = nullptr;
@@ -572,7 +572,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
     if (SyncSkip(!AllTookMultiSegPath()))
-        GTEST_SKIP() << "hybrid window did not take the multi-segment GIN path";
+        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     for (int i = 0; i < kIterations; ++i)
     {
@@ -837,7 +837,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
                                    /*srcOff=*/0, sendMh, kSize,
                                    /*dstOff=*/0, recvMh, /*peerRank=*/1,
                                    /*signalOff=*/0, sigMh, /*signalValue=*/0,
-                                   NCCL_NET_SIGNAL_OP_INC, &req));
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -989,7 +989,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
             GTEST_SKIP() << "multi-segment path not exercised on this host";
     }
 
-    const int kOverCap = kGinMaxSegments + 1;
+    const int kOverCap = kRmaMaxSegments + 1;
     MultiSegmentVmmBuffer* big = AllocSym(kOverCap, kSegRequestBytes);
     if (SyncSkip(big == nullptr))
         GTEST_SKIP() << "Could not allocate " << kOverCap << " VMM segments";
@@ -998,7 +998,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
     ncclResult_t r = RegMr(big->ptr, big->totalSize, &mh, &gh);
     EXPECT_EQ(r, ncclInvalidUsage)
         << "registration of a " << kOverCap << "-segment buffer should be rejected "
-        << "with ncclInvalidUsage (cap=" << kGinMaxSegments << "), got " << r;
+        << "with ncclInvalidUsage (cap=" << kRmaMaxSegments << "), got " << r;
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
 }
 
@@ -1177,13 +1177,14 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
         // Payload past the window (valid signal offset).
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1,
-                                   /*signalOff=*/0, sigMh, 0, NCCL_NET_SIGNAL_OP_INC, &req))
+                                   /*signalOff=*/0, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
+                                   /*isStrongSignal=*/false, &req))
             << "oversized iputSignal payload must be rejected";
         // Signal atomic straddles the end of the signal window (signalOff+8 > size).
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
                                    /*signalOff=*/kSignalSize - 4, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
             << "out-of-range signal offset must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
@@ -1357,7 +1358,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
 
 TEST(RmaMultiSegmentMPITest, BuildSkipped)
 {
-    GTEST_SKIP() << "IB Proxy GIN backend not built into this binary. Skipping multi-segment GIN tests...";
+    GTEST_SKIP() << "IB RMA proxy backend not built into this binary. Skipping multi-segment RMA tests...";
 }
 
 #endif // RCCL_HAS_RMA_IB_PROXY

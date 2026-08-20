@@ -123,7 +123,7 @@ inline bool AllocMultiSegmentVmm(int dev, int nSegments, size_t segBytes,
 // Reproduce DeepEP's non-hybrid ElasticSymmetricMemory layout:
 // one 2 MiB-aligned GPU segment followed by one independently-sized CPU segment
 // in a single reserved VA range. DeepEP registers the whole range as one NCCL
-// symmetric window and uses GIN IGet from the CPU segment into the GPU segment.
+// symmetric window and uses RMA IGet from the CPU segment into the GPU segment.
 inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
                                   MultiSegmentVmmBuffer* out)
 {

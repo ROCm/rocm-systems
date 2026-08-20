@@ -313,7 +313,7 @@
         {
           "name": "DeepEP_Hybrid_Positive_And_Stress",
           "description": "Four-rank DeepEP hybrid [GPU][CPU rank 0][CPU rank 1] registration, handle reuse, GIN IGet, and multi-node stress coverage",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:GinMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:GinMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:GinMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
         },
         {
           "name": "DeepEP_Hybrid_Elastic_Gating",
@@ -344,7 +344,7 @@
         {
           "name": "MultiSegment_Transport_All_MultiNode",
           "description": "All classic NET/IB and GIN multi-segment tests, including DeepEP patterns, cross-boundary sweeps, flushes, stress, and negative coverage",
-          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*-GinMultiSegmentMPITest.DeepEP_Hybrid*"
+          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
         }
       ]
     },
