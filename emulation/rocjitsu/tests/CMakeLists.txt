@@ -20,6 +20,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_coverage
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
