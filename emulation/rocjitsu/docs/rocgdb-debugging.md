@@ -3,7 +3,9 @@
 rocjitsu emulates the AMD KFD closely enough that **real ROCgdb / rocm-dbgapi**
 can attach to a workload running on the emulated GPU and debug its kernels — no
 physical AMD GPU required. This document explains how the pieces fit together,
-how to debug your own kernel, and tracks what is implemented.
+how to debug your own kernel, and tracks what is implemented. To run the
+official `gdb.rocm` suite against the emulator, see
+[ROCgdb Test Suite](rocgdb-testsuite.md).
 
 All KFD debug behaviour is mirrored from the real driver source
 (`amd/amdkfd/{kfd_chardev.c,kfd_debug.c,kfd_topology.c}`, amdgpu-6.16.13),

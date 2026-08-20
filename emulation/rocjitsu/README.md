@@ -123,6 +123,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
 | [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |
+| [ROCgdb Test Suite](docs/rocgdb-testsuite.md) | Run the official `gdb.rocm` suite against the emulator: setup, session hygiene, reading results |
 
 ### Design
 
