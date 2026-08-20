@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -290,6 +291,46 @@ def _numeric_validation_errors(
     return result_count, errors
 
 
+def _timed_aggregate_ms(output: str) -> tuple[float | None, list[str]]:
+    """Returns the sum of valid Tensile numeric-row device timings."""
+    errors = []
+    header_width: int | None = None
+    time_index: int | None = None
+    samples_us = []
+    for line_number, line in enumerate(output.splitlines(), start=1):
+        try:
+            row = next(csv.reader([line], strict=True))
+        except csv.Error:
+            continue
+        stripped = [field.strip() for field in row]
+        if stripped and stripped[0] == "run" and "validation" in stripped:
+            header_width = len(stripped)
+            time_index = stripped.index("time-us") if "time-us" in stripped else None
+            continue
+        if (
+            header_width is None
+            or time_index is None
+            or not stripped
+            or not stripped[0].isdigit()
+            or len(stripped) != header_width
+        ):
+            continue
+        try:
+            sample_us = float(stripped[time_index])
+        except ValueError:
+            sample_us = math.nan
+        if not math.isfinite(sample_us) or sample_us <= 0.0:
+            errors.append(f"line {line_number}: invalid time-us device timing")
+            continue
+        samples_us.append(sample_us)
+    if time_index is None:
+        errors.append("numeric validation output has no time-us timing column")
+    if not samples_us:
+        errors.append("numeric validation produced no valid device timing samples")
+        return None, errors
+    return sum(samples_us) / 1000.0, errors
+
+
 def _code_object_errors(
     output_dir: Path,
     llvm_readelf: Path,
@@ -349,6 +390,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("must be positive and finite")
+    return parsed
+
+
 def _gpu_target(value: str) -> str:
     if re.fullmatch(r"gfx[0-9a-z]+", value) is None:
         raise argparse.ArgumentTypeError("must name a gfx target")
@@ -362,6 +410,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--gpu-target", type=_gpu_target, default=DEFAULT_TARGET)
     parser.add_argument("--repetitions", type=int, choices=(1,), default=1)
+    parser.add_argument("--minimum-timed-ms", type=_positive_float, required=True)
     parser.add_argument("--label", required=True)
     parser.add_argument(
         "--timeout-seconds",
@@ -455,6 +504,15 @@ def main() -> int:
         expected_result_count=args.expect_numeric_rows,
         required_streamk_mode=args.require_streamk_mode,
     )
+    timed_aggregate_ms, timing_errors = _timed_aggregate_ms(output)
+    if (
+        timed_aggregate_ms is not None
+        and timed_aggregate_ms < args.minimum_timed_ms
+    ):
+        timing_errors.append(
+            "device-timed aggregate is below the required minimum: "
+            f"{timed_aggregate_ms} < {args.minimum_timed_ms} ms"
+        )
     execution_elapsed_seconds = time.monotonic() - started
     artifacts: list[Path] = []
     artifact_errors: list[str] = []
@@ -478,6 +536,7 @@ def main() -> int:
             f"Tensile execution exceeded its {args.timeout_seconds}-second budget"
         )
     errors.extend(numeric_errors)
+    errors.extend(timing_errors)
     errors.extend(artifact_errors)
     detail = {
         "config": str(config),
@@ -485,12 +544,14 @@ def main() -> int:
         "execution_elapsed_seconds": execution_elapsed_seconds,
         "expected_numeric_rows": args.expect_numeric_rows,
         "label": args.label,
+        "minimum_timed_ms": args.minimum_timed_ms,
         "numeric_rows": result_count,
         "rocjitsu_config": str(paths.rocjitsu_config),
         "rocjitsu_executable": str(paths.rocjitsu),
         "required_streamk_mode": args.require_streamk_mode,
         "requested_streamk_fixed_grid": args.streamk_fixed_grid,
         "target": args.gpu_target,
+        "timed_aggregate_ms": timed_aggregate_ms,
         "timeout_seconds": args.timeout_seconds,
         "transcript": str(transcript),
         "verified_code_objects": [str(path) for path in artifacts],

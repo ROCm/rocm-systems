@@ -63,6 +63,7 @@ class TensileValidationTest(unittest.TestCase):
         validation: str,
         *,
         sleep_seconds: int = 0,
+        time_us: float = 300_000.0,
     ) -> None:
         package = paths.tensilelite / "Tensile"
         (package / "__init__.py").write_text("", encoding="utf-8")
@@ -73,7 +74,7 @@ class TensileValidationTest(unittest.TestCase):
             "    output = Path(args[1])\n"
             "    (output / 'kernel.hsaco').write_bytes(b'elf')\n"
             "    print('run,problem,solution,validation,time-us', flush=True)\n"
-            f"    print('0,problem,kernel_SK3_shape,{validation},10', flush=True)\n"
+            f"    print('0,problem,kernel_SK3_shape,{validation},{time_us}', flush=True)\n"
             f"    time.sleep({sleep_seconds})\n",
             encoding="utf-8",
         )
@@ -88,6 +89,8 @@ class TensileValidationTest(unittest.TestCase):
             str(root / "case.yaml"),
             "--output-dir",
             str(root / "output"),
+            "--minimum-timed-ms",
+            "250.0",
             "--label",
             "unit",
             "--timeout-seconds",
@@ -188,6 +191,14 @@ class TensileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(argparse.ArgumentTypeError, "must be positive"):
             tensile_validation._positive_int("0")
 
+    def test_positive_float_parser_requires_finite_value(self) -> None:
+        self.assertEqual(tensile_validation._positive_float("250.0"), 250.0)
+        for invalid in ("0", "-1", "nan", "inf"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                argparse.ArgumentTypeError, "positive and finite"
+            ):
+                tensile_validation._positive_float(invalid)
+
     def test_gpu_target_parser_accepts_architecture_names(self) -> None:
         self.assertEqual(tensile_validation._gpu_target("gfx950"), "gfx950")
         self.assertEqual(tensile_validation._gpu_target("gfx1250"), "gfx1250")
@@ -261,6 +272,56 @@ class TensileValidationTest(unittest.TestCase):
             any("expected 2 numeric result rows, found 1" in error for error in errors)
         )
 
+    def test_device_timing_aggregate_uses_numeric_rows(self) -> None:
+        output = (
+            "noise\n"
+            "run,problem,solution,validation,time-us\n"
+            "0,one,kernel_SK3_shape,PASSED,125000\n"
+            "1,two,kernel_SK3_shape,PASSED,150000\n"
+        )
+        self.assertEqual(
+            tensile_validation._timed_aggregate_ms(output),
+            (275.0, []),
+        )
+
+    def test_main_rejects_device_timing_below_required_minimum(self) -> None:
+        with temporary_root() as root:
+            paths = self._make_fake_paths(root)
+            self._install_tensile_stub(paths, "PASSED", time_us=10.0)
+            (root / "case.yaml").write_text("case\n", encoding="utf-8")
+            forwarded = root / "row.json"
+            with (
+                mock.patch.object(
+                    tensile_validation,
+                    "resolve_tensile_validation_paths",
+                    return_value=paths,
+                ),
+                mock.patch.object(
+                    tensile_validation.subprocess,
+                    "run",
+                    return_value=self._amdgpu_header(),
+                ),
+                mock.patch.object(sys, "argv", self._main_argv(root)),
+                mock.patch.dict(
+                    os.environ,
+                    {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
+                    clear=True,
+                ),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                returncode = tensile_validation.main()
+            payload = json.loads(forwarded.read_text(encoding="utf-8"))
+        self.assertEqual(returncode, 1)
+        self.assertEqual(payload["oracle"], "fail")
+        self.assertEqual(payload["detail"]["timed_aggregate_ms"], 0.01)
+        self.assertTrue(
+            any(
+                "below the required minimum" in reason
+                for reason in payload["detail"]["reasons"]
+            )
+        )
+
     def test_main_writes_pass_and_failed_numeric_oracles(self) -> None:
         for numeric_verdict, expected_returncode, expected_oracle in (
             ("PASSED", 0, "pass"),
@@ -304,6 +365,8 @@ class TensileValidationTest(unittest.TestCase):
             self.assertEqual(payload["oracle"], expected_oracle)
             self.assertEqual(payload["detail"]["numeric_rows"], 1)
             self.assertEqual(payload["detail"]["expected_numeric_rows"], 1)
+            self.assertEqual(payload["detail"]["timed_aggregate_ms"], 300.0)
+            self.assertEqual(payload["detail"]["minimum_timed_ms"], 250.0)
             self.assertEqual(len(retained), 1)
 
     def test_main_reports_prerequisite_failure(self) -> None:
