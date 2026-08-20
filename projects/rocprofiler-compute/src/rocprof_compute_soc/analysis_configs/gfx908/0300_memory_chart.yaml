@@ -157,10 +157,10 @@ Panel Config:
           value: ROUND(100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum), 0)
           unit: Percent
         Remote Read Traffic:
-          value: ROUND(100 * SUM(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum), 0)
+          value: ROUND(100 * SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum), 0)
           unit: Percent
         Remote Write and Atomic Traffic:
-          value: ROUND(100 * SUM(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum), 0)
+          value: ROUND(100 * SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum), 0)
           unit: Percent
       comparable: false
       cli_style: mem_chart
