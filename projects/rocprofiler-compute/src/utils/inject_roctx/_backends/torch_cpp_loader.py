@@ -243,6 +243,17 @@ def _runtime_build_path(
     return cache_dir / source_build_path.name
 
 
+def _unlink_runtime_build_artifact(so_path: Path, build_path: Path) -> None:
+    """Unlink ``so_path`` when it is a file under ``build_path``."""
+    try:
+        resolved = so_path.resolve()
+        resolved.relative_to(build_path.resolve())
+        if resolved.is_file():
+            resolved.unlink()
+    except (OSError, ValueError):
+        return
+
+
 def _try_runtime_build(
     tag: str,
     *,
@@ -291,40 +302,49 @@ def _try_runtime_build(
     if force_rebuild:
         shutil.rmtree(build_path, ignore_errors=True)
 
-    finder = NativeToolFinder(
-        _NATIVE_TOOL_ROOT,
-        artifact_name=f"torch_trace_collector-{tag}.so",
-        build_target=f"torch_trace_collector-{tag}",
-        build_path=build_path,
-        configure_options=(
-            f"-DTORCH_TRACE_PYTHON={sys.executable}",
-            f"-DTORCH_TRACE_SOURCE_FINGERPRINT={tag.rpartition('_src')[2]}",
-            "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
-            "-DCMAKE_BUILD_TYPE=Release",
-        ),
-        cmake_executable=cmake_exe,
-        search_installed=not force_rebuild,
-        reuse_built_artifact=not force_rebuild,
+    artifact_name = f"torch_trace_collector-{tag}.so"
+    build_target = f"torch_trace_collector-{tag}"
+    configure_options = (
+        f"-DTORCH_TRACE_PYTHON={sys.executable}",
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={tag.rpartition('_src')[2]}",
+        "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
     )
 
-    try:
-        so_path = finder.get_artifact_path()
-    except Exception as e:
-        _log_cmake_failure(e, diagnostics)
-        return None
-
-    try:
-        mod = _import_module_from_path("torch_trace_collector", so_path)
-    except Exception as e:
-        _safe_log(
-            "warning",
-            f"built .so at {so_path} failed to load: {e}",
-            diagnostics,
+    for search_installed, reuse_built_artifact in (
+        (not force_rebuild, not force_rebuild),
+        (False, False),
+    ):
+        finder = NativeToolFinder(
+            _NATIVE_TOOL_ROOT,
+            artifact_name=artifact_name,
+            build_target=build_target,
+            build_path=build_path,
+            configure_options=configure_options,
+            cmake_executable=cmake_exe,
+            search_installed=search_installed,
+            reuse_built_artifact=reuse_built_artifact,
         )
-        return None
-
-    _safe_log("log", f"built and loaded .so: {so_path}", diagnostics)
-    return mod
+        try:
+            so_path = finder.get_artifact_path()
+        except Exception as e:
+            _log_cmake_failure(e, diagnostics)
+            return None
+        try:
+            mod = _import_module_from_path("torch_trace_collector", so_path)
+        except Exception as e:
+            _safe_log(
+                "warning",
+                f"built .so at {so_path} failed to load: {e}",
+                diagnostics,
+            )
+            _unlink_runtime_build_artifact(so_path, build_path)
+            if not reuse_built_artifact:
+                return None
+            continue
+        _safe_log("log", f"built and loaded .so: {so_path}", diagnostics)
+        return mod
+    return None
 
 
 def load(force_python_fallback: bool = False) -> LoadResult:
