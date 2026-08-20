@@ -40,7 +40,7 @@ build-tree paths.
 | `tests/dbi/consan/device/` | The checked-in behavioral-conformance tier. Seventeen common `*_test.hip` pairs cover the portable workload abstractions. Adjacent family/target sources cover CDNA MFMA/full-bank/AccVGPR, group-FLAT, RDNA B96/WMMA/FP8, gfx11 VGLOBAL/lifecycle identity, and gfx1250 clustered/TDM behavior. The gfx1250 cluster host fixture submits a real extended HSA dispatch packet rather than hiding cluster dimensions behind an ordinary HIP launch. | Add one descriptively named source per new semantic scenario. Prefer extending a scenario with another tightly related pair over creating broad clean/racy grab bags. |
 | `tests/dbi/consan/device/consan_device_test_support.h` | Small shared fixture utilities used by the paired HIP sources. | Put only genuinely reusable fixture mechanics here; keep scenario semantics and expected results local to each test source. |
 | `tests/dbi/consan/hip_consan_{lds,moi,moi_cdna,moi_rdna3,inline_shadow,spill_gfx950}_test.hip` and related support | Older target- or engine-specific device fixtures. They provide useful ISA and implementation test material but are not the common behavioral conformance tier. | Distill behaviorally justified idioms into the new paired suite. Keep implementation-specific assertions here when they remain useful, but do not count them as substitutes for portable correct/incorrect contracts. |
-| `tests/consan/CMakeLists.txt` | Builds target-specific HIP executables and registers every baseline/engine/backend row, labels, diagnostic requirements, simulator configuration, physical resource lock, and health dependency. It is included by `tests/CMakeLists.txt`. | Register every new pair here across the common matrix. As the table grows, move the declarative pair inventory and registration helpers into a focused `tests/consan/device_tests.cmake` included from this file rather than duplicating per-architecture blocks. |
+| `tests/consan/CMakeLists.txt` | Builds target-specific HIP executables and registers every baseline/engine/backend row, labels, diagnostic requirements, simulator configuration, target-scoped physical resource lock, and health dependency. The shared registration path rejects any physical device row without a lock. It is included by `tests/CMakeLists.txt`. | Register every new pair here across the common matrix. As the table grows, move the declarative pair inventory and registration helpers into a focused `tests/consan/device_tests.cmake` included from this file rather than duplicating per-architecture blocks. |
 | `tests/consan/run_checked_test.cmake` and `tests/consan/check_capability_manifest.cmake` | Shared process/output and capability checks used by ConSan tests. | Add only generic fail-closed harness behavior here; scenario semantics and result oracles belong with the HIP workload. |
 | `configs/gfx942_cdna3_kmd.json`, `configs/gfx950_cdna4_kmd.json`, `configs/gfx1250.json`, `configs/gfx1100_w7900.json`, and `configs/gfx1201_r9700.json` | RocJitsu simulator descriptions selected by the CTest registrations. | Reuse these for the suite. Change them only for a genuine target-model correction, never to encode test-specific behavior. |
 
@@ -92,7 +92,8 @@ pair runs as baseline plus all four engines on five RocJitsu targets and
 physical `gfx950`, for 60 rows per scenario. Fourteen additional pair names
 cover family- or target-specific behavior on only the architectures where the
 form exists. The union is 31 behavioral pairs and the registered matrix is
-1,281 tests, including the physical post-instrumentation health row.
+1,285 tests, including four physical module-load lifecycle rows and the
+physical post-instrumentation health row.
 
 | Scenario | Workload-derived contract | Status |
 | --- | --- | --- |
@@ -165,7 +166,7 @@ behavior-first contracts that can survive the Part 3 replacement.
 | TDM and clusters | gfx1250 now uses real extended clustered-dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, `cluster_load_async_to_lds_b32` plus `s_wait_asynccnt`, and multicast. | Store-from-LDS, wider tensor fragments, scale-WMMA, more than two CTAs per cluster, and a distinct remote cluster-memory opcode remain unabstracted. |
 | Resource and control pressure | Dynamic stack, shared helpers, MFMA/WMMA live state, CDNA AccVGPR destinations, full ordinary-VGPR-bank pressure, B96/B128 aliasing, native VGLOBAL forms, descriptor growth, and repeated dispatch are exercised. The tranche caught both AccVGPR-boundary and dynamic-frame spill defects. | Combined worst-case forms and production-sized placement/relay limits remain E2E or focused implementation-test responsibilities. |
 | Object and dispatch shape | Shared helpers have multiple kernel owners; softmax uses multiple stages and a global intermediate; continuous batching repeats changing dispatches from reset state. | Multiple loaded objects, unload/reload, multi-stream module launch, and graph replay remain lifecycle envelopes rather than covered semantic categories. |
-| Scale | The 1,281-row matrix crosses 31 pair names, five simulator targets, physical CDNA4, and every engine while staying checked in and bounded. | Full large-object relay and capacity boundaries remain E2E responsibilities; add a medium heterogeneous-object pair only if a concrete failure mode justifies its cost. |
+| Scale | The 1,285-row matrix crosses 31 pair names, five simulator targets, physical CDNA4, every engine, and a module-load lifecycle case while staying checked in and bounded. | Full large-object relay and capacity boundaries remain E2E responsibilities; add a medium heterogeneous-object pair only if a concrete failure mode justifies its cost. |
 
 ## Aorta workload expansion
 
@@ -295,7 +296,8 @@ selected across all applicable architectures. One pair/backend application is
 ten rows: correct and incorrect under the baseline and four ConSan flavors.
 The 17 common pairs contribute 1,020 rows across the five RocJitsu targets plus
 physical `gfx950`. The non-rectangular target extensions contribute 260 rows,
-and the physical health check contributes one, for 1,281 total.
+the physical module-load reduction contributes four rows, and the physical
+health check contributes one, for 1,285 total.
 
 The per-configuration arithmetic is:
 
@@ -303,7 +305,7 @@ The per-configuration arithmetic is:
 | --- | ---: | ---: |
 | RocJitsu `gfx942` | 20 | 200 |
 | RocJitsu `gfx950` | 21 | 210 |
-| Physical `gfx950` | 21 | 211, including health |
+| Physical `gfx950` | 21 | 215, including four module-load rows and health |
 | RocJitsu `gfx1100` | 21 | 210 |
 | RocJitsu `gfx1201` | 22 | 220 |
 | RocJitsu `gfx1250` | 23 | 230 |
@@ -327,18 +329,19 @@ artificially slower or to fill a time quota.
   sampled less often without materially reducing behavioral or architecture
   coverage.
 
-The current 1,281-test matrix passed in **67.91 seconds** on this host at
-`-j64`. Measured aggregate process CPU time was **3,955.54 seconds
-(65m55.54s)**: 861.05s user and 3,094.49s system. CTest's summed test duration
-was 4,314.16s. Use wall-clock latency for the budget and retain CPU time as a
-separate capacity metric.
+The current 1,285-test matrix passes in **654.698 seconds (10m54.698s)** on
+this host at `-j64`. Bash process accounting reports **1,492.635 seconds
+(24m52.635s)** aggregate CPU: 751.806s user and 740.829s system. CTest's summed
+test duration is 1,969.18s. Use wall-clock latency for the budget and retain
+CPU time as a separate capacity metric.
 
-The wall time is below the five-minute review threshold. The review does not
-justify artificial delays: the matrix already contains 1,281 independently
-scheduled rows and roughly 66 CPU-minutes of work, so the unusually wide host
-is the main cause. It does justify keeping the residual architecture and
-lifecycle gaps below visible. Add tests for those gaps when grounded in E2E
-ISA or a concrete failure, not merely to consume five minutes.
+This measurement supersedes the earlier 67.91-second result, which allowed
+all physical gfx950 processes to compete for one GPU and eventually reproduced
+a GPU memory fault. All 215 physical rows now share the target-scoped
+`consan_physical_gfx950` CTest resource lock. The five simulator targets still
+run concurrently with each other and with the one active physical row; a
+different physical target would use its own lock rather than creating a global
+bottleneck. The honest wall time is inside the 5--20-minute target.
 
 ## Issues exposed and retained as regressions
 
@@ -346,6 +349,7 @@ The current matrix has no red cells. Building it exposed defects in the
 prototype, runtime, and simulator, all fixed without weakening the behavioral
 contracts:
 
+- physical gfx950 CTest oversubscription from missing per-test resource locks;
 - `gfx942` and `gfx950` Record/Replay multidimensional workgroup identity;
 - `gfx942` and `gfx950` Sampled reduction snapshot formation;
 - `gfx1100` Inline Shadow atomic-arrival evidence;
@@ -540,7 +544,7 @@ levels. Seventeen common and fourteen family/target pair names cover the main
 synchronization, atomic, pipeline, selection/reduction, resource, cluster/TDM,
 and repeated-dispatch idioms distilled from `VALIDATION.md` and Aorta. Every
 applicable pair runs through the baseline and all four engines in RocJitsu;
-CDNA4 repeats the same coverage on the physical `gfx950`. All 1,281 rows pass
+CDNA4 repeats the same coverage on the physical `gfx950`. All 1,285 rows pass
 without expected-failure exemptions.
 
 This materially shrinks, but cannot eliminate, regression risk. The remaining

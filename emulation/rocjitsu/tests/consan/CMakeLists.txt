@@ -174,6 +174,16 @@ function(rj_add_consan_hip_case)
     if(NOT _case_TIMEOUT)
         set(_case_TIMEOUT 30)
     endif()
+    if(
+        "consan-device" IN_LIST _case_LABELS
+        AND "physical" IN_LIST _case_LABELS
+        AND NOT _case_RESOURCE_LOCK
+    )
+        message(
+            FATAL_ERROR
+            "physical ConSan device test ${_case_NAME} has no target-scoped CTest resource lock"
+        )
+    endif()
 
     # Live MOI cases are intentionally narrow fixtures. Production ConSan
     # tracks every supported synchronization class by default, but these tests
@@ -369,11 +379,18 @@ function(rj_add_consan_device_conformance_cases)
     endif()
 
     set(_config_args)
+    set(_resource_lock_args)
     set(_backend simulator)
     if(_device_CONFIG)
         list(APPEND _config_args CONFIG "${_device_CONFIG}")
     else()
         set(_backend physical)
+        list(
+            APPEND
+            _resource_lock_args
+            RESOURCE_LOCK
+            "consan_physical_${_device_TARGET}"
+        )
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
@@ -473,6 +490,7 @@ function(rj_add_consan_device_conformance_cases)
                     hip_consan_device_${_workload_target}_${_device_TARGET}_test
                 FILTER "${_workload_suite}.${_outcome}"
                 ${_config_args}
+                ${_resource_lock_args}
                 TIMEOUT 60
                 LABELS ${_labels} baseline "${_outcome_label}"
             )
@@ -566,6 +584,7 @@ function(rj_add_consan_device_conformance_cases)
                     hip_consan_device_${_workload_target}_${_device_TARGET}_test
                 FILTER "${_workload_suite}.Correct"
                 ${_config_args}
+                ${_resource_lock_args}
                 TIMEOUT 60
                 ENVIRONMENT ${_correct_environment}
                 LABELS ${_labels} "${_mode_value}" clean
@@ -592,6 +611,7 @@ function(rj_add_consan_device_conformance_cases)
                     hip_consan_device_${_workload_target}_${_device_TARGET}_test
                 FILTER "${_workload_suite}.Incorrect"
                 ${_config_args}
+                ${_resource_lock_args}
                 TIMEOUT 60
                 ENVIRONMENT ${_incorrect_environment}
                 LABELS ${_incorrect_labels}
@@ -606,6 +626,7 @@ function(rj_add_consan_device_conformance_cases)
             NAME "${_health_test_name}"
             TARGET hip_consan_device_ordered_tile_handoff_${_device_TARGET}_test
             FILTER "ConSanDeviceOrderedTileHandoffTest.Correct"
+            ${_resource_lock_args}
             TIMEOUT 60
             LABELS ${_labels} health
         )
@@ -2184,6 +2205,7 @@ function(rj_add_consan_hip_tests)
                         "ConSanDeviceGfx950Physical.BaselineModuleReduction.${_outcome}"
                     TARGET hip_consan_device_module_reduction_gfx950_test
                     FILTER "ConSanDeviceModuleReductionTest.${_outcome}"
+                    RESOURCE_LOCK "consan_physical_gfx950"
                     TIMEOUT 60
                     LABELS
                         consan consan-device gfx950 physical module-load
@@ -2195,6 +2217,7 @@ function(rj_add_consan_hip_tests)
                     "ConSanDeviceGfx950Physical.RecordReplayModuleReduction.Correct"
                 TARGET hip_consan_device_module_reduction_gfx950_test
                 FILTER "ConSanDeviceModuleReductionTest.Correct"
+                RESOURCE_LOCK "consan_physical_gfx950"
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
@@ -2217,6 +2240,7 @@ function(rj_add_consan_hip_tests)
                     "ConSanDeviceGfx950Physical.RecordReplayModuleReduction.Incorrect"
                 TARGET hip_consan_device_module_reduction_gfx950_test
                 FILTER "ConSanDeviceModuleReductionTest.Incorrect"
+                RESOURCE_LOCK "consan_physical_gfx950"
                 TIMEOUT 60
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
