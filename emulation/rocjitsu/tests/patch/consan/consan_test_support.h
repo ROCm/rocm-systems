@@ -1137,6 +1137,123 @@ std::vector<uint8_t> make_cdna4_code_object_with_local_function(
   return image;
 }
 
+/// Builds two disconnected gfx950 kernels that require different persistent
+/// ConSan representations. lds_probe has a live accumulator bank beginning at
+/// v64 and cannot grow an ordinary-VGPR tuple through it. lds_helper has an
+/// empty accumulator boundary at v128 and a dynamic stack, so private state is
+/// invalid but moving the empty boundary is safe. The fixed-stack kernel can
+/// retain the object-wide dispatch pair in SGPRs, while the dynamic-stack
+/// kernel exhausts the ordinary SGPR tail and must receive dispatch identity
+/// in its component-local VGPR tuple. No code-object-wide scalar tuple can
+/// hide the mixed-placement requirement.
+std::vector<uint8_t>
+make_cdna4_mixed_accvgpr_persistence_code_object(bool full_sampled_pressure = false,
+                                                 bool dynamic_flat_group_load = false,
+                                                 bool dynamic_has_accvgpr_bank = false) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store = build_cdna4_ds_store_b32(
+      /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  const auto flat_load = build_cdna4_flat_load_b32(
+      /*vaddr=*/0u, /*vdst=*/2u, /*byte_offset=*/0u, kArch);
+  EXPECT_TRUE(store && barrier && flat_load);
+  if (!store || !barrier || !flat_load)
+    return {};
+
+  std::vector<uint32_t> fixed_words(1200u, build_s_nop(0u, kArch));
+  fixed_words[0] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(63u), kArch);
+  std::ranges::copy(*store, fixed_words.begin() + 1u);
+  fixed_words[3] = *barrier;
+  // The fixed and dynamic owners each have a legal transient scalar window,
+  // but their liveness union does not. This forces the automatic placement
+  // fixed point to retain component-local assignments instead of hiding the
+  // mixed-owner case behind one object-wide EXEC-save window.
+  for (uint16_t sgpr = 0u; sgpr < 66u; ++sgpr)
+    fixed_words[static_cast<size_t>(sgpr) + 4u] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  fixed_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint32_t> dynamic_words(1200u, build_s_nop(0u, kArch));
+  size_t dynamic_scalar_liveness_start = 4u;
+  if (dynamic_flat_group_load) {
+    dynamic_words[0] = 0xbe8001ebu; // s_mov_b64 s[0:1], SRC_SHARED_BASE
+    dynamic_words[1] = build_v_mov_b32_e32(/*vdst=*/0u, /*scalar s0=*/0u, kArch);
+    dynamic_words[2] = build_v_mov_b32_e32(/*vdst=*/1u, /*scalar s1=*/1u, kArch);
+    std::ranges::copy(*flat_load, dynamic_words.begin() + 3u);
+    dynamic_words[5] = *barrier;
+    dynamic_scalar_liveness_start = 6u;
+  } else {
+    dynamic_words[0] = build_v_mov_b32_e32(
+        /*vdst=*/0u, vector_source_vgpr(full_sampled_pressure ? 250u : 125u), kArch);
+    std::ranges::copy(*store, dynamic_words.begin() + 1u);
+    dynamic_words[3] = *barrier;
+  }
+  for (uint16_t sgpr = 70u; sgpr < 102u; ++sgpr)
+    dynamic_words[dynamic_scalar_liveness_start + static_cast<size_t>(sgpr - 70u)] =
+        build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  if (full_sampled_pressure) {
+    // Keep every ordinary VGPR except v4:v10 live across both sites. The
+    // owner-local Sampled ABI fits its six-register access and seven-register
+    // barrier windows there; the object-wide private ABI needs eight and nine
+    // registers respectively and is deliberately unplaceable. This models
+    // the initially resource-failed 256-VGPR dynamic-stack component in the
+    // gfx950 HIP-matmul object.
+    size_t word = 40u;
+    for (uint16_t vgpr = 0u; vgpr < 251u; ++vgpr) {
+      if (vgpr >= 4u && vgpr <= 10u)
+        continue;
+      dynamic_words[word++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), kArch);
+    }
+  }
+  dynamic_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> image = make_cdna4_code_object_with_local_function(
+      fixed_words, dynamic_words, {}, /*vgpr_granulated=*/15u,
+      /*function_is_kernel=*/true);
+  mutate_kernel_descriptor(image, "lds_probe", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 3u);
+  });
+  mutate_kernel_descriptor(image, "lds_helper", [full_sampled_pressure](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    full_sampled_pressure ? 63u : 31u);
+    if (full_sampled_pressure) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 63u);
+    }
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  constexpr std::array<std::string_view, 1> kAdditionalKernelNames = {"lds_helper"};
+  append_kernel_metadata_note(image, "lds_probe", /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/32u, /*private_segment_fixed_size=*/48u,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false, kAdditionalKernelNames,
+                              /*agpr_count=*/1u, /*vgpr_count=*/126u);
+  // The compact test metadata builder intentionally gives every named kernel
+  // the same fields. Specialize the second map to model the real mixed object:
+  // only lds_helper is dynamic-stack and its accumulator bank is proven empty.
+  const auto mutate_second_value = [&](std::string_view key, uint8_t expected, uint8_t value) {
+    auto first = std::search(image.begin(), image.end(), key.begin(), key.end());
+    EXPECT_NE(first, image.end());
+    if (first == image.end())
+      return;
+    auto second = std::search(first + static_cast<std::ptrdiff_t>(key.size()), image.end(),
+                              key.begin(), key.end());
+    EXPECT_NE(second, image.end());
+    if (second == image.end())
+      return;
+    auto encoded_value = second + static_cast<std::ptrdiff_t>(key.size());
+    ASSERT_NE(encoded_value, image.end());
+    EXPECT_EQ(*encoded_value, expected);
+    *encoded_value = value;
+  };
+  mutate_second_value(".uses_dynamic_stack", 0xc2u, 0xc3u);
+  mutate_second_value(".agpr_count", 1u, dynamic_has_accvgpr_bank ? 1u : 0u);
+  mutate_second_value(".sgpr_count", 32u, 104u);
+  return image;
+}
+
 std::vector<uint8_t>
 make_cdna4_disconnected_scalar_pressure_code_object(uint16_t live_sgpr_count = 96u) {
   EXPECT_TRUE(live_sgpr_count == 96u || live_sgpr_count == 98u);

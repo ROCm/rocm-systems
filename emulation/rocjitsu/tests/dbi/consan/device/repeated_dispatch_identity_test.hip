@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Repeated, multi-stream launch envelope for gfx11 loaded-image and report
+/// Repeated, multi-stream launch envelope for loaded-image and report
 /// generation identity. Every dispatch executes the same kernel object but
 /// owns distinct output. This tests lifecycle isolation; it does not claim
 /// that ConSan diagnoses races between separate kernels.
@@ -15,7 +15,7 @@ namespace {
 constexpr uint32_t kStreams = 4u;
 constexpr uint32_t kRounds = 2u;
 constexpr uint32_t kDispatches = kStreams * kRounds;
-constexpr uint32_t kMaximumThreads = 64u;
+constexpr uint32_t kMaximumThreads = 128u;
 
 struct DispatchState {
   uint32_t observed;
@@ -23,7 +23,7 @@ struct DispatchState {
 };
 
 template <bool Synchronize>
-__global__ void gfx11_repeated_image_for_consan(DispatchState *states, uint32_t dispatch) {
+__global__ void repeated_dispatch_for_consan(DispatchState *states, uint32_t dispatch) {
   __shared__ uint32_t payload;
   const uint32_t tid = threadIdx.x;
   const uint32_t wave_size = warpSize;
@@ -36,7 +36,7 @@ __global__ void gfx11_repeated_image_for_consan(DispatchState *states, uint32_t 
   states[dispatch].control[tid] = 0xd1000000u | (dispatch << 8u) | tid;
 }
 
-void run_gfx11_dispatch_identity(bool synchronize) {
+void run_repeated_dispatch_identity(bool synchronize) {
   const uint32_t thread_count = 2u * consan_device_test::active_wave_size();
   ASSERT_LE(thread_count, kMaximumThreads);
   DispatchState *device_states = nullptr;
@@ -50,10 +50,10 @@ void run_gfx11_dispatch_identity(bool synchronize) {
     for (uint32_t stream = 0; stream < kStreams; ++stream) {
       const uint32_t dispatch = round * kStreams + stream;
       if (synchronize) {
-        gfx11_repeated_image_for_consan<true>
+        repeated_dispatch_for_consan<true>
             <<<1, thread_count, 0, streams[stream]>>>(device_states, dispatch);
       } else {
-        gfx11_repeated_image_for_consan<false>
+        repeated_dispatch_for_consan<false>
             <<<1, thread_count, 0, streams[stream]>>>(device_states, dispatch);
       }
       HIP_ASSERT(hipGetLastError());
@@ -78,7 +78,8 @@ void run_gfx11_dispatch_identity(bool synchronize) {
   }
 }
 
-TEST(ConSanDeviceGfx11DispatchIdentityTest, Correct) { run_gfx11_dispatch_identity(true); }
-TEST(ConSanDeviceGfx11DispatchIdentityTest, Incorrect) { run_gfx11_dispatch_identity(false); }
+TEST(ConSanDeviceRepeatedDispatchIdentityTest, Correct) { run_repeated_dispatch_identity(true); }
+
+TEST(ConSanDeviceRepeatedDispatchIdentityTest, Incorrect) { run_repeated_dispatch_identity(false); }
 
 } // namespace

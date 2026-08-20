@@ -3087,16 +3087,30 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   };
   if (!std::ranges::any_of(result.patches, is_exact_patch))
     return errors;
-  const bool has_global_exact_patch_without_private_dispatch =
+  const auto owner_local_dispatch_vgpr = [&](const ConSanPatchInfo &patch) {
+    std::optional<uint16_t> common;
+    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+      const auto assignment =
+          std::ranges::find(result.resolved_moi_persistent_vgpr_assignments, owner,
+                            &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+      if (assignment == result.resolved_moi_persistent_vgpr_assignments.end() ||
+          !assignment->dispatch_id_vgpr || (common && *common != *assignment->dispatch_id_vgpr)) {
+        return std::optional<uint16_t>{};
+      }
+      common = assignment->dispatch_id_vgpr;
+    }
+    return common;
+  };
+  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
-               !patch.persistent_dispatch_id_private_offset;
+               !patch.persistent_dispatch_id_private_offset &&
+               !result.resolved_moi_dispatch_id_sgpr && !result.resolved_moi_dispatch_id_vgpr &&
+               !owner_local_dispatch_vgpr(patch) &&
+               !consan_arch_uses_literal_dispatch_identity(arch);
       });
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
-  if (replacement.text_sections().size() != 1 ||
-      (has_global_exact_patch_without_private_dispatch && !result.resolved_moi_dispatch_id_sgpr &&
-       !result.resolved_moi_dispatch_id_vgpr &&
-       !consan_arch_uses_literal_dispatch_identity(arch))) {
+  if (replacement.text_sections().size() != 1 || has_exact_patch_without_dispatch) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
@@ -3292,7 +3306,42 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     std::vector<uint32_t> capture_low;
     std::vector<uint32_t> capture_high;
     std::optional<uint16_t> expected_dispatch_sgpr = result.resolved_moi_dispatch_id_sgpr;
-    if (patch.persistent_dispatch_id_private_offset) {
+    std::optional<uint16_t> expected_dispatch_vgpr = result.resolved_moi_dispatch_id_vgpr;
+    if (!patch.persistent_dispatch_id_private_offset &&
+        !result.resolved_moi_transient_sgpr_assignments.empty()) {
+      // A partially admitted object-wide dispatch pair is present in the
+      // aggregate result even though an owner-local transient assignment can
+      // explicitly reject it. Resolve that choice for this patch before
+      // validating the emitted capture; the rejected owner may instead use
+      // its persistent dispatch VGPR pair.
+      const ConSanMoiTransientSgprAssignment *first_assignment = nullptr;
+      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+        const auto assignment =
+            std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+        if (assignment != result.resolved_moi_transient_sgpr_assignments.end()) {
+          first_assignment = &*assignment;
+          break;
+        }
+      }
+      // A patch whose owners have no override continues to use the aggregate
+      // code-object-wide pair. Once any owner has an override, shared-site
+      // consistency requires every owner to have that same assignment; an
+      // explicit null pair then selects the private/persistent fallback.
+      if (first_assignment != nullptr) {
+        expected_dispatch_sgpr = first_assignment->dispatch_id_sgpr;
+        for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+          const auto assignment =
+              std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                                &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+          if (assignment == result.resolved_moi_transient_sgpr_assignments.end() ||
+              assignment->dispatch_id_sgpr != expected_dispatch_sgpr) {
+            expected_dispatch_sgpr.reset();
+            break;
+          }
+        }
+      }
+    } else if (patch.persistent_dispatch_id_private_offset) {
       expected_dispatch_sgpr.reset();
       for (uint64_t owner : patch.owner_descriptor_file_offsets) {
         const auto assignment =
@@ -3306,21 +3355,29 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
         }
         expected_dispatch_sgpr = assignment->indirect_pc_sgpr;
       }
+      // A code-object-wide non-spill Inline window has no per-owner
+      // assignment record. Its indirect PC pair is the fixed +12:+13 pair
+      // within that window, and private dispatch reload deliberately reuses
+      // the same dead body-local state.
+      if (!expected_dispatch_sgpr && result.resolved_moi_transient_sgpr_assignments.empty() &&
+          result.resolved_moi_exec_save_sgpr) {
+        expected_dispatch_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 12u);
+      }
     }
+    if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
+      expected_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
     if (expected_dispatch_sgpr) {
       capture_low.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
       capture_high.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
                               static_cast<uint16_t>(*expected_dispatch_sgpr + 1u), arch));
-    } else if (result.resolved_moi_dispatch_id_vgpr) {
-      capture_low.push_back(
-          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
-                              vector_source_vgpr(*result.resolved_moi_dispatch_id_vgpr), arch));
+    } else if (expected_dispatch_vgpr) {
+      capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                                                vector_source_vgpr(*expected_dispatch_vgpr), arch));
       capture_high.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(scratch + 3u),
-          vector_source_vgpr(static_cast<uint16_t>(*result.resolved_moi_dispatch_id_vgpr + 1u)),
-          arch));
+          vector_source_vgpr(static_cast<uint16_t>(*expected_dispatch_vgpr + 1u)), arch));
     } else {
       const auto low = instrumentation::build_v_mov_b32_literal(
           static_cast<uint16_t>(scratch + 2u), static_cast<uint32_t>(result.moi_report_dispatch_id),

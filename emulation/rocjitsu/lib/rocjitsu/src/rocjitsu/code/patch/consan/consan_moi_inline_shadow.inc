@@ -593,7 +593,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             ? std::optional<uint64_t>(resources->owner_descriptor_file_offsets.front())
             : std::nullopt;
     ConSanOptions candidate_options;
-    bool persistent_assignment_applied = false;
     if (direct_descriptor) {
       auto [cached, inserted] =
           direct_options_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -601,9 +600,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         ConSanOptions resolved = options;
         if (apply_moi_transient_sgpr_assignment(resolved,
                                                 resources->owner_descriptor_file_offsets) &&
-            (resolved.moi_persistent_vgpr_assignments.empty() ||
-             apply_moi_persistent_vgpr_assignment(resolved,
-                                                  resources->owner_descriptor_file_offsets))) {
+            apply_moi_persistent_vgpr_assignment(resolved,
+                                                 resources->owner_descriptor_file_offsets)) {
           // The descriptor-specific scalar and persistent choices are now in
           // the scalar option fields.  Dropping the object-wide assignment
           // vectors keeps the per-site copy constant-size in dense objects.
@@ -616,12 +614,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!cached->second)
         continue;
       candidate_options = *cached->second;
-      persistent_assignment_applied = true;
     } else {
       candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                               resources->owner_descriptor_file_offsets))
+                                               resources->owner_descriptor_file_offsets) ||
+          !apply_moi_persistent_vgpr_assignment(candidate_options,
+                                                resources->owner_descriptor_file_offsets)) {
         continue;
+      }
     }
 
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
@@ -678,9 +678,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<uint16_t> private_owner_shift;
-    if (options.automatic_moi_private_epoch) {
+    if (candidate_options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
-          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+          candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       // Every supported target exposes workgroup identity as an entry ABI
       // value. Preserve the complete key before arbitrary guest code can reuse
       // the ordinary SGPR or TTMP inputs.
@@ -689,9 +689,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       // guest state. Capture that owner's identity in private storage and
       // reload it into the access router's dead PC pair after the router has
       // entered its body.
-      const bool persist_dispatch_id =
-          !moi_has_runtime_hardware_dispatch_id(candidate_options) &&
-          (options.moi_dispatch_id_sgpr || options.automatic_moi_private_dispatch_id);
+      const bool persist_dispatch_id = !moi_has_runtime_hardware_dispatch_id(candidate_options) &&
+                                       (candidate_options.moi_dispatch_id_sgpr ||
+                                        candidate_options.automatic_moi_private_dispatch_id);
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -716,7 +716,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       if (!private_layout)
         continue;
-      if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      if (candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
         if (direct_descriptor) {
           auto [cached, inserted] =
               direct_owner_shift_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -733,21 +733,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      if (!candidate_options.moi_inline_indirect_pc_sgpr) {
+      const auto reload = moi_indirect_jump_sgprs(candidate_options);
+      if (!reload) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
         continue;
       }
-      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
-    }
-
-    if (!persistent_assignment_applied &&
-        !candidate_options.moi_persistent_vgpr_assignments.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options,
-                                              resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI inline-shadow access has no common persistent VGPR assignment");
-      continue;
+      candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
     }
 
     std::vector<std::string> workgroup_errors;
@@ -1601,8 +1593,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             "ConSan MOI inline-shadow access lost its transient scalar assignment");
         return;
       }
-      if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
-          !apply_moi_persistent_vgpr_assignment(
+      if (!apply_moi_persistent_vgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
@@ -1612,7 +1603,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
       if (planned_patch.private_dispatch_id_offset) {
-        candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+        const auto reload = moi_indirect_jump_sgprs(candidate_options);
+        if (!reload) {
+          result.errors.emplace_back(
+              "ConSan MOI inline-shadow access lost its private dispatch reload pair");
+          return;
+        }
+        candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
       }
       auto words = build_inline_shadow_words(
           bytes, candidate, candidate_options, arch, layout, planned_patch.workgroup_sources,
@@ -2036,8 +2033,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   "ConSan MOI inline-shadow access lost its transient scalar assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
-            if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
-                !apply_moi_persistent_vgpr_assignment(
+            if (!apply_moi_persistent_vgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
                   "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
@@ -2048,8 +2044,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
             if (planned_patch.private_dispatch_id_offset) {
-              candidate_options.moi_dispatch_id_sgpr =
-                  candidate_options.moi_inline_indirect_pc_sgpr;
+              const auto reload = moi_indirect_jump_sgprs(candidate_options);
+              if (!reload) {
+                result.errors.emplace_back(
+                    "ConSan MOI inline-shadow access lost its private dispatch reload pair");
+                return std::optional<std::vector<uint32_t>>{};
+              }
+              candidate_options.moi_dispatch_id_sgpr = reload->pc_sgpr;
             }
             return build_inline_shadow_words(
                 bytes, *planned_patch.candidate, candidate_options, arch, layout,

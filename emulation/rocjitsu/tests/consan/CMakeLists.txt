@@ -400,6 +400,7 @@ function(rj_add_consan_device_conformance_cases)
         "Reduction|reduction|ConSanDeviceReductionTest"
         "SharedHelperOwners|shared_helper_owners|ConSanDeviceSharedHelperOwnersTest"
         "IndependentWorkgroups|independent_workgroups|ConSanDeviceIndependentWorkgroupsTest"
+        "RepeatedDispatchIdentity|repeated_dispatch_identity|ConSanDeviceRepeatedDispatchIdentityTest"
         "DynamicPrivateStack|dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
         "OverlappingSubwords|overlapping_subwords|ConSanDeviceOverlappingSubwordsTest"
         "AtomicArrival|atomic_arrival|ConSanDeviceAtomicArrivalTest|atomics"
@@ -473,7 +474,6 @@ function(rj_add_consan_device_conformance_cases)
             APPEND
             _device_workloads
             "Gfx11ScalarVglobal|gfx11_scalar_vglobal|ConSanDeviceGfx11ScalarVglobalTest|atomics"
-            "Gfx11DispatchIdentity|gfx11_dispatch_identity|ConSanDeviceGfx11DispatchIdentityTest"
         )
     endif()
     foreach(_workload IN LISTS _device_workloads)
@@ -644,6 +644,7 @@ function(rj_add_consan_device_fixture_targets target)
         "reduction|reduction_test.hip"
         "shared_helper_owners|shared_helper_owners_test.hip"
         "independent_workgroups|independent_workgroups_test.hip"
+        "repeated_dispatch_identity|repeated_dispatch_identity_test.hip"
         "dynamic_private_stack|dynamic_private_stack_test.hip"
         "overlapping_subwords|overlapping_subwords_test.hip"
         "atomic_arrival|atomic_arrival_test.hip"
@@ -707,7 +708,6 @@ function(rj_add_consan_device_fixture_targets target)
             APPEND
             _device_workload_sources
             "gfx11_scalar_vglobal|gfx11_scalar_vglobal_test.hip"
-            "gfx11_dispatch_identity|gfx11_dispatch_identity_test.hip"
         )
     endif()
     foreach(_workload IN LISTS _device_workload_sources)

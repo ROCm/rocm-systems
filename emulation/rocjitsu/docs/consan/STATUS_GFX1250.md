@@ -55,7 +55,7 @@ preserve an earlier green claim.
 | **P4 hip-moi WMMA attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 15.46 seconds with complete 18/18 access coverage; prior paired 1.78x retained | 🟩 Current clean-revision row passes both exact oracles in 16.91 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.17x retained | 🟩 Current clean-revision row passes both exact oracles in 15.22 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.15x retained | 🟩 Current clean-revision row passes both exact oracles in 19.91 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.17x retained |
 | **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
-| **P4 Jakub cooperative matmul** | 🟩 Current clean-revision four-oracle row in 7.50 seconds with complete 70/70 access coverage; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 10.18 seconds with complete 70/70 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 7.15 seconds with complete 70/70 accesses plus 8/8 applicable barriers and a complete dynamic verdict; the code-object-wide cluster-tuple gate reservation regression is fixed; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 7.37 seconds with complete 70/70 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired and reviewed-fault evidence retained |
+| **P4 Jakub cooperative matmul** | 🟩 Current clean-revision four-oracle row in 7.50 seconds with complete 70/70 access coverage; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 10.18 seconds with complete 70/70 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired and reviewed-fault evidence retained | 🟩 Final candidate-tree recheck passes all four oracles in 7.06 seconds with complete 70/70 accesses plus 8/8 applicable barriers and complete static and dynamic verdicts; the code-object-wide cluster-tuple gate reservation regression remains fixed, and prior paired and reviewed-fault evidence is retained | 🟩 Current clean-revision four-oracle row in 7.37 seconds with complete 70/70 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired and reviewed-fault evidence retained |
 
 ### 2026-08-20 bounded Tensile Stream-K revalidation
 
@@ -307,6 +307,14 @@ only skip is the opt-in live-object benchmark.  The accepted hook SHA-256 is
 `e90e75343df20766f5b5b6eca2c936965df1eddc17087cd96a150bb8f9f3806c`.
 This clean evidence preserves the prior accepted paired-overhead and
 reviewed-fault qualifications.
+
+Candidate-tree artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-jakub-sampled-owner-recovery-final-FgFPdz`
+rechecks Sampled after the CDNA4 mixed-owner placement work. Through RocJitsu's
+gfx1250 configuration, all four exact arithmetic oracles pass in 7.06 seconds,
+all 70/70 accesses and 8/8 barriers patch, and the static, dynamic, and overall
+analysis verdicts are complete. The loaded hook SHA-256 is
+`dc7d952995dfbcb0cf8601c10b0b546fefd95f69f055bc08d62e4e2ec5664b2a`.
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU

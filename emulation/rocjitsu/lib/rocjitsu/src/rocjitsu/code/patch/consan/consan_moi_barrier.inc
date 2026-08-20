@@ -771,6 +771,15 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
+      ConSanOptions owner_options = options;
+      if (!apply_moi_persistent_vgpr_assignment(owner_options, owners)) {
+        result.warnings.emplace_back(
+            "ConSan MOI private epoch barrier lost its owner-local persistent assignment in " +
+            candidate.container_name);
+        continue;
+      }
+      if (!owner_options.automatic_moi_private_epoch)
+        continue;
       const ConSanPatchInfo *access_patch = patch_owner_index.persistent_access_patch_for(owners);
       if (access_patch == nullptr) {
         result.warnings.emplace_back(
@@ -779,7 +788,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
-        const auto resources = resolve_moi_scratch_plan(*plan, options, /*expected_count=*/6u);
+        const auto resources =
+            resolve_moi_scratch_plan(*plan, owner_options, /*expected_count=*/6u);
         if (!resources ||
             !access_patch->persistent_record_replay_workgroup_private_offsets.complete()) {
           result.warnings.emplace_back(
@@ -788,7 +798,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               candidate.container_name);
           continue;
         }
-        ConSanOptions candidate_options = options;
+        ConSanOptions candidate_options = std::move(owner_options);
         candidate_options.scratch_vgpr = resources->base;
         candidate_options.moi_record_replay_workgroup_private_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets;
@@ -892,7 +902,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                              private_requirements, result.errors))
       return;
-  } else if (options.automatic_moi_persistent_sgprs) {
+  }
+  if (options.automatic_moi_persistent_sgprs) {
     // The owner-kernel entry prologue grows each descriptor for this scalar
     // tuple after all emitted patch ownership is known.
   } else if (options.automatic_moi_persistent_vgprs) {
@@ -907,16 +918,15 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       for (uint64_t descriptor_offset : plan->owner_descriptor_file_offsets) {
         const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
-        const uint16_t required = assignment ? static_cast<uint16_t>(assignment->epoch_vgpr + 1u)
-                                             : static_cast<uint16_t>(*options.moi_epoch_vgpr + 1u);
-        requirements[descriptor_offset] = required;
+        if (assignment)
+          requirements[descriptor_offset] = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
       }
     }
     if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result, requirements,
                                        arch, result.errors)) {
       return;
     }
-  } else {
+  } else if (!options.automatic_moi_private_epoch) {
     MoiDescriptorVgprRequirements requirements;
     for (const ConSanKernelInfo &kernel : result.kernels) {
       requirements.emplace(kernel.descriptor_file_offset,
@@ -927,98 +937,100 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return;
     }
   }
-  if (!options.automatic_moi_private_epoch) {
-    for (const BarrierRecordCandidate &candidate : selected_candidates) {
-      std::vector<uint64_t> owners;
-      const ConSanCandidateResourcePlan *plan =
-          resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
-      if (plan) {
-        owners = plan->owner_descriptor_file_offsets;
-      }
-      if (owners.empty() && candidate.kernel_descriptor_file_offset)
-        owners.push_back(*candidate.kernel_descriptor_file_offset);
-      if (automatic_moi_persistent_state(options) && owners.empty())
-        continue;
-      ConSanOptions candidate_options = options;
-      if (!apply_moi_transient_sgpr_assignment(candidate_options, owners))
-        continue;
-      candidate_options.moi_inline_workgroup_shadow =
-          options.moi_inline_workgroup_shadow &&
-          patch_owner_index.has_workgroup_shadow_for_any(owners);
-      std::optional<uint16_t> scratch_vgpr;
-      std::optional<VgprSpillSequence> spill;
-      std::optional<InlineSgprSpillSequence> scalar_spill;
-      uint32_t required_private_bytes = 0u;
-      const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
-      const bool needs_record_replay_scalar_spill =
-          candidate_options.automatic_moi_record_replay_sgpr_spill;
-      const bool needs_scalar_spill =
-          needs_record_replay_scalar_spill ||
-          (scratch_count > 1u && candidate_options.automatic_moi_inline_sgpr_spill);
-      if (scratch_count > 1u || needs_scalar_spill) {
-        if (plan == nullptr) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline barrier visible evidence has no resource plan in " +
-              candidate.container_name);
-          continue;
-        }
-        const auto resources = resolve_moi_scratch_plan(*plan, candidate_options, scratch_count);
-        if (!resources) {
-          result.warnings.emplace_back(
-              "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
-              candidate.container_name);
-          continue;
-        }
-        // A one-VGPR Record/Replay resource can be used solely as the scalar
-        // spill transfer register. It is not Inline visible-evidence scratch:
-        // passing it as such would select Inline's much wider +12/+14 SGPR
-        // layout and reject an otherwise valid compact Record/Replay probe.
-        if (scratch_count > 1u)
-          scratch_vgpr = resources->base;
-        owners = resources->owner_descriptor_file_offsets;
-        if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-            moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-          spill = build_moi_spill_sequence(result, *resources, candidate_options,
-                                           visible_evidence_spill_managers, arch, result.warnings);
-          if (!spill)
-            continue;
-          required_private_bytes = spill->total_private_bytes;
-          note_spill_descriptor_requirements(visible_evidence_private_requirements, *resources,
-                                             *spill);
-        }
-        if (needs_scalar_spill) {
-          scalar_spill = build_inline_sgpr_spill_sequence(
-              result, *resources, candidate_options, visible_evidence_spill_managers, arch,
-              result.warnings, std::nullopt, spill ? &*spill : nullptr);
-          if (!scalar_spill)
-            continue;
-          required_private_bytes =
-              std::max(required_private_bytes, scalar_spill->total_private_bytes);
-          for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-            auto [it, inserted] = visible_evidence_private_requirements.emplace(
-                descriptor_offset, scalar_spill->total_private_bytes);
-            if (!inserted)
-              it->second = std::max(it->second, scalar_spill->total_private_bytes);
-          }
-        }
-        note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
-        note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources,
-                                   candidate_options, arch);
-      }
-      planned_candidates.push_back(PlannedInlineEpochBarrier{
-          .candidate = candidate,
-          .owner_descriptor_file_offsets = std::move(owners),
-          .scratch_vgpr = scratch_vgpr,
-          .private_epoch_offset = std::nullopt,
-          .private_owner_offset = std::nullopt,
-          .private_owner_shift = std::nullopt,
-          .private_record_replay_workgroup_offsets = {},
-          .spill = std::move(spill),
-          .scalar_spill = std::move(scalar_spill),
-          .persistent_private_state_end = 0u,
-          .required_private_bytes = required_private_bytes,
-      });
+  for (const BarrierRecordCandidate &candidate : selected_candidates) {
+    std::vector<uint64_t> owners;
+    const ConSanCandidateResourcePlan *plan =
+        resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
+    if (plan) {
+      owners = plan->owner_descriptor_file_offsets;
     }
+    if (owners.empty() && candidate.kernel_descriptor_file_offset)
+      owners.push_back(*candidate.kernel_descriptor_file_offset);
+    if (automatic_moi_persistent_state(options) && owners.empty())
+      continue;
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, owners) ||
+        !apply_moi_persistent_vgpr_assignment(candidate_options, owners)) {
+      continue;
+    }
+    if (candidate_options.automatic_moi_private_epoch)
+      continue;
+    candidate_options.moi_inline_workgroup_shadow =
+        options.moi_inline_workgroup_shadow &&
+        patch_owner_index.has_workgroup_shadow_for_any(owners);
+    std::optional<uint16_t> scratch_vgpr;
+    std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    uint32_t required_private_bytes = 0u;
+    const uint16_t scratch_count = inline_shadow_barrier_scratch_count(candidate_options);
+    const bool needs_record_replay_scalar_spill =
+        candidate_options.automatic_moi_record_replay_sgpr_spill;
+    const bool needs_scalar_spill =
+        needs_record_replay_scalar_spill ||
+        (scratch_count > 1u && candidate_options.automatic_moi_inline_sgpr_spill);
+    if (scratch_count > 1u || needs_scalar_spill) {
+      if (plan == nullptr) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline barrier visible evidence has no resource plan in " +
+            candidate.container_name);
+        continue;
+      }
+      const auto resources = resolve_moi_scratch_plan(*plan, candidate_options, scratch_count);
+      if (!resources) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
+            candidate.container_name);
+        continue;
+      }
+      // A one-VGPR Record/Replay resource can be used solely as the scalar
+      // spill transfer register. It is not Inline visible-evidence scratch:
+      // passing it as such would select Inline's much wider +12/+14 SGPR
+      // layout and reject an otherwise valid compact Record/Replay probe.
+      if (scratch_count > 1u)
+        scratch_vgpr = resources->base;
+      owners = resources->owner_descriptor_file_offsets;
+      if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+          moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
+        spill = build_moi_spill_sequence(result, *resources, candidate_options,
+                                         visible_evidence_spill_managers, arch, result.warnings);
+        if (!spill)
+          continue;
+        required_private_bytes = spill->total_private_bytes;
+        note_spill_descriptor_requirements(visible_evidence_private_requirements, *resources,
+                                           *spill);
+      }
+      if (needs_scalar_spill) {
+        scalar_spill = build_inline_sgpr_spill_sequence(
+            result, *resources, candidate_options, visible_evidence_spill_managers, arch,
+            result.warnings, std::nullopt, spill ? &*spill : nullptr);
+        if (!scalar_spill)
+          continue;
+        required_private_bytes =
+            std::max(required_private_bytes, scalar_spill->total_private_bytes);
+        for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
+          auto [it, inserted] = visible_evidence_private_requirements.emplace(
+              descriptor_offset, scalar_spill->total_private_bytes);
+          if (!inserted)
+            it->second = std::max(it->second, scalar_spill->total_private_bytes);
+        }
+      }
+      note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
+      note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
+                                 arch);
+    }
+    planned_candidates.push_back(PlannedInlineEpochBarrier{
+        .candidate = candidate,
+        .owner_descriptor_file_offsets = std::move(owners),
+        .scratch_vgpr = scratch_vgpr,
+        .private_epoch_offset = std::nullopt,
+        .private_owner_offset = std::nullopt,
+        .private_owner_shift = std::nullopt,
+        .private_record_replay_workgroup_offsets = {},
+        .spill = std::move(spill),
+        .scalar_spill = std::move(scalar_spill),
+        .persistent_private_state_end = 0u,
+        .required_private_bytes = required_private_bytes,
+    });
   }
   if (planned_candidates.empty()) {
     result.warnings.emplace_back(

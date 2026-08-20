@@ -627,16 +627,32 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     erase_redundant_adjacent_full_barrier_candidates(candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
       const BarrierRecordCandidate &candidate = candidates[index];
-      result.resource_plans.push_back(plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
-          candidate.kernel_descriptor_file_offset,
-          /*scratch_count=*/options.moi_engine == ConSanMoiEngine::Sampled
-              ? (options.automatic_moi_private_epoch || moi_uses_scalar_persistent_state(options)
-                     ? 9u
-                     : 7u)
-          : options.moi_engine == ConSanMoiEngine::InlineShadow
-              ? inline_shadow_barrier_scratch_count(options)
-              : 6u));
+      const auto scratch_count_for = [](const ConSanOptions &site_options) {
+        return static_cast<uint16_t>(site_options.moi_engine == ConSanMoiEngine::Sampled
+                                         ? (site_options.automatic_moi_private_epoch ||
+                                                    moi_uses_scalar_persistent_state(site_options)
+                                                ? 9u
+                                                : 7u)
+                                     : site_options.moi_engine == ConSanMoiEngine::InlineShadow
+                                         ? inline_shadow_barrier_scratch_count(site_options)
+                                         : 6u);
+      };
+      ConSanOptions site_options = options;
+      uint16_t scratch_count = scratch_count_for(site_options);
+      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
+          state, site_options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
+          candidate.kernel_descriptor_file_offset, scratch_count);
+      ConSanOptions owner_options = site_options;
+      if (apply_moi_persistent_vgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+        const uint16_t owner_scratch_count = scratch_count_for(owner_options);
+        if (owner_scratch_count != scratch_count) {
+          plan =
+              plan_moi_resource_site(state, owner_options, ConSanResourceSiteKind::Barrier, index,
+                                     candidate.site.text_offset,
+                                     candidate.kernel_descriptor_file_offset, owner_scratch_count);
+        }
+      }
+      result.resource_plans.push_back(std::move(plan));
     }
   }
   if (options.moi_track_atomics) {

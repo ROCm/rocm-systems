@@ -482,8 +482,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     const ConSanCandidateResourcePlan *candidate_resource_plan =
         resource_plan_for_candidate(result, candidate);
+    if (candidate_resource_plan == nullptr)
+      continue;
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(
+            candidate_options, candidate_resource_plan->owner_descriptor_file_offsets) ||
+        !apply_moi_persistent_vgpr_assignment(
+            candidate_options, candidate_resource_plan->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI sampled probe lost its owner-local persistent or transient assignment");
+      continue;
+    }
     const bool planned_spill_backed_operand_recovery =
-        candidate_resource_plan != nullptr &&
         std::ranges::any_of(candidate_resource_plan->alternatives, [](const auto &alternative) {
           return alternative.kind ==
                      ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
@@ -491,9 +501,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         });
     const uint16_t expected_scratch_count =
         planned_spill_backed_operand_recovery
-            ? sampled_spill_backed_scratch_count(options, candidate, arch)
-            : direct_sampled_scratch_count(options, candidate, arch);
-    const auto resources = resolve_moi_scratch(result, candidate, options, expected_scratch_count);
+            ? sampled_spill_backed_scratch_count(candidate_options, candidate, arch)
+            : direct_sampled_scratch_count(candidate_options, candidate, arch);
+    const auto resources =
+        resolve_moi_scratch(result, candidate, candidate_options, expected_scratch_count);
     if (!resources) {
       continue;
     }
@@ -506,35 +517,28 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<uint16_t> private_owner_shift;
-    if (options.automatic_moi_private_epoch) {
+    if (candidate_options.automatic_moi_private_epoch) {
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_sampled_private_epoch_layout(result, *resources, options, arch,
-                                                              result.warnings);
+          cached->second = build_sampled_private_epoch_layout(result, *resources, candidate_options,
+                                                              arch, result.warnings);
         }
         private_layout = cached->second;
       } else {
-        private_layout =
-            build_sampled_private_epoch_layout(result, *resources, options, arch, result.warnings);
+        private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
+                                                            arch, result.warnings);
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
       if (!private_layout || (private_layout->owner_offset && !private_owner_shift))
         continue;
     }
-    ConSanOptions candidate_options = options;
     if (private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI sampled probe lost its owner-local transient scalar assignment");
-      continue;
     }
     candidate_options.scratch_vgpr = resources->base;
     std::optional<VgprSpillSequence> spill;
@@ -822,8 +826,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   for (const PlannedSampledPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             planned_patch.resources.owner_descriptor_file_offsets))
+    if (!apply_moi_transient_sgpr_assignment(
+            candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+        !apply_moi_persistent_vgpr_assignment(
+            candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
                                arch);
@@ -1150,9 +1156,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanOptions candidate_options = options;
       if (!apply_moi_transient_sgpr_assignment(
+              candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+          !apply_moi_persistent_vgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
-            "ConSan MOI sampled probe lost its final transient scalar assignment");
+            "ConSan MOI sampled probe lost its final persistent or transient assignment");
         return;
       }
       candidate_options.scratch_vgpr = planned_patch.resources.base;
@@ -1465,9 +1473,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           [&](const PlannedSampledPatch &planned_patch) {
             ConSanOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
+                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+                !apply_moi_persistent_vgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
-                  "ConSan MOI sampled probe lost its inline transient scalar assignment");
+                  "ConSan MOI sampled probe lost its inline persistent or transient assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
             candidate_options.scratch_vgpr = planned_patch.resources.base;

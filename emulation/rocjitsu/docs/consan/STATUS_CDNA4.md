@@ -634,13 +634,78 @@ The HipKittens rows remain explicit enablement work.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟨 Current physical clean run passes all three exact numerical checks with complete 739/739 supported LDS-access coverage, complete static and dynamic verdicts, and zero mismatches; paired overhead and reviewed-fault acceptance remain | 🟨 All three one-repetition numerical oracles pass in the unrestricted run after fixing scalar-epoch barrier SCC preservation; 709/739 accesses and all 109/109 barriers patch.  The remaining 30 typed resource failures belong to an unexecuted dynamic-stack HybridStreamKTree kernel packaged in the same code object, so static completeness is still false | 🟥 The retained current clean assessment rejects before execution at the former scalar-placement boundary; the newly integrated access-only AccVGPR fallback does not admit this synchronized object and has not promoted the cell | 🟥 The retained current clean assessment rejects before execution at the former scalar-placement boundary; current owner-qualified planning has not yet been rerun for this profile | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Current SuperCollider evidence supersedes the July prefix-729 numerical failure.  Record/Replay now executes cleanly; its remaining promotion gate is the typed dynamic-stack resource gap in the packaged but unexecuted HybridStreamKTree kernel. |
+| P0 | `hip_matmul_matmul::m128_n128_k128` | 🟨 Current physical clean run passes all three exact numerical checks with complete 739/739 supported LDS-access coverage, complete static and dynamic verdicts, and zero mismatches; paired overhead and reviewed-fault acceptance remain | 🟨 All three one-repetition numerical oracles pass in the unrestricted run after fixing scalar-epoch barrier SCC preservation; 709/739 accesses and all 109/109 barriers patch.  The remaining 30 typed resource failures belong to an unexecuted dynamic-stack HybridStreamKTree kernel packaged in the same code object, so static completeness is still false | 🟨 Final candidate-tree physical run at the standard stride 256 and workload-qualified residue 244 passes all three exact numerical oracles in 22.53 seconds, publishes 112 visible samples and 2 synchronization records with zero diagnostics or malformed/incomplete state, patches all 739/739 accesses and 109/109 barriers, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Final candidate-tree physical run passes all three exact numerical oracles in 18.57 seconds with 188,416 visible evidence events, zero diagnostics, overflow, or dynamic-incomplete state, complete 739/739 access and 109/109 barrier coverage, and complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Sampled and Inline Shadow now cover the packaged dynamic-stack HybridStreamKTree sites by combining owner-private and owner-local persistent-VGPR state.  Paired-overhead and reviewed-fault evidence remain for green acceptance. |
 | P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Fresh configure evidence in `rocjitsu-test-corpus-build/kernels-gfx950-hipkittens-reassess-20260722` stops at missing Clang OpenMP headers/runtime (`omp.h`); no baseline or ConSan profile has run. |
 | P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
 | P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The compiler lowers `local_write_cooperative` and `local_read` shared-memory operations to provenance-unknown FLAT instructions in non-kernel functions.  The exact baseline and every standard profile are retained under the `consan-gfx950-streamk-*-provenance-20260724` artifact roots; `bd-1w9.9.10` tracks typed group provenance and function synchronization placement. |
 | P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The two-tile ownership path reproduces the same provenance-unknown FLAT instructions in non-kernel functions and the same function-level synchronization boundary as the simple case.  It remains a separate exact-oracle denominator under the same retained artifact roots and `bd-1w9.9.10`. |
 | P2 | `rocblas_sgemm` compact exact cases | 🩶 Baseline exact; profile unassessed | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifacts `consan-gfx950-rocblas-sgemm-rr-assessment-20260722/run.log` and `run-verbose.log`; preflight finds 49,435 access ranges and 2,558,464 barrier records before strict policy terminates with exit code 92.  Per-owner persistent tuples are a medium-sized gap, so this bounded red row is not an easy-cell candidate. |
+
+### 2026-08-20 HIP matmul Inline Shadow mixed-owner closure
+
+Final candidate-tree hook SHA-256
+`dc7d952995dfbcb0cf8601c10b0b546fefd95f69f055bc08d62e4e2ec5664b2a`
+closes the packaged `HybridStreamKTree` gap on a physical MI355X/gfx950.
+Artifact root
+`consan-validation/rebase-20260820-gfx950-hip-matmul-owner-dispatch-inline-final-qEKCLI`
+records the strict Inline Shadow run. All three selected numerical oracles pass
+in 18.57 seconds, with 739/739 accesses, 109/109 barriers, 188,416 visible
+evidence events, complete static and dynamic verdicts, and zero diagnostics,
+overflow, or dynamic-incomplete events.
+
+The linked object requires mixed persistent representations: fixed-stack
+owners with live AccVGPR banks use entry-captured private state, while the
+dynamic-stack empty-AccVGPR-boundary owner uses a component-local VGPR tuple.
+When that owner cannot use the otherwise valid code-object dispatch SGPR pair,
+its tuple now also retains dispatch identity. A checked-in two-kernel host
+regression reproduces that partial-owner dispatch case and verifies both
+accesses, both barriers, both entry prologues, and final exact-shadow semantic
+validation.
+
+### 2026-08-20 HIP matmul Sampled and Inline Shadow clean refresh
+
+The earlier candidate-tree hook SHA-256 was
+`9b01bf1ff91b811edc70e53720f02f8122a23540eabca0cd9d82fcf6ed5170c5`.
+The physical-gfx950 baseline passes all three selected m128-n128-k128 exact
+oracles in 0.124 seconds. Sampled at its standard runtime stride 256 and
+workload-qualified residue 4 passes the same three oracles in 18.19 seconds,
+publishes 112 visible samples without a diagnostic, and has a complete dynamic
+verdict. It patches 709/739 accesses and all 104/104 applicable barriers.
+Inline Shadow passes all three exact oracles in 17.59 seconds with 188,416
+visible evidence events, zero diagnostics or dynamic-incomplete state, and
+709/739 access plus 104/109 barrier coverage.
+
+Both former red cells therefore advance to orange: neither profile still
+rejects before execution. The remaining misses are static sites in the
+packaged but unexecuted dynamic-stack `HybridStreamKTree` kernel: 30 accesses
+for Sampled, and the same 30 accesses plus 5 barriers for Inline Shadow. Those
+gaps must be closed or explicitly qualified before either cell can advance to
+yellow; paired-overhead and reviewed-fault evidence remain after that.
+
+### 2026-08-20 HIP matmul Sampled mixed-owner closure
+
+Final candidate-tree hook SHA-256
+`dc7d952995dfbcb0cf8601c10b0b546fefd95f69f055bc08d62e4e2ec5664b2a`
+closes Sampled's packaged `HybridStreamKTree` gap on a physical MI355X/gfx950.
+Artifact root
+`consan-validation/rebase-20260820-gfx950-hip-matmul-owner-recovery-sampled-final-hQZn6f`
+records the strict standard-stride run at workload-qualified residue 244. All
+three selected numerical oracles pass in 22.53 seconds. The run patches all
+739/739 accesses and 109/109 barriers, publishes 112 sampled accesses and 2
+synchronization records, reports complete static and dynamic verdicts, and
+has zero diagnostics, conflicts, malformed records, dropped windows, or
+dynamic-incomplete events.
+
+The linked object needs Sampled's owner placement to reach a fixed point.
+Fixed-stack owners with live AccVGPR banks use entry-snapshotted private
+state; the full-pressure dynamic-stack owner uses a component-local
+persistent VGPR tuple and owner-local transient scalar window. Resource-failed
+plans remain in owner discovery because that smaller final ABI makes their
+739-access/109-barrier resource-plan rebuild succeed. Checked-in host tests
+cover mixed private/persistent state and the initially failed-owner recovery.
+The repeated-dispatch identity correct/incorrect device pair now runs on every
+CDNA3/4/5 and RDNA3/4 configuration, including physical gfx950.
 
 ### gfx950 Tensile follow-on
 

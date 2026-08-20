@@ -4187,6 +4187,155 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsForDynamicStackOwner) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4InlineShadowMovesEmptyAccumulatorBoundaryForDynamicStackState) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store =
+      build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(store && barrier);
+
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  text_words[0] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(125u), kArch);
+  std::ranges::copy(*store, text_words.begin() + 1u);
+  text_words[3] = *barrier;
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "dynamic_stack_empty_accumulator_boundary", /*vgpr_granulated=*/15u,
+      /*uses_dynamic_stack=*/true, /*workgroup_id_dimension_mask=*/0u,
+      /*group_segment_fixed_size=*/4u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // The guest reaches v125 in a 128-VGPR allocation. ACCUM_OFFSET names
+    // v128, but metadata proves that no accumulator is allocated. Inline
+    // owner/epoch/workgroup state therefore has to move this empty boundary
+    // before site-local scratch can grow above the persistent tuple.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 31u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  append_kernel_metadata_note(bytes, "dynamic_stack_empty_accumulator_boundary",
+                              /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/104u, /*private_segment_fixed_size=*/48u,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/126u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(assignment.owner_vgpr, 126u);
+  EXPECT_EQ(assignment.epoch_vgpr, 127u);
+  ASSERT_TRUE(assignment.workgroup_key_vgpr);
+  EXPECT_EQ(*assignment.workgroup_key_vgpr, 128u);
+  ASSERT_TRUE(assignment.dispatch_id_vgpr);
+  EXPECT_EQ(*assignment.dispatch_id_vgpr, 129u);
+  EXPECT_EQ(
+      std::ranges::count_if(result.patches,
+                            [](const ConSanPatchInfo &patch) {
+                              return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+                                     patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+                            }),
+      1u)
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " plans=" << testing::PrintToString(result.resource_plans)
+      << " patches=" << testing::PrintToString(result.patches);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_GT(
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 31u)
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " plans=" << testing::PrintToString(result.resource_plans)
+      << " patches=" << testing::PrintToString(result.patches);
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object();
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 2u);
+  const auto fixed = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(fixed, original.kernels().end());
+  ASSERT_NE(dynamic, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  const auto analyzed_dynamic =
+      std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(analyzed_dynamic, result.kernels.end());
+  ASSERT_TRUE(analyzed_dynamic->uses_dynamic_stack.has_value());
+  EXPECT_TRUE(*analyzed_dynamic->uses_dynamic_stack);
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiPersistentVgprAssignment &assignment =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
+  EXPECT_EQ(assignment.owner_vgpr, 126u);
+  EXPECT_EQ(assignment.epoch_vgpr, 127u);
+  EXPECT_TRUE(assignment.workgroup_key_vgpr);
+  EXPECT_TRUE(assignment.dispatch_id_vgpr);
+  EXPECT_EQ(
+      std::ranges::count_if(result.patches,
+                            [](const ConSanPatchInfo &patch) {
+                              return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+                                     patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+                            }),
+      2u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
 TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   const std::array<uint32_t, 4> text_words = {
       build_v_mov_b32_e32(/*vdst=*/11, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
@@ -6737,6 +6886,9 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   const ConSanMoiTransientSgprAssignment &assignment =
       result.resolved_moi_transient_sgpr_assignments.front();
   ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(assignment.dispatch_id_sgpr);
+  EXPECT_EQ(assignment.dispatch_id_sgpr, result.resolved_moi_dispatch_id_sgpr);
   ASSERT_TRUE(assignment.visible_evidence_sgpr);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);

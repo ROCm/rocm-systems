@@ -3023,6 +3023,259 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store =
+      build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(store && barrier);
+
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  text_words[0] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(126u), kArch);
+  std::ranges::copy(*store, text_words.begin() + 1u);
+  text_words[3] = *barrier;
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_dynamic_stack_empty_accumulator_boundary",
+      /*vgpr_granulated=*/15u, /*uses_dynamic_stack=*/true,
+      /*workgroup_id_dimension_mask=*/0u, /*group_segment_fixed_size=*/4u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // Owner/epoch start at v127 after the guest's highest reference. The
+    // encoded v128 accumulator boundary is empty, so the persistent pair and
+    // rebuilt access scratch may extend through it without reinterpreting any
+    // guest accumulator state.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 31u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  append_kernel_metadata_note(bytes, "sampled_dynamic_stack_empty_accumulator_boundary",
+                              /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/102u, /*private_segment_fixed_size=*/48u,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/127u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(assignment.owner_vgpr, 127u);
+  EXPECT_EQ(assignment.epoch_vgpr, 128u);
+  EXPECT_FALSE(assignment.dispatch_id_vgpr);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+                                           patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+                                  }),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_GT(
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+      31u);
+}
+
+TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
+  const std::vector<uint8_t> bytes =
+      make_cdna4_mixed_accvgpr_persistence_code_object(/*full_sampled_pressure=*/true);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 2u);
+  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(dynamic, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(4u);
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " plans=" << testing::PrintToString(result.resource_plans);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
+  EXPECT_EQ(assignment.owner_vgpr, 251u);
+  EXPECT_EQ(assignment.epoch_vgpr, 252u);
+  EXPECT_FALSE(assignment.dispatch_id_vgpr);
+  const auto dynamic_plan =
+      std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Access &&
+               std::ranges::find(plan.owner_descriptor_file_offsets,
+                                 dynamic->descriptor_file_offset) !=
+                   plan.owner_descriptor_file_offsets.end();
+      });
+  ASSERT_NE(dynamic_plan, result.resource_plans.end());
+  // This owner's persistent VGPR tuple supplies owner/epoch, so its native LDS
+  // store needs only the Sampled transaction registers and identity bank. The
+  // code-object-wide private-state fallback would incorrectly reserve two
+  // additional tail VGPRs and can make a full-pressure dynamic-stack owner
+  // unpatchable.
+  const uint16_t dynamic_access_scratch_count =
+      static_cast<uint16_t>((options.moi_sampled_check ? 7u : 5u) + 1u);
+  EXPECT_EQ(dynamic_plan->scratch_vgpr_count, dynamic_access_scratch_count);
+
+  const auto dynamic_barrier_plan =
+      std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Barrier &&
+               std::ranges::find(plan.owner_descriptor_file_offsets,
+                                 dynamic->descriptor_file_offset) !=
+                   plan.owner_descriptor_file_offsets.end();
+      });
+  ASSERT_NE(dynamic_barrier_plan, result.resource_plans.end());
+  EXPECT_EQ(dynamic_barrier_plan->scratch_vgpr_count, 7u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+                                           patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+                                  }),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
+TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object(
+      /*full_sampled_pressure=*/true, /*dynamic_flat_group_load=*/true,
+      /*dynamic_has_accvgpr_bank=*/true);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 2u);
+  const auto fixed = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(fixed, original.kernels().end());
+  ASSERT_NE(dynamic, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(4u);
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                               << " plans=" << testing::PrintToString(result.resource_plans);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 0u);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &persistent =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(persistent.descriptor_file_offset, dynamic->descriptor_file_offset);
+  EXPECT_EQ(persistent.owner_vgpr, 251u);
+  EXPECT_EQ(persistent.epoch_vgpr, 252u);
+
+  // No scalar window is legal for the union of the two owners. The resource
+  // planner must therefore keep the initially failed dynamic component in the
+  // placement fixed point: the fixed owner uses the ordinary object default,
+  // while the incompatible dynamic owner receives a local override.
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_GE(*result.resolved_moi_exec_save_sgpr, 66u);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.resolved_moi_transient_sgpr_assignments);
+  const auto dynamic_transient = std::ranges::find(
+      result.resolved_moi_transient_sgpr_assignments, dynamic->descriptor_file_offset,
+      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(dynamic_transient, result.resolved_moi_transient_sgpr_assignments.end());
+  EXPECT_NE(*result.resolved_moi_exec_save_sgpr, dynamic_transient->exec_save_sgpr);
+  EXPECT_LT(dynamic_transient->exec_save_sgpr, 70u);
+
+  const auto dynamic_plan =
+      std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Access &&
+               std::ranges::find(plan.owner_descriptor_file_offsets,
+                                 dynamic->descriptor_file_offset) !=
+                   plan.owner_descriptor_file_offsets.end();
+      });
+  ASSERT_NE(dynamic_plan, result.resource_plans.end());
+  EXPECT_NE(dynamic_plan->source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(dynamic_plan->scratch_vgpr_count, 6u);
+  const auto dynamic_barrier_plan =
+      std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Barrier &&
+               std::ranges::find(plan.owner_descriptor_file_offsets,
+                                 dynamic->descriptor_file_offset) !=
+                   plan.owner_descriptor_file_offsets.end();
+      });
+  ASSERT_NE(dynamic_barrier_plan, result.resource_plans.end());
+  EXPECT_NE(dynamic_barrier_plan->source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(dynamic_barrier_plan->scratch_vgpr_count, 7u);
+
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+                                           patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+                                  }),
+            2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            2u);
+}
+
 TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);

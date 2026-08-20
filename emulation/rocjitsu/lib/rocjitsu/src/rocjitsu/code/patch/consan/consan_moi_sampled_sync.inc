@@ -812,8 +812,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
+      ConSanOptions owner_options = options;
+      const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
+      if (!apply_moi_persistent_vgpr_assignment(owner_options, owner_descriptor)) {
+        owner_lowering_failure = "missing owner-local persistent assignment";
+        break;
+      }
       const auto owner_shift =
-          options.automatic_moi_private_epoch
+          owner_options.automatic_moi_private_epoch
               ? moi_descriptor_owner_shift(bytes, owner.descriptor_file_offset, result.errors)
               : std::optional<uint16_t>(0u);
       if (!workgroup_sources || !owner_shift ||
@@ -995,33 +1001,46 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       continue;
     const auto existing = barrier_plan_by_offset.find(site.text_offset);
     ConSanCandidateResourcePlan plan;
+    size_t resource_plan_index = 0u;
     if (existing != barrier_plan_by_offset.end()) {
-      plan = result.resource_plans[existing->second];
+      resource_plan_index = existing->second;
+      plan = result.resource_plans[resource_plan_index];
     } else {
       plan =
           plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Barrier, index,
                                  site.text_offset, candidate.barrier.kernel_descriptor_file_offset,
                                  options.automatic_moi_private_epoch ? 9u : 7u);
       result.resource_plans.push_back(plan);
-      barrier_plan_by_offset.emplace(site.text_offset, result.resource_plans.size() - 1u);
+      resource_plan_index = result.resource_plans.size() - 1u;
+      barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
     }
-    const uint16_t scratch_count =
-        options.automatic_moi_private_epoch || moi_uses_scalar_persistent_state(options) ? 9u : 7u;
-    const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
-    if (!resources)
-      continue;
     ConSanOptions candidate_options = options;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
+                                             plan.owner_descriptor_file_offsets) ||
+        !apply_moi_persistent_vgpr_assignment(candidate_options,
+                                              plan.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
-          "ConSan MOI sampled barrier lost its owner-local transient scalar assignment");
+          "ConSan MOI sampled barrier lost its owner-local persistent or transient assignment");
       continue;
     }
+    const uint16_t scratch_count = candidate_options.automatic_moi_private_epoch ||
+                                           moi_uses_scalar_persistent_state(candidate_options)
+                                       ? 9u
+                                       : 7u;
+    if (plan.scratch_vgpr_count != scratch_count) {
+      plan = plan_moi_resource_site(resource_state, candidate_options,
+                                    ConSanResourceSiteKind::Barrier, index, site.text_offset,
+                                    candidate.barrier.kernel_descriptor_file_offset, scratch_count);
+      result.resource_plans[resource_plan_index] = plan;
+    }
+    const auto resources = resolve_moi_scratch_plan(plan, candidate_options, scratch_count);
+    if (!resources)
+      continue;
     candidate_options.scratch_vgpr = resources->base;
     std::optional<MoiPrivateEpochLayout> private_layout;
-    if (options.automatic_moi_private_epoch) {
-      private_layout =
-          build_sampled_private_epoch_layout(result, *resources, options, arch, result.warnings);
+    if (candidate_options.automatic_moi_private_epoch) {
+      private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
+                                                          arch, result.warnings);
       if (!private_layout)
         continue;
     }

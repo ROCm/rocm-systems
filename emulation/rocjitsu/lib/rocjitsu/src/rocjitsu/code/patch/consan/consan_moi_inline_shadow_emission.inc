@@ -686,6 +686,12 @@
                      *options.moi_dispatch_id_sgpr) &&
         store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
                      static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u));
+  } else if (options.moi_track_atomics && options.moi_dispatch_id_vgpr) {
+    stored_generation =
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation),
+                   *options.moi_dispatch_id_vgpr) &&
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
+                   static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + 1u));
   } else {
     const uint64_t generation =
         options.moi_track_atomics ? options.moi_report_dispatch_id : options.moi_report_generation;
@@ -987,10 +993,11 @@
                             std::string(stage));
     }
   } failure{errors};
-  const bool literal_dispatch_id =
-      consan_arch_uses_literal_dispatch_identity(arch) && !options.moi_dispatch_id_sgpr;
+  const bool literal_dispatch_id = consan_arch_uses_literal_dispatch_identity(arch) &&
+                                   !moi_has_runtime_hardware_dispatch_id(options);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
-      (!options.moi_dispatch_id_sgpr && !literal_dispatch_id) || !options.moi_report_buffer_address)
+      (!moi_has_runtime_hardware_dispatch_id(options) && !literal_dispatch_id) ||
+      !options.moi_report_buffer_address)
     return false;
 
   const uint16_t exec_base = *options.moi_exec_save_sgpr;
@@ -1364,43 +1371,23 @@
   if (!save_claimed_publishers)
     return false;
   words.push_back(*save_claimed_publishers);
-  uint16_t dispatch_low_source = 0;
-  uint16_t dispatch_high_source = 0;
-  if (options.moi_dispatch_id_sgpr) {
-    dispatch_low_source = *options.moi_dispatch_id_sgpr;
-    dispatch_high_source = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u);
-  } else {
-    const auto low = instrumentation::build_v_mov_b32_literal(
-        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
-    if (!low)
-      return false;
-    words.insert(words.end(), low->begin(), low->end());
-    dispatch_low_source = vector_source_vgpr(tmp_vgpr);
-  }
-  const auto same_dispatch_low =
-      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_low_source, prior_dispatch_low_vgpr, arch);
-  if (!same_dispatch_low)
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch,
+          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
     return false;
-  words.push_back(*same_dispatch_low);
+  }
   if (!narrow_vcc())
     return false;
-  if (!options.moi_dispatch_id_sgpr) {
-    const auto high = instrumentation::build_v_mov_b32_literal(
-        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
-    if (!high)
-      return false;
-    words.insert(words.end(), high->begin(), high->end());
-    dispatch_high_source = vector_source_vgpr(tmp_vgpr);
-  }
-  const auto same_dispatch_high =
-      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_high_source, prior_dispatch_high_vgpr, arch);
   const auto save_same_dispatch =
       instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kRdna4ExecLo, arch);
   const auto restore_claimed_publishers =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
-  if (!same_dispatch_high || !save_same_dispatch || !restore_claimed_publishers)
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch,
+          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+      !save_same_dispatch || !restore_claimed_publishers) {
     return false;
-  words.push_back(*same_dispatch_high);
+  }
   if (!narrow_vcc())
     return false;
   words.push_back(*save_same_dispatch);
@@ -1431,23 +1418,10 @@
                                        current_low_vgpr, arch)) {
     return false;
   }
-  if (options.moi_dispatch_id_sgpr) {
-    words.push_back(build_v_mov_b32_e32(current_low_vgpr, *options.moi_dispatch_id_sgpr, arch));
-    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
-                                        static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
-                                        arch));
-  } else {
-    const auto low = instrumentation::build_v_mov_b32_literal(
-        current_low_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
-    const auto high = instrumentation::build_v_mov_b32_literal(
-        static_cast<uint16_t>(current_low_vgpr + 1u),
-        static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
-    if (!low || !high)
-      return false;
-    words.insert(words.end(), low->begin(), low->end());
-    words.insert(words.end(), high->begin(), high->end());
-  }
-  if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
+  if (!append_moi_report_dispatch_id_pair(words, options, current_low_vgpr,
+                                          static_cast<uint16_t>(current_low_vgpr + 1u), arch,
+                                          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+      !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
       !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
@@ -2532,8 +2506,8 @@
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  if (!options.moi_exec_save_sgpr ||
-      (!options.moi_dispatch_id_sgpr && !consan_arch_uses_literal_dispatch_identity(arch))) {
+  if (!options.moi_exec_save_sgpr || (!moi_has_runtime_hardware_dispatch_id(options) &&
+                                      !consan_arch_uses_literal_dispatch_identity(arch))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
@@ -2583,6 +2557,11 @@
       reject_optional_scratch_range_overlap(options.moi_workgroup_key_vgpr, *options.scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
+  if (options.moi_dispatch_id_vgpr &&
+      range_overlaps(*options.moi_dispatch_id_vgpr, 2u, *options.scratch_vgpr, scratch_count)) {
+    errors.emplace_back("ConSan MOI scratch VGPRs overlap the dispatch-ID VGPR pair");
+    return std::nullopt;
+  }
 
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
       candidate_access_ranges(bytes, candidate, arch);
@@ -2659,6 +2638,11 @@
   words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u));
   if (private_dispatch_id_offset) {
+    if (!options.moi_dispatch_id_sgpr) {
+      errors.emplace_back(
+          "ConSan MOI private dispatch reload requires a transient scalar destination");
+      return std::nullopt;
+    }
     const auto load_low =
         instrumentation::build_private_load_b32(address_lo_vgpr, *private_dispatch_id_offset, arch);
     const auto load_high = instrumentation::build_private_load_b32(
@@ -2780,18 +2764,24 @@
     return std::nullopt;
   }
   if (generation_tagged_local_shadow) {
-    if (!options.moi_dispatch_id_sgpr) {
+    if (!moi_has_runtime_hardware_dispatch_id(options)) {
       errors.emplace_back("ConSan MOI generation-tagged local shadow requires dispatch identity");
       return std::nullopt;
     }
     // Workgroup coordinates alone repeat across dispatches. Fold the native
     // dispatch identity into the bounded generation and reserve zero for an
     // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
+    const uint16_t dispatch_low_source = options.moi_dispatch_id_sgpr
+                                             ? *options.moi_dispatch_id_sgpr
+                                             : vector_source_vgpr(*options.moi_dispatch_id_vgpr);
+    const uint16_t dispatch_high_source =
+        options.moi_dispatch_id_sgpr
+            ? static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u)
+            : vector_source_vgpr(static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + 1u));
     const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
-        workgroup_key_vgpr, *options.moi_dispatch_id_sgpr, workgroup_key_vgpr, arch);
+        workgroup_key_vgpr, dispatch_low_source, workgroup_key_vgpr, arch);
     const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
-        workgroup_key_vgpr, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u),
-        workgroup_key_vgpr, arch);
+        workgroup_key_vgpr, dispatch_high_source, workgroup_key_vgpr, arch);
     const auto bound_generation = instrumentation::build_v_and_b32_literal(
         workgroup_key_vgpr, consan_moi_exact_shadow::max_generation - 1u, workgroup_key_vgpr, arch);
     const auto make_nonzero_generation = instrumentation::build_v_add_u32(
@@ -3084,18 +3074,11 @@
         }
       }
       std::vector<uint32_t> copy_dispatch_id;
-      if (options.moi_dispatch_id_sgpr) {
-        copy_dispatch_id.push_back(
-            build_v_mov_b32_e32(tmp_vgpr, *options.moi_dispatch_id_sgpr, arch));
-      } else {
-        const auto literal = instrumentation::build_v_mov_b32_literal(
-            tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
-        if (!literal) {
-          errors.emplace_back(
-              "ConSan MOI inline-shadow probe could not encode literal dispatch ID");
-          return std::nullopt;
-        }
-        copy_dispatch_id = *literal;
+      if (!append_moi_report_dispatch_id_word(copy_dispatch_id, options, tmp_vgpr,
+                                              /*high_word=*/false, arch,
+                                              ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+        errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
+        return std::nullopt;
       }
       const auto mix_workgroup_key = instrumentation::build_v_xor_b32(
           tmp_vgpr, vector_source_vgpr(dispatch_bank_key_vgpr), tmp_vgpr, arch);
@@ -3193,8 +3176,9 @@
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish with "
             "EXEC base s" +
             std::to_string(*options.moi_exec_save_sgpr) + " and dispatch base " +
-            (options.moi_dispatch_id_sgpr ? "s" + std::to_string(*options.moi_dispatch_id_sgpr)
-                                          : std::string("literal")));
+            (options.moi_dispatch_id_sgpr   ? "s" + std::to_string(*options.moi_dispatch_id_sgpr)
+             : options.moi_dispatch_id_vgpr ? "v" + std::to_string(*options.moi_dispatch_id_vgpr)
+                                            : std::string("literal")));
         return std::nullopt;
       }
       if (loop_external_cells) {

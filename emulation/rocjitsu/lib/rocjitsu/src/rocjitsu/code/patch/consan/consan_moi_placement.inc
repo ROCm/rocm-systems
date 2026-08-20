@@ -1414,13 +1414,17 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanOptions &options,
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
-  if (options.moi_persistent_vgpr_assignments.empty())
-    return options.moi_owner_vgpr.has_value();
+  if (options.moi_persistent_vgpr_assignments.empty()) {
+    return options.moi_owner_vgpr.has_value() || moi_uses_scalar_persistent_state(options) ||
+           options.automatic_moi_private_epoch;
+  }
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
+  size_t assigned_owner_count = 0u;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
     const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
     if (!assignment)
       continue;
+    ++assigned_owner_count;
     if (selected &&
         (selected->owner_vgpr != assignment->owner_vgpr ||
          selected->epoch_vgpr != assignment->epoch_vgpr ||
@@ -1431,8 +1435,23 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
     }
     selected = assignment;
   }
-  if (!selected)
+  if (!selected) {
+    if (!options.automatic_moi_private_epoch)
+      return false;
+    options.moi_owner_vgpr.reset();
+    options.moi_epoch_vgpr.reset();
+    options.moi_workgroup_key_vgpr.reset();
+    options.moi_record_replay_workgroup_vgprs = {};
+    options.moi_dispatch_id_vgpr.reset();
+    return true;
+  }
+  // One physical site cannot consume two different persistent
+  // representations. Components are constructed from shared ownership, so a
+  // partial match indicates stale or incomplete placement metadata.
+  if (assigned_owner_count != owner_descriptor_offsets.size())
     return false;
+  options.automatic_moi_private_epoch = false;
+  options.automatic_moi_private_dispatch_id = false;
   options.moi_owner_vgpr = selected->owner_vgpr;
   options.moi_epoch_vgpr = selected->epoch_vgpr;
   options.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
@@ -1984,11 +2003,35 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
   return result;
 }
 
+[[nodiscard]] bool moi_resource_plan_can_be_recovered_by_persistent_placement(
+    const ConSanCandidateResourcePlan &plan, const ConSanOptions &options, rj_code_arch_t arch) {
+  if (plan.source != ConSanRegisterAllocationSource::Unsupported)
+    return false;
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+      (options.moi_engine != ConSanMoiEngine::InlineShadow &&
+       options.moi_engine != ConSanMoiEngine::Sampled)) {
+    return false;
+  }
+  // Persistent placement and resource planning form a fixed point for the
+  // CDNA3/4 Inline and Sampled ABIs. A smaller owner-local persistent tuple
+  // can recover an automatic plan that initially had no legal window, while
+  // a component-local transient assignment can recover an automatic window
+  // rejected against the provisional code-object-wide scalar state. Explicit
+  // scratch conflicts and structural failures cannot be repaired here and
+  // must not make an unrelated owner appear admitted.
+  return !plan.owner_descriptor_file_offsets.empty() &&
+         (plan.reason == ConSanRegisterPlanReason::NoLegalWindow ||
+          (plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap && !options.scratch_vgpr));
+}
+
 [[nodiscard]] std::vector<uint64_t> moi_scalar_owner_descriptors(const ConSanResult &result) {
   std::vector<uint64_t> owners;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-      continue;
+    // Scalar persistent state is code-object-wide and must be proven against
+    // every semantically admitted owner, including a site whose provisional
+    // resource plan failed. Persistent placement can change that site's ABI
+    // and recover it on the subsequent resource-plan rebuild; omitting it here
+    // would instead select SGPRs that clobber the very owner being recovered.
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
       if (std::ranges::find(owners, descriptor_offset) == owners.end())
         owners.push_back(descriptor_offset);
@@ -2882,25 +2925,45 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
   for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
        ++candidate_index) {
     const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
-    const uint16_t scratch_count = moi_access_scratch_vgpr_count(options, candidate, state.arch);
+    ConSanOptions site_options = options;
+    uint16_t scratch_count = moi_access_scratch_vgpr_count(site_options, candidate, state.arch);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
-        state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
+        state, site_options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
         candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
+    // Persistent placement can deliberately mix private state with
+    // component-local VGPR tuples. The first plan discovers the physical
+    // site's complete owner set; size and place its final scratch window for
+    // that owner's actual ABI, rather than the code-object-wide fallback.
+    ConSanOptions owner_options = site_options;
+    if (apply_moi_persistent_vgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
+      const uint16_t owner_scratch_count =
+          moi_access_scratch_vgpr_count(owner_options, candidate, state.arch);
+      if (owner_scratch_count != scratch_count) {
+        scratch_count = owner_scratch_count;
+        plan = plan_moi_resource_site(state, owner_options, ConSanResourceSiteKind::Access,
+                                      candidate_index, candidate.text_offset,
+                                      candidate.kernel_descriptor_file_offset, scratch_count,
+                                      &candidate);
+      }
+      site_options = std::move(owner_options);
+    }
     bool initial_sampled_spill_overlaps_guest = false;
     if (plan.source == ConSanRegisterAllocationSource::SpillRequired && plan.scratch_vgpr) {
       std::vector<std::string> ignored_overlap_errors;
       initial_sampled_spill_overlaps_guest = reject_candidate_scratch_range_overlap(
           candidate, *plan.scratch_vgpr, plan.scratch_vgpr_count, ignored_overlap_errors);
     }
-    if (sampled_access_supports_spill_backed_operand_recovery(options, candidate, state.arch) &&
+    if (sampled_access_supports_spill_backed_operand_recovery(site_options, candidate,
+                                                              state.arch) &&
         ((plan.source == ConSanRegisterAllocationSource::Unsupported &&
           plan.reason == ConSanRegisterPlanReason::NoLegalWindow) ||
          initial_sampled_spill_overlaps_guest)) {
       const uint16_t spill_scratch_count =
-          sampled_spill_backed_scratch_count(options, candidate, state.arch);
+          sampled_spill_backed_scratch_count(site_options, candidate, state.arch);
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
-          candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
+          state, site_options, ConSanResourceSiteKind::Access, candidate_index,
+          candidate.text_offset, candidate.kernel_descriptor_file_offset, spill_scratch_count,
+          &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
       const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
       const ConSanResourcePlanAlternative alternative{
@@ -2941,7 +3004,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
         plan = std::move(spill_plan);
       plan.alternatives = std::move(alternatives);
     }
-    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+    if (site_options.moi_engine == ConSanMoiEngine::InlineShadow &&
         (state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
         candidate.source == ConSanMoiCandidateSource::NativeLds &&
         moi_load_clobbers_address(candidate) &&
@@ -2950,10 +3013,11 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
          (plan.source == ConSanRegisterAllocationSource::Unsupported &&
           plan.reason == ConSanRegisterPlanReason::NoLegalWindow))) {
       const uint16_t spill_scratch_count =
-          inline_shadow_spill_backed_scratch_count(options, candidate, state.arch);
+          inline_shadow_spill_backed_scratch_count(site_options, candidate, state.arch);
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
-          candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
+          state, site_options, ConSanResourceSiteKind::Access, candidate_index,
+          candidate.text_offset, candidate.kernel_descriptor_file_offset, spill_scratch_count,
+          &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
       // The reduced window omits the dedicated address snapshot because the
       // original address is expected to be authoritative in that window's
@@ -3588,12 +3652,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     parent.try_emplace(descriptor_offset, descriptor_offset);
   };
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    const bool irrecoverably_unsupported_cdna =
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        plan.source == ConSanRegisterAllocationSource::Unsupported &&
-        plan.reason != ConSanRegisterPlanReason::ForbiddenOverlap;
-    if (irrecoverably_unsupported_cdna)
-      continue;
+    // This pass also precedes persistent-state placement. A provisional
+    // NoLegalWindow plan is not irrecoverable: owner-local persistent VGPRs
+    // can shrink the site's final ABI, after which it still needs a transient
+    // EXEC/dispatch assignment proven against this exact owner component.
+    // Plans without a resolved owner naturally contribute nothing here.
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets)
       ensure_owner(descriptor_offset);
   }
@@ -3610,11 +3673,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     return root;
   };
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    const bool irrecoverably_unsupported_cdna =
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-        plan.source == ConSanRegisterAllocationSource::Unsupported &&
-        plan.reason != ConSanRegisterPlanReason::ForbiddenOverlap;
-    if (irrecoverably_unsupported_cdna || plan.owner_descriptor_file_offsets.empty())
+    if (plan.owner_descriptor_file_offsets.empty())
       continue;
     const uint64_t first = plan.owner_descriptor_file_offsets.front();
     for (uint64_t owner : plan.owner_descriptor_file_offsets) {
@@ -4167,6 +4226,23 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   }
   if (!assigned_any)
     return false;
+  // A code-object-wide dispatch pair may be legal for one disconnected owner
+  // and overlap another owner's guest scalar state. Preserve that partial
+  // result: fixed-stack owners without the pair can capture it in their
+  // private entry state, while dynamic-stack owners receive an owner-local
+  // persistent VGPR pair during the later persistent-state placement pass.
+  // The marker is intentionally set only after component assignment has
+  // proved which owners cannot use the global pair.
+  if (options.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_dispatch_id_sgpr &&
+      std::ranges::any_of(options.moi_transient_sgpr_assignments,
+                          [](const ConSanMoiTransientSgprAssignment &assignment) {
+                            return !assignment.dispatch_id_sgpr;
+                          })) {
+    options.automatic_moi_private_dispatch_id = true;
+    result.warnings.emplace_back(
+        "ConSan MOI deferred incompatible owner-local dispatch identity to private or "
+        "persistent VGPR state");
+  }
   result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
   result.warnings.emplace_back(
       "ConSan MOI assigned owner-local transient SGPR windows to independent owner components");
@@ -4194,10 +4270,14 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     result.warnings.push_back(std::move(warning));
     return false;
   }
-  const bool include_unsupported =
-      arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4;
+  // A provisional CDNA resource failure may disappear after owner-local
+  // persistent placement shrinks the probe ABI. Prove a global transient
+  // window against those resolved owners too; otherwise a window selected
+  // from the successful subset is later (correctly) rejected for the newly
+  // recovered sites. The partial-owner path below remains the fallback when
+  // no one code-object-wide window exists.
   const MoiScalarOwnerContextResolution scalar_contexts =
-      collect_moi_scalar_owner_contexts(plan_contexts.groups, include_unsupported);
+      collect_moi_scalar_owner_contexts(plan_contexts.groups, true);
   if (scalar_contexts.contexts.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI could not derive automatic EXEC-save SGPRs without an owned candidate "
@@ -5353,7 +5433,15 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       return kernel.uses_dynamic_stack.value_or(false) &&
              std::ranges::any_of(
                  result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-                   return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                   // Resource planning precedes persistent-state placement.
+                   // A full-pressure site can therefore be provisionally
+                   // unsupported only because the code-object-wide fallback
+                   // ABI is larger than its eventual owner-local ABI. Keep
+                   // every semantically admitted, resolved owner in this
+                   // query so placement can recover that site on the rebuild.
+                   return (plan.source != ConSanRegisterAllocationSource::Unsupported ||
+                           moi_resource_plan_can_be_recovered_by_persistent_placement(plan, options,
+                                                                                      arch)) &&
                           std::ranges::find(plan.owner_descriptor_file_offsets,
                                             kernel.descriptor_file_offset) !=
                               plan.owner_descriptor_file_offsets.end();
@@ -5768,8 +5856,12 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
 
     std::vector<std::vector<uint64_t>> components;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-        continue;
+      // Persistent placement and resource planning form a fixed point. A
+      // resource-failed plan still contributes its resolved ownership: the
+      // component-local tuple selected here may reduce its scratch ABI enough
+      // for the subsequent resource-plan rebuild to admit it. Dropping such a
+      // plan makes that recovery impossible and can silently omit every site
+      // owned by a full-pressure kernel.
       for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
         if (std::ranges::none_of(components, [&](const auto &component) {
               return std::ranges::find(component, descriptor_offset) != component.end();
@@ -5869,12 +5961,38 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       return false;
     };
 
+    bool assigned_private_component = false;
     for (const std::vector<uint64_t> &component : components) {
       uint32_t component_base = 0u;
       uint32_t component_limit = kMaxVgprs;
+      uint32_t component_encoded_limit = kMaxVgprs;
+      bool resolved_every_component_context = true;
+      ConSanOptions component_options = options;
+      const bool component_transient_state_resolved =
+          options.moi_transient_sgpr_assignments.empty() ||
+          apply_moi_transient_sgpr_assignment(component_options, component);
+      const bool component_needs_persistent_dispatch_vgprs =
+          needs_persistent_dispatch_vgprs && component_transient_state_resolved &&
+          !moi_has_runtime_hardware_dispatch_id(component_options);
+      for (uint64_t descriptor_offset : component) {
+        const auto found = planning_state.context_by_descriptor.find(descriptor_offset);
+        if (found == planning_state.context_by_descriptor.end() || found->second == nullptr) {
+          resolved_every_component_context = false;
+          continue;
+        }
+        const MoiKernelResourceContext &context = *found->second;
+        component_encoded_limit =
+            std::min<uint32_t>(component_encoded_limit, context.ordinary_vgpr_limit);
+        // A component-local tuple may extend beyond the encoded ordinary
+        // boundary only when metadata proves that owner has no allocated
+        // accumulator bank. Resource replanning then grows the unified VGPR
+        // allocation and moves the empty boundary together. A real AccVGPR
+        // bank remains a hard limit for every owner that shares this tuple.
+        if (!context.can_move_empty_cdna_accvgpr_boundary)
+          component_limit = std::min<uint32_t>(component_limit, context.ordinary_vgpr_limit);
+      }
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-        if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
-            std::ranges::none_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
+        if (std::ranges::none_of(plan.owner_descriptor_file_offsets, [&](uint64_t offset) {
               return std::ranges::find(component, offset) != component.end();
             })) {
           continue;
@@ -5884,7 +6002,23 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                 ? std::min<uint32_t>(plan.current_vgpr_count, plan.ordinary_vgpr_limit)
                 : plan.max_referenced_vgpr_count;
         component_base = std::max(component_base, safe_base);
-        component_limit = std::min<uint32_t>(component_limit, plan.ordinary_vgpr_limit);
+        component_encoded_limit =
+            std::min<uint32_t>(component_encoded_limit, plan.ordinary_vgpr_limit);
+        if (!resolved_every_component_context)
+          component_limit = std::min<uint32_t>(component_limit, plan.ordinary_vgpr_limit);
+      }
+      const bool crosses_encoded_component_boundary =
+          component_base + persistent_count > component_encoded_limit;
+      // Scalar state avoids descriptor growth even when trusted metadata says
+      // an empty accumulator boundary can move. Prefer that smaller, more
+      // conservative representation when it is legal across the complete
+      // owner union; component-local VGPR growth remains the fallback when a
+      // different owner makes the global scalar tail unavailable.
+      if (crosses_encoded_component_boundary &&
+          (options.moi_engine == ConSanMoiEngine::InlineShadow ||
+           options.moi_engine == ConSanMoiEngine::Sampled) &&
+          !options.force_private_epoch && try_assign_scalar_persistent_state()) {
+        return true;
       }
       if (component_base + persistent_count > component_limit) {
         const bool has_dynamic_stack_owner =
@@ -5893,7 +6027,8 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                                                     &ConSanKernelInfo::descriptor_file_offset);
               return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
             });
-        if ((options.moi_engine == ConSanMoiEngine::InlineShadow ||
+        if (!crosses_encoded_component_boundary &&
+            (options.moi_engine == ConSanMoiEngine::InlineShadow ||
              options.moi_engine == ConSanMoiEngine::Sampled) &&
             !options.force_private_epoch && try_assign_scalar_persistent_state()) {
           return true;
@@ -5904,20 +6039,28 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           result.outcome = ConSanTransformOutcome::Unsupported;
           result.warnings.emplace_back(
               "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
-              ") for a dynamic-stack CDNA owner with a full ordinary VGPR bank");
+              ") for a dynamic-stack CDNA owner with a full ordinary VGPR bank: component " +
+              std::to_string(component_base) + ":" +
+              std::to_string(component_base + persistent_count) + " exceeds limit " +
+              std::to_string(component_limit));
           return false;
         }
-        if (options.moi_engine == ConSanMoiEngine::InlineShadow && !has_dynamic_stack_owner) {
-          options.moi_persistent_vgpr_assignments.clear();
+        const bool supports_private_component =
+            !has_dynamic_stack_owner &&
+            (options.moi_engine == ConSanMoiEngine::InlineShadow ||
+             (options.moi_engine == ConSanMoiEngine::Sampled &&
+              options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId));
+        if (supports_private_component) {
           options.moi_init_owner_epoch = true;
           options.automatic_moi_private_epoch = true;
           result.moi_private_epoch_automatic = true;
+          assigned_private_component = true;
           result.warnings.emplace_back(
-              "ConSan MOI selected entry-snapshotted private owner/epoch state below a full "
-              "CDNA ordinary VGPR bank after scalar placement " +
+              "ConSan MOI selected component-local entry-snapshotted private owner/epoch state "
+              "below a full CDNA ordinary VGPR bank after scalar placement " +
               (scalar_persistence_failure.empty() ? std::string("was not requested")
                                                   : scalar_persistence_failure));
-          return true;
+          continue;
         }
         result.outcome = ConSanTransformOutcome::Unsupported;
         if (options.moi_engine == ConSanMoiEngine::Sampled && !scalar_persistence_failure.empty()) {
@@ -5954,7 +6097,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                                           : std::nullopt,
           };
         }
-        if (needs_persistent_dispatch_vgprs) {
+        if (component_needs_persistent_dispatch_vgprs) {
           assignment.dispatch_id_vgpr = next;
           next = static_cast<uint16_t>(next + 2u);
         }
@@ -5962,16 +6105,24 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       }
     }
     options.moi_init_owner_epoch = true;
-    options.automatic_moi_persistent_vgprs = true;
-    if (needs_persistent_dispatch_vgprs) {
-      options.automatic_moi_private_dispatch_id = false;
+    options.automatic_moi_persistent_vgprs = !options.moi_persistent_vgpr_assignments.empty();
+    if (needs_persistent_dispatch_vgprs && options.automatic_moi_persistent_vgprs) {
+      if (!assigned_private_component)
+        options.automatic_moi_private_dispatch_id = false;
       options.automatic_moi_dispatch_id_vgprs = true;
       result.moi_dispatch_id_vgprs_automatic = true;
     }
     result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
-    result.moi_persistent_vgprs_automatic = true;
+    result.moi_persistent_vgprs_automatic = options.automatic_moi_persistent_vgprs;
     result.warnings.emplace_back(
-        "ConSan MOI assigned per-owner persistent VGPR tuples below CDNA AccVGPR boundaries");
+        assigned_private_component && options.automatic_moi_persistent_vgprs
+            ? "ConSan MOI assigned component-local private and persistent VGPR state below CDNA "
+              "AccVGPR boundaries"
+        : assigned_private_component
+            ? "ConSan MOI assigned component-local private state below CDNA AccVGPR "
+              "boundaries"
+            : "ConSan MOI assigned per-owner persistent VGPR tuples below CDNA AccVGPR "
+              "boundaries");
     return true;
   }
   const bool would_grow_descriptor =
