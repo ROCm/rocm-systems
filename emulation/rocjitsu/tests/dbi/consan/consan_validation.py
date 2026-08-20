@@ -889,6 +889,11 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
+        # The two-mode process performs independent model setup plus decode and
+        # combined inference. The gfx1250 simulator's accepted clean row takes
+        # roughly 77 seconds, so retain the same bounded 180-second contract
+        # for clean, overhead, inventory, and fault automation.
+        run_timeout_seconds=180,
     ),
     Workload(
         id="tp2-family",

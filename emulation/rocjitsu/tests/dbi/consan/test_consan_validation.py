@@ -4766,6 +4766,7 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/workspace"), "gfx1201", workload, "clean", Path("/unused")
         )
         self.assertEqual(command[command.index("--mode") + 1], "decode-combined")
+        self.assertEqual(workload.run_timeout_seconds, 180)
 
     def test_gfx1250_d128_fault_uses_fast_oracle_variant(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
