@@ -274,16 +274,10 @@
     const uint16_t token_hash = static_cast<uint16_t>(base + 14u);
     const uint16_t source_address = static_cast<uint16_t>(base + 21u);
     const uint16_t prior_owner = static_cast<uint16_t>(base + 23u);
-    const uint16_t consumer_owner = options.moi_owner_vgpr
-                                        ? *options.moi_owner_vgpr
-                                        : consan_detail::inline_shadow_loop_counter_vgpr(
-                                              base, /*has_exec_save=*/true, /*track_atomics=*/true);
-    if (!options.moi_owner_vgpr) {
-      if (!options.moi_persistent_owner_sgpr)
-        return false;
-      words.push_back(
-          build_v_mov_b32_e32(consumer_owner, *options.moi_persistent_owner_sgpr, arch));
-    }
+    // The packed access value is authoritative here: it was built from the
+    // candidate's persistent owner source immediately before publication.
+    // Extracting that value below also supports owner-private state without
+    // requiring a second persistent VGPR or SGPR solely for diagnostics.
     if (!append_extract_exact_shadow_field(words, current_field_vgpr, current_value_vgpr,
                                            consan_moi_exact_shadow::owner_shift,
                                            consan_moi_exact_shadow::max_owner, arch) ||
@@ -981,7 +975,18 @@
 [[nodiscard]] bool append_versioned_exact_shadow_transaction(
     std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
-    uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention) {
+    uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention,
+    std::vector<std::string> &errors) {
+  struct FailureStage {
+    std::vector<std::string> &errors;
+    std::string_view stage = "preflight";
+    bool succeeded = false;
+    ~FailureStage() {
+      if (!succeeded)
+        errors.emplace_back("ConSan MOI versioned exact-shadow transaction failed during " +
+                            std::string(stage));
+    }
+  } failure{errors};
   const bool literal_dispatch_id =
       consan_arch_uses_literal_dispatch_identity(arch) && !options.moi_dispatch_id_sgpr;
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr ||
@@ -1039,6 +1044,7 @@
                                         vector_source_vgpr(saved_address_hi_vgpr), arch));
   };
 
+  failure.stage = "slot snapshot";
   constexpr uint32_t kContentionRetryLimit = 2048u;
   if (retry_contention) {
     constexpr uint16_t kScalarLiteralSource = 255u;
@@ -1078,6 +1084,7 @@
   // A changed read, odd predecessor, or terminal version is unusable. Keep
   // narrowing instead of branching so a mixed wave can still publish valid
   // independent slots.
+  failure.stage = "payload validation";
   const auto same_version = instrumentation::build_v_cmp_eq_u32_vcc(
       vector_source_vgpr(ready_version_vgpr), cas_expected_vgpr, arch);
   const auto parity =
@@ -1261,6 +1268,7 @@
   words.push_back(*union_ready_dispatch);
   words.push_back(*union_valid);
 
+  failure.stage = "reservation";
   const auto claim_new = instrumentation::build_v_add_u32(
       cas_new_vgpr, scalar_positive_inline_u32(1), ready_version_vgpr, arch);
   const uint32_t claim_expected =
@@ -1288,6 +1296,7 @@
   if (!narrow_vcc())
     return false;
   if (retry_contention) {
+    failure.stage = "contention retry";
     const auto save_claimed =
         instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
     const auto select_failed = instrumentation::build_s_andn2_b64(kRdna4ExecLo, publisher_exec_sgpr,
@@ -1349,6 +1358,7 @@
   // registers are still live. The resulting scalar mask survives publication;
   // the vector dispatch pair can then retain exact-byte provenance for the
   // diagnostic path without growing the scratch window.
+  failure.stage = "dispatch qualification";
   const auto save_claimed_publishers =
       instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
   if (!save_claimed_publishers)
@@ -1406,6 +1416,7 @@
       build_v_mov_b32_e32(prior_dispatch_high_vgpr, vector_source_vgpr(current_low_vgpr), arch));
   restore_slot_address();
 
+  failure.stage = "publication";
   if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, packed_access),
                                        saved_current_low_vgpr, arch) ||
@@ -1450,6 +1461,7 @@
     return false;
   words.push_back(*store_drain);
 
+  failure.stage = "commit";
   const auto commit_new = instrumentation::build_v_add_u32(
       cas_new_vgpr, scalar_positive_inline_u32(2), ready_version_vgpr, arch);
   const auto commit_expected = instrumentation::build_v_add_u32(
@@ -1485,6 +1497,7 @@
 
   // Count successful publications before excluding cross-dispatch priors from
   // diagnosis. The event counter therefore remains a successful-commit count.
+  failure.stage = "accounting";
   if (!append_atomic_fetch_add_one_u32(words,
                                        *options.moi_report_buffer_address +
                                            offsetof(ConSanMoiReportHeader, event_counter),
@@ -1521,6 +1534,7 @@
   if (!select_same_dispatch)
     return false;
   words.push_back(*select_same_dispatch);
+  failure.succeeded = true;
   return true;
 }
 
@@ -1745,6 +1759,16 @@
     uint32_t shadow_granule_bytes, uint32_t relative_cell_index,
     std::optional<uint16_t> relative_cell_index_vgpr, const VgprSpillSequence *spill,
     std::optional<uint16_t> spill_backed_lds_byte_offset_source, std::vector<std::string> &errors) {
+  struct FailureStage {
+    std::vector<std::string> &errors;
+    std::string_view stage = "preflight";
+    bool succeeded = false;
+    ~FailureStage() {
+      if (!succeeded)
+        errors.emplace_back("ConSan MOI wave-coalesced exact-shadow swap failed during " +
+                            std::string(stage));
+    }
+  } failure{errors};
   if (!options.moi_exec_save_sgpr)
     return false;
 
@@ -1763,6 +1787,7 @@
   const uint16_t saved_current_low_vgpr = static_cast<uint16_t>(old_value_vgpr + 4u);
   const uint16_t saved_current_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 5u);
 
+  failure.stage = "partition setup";
   const auto save_incoming_exec =
       instrumentation::build_s_mov_b64(incoming_exec_sgpr, kRdna4ExecLo, arch);
   const auto initialize_pending =
@@ -1873,6 +1898,7 @@
   words.push_back(*high_mask_equal);
   const size_t high_value_fallback_branch = words.size();
   words.push_back(0);
+  failure.stage = "common provenance";
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
           relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
@@ -1927,10 +1953,11 @@
   if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
     return false;
   }
+  failure.stage = "common transaction";
   if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
                                                  current_low_vgpr, old_value_vgpr,
                                                  publisher_exec_sgpr, committed_exec_sgpr,
-                                                 /*retry_contention=*/true)) {
+                                                 /*retry_contention=*/true, errors)) {
     return false;
   }
   // A uniform representative stands for the complete metadata-identical
@@ -1941,6 +1968,7 @@
 
   const size_t fallback = words.size();
   words.push_back(*restore_group_exec);
+  failure.stage = "fallback provenance";
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
           relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
@@ -1971,10 +1999,11 @@
   if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
     return false;
   }
+  failure.stage = "fallback transaction";
   if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
                                                  current_low_vgpr, old_value_vgpr,
                                                  publisher_exec_sgpr, committed_exec_sgpr,
-                                                 /*retry_contention=*/true)) {
+                                                 /*retry_contention=*/true, errors)) {
     return false;
   }
   // Nonuniform metadata cannot be attributed to the whole group. EXEC now
@@ -2008,8 +2037,11 @@
   // The partition operations changed VCC/SCC. Restore the incoming values so
   // the existing diagnostic helper can snapshot and restore the true program
   // state while evaluating every lane in this address group.
-  if (!append_restore_moi_special_state(words, options, arch) ||
-      !append_inline_shadow_diagnostic_words(
+  failure.stage = "pre-diagnostic state restoration";
+  if (!append_restore_moi_special_state(words, options, arch))
+    return false;
+  failure.stage = "diagnostic encoding";
+  if (!append_inline_shadow_diagnostic_words(
           words, candidate, options, arch, layout, old_value_vgpr,
           static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
           lds_byte_offset_vgpr, static_byte_offset, byte_count, shadow_granule_bytes,
@@ -2043,6 +2075,7 @@
   // The selected group is a subset of pending EXEC, so XOR removes exactly
   // that group. Keep this independent of the gfx12 AND-NOT operand convention;
   // live qualification is the authority for this generated control flow.
+  failure.stage = "loop completion";
   const auto remove_group =
       instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr, group_exec_sgpr, arch);
   const auto select_remaining =
@@ -2100,6 +2133,7 @@
   words[high_mask_fallback_branch] = *high_mask_branch;
   words[common_branch] = build_s_branch(*diagnostic_delta, arch);
   words[loop_branch] = *continue_loop;
+  failure.succeeded = true;
   return true;
 }
 
@@ -2591,11 +2625,11 @@
     // sharing keeps the minimum native CDNA access window at 16 VGPRs.
     saved_lds_byte_offset_vgpr = cas_expected_vgpr;
   } else if (moi_load_clobbers_address(candidate)) {
-    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
-        consan_detail::inline_shadow_loop_counter_vgpr(
-            *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-            options.moi_track_atomics, inline_shadow_reserves_scalar_consumer_owner(options)) +
-        inline_shadow_loop_scratch_count(options, candidate));
+    saved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
+                                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+                                  options.moi_track_atomics) +
+                              inline_shadow_loop_scratch_count(options, candidate));
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -2900,7 +2934,7 @@
             continue;
           const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
               *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-              options.moi_track_atomics, inline_shadow_reserves_scalar_consumer_owner(options));
+              options.moi_track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
           if (static_cast<uint32_t>(loop_offset_vgpr) >=
               static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count) {
@@ -2998,8 +3032,7 @@
       }
       const bool loop_external_cells = use_cell_loop;
       const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-          *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics,
-          inline_shadow_reserves_scalar_consumer_owner(options));
+          *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics);
       const uint16_t saved_workgroup_key_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
       if (loop_external_cells) {
         if (static_cast<uint32_t>(saved_workgroup_key_vgpr) >=
@@ -3157,7 +3190,11 @@
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(
-            "ConSan MOI inline-shadow probe could not encode versioned shadow publish");
+            "ConSan MOI inline-shadow probe could not encode versioned shadow publish with "
+            "EXEC base s" +
+            std::to_string(*options.moi_exec_save_sgpr) + " and dispatch base " +
+            (options.moi_dispatch_id_sgpr ? "s" + std::to_string(*options.moi_dispatch_id_sgpr)
+                                          : std::string("literal")));
         return std::nullopt;
       }
       if (loop_external_cells) {

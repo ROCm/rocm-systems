@@ -377,16 +377,23 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     if (!publish_visible_evidence)
       return true;
     const uint16_t scratch = *visible_evidence_scratch_vgpr;
+    // CDNA global atomics require the address tuple to start at an even
+    // VGPR. Keep the three-register barrier layout target-neutral by rotating
+    // its rank/result into the tail instead of forming an odd v+1:v+2 pair.
+    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const uint16_t rank_vgpr = static_cast<uint16_t>(scratch + (cdna ? 2u : 0u));
+    const uint16_t address_vgpr = static_cast<uint16_t>(scratch + (cdna ? 0u : 1u));
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u);
     const auto save_active_exec =
         instrumentation::build_s_mov_b64(active_exec_sgpr, kRdna4ExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-        scratch, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
+        rank_vgpr, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
     const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-        scratch, static_cast<uint16_t>(active_exec_sgpr + 1u), vector_source_vgpr(scratch), arch);
+        rank_vgpr, static_cast<uint16_t>(active_exec_sgpr + 1u), vector_source_vgpr(rank_vgpr),
+        arch);
     const auto first_active =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), scratch, arch);
+        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), rank_vgpr, arch);
     const auto narrow_first =
         instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
     const auto restore_exec =
@@ -404,7 +411,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     if (!append_publish_visible_evidence_if_zero(
             words,
             *options.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
-            scratch, static_cast<uint16_t>(scratch + 1u), temporary_exec_sgpr, arch))
+            rank_vgpr, address_vgpr, temporary_exec_sgpr, arch))
       return false;
     words.push_back(*restore_exec);
     return true;
@@ -1235,8 +1242,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!island_offset) {
         const bool has_spill_backed_inline_router =
             candidate_options.automatic_moi_inline_sgpr_spill &&
-            moi_indirect_jump_sgprs(candidate_options) &&
-            candidate_options.moi_inline_visible_evidence_sgpr;
+            moi_inline_dense_router_scalar_abi(candidate_options, arch).has_value();
         const bool has_spill_backed_record_replay_router =
             candidate_options.automatic_moi_record_replay_sgpr_spill &&
             moi_indirect_jump_sgprs(candidate_options) &&
@@ -1246,9 +1252,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
             arch == ROCJITSU_CODE_ARCH_GFX1250 ||
-            (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+            ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+              arch == ROCJITSU_CODE_ARCH_RDNA4) &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
-              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay)) ||
+              (candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+               candidate_options.moi_record_replay_dense_barrier_router))) ||
             ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
               arch == ROCJITSU_CODE_ARCH_CDNA4) &&
              candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
@@ -1713,14 +1721,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const auto special_state = moi_special_state_sgprs(group_options);
       const auto indirect_state = moi_indirect_jump_sgprs(group_options);
+      const auto inline_dense_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
       const bool spill_backed_inline_router = group_options.automatic_moi_inline_sgpr_spill;
       const bool spill_backed_record_replay_router =
           group_options.automatic_moi_record_replay_sgpr_spill;
       const bool spill_backed_router =
           spill_backed_inline_router || spill_backed_record_replay_router;
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state ||
-          (spill_backed_inline_router && !group_options.moi_inline_visible_evidence_sgpr) ||
+          !indirect_state || (spill_backed_inline_router && !inline_dense_abi) ||
           (spill_backed_record_replay_router &&
            (!group_options.moi_record_replay_dispatch_key_sgpr ||
             !group_options.moi_record_replay_call_return_sgpr))) {
@@ -1735,7 +1743,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       uint16_t key_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
       uint16_t call_return_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
       if (spill_backed_inline_router) {
-        key_sgpr = *group_options.moi_inline_visible_evidence_sgpr;
+        key_sgpr = inline_dense_abi->dispatch_key_sgpr;
         call_return_sgpr = jump_pc_sgpr;
       } else if (spill_backed_record_replay_router) {
         key_sgpr = *group_options.moi_record_replay_dispatch_key_sgpr;

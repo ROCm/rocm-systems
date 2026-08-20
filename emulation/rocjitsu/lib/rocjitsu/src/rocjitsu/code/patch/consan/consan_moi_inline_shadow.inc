@@ -281,7 +281,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // unrelated code object. Retain the planning state's pristine CFG and
   // liveness facts so a relocated relay host cannot clobber transient state.
   const auto &dense_host_blocks = resource_state.blocks;
-  if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+       is_rdna4_family_arch(arch)) &&
+      use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
@@ -298,8 +300,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::vector<std::pair<std::pair<bool, std::string>, DenseGroup>> groups;
     for (const auto &[key, owner_candidates] : owner_groups) {
       for (const ConSanMoiCandidate *candidate : owner_candidates) {
+        // A full-pressure CDNA owner can have only one dead scalar beyond the
+        // indirect-PC pair.  Its dense route encodes both the route ordinal
+        // and the incoming SCC in that scalar, using one inline-constant bit
+        // for each.  Keep every such group within the 0..63 inline range.
+        const size_t max_group_size =
+            arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 31u : 64u;
         if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
+            (arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+             groups.back().second.candidates.size() == max_group_size) ||
             candidate->text_offset - groups.back().second.candidates.front()->text_offset >
                 kMaxCommonRelayAnchorSpan) {
           groups.push_back(
@@ -341,8 +350,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           local_entry_islands->has_reachable(group.candidates.front()->text_offset,
                                              kIndirectIslandWords);
       // gfx1250 also uses the shared call relay to compact nearby anchors.
-      // RDNA4 has no scalar call instruction, so use an explicit key plus
-      // branch only when the ordinary per-site relay is stranded.
+      // CDNA3/4 and RDNA4 use an explicit key plus branch only when the
+      // ordinary per-site relay is stranded.
       if (!explicit_anchors_fit || singleton_has_direct_island ||
           (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
         continue;
@@ -681,7 +690,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       // reload it into the access router's dead PC pair after the router has
       // entered its body.
       const bool persist_dispatch_id =
-          !candidate_options.moi_dispatch_id_sgpr && options.moi_dispatch_id_sgpr;
+          !candidate_options.moi_dispatch_id_sgpr &&
+          (options.moi_dispatch_id_sgpr || options.automatic_moi_private_dispatch_id);
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -839,6 +849,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         workgroup_shadow_compact_token, resources->count, spill ? &*spill : nullptr,
         candidate_errors, &guest_instruction_word_count);
     if (!words) {
+      for (std::string &error : candidate_errors) {
+        error += " for " + candidate.mnemonic + " at text offset " +
+                 std::to_string(candidate.text_offset) + " with scratch v" +
+                 std::to_string(resources->base) + ":v" +
+                 std::to_string(resources->base + resources->count - 1u);
+      }
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
       continue;
@@ -1272,14 +1288,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
       const bool explicit_dense_key = !scalar_abi->call_return_sgpr.has_value();
       const uint16_t key_sgpr = scalar_abi->dispatch_key_sgpr;
+      const bool key_encodes_scc =
+          explicit_dense_key && key_sgpr == scalar_abi->indirect_jump.scc_save_sgpr;
       const std::optional<uint16_t> call_return_sgpr = scalar_abi->call_return_sgpr;
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiIndirectJumpSgprs jump_sgprs = scalar_abi->indirect_jump;
 
       std::vector<uint32_t> island_words;
+      if (key_encodes_scc)
+        island_words.push_back(build_s_nop(0, arch));
       if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
                                                    jump_sgprs.pc_sgpr, jump_sgprs.scc_save_sgpr,
-                                                   /*capture_scc=*/true, arch) ||
+                                                   /*capture_scc=*/!key_encodes_scc, arch) ||
           island_words.empty()) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode its dense entry island");
@@ -1325,6 +1345,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
+      if (key_encodes_scc) {
+        // Bit zero retains the caller's SCC; the remaining inline-constant
+        // bits select the dense route.  Normalize the latter into the now
+        // disposable indirect-PC low register for the comparisons below.
+        dispatcher_words.push_back(
+            build_s_lshr_b32(jump_sgprs.pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
+      }
       if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, *call_return_sgpr, jump_sgprs.pc_sgpr, arch);
@@ -1350,8 +1377,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return;
           }
         } else {
-          const auto compare_entry =
-              instrumentation::build_s_cmp_eq_u32(key_sgpr, scalar_positive_inline_u32(0), arch);
+          const auto compare_entry = instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_sgprs.pc_sgpr : key_sgpr, scalar_positive_inline_u32(0), arch);
           if (!compare_entry) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode its dense entry-host comparison");
@@ -1360,11 +1387,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           dispatcher_words.push_back(*compare_entry);
         }
         std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const uint16_t bitcmp_opcode =
+              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
+          matched_words.push_back(
+              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
+        }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+        const uint64_t matched_branch_offset =
+            matched_offset + matched_words.size() * sizeof(uint32_t);
         const auto direct_entry =
             explicit_dense_key
-                ? compute_sopp_branch_simm16(matched_offset, entry_host->second.body_offset)
+                ? compute_sopp_branch_simm16(matched_branch_offset, entry_host->second.body_offset)
                 : std::nullopt;
         if (direct_entry) {
           matched_words.push_back(build_s_branch(*direct_entry, arch));
@@ -1375,6 +1410,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its dense entry-host target");
           return;
+        }
+        if (key_encodes_scc && !direct_entry) {
+          // The generic indirect helper ordinarily restores SCC from its
+          // dedicated save scalar.  Here that scalar contains a tagged key.
+          matched_words[matched_words.size() - 2u] = matched_words.front();
         }
         const auto skip =
             instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
@@ -1401,7 +1441,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           }
         } else {
           const auto compare = instrumentation::build_s_cmp_eq_u32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
+              key_encodes_scc ? jump_sgprs.pc_sgpr : key_sgpr,
+              scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
           if (!compare) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode its dense dispatch comparison");
@@ -1411,6 +1452,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
 
         std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const uint16_t bitcmp_opcode =
+              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
+          matched_words.push_back(
+              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
+        }
         if (!explicit_dense_key && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
           matched_words.push_back(build_s_add_u32(*call_return_sgpr, *call_return_sgpr,
@@ -1422,10 +1469,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+        const uint64_t matched_branch_offset =
+            matched_offset + matched_words.size() * sizeof(uint32_t);
         const auto direct_body =
-            explicit_dense_key
-                ? compute_sopp_branch_simm16(matched_offset, planned_patch->placement.body_offset)
-                : std::nullopt;
+            explicit_dense_key ? compute_sopp_branch_simm16(matched_branch_offset,
+                                                            planned_patch->placement.body_offset)
+                               : std::nullopt;
         if (direct_body) {
           matched_words.push_back(build_s_branch(*direct_body, arch));
         } else if (!append_moi_scc_preserving_indirect_jump(
@@ -1435,6 +1484,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode a dense dispatch target");
           return;
+        }
+        if (key_encodes_scc && !direct_body) {
+          matched_words[matched_words.size() - 2u] = matched_words.front();
         }
         if (matched_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
           result.errors.emplace_back(
@@ -1473,11 +1525,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       patches.push_back(std::move(dispatcher_info));
 
       if (entry_host != dense_entry_hosts.end()) {
-        const std::optional<uint32_t> host_entry =
-            explicit_dense_key ? std::optional<uint32_t>(
-                                     build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch))
-                               : instrumentation::build_s_call_i64(*call_return_sgpr,
-                                                                   /*next instruction=*/0, arch);
+        std::optional<uint32_t> host_entry;
+        if (key_encodes_scc) {
+          host_entry = instrumentation::build_s_cselect_b32(key_sgpr, scalar_positive_inline_u32(1),
+                                                            scalar_positive_inline_u32(0), arch);
+        } else if (explicit_dense_key) {
+          host_entry = build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch);
+        } else {
+          host_entry = instrumentation::build_s_call_i64(*call_return_sgpr,
+                                                         /*next instruction=*/0, arch);
+        }
         if (!host_entry || entry_host->second.host_offset > new_text.size() ||
             sizeof(uint32_t) > new_text.size() - entry_host->second.host_offset) {
           result.errors.emplace_back(
@@ -1512,8 +1569,22 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 "ConSan MOI inline-shadow probe could not encode an explicit dense branch key");
             return;
           }
-          anchor_words[0] = build_s_mov_b32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
+          if (key_encodes_scc) {
+            const uint16_t route_key = static_cast<uint16_t>(2u * (group_index + 1u));
+            const auto tagged_key = instrumentation::build_s_cselect_b32(
+                key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_key + 1u)),
+                scalar_positive_inline_u32(route_key), arch);
+            if (!tagged_key) {
+              result.errors.emplace_back(
+                  "ConSan MOI inline-shadow probe could not encode a tagged dense branch key");
+              return;
+            }
+            anchor_words[0] = *tagged_key;
+          } else {
+            anchor_words[0] = build_s_mov_b32(
+                key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)),
+                arch);
+          }
           anchor_words[1] = build_s_branch(*call_delta, arch);
         } else {
           anchor_words.front() = *call;

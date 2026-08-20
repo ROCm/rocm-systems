@@ -10,14 +10,13 @@ namespace {
 struct DeviceState {
   uint32_t synchronize;
   uint32_t wave_count;
-  uint32_t turn;
   uint32_t completion[2];
   uint32_t final_mask;
   uint32_t observed;
-  uint32_t control[128];
+  uint32_t control[256];
 };
 
-__global__ __launch_bounds__(128) void tree_atomic_or_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(256) void tree_atomic_or_for_consan(DeviceState *state) {
   __shared__ volatile uint32_t partials[4];
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid % warpSize;
@@ -27,32 +26,43 @@ __global__ __launch_bounds__(128) void tree_atomic_or_for_consan(DeviceState *st
   if (lane != 0)
     return;
 
-  volatile uint32_t *turn = &state->turn;
-  while (*turn != wave) {
-  }
   consan_device_test::store_lds_word(&partials[wave], 0x200u + 19u * wave);
 
-  if (wave + 1u != state->wave_count) {
+  // Waves 1, 2, and 3 deliberately race to publish distinct release edges
+  // through one direct-mapped atomic object. This is the small checked-in
+  // form of the concurrent producer pattern in Hip-MOI's Stream-K tree E2E
+  // workload. The final wave must not turn ordinary publication contention
+  // into ConSan overflow or lose any producer's causal edge.
+  if (wave != 0u) {
     (void)__hip_atomic_fetch_or(&state->completion[0], 1u << wave, __ATOMIC_RELEASE,
                                 __HIP_MEMORY_SCOPE_AGENT);
   } else {
+    const uint32_t producer_mask = ((1u << state->wave_count) - 1u) & ~1u;
+    while ((__hip_atomic_load(&state->completion[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) &
+            producer_mask) != producer_mask) {
+    }
     uint32_t *completion = &state->completion[state->synchronize ? 0u : 1u];
     state->final_mask =
         __hip_atomic_fetch_or(completion, 0u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
     uint32_t sum = 0u;
 #pragma clang loop unroll(disable)
-    for (uint32_t producer = 0; producer < state->wave_count; ++producer)
+    for (uint32_t rank = 0; rank < state->wave_count; ++rank) {
+      // Visit a different wave's cell first. Sampled tracks one dynamic cell
+      // at this static load site, so leading with the reader's own cell would
+      // hide the intentionally unordered pair in the incorrect workload.
+      const uint32_t producer = (rank + 1u) % state->wave_count;
       sum += consan_device_test::load_lds_word(&partials[producer]);
+    }
     state->observed = sum;
   }
-  *turn = wave + 1u;
 }
 
 void run_tree_atomic_or(bool synchronize) {
-  const uint32_t thread_count = 128u;
+  const uint32_t thread_count = 4u * consan_device_test::active_wave_size();
   const uint32_t wave_count = thread_count / consan_device_test::active_wave_size();
-  ASSERT_TRUE(wave_count == 2u || wave_count == 4u);
-  const uint32_t producer_mask = (1u << (wave_count - 1u)) - 1u;
+  ASSERT_EQ(wave_count, 4u);
+  ASSERT_LE(thread_count, 256u);
+  const uint32_t producer_mask = ((1u << wave_count) - 1u) & ~1u;
   DeviceState state{};
   state.synchronize = synchronize;
   state.wave_count = wave_count;
@@ -67,7 +77,6 @@ void run_tree_atomic_or(bool synchronize) {
   HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_state));
   EXPECT_EQ(state.wave_count, wave_count);
-  EXPECT_EQ(state.turn, wave_count);
   EXPECT_EQ(state.completion[0], producer_mask);
   EXPECT_EQ(state.completion[1], producer_mask);
   EXPECT_EQ(state.final_mask, producer_mask);

@@ -162,6 +162,57 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
             ConSanCapabilityDisposition::Supported);
 }
 
+TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublication) {
+  constexpr std::array targets = {
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3", 12u, 26u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3", 12u, 26u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4", 12u, 26u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4", 13u, 27u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", 13u, 27u},
+  };
+
+  for (const InlineReleaseSequenceTarget &target : targets) {
+    SCOPED_TRACE(target.label);
+    std::vector<uint32_t> atomic_words;
+    const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+        target, atomic_words, {}, InlineAtomicSequenceKind::Acquire);
+    ASSERT_FALSE(bytes.empty());
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_track_atomics = true;
+    options.scratch_vgpr = 8u;
+    options.moi_exec_save_sgpr = 80u;
+    options.moi_owner_vgpr = 40u;
+    options.moi_epoch_vgpr = 41u;
+    options.moi_dispatch_id_sgpr = 20u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> cave_words =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    constexpr uint16_t kRetryCountSgpr = 100u;
+    constexpr uint16_t kScalarLiteralSource = 255u;
+    const std::array<uint32_t, 2> initialize_retries = {
+        build_s_mov_b32(kRetryCountSgpr, kScalarLiteralSource, target.arch),
+        kConSanMoiInlineMetadataPublicationRetryLimit,
+    };
+    EXPECT_TRUE(contains_subsequence(cave_words, initialize_retries));
+    EXPECT_NE(
+        std::ranges::find(
+            cave_words, build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, target.arch)),
+        cave_words.end());
+  }
+}
+
 TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
   const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
                                            /*release_transaction_vsrc=*/12,
@@ -454,6 +505,101 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   expect_unified_atomic_wait(*acquired_token_transaction);
 }
 
+TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kIndirectPcSgpr = 48u;
+  constexpr uint16_t kKeyAndSccSgpr = 50u;
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
+      /*scope=*/2u, kArch);
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  ASSERT_TRUE(atomic && wait);
+
+  std::vector<uint32_t> text_words;
+  text_words.insert(text_words.end(), release.begin(), release.end());
+  text_words.push_back(*wait);
+  const uint64_t atomic_offset = text_words.size() * sizeof(uint32_t);
+  text_words.insert(text_words.end(), atomic->begin(), atomic->end());
+  text_words.push_back(*wait);
+  text_words.insert(text_words.end(), acquire.begin(), acquire.end());
+  // Keep the appended body outside SOPP reach and deny the ordinary island
+  // allocator an eight-word zero-NOP cave.
+  text_words.resize(33'000u, build_s_nop(1u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "far_inline_atomic", /*vgpr_granulated=*/7u,
+                                 /*uses_dynamic_stack=*/false);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 1u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_exec_save_sgpr = 4u;
+  options.moi_inline_indirect_pc_sgpr = kIndirectPcSgpr;
+  options.moi_inline_indirect_scc_sgpr = kKeyAndSccSgpr;
+  options.moi_inline_dispatch_key_sgpr = kKeyAndSccSgpr;
+  options.moi_inline_call_return_sgpr = kIndirectPcSgpr;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_partial_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_transient_sgpr_assignments.push_back(
+      {.descriptor_file_offset = original.kernels().front().descriptor_file_offset,
+       .exec_save_sgpr = 4u,
+       .owner_sgpr = std::nullopt,
+       .dispatch_id_sgpr = std::nullopt,
+       .spill_backed = true,
+       .indirect_pc_sgpr = kIndirectPcSgpr,
+       .indirect_scc_sgpr = kKeyAndSccSgpr,
+       .dispatch_key_sgpr = kKeyAndSccSgpr,
+       .call_return_sgpr = kIndirectPcSgpr,
+       .visible_evidence_sgpr = std::nullopt,
+       .branch_only_scalar_spill = false,
+       .dynamic_stack_borrowed_sgpr = std::nullopt});
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto atomic_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
+           patch.anchor_offset == atomic_offset;
+  });
+  ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable indirect entry island") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> anchor_words =
+      text_words_at_offset(patched, atomic_offset, 2u * sizeof(uint32_t));
+  ASSERT_EQ(anchor_words.size(), 2u);
+  const auto tagged_key = instrumentation::build_s_cselect_b32(
+      kKeyAndSccSgpr, scalar_positive_inline_u32(3u), scalar_positive_inline_u32(2u), kArch);
+  ASSERT_TRUE(tagged_key);
+  EXPECT_EQ(anchor_words.front(), *tagged_key);
+}
+
 TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
   constexpr std::array targets = {
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3",
@@ -516,6 +662,27 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     // Five direct/inherited token slots each reserve, roll back if needed,
     // then commit. These 15 CAS sites exist only on the predecessor-import path.
     EXPECT_EQ(count_subsequence(cave_words, *acquired_token_transaction), 15u);
+    const auto namespace_mask = instrumentation::build_v_and_b32_literal(
+        /*vdst=*/29u, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity / 2u - 1u,
+        /*vsrc1=*/29u, target.arch);
+    const auto unsafe_full_table_mask = instrumentation::build_v_and_b32_literal(
+        /*vdst=*/29u, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity - 1u,
+        /*vsrc1=*/29u, target.arch);
+    ASSERT_TRUE(namespace_mask && unsafe_full_table_mask);
+    EXPECT_GT(count_subsequence(cave_words, *namespace_mask), 0u)
+        << "token address lowering must stay within its semantic namespace";
+    EXPECT_EQ(count_subsequence(cave_words, *unsafe_full_table_mask), 0u)
+        << "a full-table mask can address beyond the selected namespace";
+    const uint16_t release_retry_count_sgpr = 100u;
+    const std::array<uint32_t, 2> initialize_release_retries = {
+        build_s_mov_b32(release_retry_count_sgpr, /*literal source=*/255u, target.arch),
+        kConSanMoiInlineMetadataPublicationRetryLimit,
+    };
+    EXPECT_TRUE(contains_subsequence(cave_words, initialize_release_retries))
+        << "concurrent release publishers must outwait a full causal scan";
+    EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
+                        build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, target.arch)),
+              cave_words.end());
     const auto advance_consumer_segment =
         instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
                                          *options.moi_epoch_vgpr, target.arch);
@@ -868,6 +1035,8 @@ TEST(ConSanMoi, InlineAcquiredTokenHashSeparatesAuthorizationAndReleaseSequenceN
       workgroup, consumer, producer, capacity, /*release_sequence=*/true);
   EXPECT_LT(authorization, capacity);
   EXPECT_LT(release_sequence, capacity);
+  EXPECT_LT(authorization, capacity / 2u);
+  EXPECT_GE(release_sequence, capacity / 2u);
   EXPECT_NE(authorization, release_sequence);
 }
 
@@ -898,28 +1067,24 @@ TEST(ConSanMoi, InlineAcquiredTokenHashDoesNotAliasDistinctCausalEdgesByConstruc
   }
 }
 
-TEST(ConSanMoi, InlineAcquiredTokenCapacitySeparatesFourWaveReleaseSequenceAncestors) {
+TEST(ConSanMoi, InlineAcquiredTokenCapacitySeparatesCdna4FourWaveReleaseSequence) {
   constexpr uint32_t workgroup = 1u;
-  constexpr uint32_t first_producer = 1u;
-  constexpr uint32_t second_consumer = 257u;
-  constexpr uint32_t third_consumer = 513u;
-  // Wave owner IDs are spaced by 256. The first and inherited edges in this
-  // ordinary four-wave release sequence collide in the former 64-slot table.
-  EXPECT_EQ(consan_moi_inline_acquired_epoch_token_slot_index(workgroup, second_consumer,
-                                                              first_producer, 64u,
-                                                              /*release_sequence=*/true),
-            consan_moi_inline_acquired_epoch_token_slot_index(workgroup, third_consumer,
-                                                              first_producer, 64u,
-                                                              /*release_sequence=*/true));
-  EXPECT_GE(kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity, 128u);
-  EXPECT_NE(consan_moi_inline_acquired_epoch_token_slot_index(
-                workgroup, second_consumer, first_producer,
-                kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
-                /*release_sequence=*/true),
-            consan_moi_inline_acquired_epoch_token_slot_index(
-                workgroup, third_consumer, first_producer,
-                kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
-                /*release_sequence=*/true));
+  // gfx950 wave-owner IDs are spaced by 16. A rotated four-wave tree publishes
+  // the direct 1 -> 49 edge and the 1 -> 33 release-sequence edge. Their mixed
+  // hashes have identical low ten bits, so merely growing an undivided table
+  // through 1024 slots cannot separate them. Distinct namespaces must.
+  EXPECT_GE(kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity, 1024u);
+  const uint32_t direct = consan_moi_inline_acquired_epoch_token_slot_index(
+      workgroup, /*consumer=*/49u, /*producer=*/1u,
+      kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+      /*release_sequence=*/false);
+  const uint32_t release_sequence = consan_moi_inline_acquired_epoch_token_slot_index(
+      workgroup, /*consumer=*/33u, /*producer=*/1u,
+      kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+      /*release_sequence=*/true);
+  EXPECT_LT(direct, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity / 2u);
+  EXPECT_GE(release_sequence, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity / 2u);
+  EXPECT_NE(direct, release_sequence);
 }
 
 TEST(ConSanMoi, InlineAtomicDirectMappedTablePinsLookupAndReplacementContract) {
@@ -2882,7 +3047,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   const uint16_t release_retry_count_sgpr = 100u;
   const std::array<uint32_t, 2> initialize_release_retries = {
       build_s_mov_b32(release_retry_count_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
-      4096u,
+      kConSanMoiInlineMetadataPublicationRetryLimit,
   };
   const auto decrement_release_retry =
       build_s_sub_u32(release_retry_count_sgpr, release_retry_count_sgpr,
@@ -2897,7 +3062,8 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   EXPECT_NE(std::find(release_words.begin(), release_words.end(), *release_retries_remain),
             release_words.end());
   EXPECT_NE(std::find(release_words.begin(), release_words.end(),
-                      build_s_sleep(/*delay=*/1, ROCJITSU_CODE_ARCH_RDNA4)),
+                      build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay,
+                                    ROCJITSU_CODE_ARCH_RDNA4)),
             release_words.end());
   const auto coherent_version_load = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true,

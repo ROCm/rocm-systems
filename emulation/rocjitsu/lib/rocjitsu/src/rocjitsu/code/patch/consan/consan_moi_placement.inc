@@ -953,14 +953,6 @@ struct MoiSgprRange {
                                                          consan_moi_exact_shadow::granule_bytes);
 }
 
-[[nodiscard]] bool inline_shadow_reserves_scalar_consumer_owner(const ConSanOptions &options) {
-  // Access-time acquired-token filtering needs the current owner in a VGPR.
-  // A scalar-persistent owner therefore occupies one site-local register
-  // beyond the transaction window for the whole diagnostic lifetime.
-  return options.moi_track_atomics && !options.moi_owner_vgpr &&
-         moi_uses_scalar_persistent_state(options);
-}
-
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
 
 [[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const ConSanOptions &options) {
@@ -1128,9 +1120,7 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           ? 1u
           : 0u;
   return static_cast<uint16_t>(
-      inline_shadow_scratch_count(options) +
-      (inline_shadow_reserves_scalar_consumer_owner(options) ? 1u : 0u) +
-      inline_shadow_loop_scratch_count(options, candidate) +
+      inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
       flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
 }
@@ -2180,7 +2170,8 @@ struct MoiInlineDenseRouterScalarAbi {
 [[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
 moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t arch) {
   if (options.moi_engine != ConSanMoiEngine::InlineShadow ||
-      (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+       arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return std::nullopt;
   }
   if (options.moi_inline_branch_only_scalar_spill)
@@ -2207,9 +2198,9 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
   const uint16_t base = *options.moi_exec_save_sgpr;
   return MoiInlineDenseRouterScalarAbi{
       .indirect_jump = *indirect_jump,
-      // GFX1250 derives its key from the scalar-call return PC. RDNA4 has no
-      // scalar call and keeps an explicit key in the otherwise-unused return
-      // pair's low half.
+      // GFX1250 derives its key from the scalar-call return PC. CDNA3/4 and
+      // RDNA4 use an explicit key in the otherwise-unused return pair's low
+      // half.
       .dispatch_key_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250 ? indirect_jump->pc_sgpr
                                                               : static_cast<uint16_t>(base + 28u),
       .call_return_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250
@@ -4890,6 +4881,22 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
         "ConSan MOI is using a literal report dispatch ID because no persistent hardware "
         "dispatch-ID SGPR pair fits");
     return false;
+  }
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+               plan.site_kind == ConSanResourceSiteKind::Access;
+      })) {
+    // The access prologue can capture the hardware dispatch preload directly
+    // into owner-private state before restoring the full-pressure guest entry
+    // ABI. Each access reloads that identity into its owner-local indirect-PC
+    // pair, so no code-object-wide guest SGPR reservation is needed.
+    options.automatic_moi_private_dispatch_id = true;
+    result.warnings.emplace_back(
+        "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
+        "SGPR pair fits");
+    return true;
   }
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back(

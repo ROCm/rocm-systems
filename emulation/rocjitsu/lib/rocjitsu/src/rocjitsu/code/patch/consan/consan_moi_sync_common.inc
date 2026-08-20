@@ -302,8 +302,7 @@ void append_fence_record_candidates(const ConSanResult &result,
 
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
                                                           bool allow_ordered_lds_atomic = false) {
-  const bool is_ordered_lds_atomic =
-      allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_");
+  const bool is_ordered_lds_atomic = allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_");
   if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
       !is_ordered_lds_atomic)
     return false;
@@ -326,8 +325,7 @@ void append_fence_record_candidates(const ConSanResult &result,
   // LDS visibility is inherently workgroup-scoped. Its instruction encoding
   // has no explicit scope field, so supply the semantic scope only after the
   // surrounding sequence has qualified this site as an ordering event.
-  if (allow_ordered_lds_atomic && normalized.mnemonic.starts_with("ds_") &&
-      !normalized.raw_scope)
+  if (allow_ordered_lds_atomic && normalized.mnemonic.starts_with("ds_") && !normalized.raw_scope)
     normalized.raw_scope = 1u;
   return normalized;
 }
@@ -365,8 +363,8 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
     return;
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
+  const bool allow_ordered_lds_atomic =
+      consan_arch_supports_capability_form(result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     const ConSanAtomicSite normalized =
@@ -388,8 +386,8 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
 void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
+  const bool allow_ordered_lds_atomic =
+      consan_arch_supports_capability_form(result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   for (const ConSanAtomicSite &site : function.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
     const ConSanAtomicSite normalized =
@@ -681,8 +679,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint16_t workgroup_key_vgpr, uint16_t consumer_owner_vgpr, uint16_t producer_owner_vgpr,
     uint16_t slot_address_vgpr, uint16_t hash_vgpr, uint16_t temporary_vgpr, bool release_sequence,
     rj_code_arch_t arch) {
-  if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
+  if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
     return false;
+  const uint32_t namespace_capacity = table_capacity / 2u;
+  const uint64_t namespace_base =
+      table_base + (release_sequence ? static_cast<uint64_t>(namespace_capacity) *
+                                           sizeof(ConSanMoiInlineAcquiredEpochTokenSlot)
+                                     : 0u);
   const auto mix_workgroup = instrumentation::build_v_mul_lo_u32_literal(
       hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenWorkgroupMultiplier, workgroup_key_vgpr,
       arch);
@@ -713,7 +716,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const auto mix_fold2 = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto masked =
-      instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
+      instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u, hash_vgpr, arch);
   const auto times_eight = instrumentation::build_v_lshlrev_b32(
       slot_address_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
   const auto times_sixteen = instrumentation::build_v_lshlrev_b32(
@@ -725,10 +728,10 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const auto times_slot_size = instrumentation::build_v_add_u32(
       hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
   const auto base_lo = instrumentation::build_v_mov_b32_literal(
-      slot_address_vgpr, static_cast<uint32_t>(table_base), arch);
+      slot_address_vgpr, static_cast<uint32_t>(namespace_base), arch);
   const auto base_hi =
       instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(slot_address_vgpr + 1u),
-                                               static_cast<uint32_t>(table_base >> 32u), arch);
+                                               static_cast<uint32_t>(namespace_base >> 32u), arch);
   const auto add_offset =
       instrumentation::build_v_add_u64_vgpr_offset(slot_address_vgpr, hash_vgpr, arch);
   InstructionSequence sequence(words);
@@ -745,9 +748,11 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     words.insert(words.end(), salt->begin(), salt->end());
     words.push_back(*mix_salt);
   }
-  return sequence.emit_all(fold0, mix_fold0, avalanche0, fold1, mix_fold1, avalanche1, fold2,
-                           mix_fold2, masked, times_eight, times_sixteen, times_thirty_two,
-                           times_forty_eight, times_slot_size, base_lo, base_hi, add_offset);
+  if (!sequence.emit_all(fold0, mix_fold0, avalanche0, fold1, mix_fold1, avalanche1, fold2,
+                         mix_fold2, masked))
+    return false;
+  return sequence.emit_all(times_eight, times_sixteen, times_thirty_two, times_forty_eight,
+                           times_slot_size, base_lo, base_hi, add_offset);
 }
 
 // Publishes the direct acquire edge and every inherited snapshot edge as one
@@ -1451,9 +1456,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
-  if (!append_compare_moi_report_dispatch_id_word(
-          words, options, value_vgpr, temporary_vgpr,
-          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
+                                                  /*high_word=*/false, arch,
+                                                  ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1461,9 +1466,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                           sizeof(uint32_t),
                                       value_vgpr, arch))
     return false;
-  if (!append_compare_moi_report_dispatch_id_word(
-          words, options, value_vgpr, temporary_vgpr,
-          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
+                                                  /*high_word=*/true, arch,
+                                                  ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
@@ -1607,8 +1612,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t atomic_address_vgpr,
     uint16_t workgroup_key_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_table_capacity, rj_code_arch_t arch) {
-  const bool has_dispatch_id = options.moi_dispatch_id_sgpr.has_value() ||
-                               consan_arch_uses_literal_dispatch_identity(arch);
+  const bool has_dispatch_id =
+      options.moi_dispatch_id_sgpr.has_value() || consan_arch_uses_literal_dispatch_identity(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !has_dispatch_id ||
       !options.moi_owner_vgpr || token_table_capacity == 0 ||
       token_table_capacity > kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity ||
@@ -2042,8 +2047,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       instrumentation::build_v_add_u32(loop_index, scalar_positive_inline_u32(1), loop_index, arch);
   const auto capacity =
       instrumentation::build_v_mov_b32_literal(temporary, token_table_capacity, arch);
-  const auto finished = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(temporary), loop_index, arch);
+  const auto finished =
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(temporary), loop_index, arch);
   if (!next_index || !capacity || !finished)
     return false;
   words.insert(words.end(), next_index->begin(), next_index->end());
@@ -2096,8 +2101,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint32_t token_capacity, bool emit_guest_instruction, bool import_claimed_predecessor,
     bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors) {
-  const bool has_dispatch_id = options.moi_dispatch_id_sgpr.has_value() ||
-                               consan_arch_uses_literal_dispatch_identity(arch);
+  const bool has_dispatch_id =
+      options.moi_dispatch_id_sgpr.has_value() || consan_arch_uses_literal_dispatch_identity(arch);
   const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !has_dispatch_id ||
@@ -2241,13 +2246,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // Retry only when this invocation has not claimed the slot at all; if one
   // of several local lanes wins, retain the existing fail-closed treatment of
   // the other lanes rather than letting multiple publishers write one slot.
-  // The critical section includes a 64-slot causal-snapshot scan. Coherent
-  // version polls plus a short yield let a resident publisher complete, while
-  // the finite bound still terminates on a permanently stuck odd slot.
-  constexpr uint32_t kReleaseContentionRetryLimit = 4096u;
+  // The critical section includes a full acquired-token-table causal scan.
+  // Coherent version polls plus a short yield let a resident publisher
+  // complete, while the finite bound still terminates on a permanently stuck
+  // odd slot.
   constexpr uint16_t kScalarLiteralSource = 255u;
   words.push_back(build_s_mov_b32(retry_count_sgpr, kScalarLiteralSource, arch));
-  words.push_back(kReleaseContentionRetryLimit);
+  words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
   const size_t retry_begin = words.size();
   if (!append_atomic_load_u32(words, slot_address, prior_version, arch)) {
     errors.emplace_back("ConSan MOI inline release could not begin its version retry");
@@ -2328,7 +2333,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const size_t claimed_exit_branch = words.size();
   words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
   words.push_back(*restore_failed);
-  words.push_back(build_s_sleep(/*delay=*/1, arch));
+  words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
   words.push_back(*decrement_retry);
   words.push_back(*retries_remain);
   const auto retries_exhausted = instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch);
@@ -2588,11 +2593,12 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &input_options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, size_t inline_atomic_release_slots_offset,
-    uint32_t inline_atomic_release_capacity, size_t inline_causal_snapshots_offset,
-    uint32_t inline_causal_snapshot_capacity, size_t inline_acquired_token_slots_offset,
-    uint32_t inline_acquired_token_capacity, uint64_t cave_text_offset, uint64_t return_text_offset,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
+    const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,
+    size_t inline_atomic_release_slots_offset, uint32_t inline_atomic_release_capacity,
+    size_t inline_causal_snapshots_offset, uint32_t inline_causal_snapshot_capacity,
+    size_t inline_acquired_token_slots_offset, uint32_t inline_acquired_token_capacity,
+    uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
+    std::vector<std::string> &errors) {
   ConSanOptions options = input_options;
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_TMP_VGPR");
@@ -2611,7 +2617,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
   const bool scalar_persistent =
       options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
-  if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) && !scalar_persistent) {
+  if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) && !scalar_persistent &&
+      private_layout == nullptr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_MOI_OWNER_VGPR and "
                         "RJ_CONSAN_MOI_EPOCH_VGPR");
     return std::nullopt;
@@ -2695,6 +2702,122 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         build_v_mov_b32_e32(materialized_epoch, *options.moi_persistent_epoch_sgpr, arch));
     options.moi_owner_vgpr = materialized_owner;
     options.moi_epoch_vgpr = materialized_epoch;
+  }
+  if (private_layout) {
+    if (!options.automatic_moi_private_epoch || !private_layout->workgroup_key_offset ||
+        !candidate.kernel_descriptor_file_offset) {
+      errors.emplace_back("ConSan MOI inline atomic patch has an invalid private state plan");
+      return std::nullopt;
+    }
+    const uint16_t materialized_workgroup_key =
+        static_cast<uint16_t>(*options.scratch_vgpr + required_scratch_count - 6u);
+    const uint16_t private_temporary =
+        static_cast<uint16_t>(*options.scratch_vgpr + required_scratch_count - 5u);
+    const uint16_t materialized_owner =
+        static_cast<uint16_t>(*options.scratch_vgpr + required_scratch_count - 4u);
+    const uint16_t materialized_epoch = static_cast<uint16_t>(materialized_owner + 1u);
+    const auto load_epoch = instrumentation::build_private_load_b32(
+        materialized_epoch, private_layout->epoch_offset, arch);
+    const auto load_workgroup = instrumentation::build_private_load_b32(
+        materialized_workgroup_key, *private_layout->workgroup_key_offset, arch);
+    const auto wait_private = instrumentation::build_s_wait_private_load0(arch);
+    if (!load_epoch || !load_workgroup || !wait_private) {
+      errors.emplace_back(
+          "ConSan MOI inline atomic patch could not load private epoch/workgroup state");
+      return std::nullopt;
+    }
+    words.insert(words.end(), load_epoch->begin(), load_epoch->end());
+    words.insert(words.end(), load_workgroup->begin(), load_workgroup->end());
+    words.push_back(*wait_private);
+    if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      if (!private_layout->owner_offset) {
+        errors.emplace_back("ConSan MOI inline atomic patch has no private workitem owner");
+        return std::nullopt;
+      }
+      const auto owner_shift =
+          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+      const auto load_owner = instrumentation::build_private_load_b32(
+          materialized_owner, *private_layout->owner_offset, arch);
+      const auto wait_owner = instrumentation::build_s_wait_private_load0(arch);
+      const auto shift_owner =
+          owner_shift
+              ? instrumentation::build_v_lshrrev_b32(materialized_owner,
+                                                     scalar_positive_inline_u32(*owner_shift),
+                                                     materialized_owner, arch)
+              : std::nullopt;
+      if (!owner_shift || !load_owner || !wait_owner || !shift_owner) {
+        errors.emplace_back("ConSan MOI inline atomic patch could not load private owner state");
+        return std::nullopt;
+      }
+      words.insert(words.end(), load_owner->begin(), load_owner->end());
+      words.push_back(*wait_owner);
+      words.push_back(*shift_owner);
+    } else if (options.moi_owner_source == ConSanMoiOwnerSource::HwId && options.moi_owner_sgpr) {
+      if (options.automatic_moi_owner_sgpr) {
+        const auto save_owner = instrumentation::build_v_writelane_b32(
+            private_temporary, *options.moi_owner_sgpr, 0u, arch);
+        if (!save_owner) {
+          errors.emplace_back("ConSan MOI inline atomic patch could not save borrowed owner state");
+          return std::nullopt;
+        }
+        words.insert(words.end(), save_owner->begin(), save_owner->end());
+      }
+      if (!append_moi_resident_wave_owner(words, *options.moi_owner_sgpr,
+                                          /*one_based=*/true, arch)) {
+        errors.emplace_back("ConSan MOI inline atomic patch could not derive resident-wave owner");
+        return std::nullopt;
+      }
+      words.push_back(build_v_mov_b32_e32(materialized_owner, *options.moi_owner_sgpr, arch));
+      if (options.automatic_moi_owner_sgpr) {
+        const auto restore_owner = instrumentation::build_v_readlane_b32(
+            *options.moi_owner_sgpr, private_temporary, 0u, arch);
+        const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
+        if (!restore_owner || !wait_owner) {
+          errors.emplace_back(
+              "ConSan MOI inline atomic patch could not restore borrowed owner state");
+          return std::nullopt;
+        }
+        words.insert(words.end(), restore_owner->begin(), restore_owner->end());
+        words.push_back(*wait_owner);
+      }
+    } else {
+      errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
+      return std::nullopt;
+    }
+    if (private_layout->dispatch_id_offset) {
+      if (!options.moi_dispatch_id_sgpr) {
+        errors.emplace_back("ConSan MOI inline atomic patch has no private dispatch reload pair");
+        return std::nullopt;
+      }
+      const auto load_dispatch_low = instrumentation::build_private_load_b32(
+          private_temporary, *private_layout->dispatch_id_offset, arch);
+      const auto load_dispatch_high = instrumentation::build_private_load_b32(
+          materialized_workgroup_key,
+          *private_layout->dispatch_id_offset + SpillManager::kSlotBytes, arch);
+      const auto wait_dispatch = instrumentation::build_s_wait_private_load0(arch);
+      const auto read_dispatch_low = instrumentation::build_v_readfirstlane_b32(
+          *options.moi_dispatch_id_sgpr, private_temporary, arch);
+      const auto read_dispatch_high = instrumentation::build_v_readfirstlane_b32(
+          static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), materialized_workgroup_key,
+          arch);
+      const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
+      if (!load_dispatch_low || !load_dispatch_high || !wait_dispatch || !read_dispatch_low ||
+          !read_dispatch_high || !wait_scalar) {
+        errors.emplace_back("ConSan MOI inline atomic patch could not reload private dispatch ID");
+        return std::nullopt;
+      }
+      words.insert(words.end(), load_dispatch_low->begin(), load_dispatch_low->end());
+      words.insert(words.end(), load_dispatch_high->begin(), load_dispatch_high->end());
+      words.push_back(*wait_dispatch);
+      words.push_back(*read_dispatch_low);
+      words.push_back(*read_dispatch_high);
+      words.push_back(*wait_scalar);
+      words.insert(words.end(), load_workgroup->begin(), load_workgroup->end());
+      words.push_back(*wait_private);
+    }
+    options.moi_owner_vgpr = materialized_owner;
+    options.moi_epoch_vgpr = materialized_epoch;
+    options.moi_workgroup_key_vgpr = materialized_workgroup_key;
   }
   if (candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
     if (!candidate.kernel_descriptor_file_offset) {
@@ -2790,10 +2913,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // source version and a following AcquireRelease publication cannot race
     // the still-active publisher. The bounded retry preserves fail-closed
     // behavior for malformed or abandoned odd slots.
-    constexpr uint32_t kAcquireSourceRetryLimit = 4096u;
     constexpr uint16_t kScalarLiteralSource = 255u;
     words.push_back(build_s_mov_b32(version_retry_count, kScalarLiteralSource, arch));
-    words.push_back(kAcquireSourceRetryLimit);
+    words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
     const size_t version_retry_begin = words.size();
     if (!append_atomic_load_u32(words, *options.scratch_vgpr, version_before, arch)) {
       errors.emplace_back("ConSan MOI inline acquire could not load its release version");
@@ -2815,7 +2937,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     words.push_back(*version_even);
     const size_t version_even_exit = words.size();
     words.push_back(*instrumentation::build_s_cbranch_vccnz(/*simm16=*/0, arch));
-    words.push_back(build_s_sleep(/*delay=*/1, arch));
+    words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
     words.push_back(*decrement_retry);
     words.push_back(*retries_remain);
     const size_t version_exhausted_exit = words.size();

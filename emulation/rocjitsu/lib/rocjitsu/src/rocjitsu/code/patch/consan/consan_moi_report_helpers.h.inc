@@ -184,7 +184,13 @@ inline constexpr uint32_t kConSanMoiInlineShadowDefaultDiagnosticCapacity = 4;
 inline constexpr uint32_t kConSanMoiInlineShadowDiagnosticHeadroomPerAccess = 64;
 inline constexpr uint32_t kConSanMoiInlineShadowConservativeExactShadowEntries = 16u * 1024u;
 inline constexpr uint32_t kConSanMoiInlineShadowAtomicReleaseSlotCapacity = 64;
-inline constexpr uint32_t kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity = 128;
+inline constexpr uint32_t kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity = 1024;
+// A release publisher holds its direct-mapped object slot while scanning the
+// full token table. Leave enough bounded, backed-off polls for that ordinary
+// critical section before a competing publisher or consumer reports a
+// genuinely stuck odd version.
+inline constexpr uint32_t kConSanMoiInlineMetadataPublicationRetryLimit = 65536;
+inline constexpr uint32_t kConSanMoiInlineMetadataPublicationSleepDelay = 16;
 
 [[nodiscard]] constexpr uint32_t
 consan_moi_inline_atomic_release_slot_index(uint64_t atomic_address, uint32_t table_capacity) {
@@ -232,8 +238,9 @@ consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &
 [[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_slot_index(
     uint32_t workgroup_key, uint32_t consumer_owner_id, uint32_t producer_owner_id,
     uint32_t table_capacity, bool release_sequence = false) {
-  if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
+  if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
     return 0;
+  const uint32_t namespace_capacity = table_capacity / 2u;
   uint32_t mixed = workgroup_key * kConSanMoiInlineTokenWorkgroupMultiplier;
   mixed ^= consumer_owner_id * kConSanMoiInlineTokenConsumerMultiplier;
   mixed ^= producer_owner_id * kConSanMoiInlineTokenProducerMultiplier;
@@ -244,7 +251,7 @@ consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &
   mixed ^= mixed >> 15u;
   mixed *= kConSanMoiInlineTokenAvalancheMultiplier1;
   mixed ^= mixed >> 16u;
-  return mixed & (table_capacity - 1u);
+  return (mixed & (namespace_capacity - 1u)) + (release_sequence ? namespace_capacity : 0u);
 }
 
 enum class ConSanMoiInlineAcquiredEpochTokenLookup : uint8_t {

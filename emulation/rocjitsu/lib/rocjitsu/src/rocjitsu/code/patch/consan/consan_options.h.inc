@@ -508,6 +508,10 @@ struct ConSanOptions {
   /// Internal marker set after ConSan assigns the persistent hardware
   /// dispatch-ID SGPR pair used by dispatch-qualified engine metadata.
   bool automatic_moi_dispatch_id_sgprs = false;
+  /// Internal marker set when every admitted CDNA Inline owner must capture
+  /// its hardware dispatch identity in private entry state because no
+  /// code-object-wide persistent SGPR pair survives the guest program.
+  bool automatic_moi_private_dispatch_id = false;
   /// Internal marker set after ConSan assigns an entry-captured persistent
   /// hardware dispatch-ID VGPR pair.
   bool automatic_moi_dispatch_id_vgprs = false;
