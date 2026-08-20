@@ -1045,10 +1045,12 @@ class TestExecutor:
         # num_gpus of 0 declares a test that needs no GPU, which only makes sense
         # on one node: multi-node placement builds "host:{num_gpus}" and
         # "--map-by ppr:{num_gpus}:node" from it, and zero there would launch
-        # nothing. Fail this test rather than emit that.
-        if num_nodes > 1 and num_gpus < 1:
-            msg = (f"Invalid num_gpus for test '{test_name}': {num_gpus} GPUs/node cannot place "
-                   f"ranks across {num_nodes} nodes")
+        # nothing. The same goes for the resolved rank count, which "auto" derives
+        # from num_gpus, so zero GPUs would ask mpirun for -np 0. Fail the test
+        # rather than launch nothing and call it a pass.
+        if num_ranks < 1 or num_nodes < 1 or num_gpus < 0 or (num_nodes > 1 and num_gpus < 1):
+            msg = (f"Invalid placement for test '{test_name}': {num_ranks} rank(s) over "
+                   f"{num_nodes} node(s) at {num_gpus} GPU(s)/node")
             print(f"ERROR: {msg}")
             return {
                 "name": test_name,

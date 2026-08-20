@@ -1175,6 +1175,25 @@ protected:
         return result;
     }
 
+    // QPs the connection actually uses. NCCL_IB_QPS_PER_CONNECTION states only a
+    // request: on a merged device the plugin creates that many per member, so
+    // arming faults from the environment would leave the remaining QPs healthy
+    // and "the send must fail" would depend on which QP the scheduler picked.
+    // Valid once the scheduler is warm, which the first successful send does.
+    ThreadResult WorkerCastLiveNqps(void* sendComm, int* nqps) {
+        struct ncclIbCastSchedState state;
+        ThreadResult result = WorkerCastGetSchedState(sendComm, &state);
+        if (!result.ok) return result;
+        if (state.nqps <= 0) {
+            result.ok = false;
+            result.msg = "scheduler reports nqps=" + std::to_string(state.nqps);
+            return result;
+        }
+        *nqps = state.nqps;
+        return result;
+    }
+#endif /* ENABLE_FAULT_INJECTION */
+
     // Warm the scheduler up (it initializes on the first send) and arm equal
     // weights. nqps comes from the environment so both ranks agree without a
     // collective; the sender confirms the connection really uses that many QPs.
@@ -1532,25 +1551,6 @@ protected:
         }
         return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
     }
-
-    // QPs the connection actually uses. NCCL_IB_QPS_PER_CONNECTION states only a
-    // request: on a merged device the plugin creates that many per member, so
-    // arming faults from the environment would leave the remaining QPs healthy
-    // and "the send must fail" would depend on which QP the scheduler picked.
-    // Valid once the scheduler is warm, which the first successful send does.
-    ThreadResult WorkerCastLiveNqps(void* sendComm, int* nqps) {
-        struct ncclIbCastSchedState state;
-        ThreadResult result = WorkerCastGetSchedState(sendComm, &state);
-        if (!result.ok) return result;
-        if (state.nqps <= 0) {
-            result.ok = false;
-            result.msg = "scheduler reports nqps=" + std::to_string(state.nqps);
-            return result;
-        }
-        *nqps = state.nqps;
-        return result;
-    }
-#endif /* ENABLE_FAULT_INJECTION */
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
