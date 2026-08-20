@@ -67,11 +67,15 @@ until baseline execution becomes suitable for end-to-end validation.
 
 ### 2026-08-20 TP1 decode/combined Inline refresh
 
-A fresh native gfx1250 B0 simulator run replaces the stale 600-second
-no-verdict boundary.  Both exact oracles pass: decode takes 15.153 seconds and
-combined takes 21.393 seconds for their timed iterations.  The aggregate is
-analysis-, static-, and dynamic-complete at 704/704 accesses plus 74/74
-barriers, with zero diagnostics or incomplete encounters.
+Accepted artifact
+`rebase-20260820-gfx1250-tp1-decode-inline-13761fd` at source revision
+`13761fd159` and hook SHA-256
+`8928b234058aae810456b3836c83550bca2368c4d8e033cf82ada908f6feef45`
+replaces the stale 600-second no-verdict boundary.  Both exact oracles pass:
+decode takes 15.153 seconds and combined takes 21.393 seconds for their timed
+iterations.  The 77.304-second aggregate process is analysis-, static-, and
+dynamic-complete at 704/704 accesses plus 74/74 barriers, with zero diagnostics
+or incomplete encounters.
 
 The two modes construct independent IREE models in one Python process.  Their
 `SystemContext`/`BoundModule` reference cycles previously retained the first
