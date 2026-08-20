@@ -19,7 +19,6 @@ if SRC not in sys.path:
 
 # Imported after sys.path is extended, since it lives under src/.
 from utils import csv_compression  # noqa: E402
-from utils.mem_chart_common import strip_ansi as strip_ansi  # noqa: E402
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},

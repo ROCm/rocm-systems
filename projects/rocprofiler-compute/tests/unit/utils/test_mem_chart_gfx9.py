@@ -95,9 +95,11 @@ GFX9_SAMPLE_METRICS = {
 }
 
 
-def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE):
+def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE, gpu_arch=None):
     return strip_ansi(
-        mem_chart_gfx9.plot_mem_chart(dict(metrics), chart_title=chart_title)
+        mem_chart_gfx9.plot_mem_chart(
+            dict(metrics), chart_title=chart_title, gpu_arch=gpu_arch
+        )
     )
 
 
@@ -199,6 +201,40 @@ class TestPlotMemChartGfx9:
         output = render_gfx9_chart({})
         assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
 
+    def test_lds_util_renders(self):
+        output = render_gfx9_chart({"LDS Util": 45})
+        assert "Util 45.0%" in output
+
+    def test_gfx908_no_mall_no_io(self):
+        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx908")
+        assert "MALL" not in output
+        assert "xGMI" not in output
+        assert "PCIe" not in output
+
+    def test_gfx940_has_mall(self):
+        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx940")
+        assert "MALL" in output
+        assert "xGMI" not in output
+        assert "PCIe" not in output
+
+    def test_gfx950_has_mall_and_io(self):
+        metrics = dict(GFX9_SAMPLE_METRICS)
+        metrics.update({
+            "HBM Read BW": 100e9,
+            "HBM Write BW": 50e9,
+            "HBM Atomic BW": 1e9,
+            "xGMI Read BW": 20e9,
+            "xGMI Write BW": 10e9,
+            "xGMI Atomic BW": 500e6,
+            "PCIe Read BW": 15e9,
+            "PCIe Write BW": 8e9,
+            "PCIe Atomic BW": 200e6,
+        })
+        output = render_gfx9_chart(metrics, gpu_arch="gfx950")
+        assert "MALL" in output
+        assert "xGMI" in output
+        assert "PCIe" in output
+
 
 class TestPanelYamlGfx9:
     def test_discovers_expected_architectures(self):
@@ -215,10 +251,20 @@ class TestPanelYamlGfx9:
             expected_architecture_extra_metric_keys(architecture)
         )
 
-    def test_panel_yaml_metrics_render_same_line_count_across_architectures(self):
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_panel_yaml_metrics_render_with_gpu_arch(self, architecture):
+        output = render_gfx9_chart(
+            panel_yaml_metrics(architecture), gpu_arch=architecture
+        )
+        assert len(output) > 100
+
+    def test_panel_yaml_metrics_render_same_line_count_across_base_architectures(self):
+        base_archs = [a for a in GFX9_ARCHITECTURES if a != "gfx950"]
         line_counts = {
-            arch: len(render_gfx9_chart(panel_yaml_metrics(arch)).splitlines())
-            for arch in GFX9_ARCHITECTURES
+            arch: len(
+                render_gfx9_chart(panel_yaml_metrics(arch), gpu_arch=arch).splitlines()
+            )
+            for arch in base_archs
         }
         assert len(set(line_counts.values())) == 1, line_counts
 
