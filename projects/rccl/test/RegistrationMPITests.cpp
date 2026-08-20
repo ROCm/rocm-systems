@@ -1108,10 +1108,16 @@ protected:
 
     bool createHybridVmmBuffer(size_t gpuBytes, size_t localCpuBytes,
                                RCCLHybridVmmTests::HybridVmmBuffer& buf,
-                               std::string& reason)
+                               std::string& reason,
+                               bool requireReexport = true)
     {
         int dev = 0;
-        bool allocated = hipGetDevice(&dev) == hipSuccess &&
+        bool supported = hipGetDevice(&dev) == hipSuccess &&
+            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(
+                dev, requireReexport, &reason);
+        if (!supported)
+            return false;
+        bool allocated =
             RCCLHybridVmmTests::AllocHybridVmm(
                 dev, gpuBytes, localCpuBytes, &buf, &reason);
         if (!MPIHelpers::allRanksTrue(allocated)) {
@@ -1849,7 +1855,8 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridElasticRegistrationDisabled)
     std::string reason;
     if (!createHybridVmmBuffer(
             /*gpuBytes=*/8 * 1024 * 1024,
-            /*localCpuBytes=*/2 * 1024 * 1024, hybrid, reason)) {
+            /*localCpuBytes=*/2 * 1024 * 1024, hybrid, reason,
+            /*requireReexport=*/false)) {
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
     }
     auto hybridCleanup = makeScopeGuard([&]() {
