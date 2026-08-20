@@ -1055,10 +1055,12 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             context::correlation_id corr_id{};
             corr_id.internal = 99;
 
-            expected.queue_id    = qid;
-            expected.agent_id    = agent.get_rocp_agent()->id;
-            expected.kernel_id   = 42;
-            expected.dispatch_id = 7;
+            expected.queue_id       = qid;
+            expected.agent_id       = agent.get_rocp_agent()->id;
+            expected.kernel_id      = 42;
+            expected.dispatch_id    = 7;
+            expected.correlation_id = {.internal = corr_id.internal,
+                                       .external = context::null_user_data};
 
             auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
             auto ret_pkt   = spm::pre_kernel_call(ctx_p,
