@@ -40,9 +40,9 @@
 #define NCCL_CUMEM_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// cuMem HOST allocations: native only. NOT part of the 7.0.2.x backport (relies
-// on hipDeviceAttributeHostNumaId, which is absent there).
-#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) NCCL_VER_GE(v, ROCM_VER_7_12_60540)
+// cuMem HOST allocations: native 7.12 OR the 7.0.2.x backport.
+#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
 // Back-compat alias for the few call sites that compare against the native
 // minimum directly.
