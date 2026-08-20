@@ -696,10 +696,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     for (int segment = 0; segment < mem->numSegments; segment++) {
       CUmemLocationType locType = segmentTypes[segment];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-      // Host-backed VMM mappings are DMA-BUF objects, not ordinary pageable or
-      // hipHostAlloc memory. Register every AMD VMM segment through GIN's
-      // NCCL_PTR_CUDA path so it obtains the segment DMA-BUF fd; ibv_reg_mr on
-      // the CPU mapping is rejected by bnxt_re with EFAULT.
+      // AMD host-backed VMM uses DMA-BUF, so register every segment through
+      // NCCL_PTR_CUDA; ordinary ibv_reg_mr page pinning fails with EFAULT.
       int ptrType = NCCL_PTR_CUDA;
 #else
       int ptrType = ncclSymIsHostSegment(locType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
