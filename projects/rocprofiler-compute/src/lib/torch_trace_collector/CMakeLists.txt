@@ -28,7 +28,7 @@ else()
     set(_ttc_unavailable_severity STATUS)
 endif()
 
-# Interpreter used to locate Torch and to read the CXX11 ABI.
+# Interpreter used to locate Torch.
 if(TORCH_TRACE_PYTHON)
     set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
@@ -73,31 +73,6 @@ message(
 )
 set(_torch_version "${Torch_VERSION}")
 
-execute_process(
-    COMMAND
-        "${_ttc_python}"
-        -c
-        "import sys\ntry:\n    import torch\n    print(int(torch.compiled_with_cxx11_abi()))\nexcept Exception as exc:\n    sys.stderr.write('torch_trace_collector: torch not importable: ' + str(exc) + '\\n')\n    sys.exit(3)\n"
-    OUTPUT_VARIABLE _torch_cxx11_abi
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_VARIABLE _ttc_torch_cxx11_abi_err
-    RESULT_VARIABLE _ttc_torch_cxx11_abi_rc
-)
-if(_ttc_torch_cxx11_abi_rc EQUAL 3)
-    message(
-        ${_ttc_unavailable_severity}
-        "torch_trace_collector: torch is not importable in ${_ttc_python}; the "
-        "extension is not built.\n${_ttc_torch_cxx11_abi_err}"
-    )
-    return()
-elseif(NOT _ttc_torch_cxx11_abi_rc EQUAL 0)
-    message(
-        FATAL_ERROR
-        "torch_trace_collector: failed to read the CXX11 ABI via "
-        "${_ttc_python}:\n${_ttc_torch_cxx11_abi_err}"
-    )
-endif()
-
 if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
     message(
         FATAL_ERROR
@@ -105,6 +80,14 @@ if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
     )
 endif()
 set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
+
+if(NOT TORCH_TRACE_CXX11_ABI MATCHES "^[01]$")
+    message(
+        FATAL_ERROR
+        "torch_trace_collector: TORCH_TRACE_CXX11_ABI must be 0 or 1."
+    )
+endif()
+set(_torch_cxx11_abi "${TORCH_TRACE_CXX11_ABI}")
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
