@@ -12,6 +12,8 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -143,8 +145,15 @@ TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
     const uint32_t cap2 = static_cast<uint32_t>(props["capability2"]);
     const uint64_t dp = props["debug_prop"];
 
-    // Base trap-debugger support is advertised on every simulated GPU.
-    EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_SUPPORT);
+    // Base trap-debugger support is advertised on every GPU the CWSR codec can
+    // produce a record for, and withheld on the rest: rocdbgapi reads wave state
+    // out of the save area, so an agent whose record layout the simulator does
+    // not model cannot be serviced and must be declined at attach rather than at
+    // every wave stop. The sub-capabilities below stay driver-derived either
+    // way; they describe a support that is simply no longer claimed.
+    EXPECT_EQ(static_cast<bool>(cap & HSA_CAP_TRAP_DEBUG_SUPPORT),
+              rocjitsu::kmd::cwsr_layout_modelled_for_gc_ip_version(
+                  rocjitsu::kmd::gc_ip_version_for_gfx_target_version(e.gfx_target_version)));
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED);
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED);
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED);
@@ -170,7 +179,10 @@ TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, ExplicitCapabilityAndDebugPropArePreserved) {
-  Sysfs::GpuInfo gpu = make_gpu_info(110000u /* gfx1100 */);
+  // gfx942, so the trap-debug bit survives the override and this stays a test
+  // about the override rather than about the CWSR gate; the gfx1100 case is
+  // CapturedCapabilityCannotReadvertiseUnservicableTrapDebug's.
+  Sysfs::GpuInfo gpu = make_gpu_info(90402u /* gfx942 */);
   gpu.capability = HSA_CAP_TRAP_DEBUG_SUPPORT;
   gpu.capability2 = HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
   gpu.debug_prop = HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
@@ -203,6 +215,24 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
     ASSERT_TRUE(props.count("debug_prop"));
     EXPECT_EQ(props["debug_prop"], e.debug_prop);
   }
+}
+
+TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
+  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
+                                    rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  ASSERT_EQ(loaded.device.revision_id, 1u);
+
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(debug_gpu_info(loaded.device));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("capability"));
+  const uint32_t capability = static_cast<uint32_t>(props["capability"]);
+  const uint32_t asic_revision =
+      (capability & HSA_CAP_ASIC_REVISION_MASK) >> HSA_CAP_ASIC_REVISION_SHIFT;
+  EXPECT_EQ(asic_revision, loaded.device.revision_id);
 }
 
 // The address-watch register count is the one capability field a debugger acts
@@ -289,6 +319,57 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     // simd_arrays_per_engine, i.e. the node's total shader engines.
     EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
               num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+  }
+}
+
+// MI350X is harvested too: its captured KFD topology has 32 shader arrays of
+// 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
+// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
+// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
+TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
+  const std::string config_dir = CONFIG_DIR;
+  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
+                                            "gfx950_mi355x_kmd_2gpu.json"};
+
+  for (const char *cfg : kMi350xConfigs) {
+    SCOPED_TRACE(cfg);
+    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_NE(loaded.soc(), nullptr);
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_EQ(num_xcc, 8u);
+
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
+    ASSERT_FALSE(topology_dir.empty());
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+
+    ASSERT_TRUE(props.count("array_count"));
+    ASSERT_TRUE(props.count("simd_arrays_per_engine"));
+    ASSERT_TRUE(props.count("cu_per_simd_array"));
+    ASSERT_TRUE(props.count("simd_count"));
+    ASSERT_TRUE(props.count("simd_per_cu"));
+    EXPECT_EQ(props["array_count"], 32u);
+    EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
+    EXPECT_EQ(props["cu_per_simd_array"], 9u);
+    EXPECT_EQ(props["simd_count"], 1024u);
+    EXPECT_EQ(props["simd_per_cu"], 4u);
+
+    const uint64_t physical_cus = props["array_count"] * props["cu_per_simd_array"];
+    const uint64_t active_cus = props["simd_count"] / props["simd_per_cu"];
+    EXPECT_EQ(physical_cus, 288u);
+    EXPECT_EQ(active_cus, 256u);
+
+    EXPECT_EQ(loaded.device.device_id, 30112u);
+    EXPECT_EQ(loaded.device.local_mem_size, 309220868096ULL);
+    EXPECT_EQ(loaded.device.mem_clk_max, 1900u);
+    EXPECT_EQ(loaded.device.num_sdma_engines, 2u);
+    EXPECT_EQ(loaded.device.num_sdma_xgmi_engines, 14u);
+    EXPECT_EQ(loaded.device.num_sdma_queues_per_engine, 8u);
+    ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
+    EXPECT_EQ(loaded.device.num_cp_queues, 24u);
+    EXPECT_EQ(loaded.device.max_engine_clk_fcompute, 2200u);
   }
 }
 
@@ -419,7 +500,7 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   // Configs whose device matches a captured real-hardware topology dump.
   constexpr const char *kConfigs[] = {
       "gfx942_cdna3.json",  // MI300X
-      "gfx950_cdna4.json",  // MI350X
+      "gfx950_mi355x.json", // MI350X
       "gfx1201_r9700.json", // R9700
   };
 
@@ -445,8 +526,21 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
     // The synthetic topology re-derives the HSA_CAP_ASIC_REVISION field from the
     // config's revision_id, so compare the feature bits with that field masked
     // out (the captured dumps carry the physical part's revision there).
-    const uint32_t asic_mask = static_cast<uint32_t>(HSA_CAP_ASIC_REVISION_MASK);
+    //
+    // HSA_CAP_TRAP_DEBUG_SUPPORT is masked out for a different reason: it is the
+    // one bit the simulator deliberately does not reproduce faithfully. A part
+    // whose CWSR record layout the codec cannot produce is not debuggable here
+    // however debuggable the physical device is, so the bit is withheld and
+    // checked below against the gate instead of against the dump.
+    const uint32_t asic_mask = static_cast<uint32_t>(HSA_CAP_ASIC_REVISION_MASK) |
+                               static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
     EXPECT_EQ(static_cast<uint32_t>(props["capability"]) & ~asic_mask, e->capability & ~asic_mask);
+    EXPECT_TRUE(e->capability & HSA_CAP_TRAP_DEBUG_SUPPORT)
+        << "the physical part advertises it, so the simulator's value is a real deviation";
+    EXPECT_EQ(
+        static_cast<bool>(static_cast<uint32_t>(props["capability"]) & HSA_CAP_TRAP_DEBUG_SUPPORT),
+        kmd::cwsr_layout_modelled_for_gc_ip_version(
+            kmd::gc_ip_version_for_gfx_target_version(loaded.device.gfx_target_version)));
     EXPECT_EQ(static_cast<uint32_t>(props["capability2"]), e->capability2);
     EXPECT_EQ(props["debug_prop"], e->debug_prop);
   }

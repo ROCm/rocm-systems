@@ -161,7 +161,7 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     rocjitsu::BinaryTranslatorOptions options;
     options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
     options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
-    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
                                           options);
     translator.set_trace_callback([&](const rocjitsu::TranslationTraceEvent &trace) {
       if (trace.changed)

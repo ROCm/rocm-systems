@@ -155,7 +155,7 @@ _RDNA4_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdAndB32', 18, 'v_dual_and_b32'),
 )
 
-_GFX1250_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
+_CDNA5_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdMaxNumF32', 10, 'v_dual_max_num_f32'),
     VopdSlotOp('VopdMinNumF32', 11, 'v_dual_min_num_f32'),
     VopdSlotOp('VopdAddNcU32', 16, 'v_dual_add_nc_u32'),
@@ -1716,17 +1716,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return []
 
 
-class Gfx1250Profile(Rdna4Profile):
+class Cdna5Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
-    The gfx1250 encoding model is RDNA4/GFX12-like. Keep ``gfx1250`` as the
+    The gfx1250 encoding model is RDNA4/GFX12-like. Use ``cdna5`` as the
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
     @property
     def generated_arch_name(self) -> str | None:
-        return 'gfx1250'
+        return 'cdna5'
 
     @property
     def generated_dir_name(self) -> str | None:
@@ -1843,7 +1843,7 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
-        return _GFX1250_VOPD_SLOT_OPS
+        return _CDNA5_VOPD_SLOT_OPS
 
     @property
     def vopd_x_slot_opcodes(self) -> frozenset[int]:

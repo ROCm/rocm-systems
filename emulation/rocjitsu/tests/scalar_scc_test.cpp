@@ -119,7 +119,7 @@ const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {

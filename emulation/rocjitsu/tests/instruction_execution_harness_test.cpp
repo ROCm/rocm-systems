@@ -12,10 +12,13 @@
 #include "decode_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
@@ -34,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "test_encodings_util.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include "util/simd.h"
@@ -73,12 +77,6 @@
 namespace {
 
 using namespace rocjitsu;
-
-/// @brief Common test encoding entry (matches all ISA test_encodings.h).
-struct TestEncEntry {
-  std::string_view mnemonic;
-  std::array<uint32_t, 2> words;
-};
 
 constexpr uint32_t pack16(uint16_t lo, uint16_t hi) {
   return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
@@ -157,7 +155,7 @@ constexpr HwregArchCase kHwregArchCases[] = {
      rdna3_5::kSSetregImm32B32Sopk},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4::kSGetregB32Sopk, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cdna5::kSGetregB32Sopk, cdna5::kSSetregB32Sopk,
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", cdna5::kSGetregB32Sopk, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 };
 
@@ -177,6 +175,29 @@ public:
 
   Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                       amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {
+    if (l2)
+      l2->set_backing_memory(memory);
+    set_memory(memory);
+    set_l2(l2);
+  }
+
+  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
+    execute_instruction(inst, wf);
+    if (inst->is_memory_op())
+      route_memory_inst(inst, wf);
+    else
+      delete inst;
+  }
+};
+
+class Cdna4MemoryTestCu
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
+
+  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
       l2->set_backing_memory(memory);
@@ -237,10 +258,7 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_setreg",
       "s_rfe",
   };
-  for (auto p : SKIP_PREFIXES)
-    if (mn.substr(0, p.size()) == p)
-      return true;
-  return false;
+  return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
 constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
@@ -271,8 +289,9 @@ const HarnessExpectation *harness_expectation(std::string_view arch_name) {
 }
 
 /// @brief Helper to run all test encodings for a given ISA.
+template <typename Encoding>
 void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
-                           const TestEncEntry *encodings, size_t num_encodings) {
+                           const Encoding *encodings, size_t num_encodings) {
   // Set up minimal CU with zeroed memory.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_mem");
   amdgpu::L2Cache l2(std::string(arch_name) + "_l2");
@@ -387,11 +406,8 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
 // --- Parameterized tests per ISA ---
 
-// Helper macro: cast the ISA-specific TestEncoding array to the common layout.
-// The struct layout (string_view + array<uint32_t,2>) is identical across all ISAs.
 #define RUN_HARNESS(ISA_NS, ARCH_ENUM, ARCH_STR)                                                   \
-  run_execution_harness(ARCH_ENUM, ARCH_STR,                                                       \
-                        reinterpret_cast<const TestEncEntry *>(ISA_NS::test_data::ENCODINGS),      \
+  run_execution_harness(ARCH_ENUM, ARCH_STR, ISA_NS::test_data::ENCODINGS,                         \
                         ISA_NS::test_data::NUM_ENCODINGS)
 
 TEST(InstructionExecutionHarness, Cdna1) { RUN_HARNESS(cdna1, ROCJITSU_CODE_ARCH_CDNA1, "cdna1"); }
@@ -466,7 +482,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
 }
 TEST(InstructionExecutionHarness, Gfx1250) {
-  RUN_HARNESS(cdna5, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
+  RUN_HARNESS(cdna5, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250");
 }
 
 #undef RUN_HARNESS
@@ -476,7 +492,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   amdgpu::L2Cache l2("gfx1250_memory_harness_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -484,7 +500,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -671,7 +687,7 @@ TEST(ScalarSccTest, ScalarCvtPreservesScc) {
 
   run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", cases.data(), cases.size());
   run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", cases.data(), cases.size());
-  run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cases.data(), cases.size());
+  run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", cases.data(), cases.size());
 }
 
 TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
@@ -742,6 +758,46 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(Cdna4Vop3Test, BcntAddsSourceAccumulator) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "cdna4_bcnt_scalar_mem" : "cdna4_bcnt_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "cdna4_bcnt_scalar_l2" : "cdna4_bcnt_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->raw_vgpr_reg<64>(vb + 0)[0] = 0x80000001u;
+    cu->raw_vgpr_reg<64>(vb + 1)[0] = 7u;
+    wf->set_exec(1);
+
+    const auto words = encode_cdna_vop3(cdna4::kVBcntU32B32Vop3, /*vdst=*/2,
+                                        /*src0=*/256, /*src1=*/257, /*src2=*/0);
+    DecodeResult decoded = decoder->decode(words.data());
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded.value());
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_bcnt_u32_b32");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->raw_vgpr_reg<64>(vb + 2)[0], 9u);
     if (!wf->is_halted())
       wf->halt();
   }
@@ -1130,7 +1186,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   amdgpu::L2Cache l2("gfx1250_wmma_f16_fp8_k64_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1144,7 +1200,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -1247,7 +1303,7 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
   amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_k32_bf16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1322,7 +1378,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   amdgpu::L2Cache l2("gfx1250_dpp8_add_f16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1331,7 +1387,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1378,7 +1434,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   amdgpu::L2Cache l2("gfx1250_exec_mask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1387,7 +1443,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1435,7 +1491,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   amdgpu::L2Cache l2("gfx1250_cmpx_gt_i32_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1444,7 +1500,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1475,7 +1531,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   amdgpu::L2Cache l2("gfx1250_cmp_f32_mask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1484,7 +1540,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1521,7 +1577,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_arith_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1530,7 +1586,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1595,7 +1651,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
   amdgpu::L2Cache l2("gfx1250_true16_vop2_add_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1604,7 +1660,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1637,7 +1693,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_vop2_fmac_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1646,7 +1702,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1679,7 +1735,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_mul_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1688,7 +1744,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1717,7 +1773,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_cmp_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1726,7 +1782,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1763,7 +1819,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
                                     : "gfx1250_true16_class_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1772,7 +1828,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1811,7 +1867,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
                                     : "gfx1250_true16_cmpx_class_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1820,7 +1876,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1857,7 +1913,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
                                     : "gfx1250_true16_special_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1866,7 +1922,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1936,7 +1992,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
   amdgpu::L2Cache l2("gfx1250_true16_vopc_cmp_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1945,7 +2001,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3336,7 +3392,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   amdgpu::L2Cache l2("gfx1250_true16_cndmask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3345,7 +3401,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3383,7 +3439,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
   amdgpu::L2Cache l2("gfx1250_true16_lshrrev_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3392,7 +3448,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3421,7 +3477,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   amdgpu::L2Cache l2("gfx1250_true16_bitop_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3430,7 +3486,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3485,7 +3541,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_vop1_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3494,7 +3550,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3678,7 +3734,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_cvt_vop1_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3687,7 +3743,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3717,7 +3773,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_bytesel_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3726,7 +3782,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3765,7 +3821,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f16_e5m3_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3774,7 +3830,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3819,7 +3875,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f32_bytesel_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3828,7 +3884,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3865,7 +3921,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3874,7 +3930,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3908,7 +3964,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_bf8_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3917,7 +3973,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3951,7 +4007,7 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_sr_pk_f16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3960,7 +4016,7 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto words =
@@ -4640,7 +4696,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f16_source_mode_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -4649,7 +4705,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -4993,7 +5049,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_e5m3_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5002,7 +5058,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5077,7 +5133,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_scale_e8m0_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5086,7 +5142,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5132,7 +5188,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   amdgpu::L2Cache l2("gfx1250_ds_swizzle_vds_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5141,7 +5197,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5192,7 +5248,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5200,7 +5256,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5235,7 +5291,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_alias_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5243,7 +5299,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5278,7 +5334,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_u64_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5286,7 +5342,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5321,7 +5377,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
   amdgpu::L2Cache l2("gfx1250_atomic_cmpswap_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5329,7 +5385,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5462,7 +5518,7 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_wave_sched_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5499,7 +5555,7 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_hwreg_ids_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5534,7 +5590,7 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5574,7 +5630,7 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbSts2Counters) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts2_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5631,7 +5687,7 @@ TEST(HwregHelperTest, ModeBit27OnlyEnablesGprIndexingWhereArchitected) {
       {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", true},  {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", true},
       {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", false}, {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", false},
       {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", false}, {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", false},
-      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", true},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", true},
   };
 
   for (const GprIdxModeCase &arch_case : cases) {
@@ -5786,9 +5842,16 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
 
+    // TRAPSTS is backed by Wavefront::trapsts_ on every arch: the GPU trap
+    // handler reads the excp cause on entry and clears it before s_rfe, so a
+    // write has to reach wave state rather than report Unsupported.
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(3)), "TRAPSTS");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(3), 1u),
-              amdgpu::HwregAccessResult::Unsupported);
+              amdgpu::HwregAccessResult::Success);
+    uint32_t trapsts = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(3), trapsts),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(trapsts, 1u);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(14)), "FLUSH_IB");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(14), 1u),
               amdgpu::HwregAccessResult::Unsupported);
@@ -6073,3 +6136,83 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
 }
 
 } // namespace
+
+// FLAT routing is decided per lane against the private aperture, so one wave can
+// mix scratch lanes with global ones. The dword-interleaved scratch swizzle is a
+// property of the private lanes only: applying its stride instruction-wide put a
+// global lane's second dword at addr + wf_size*4 instead of addr + 4.
+TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
+  amdgpu::GpuMemory gpu_mem("cdna4_flat_mixed_mem");
+  amdgpu::L2Cache l2("cdna4_flat_mixed_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Cdna4MemoryTestCu cu("cdna4", cfg, &gpu_mem, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kPrivateBase = 0x0000200000000000ULL;
+  constexpr uint64_t kScratchBase = 0x8000;
+  constexpr uint64_t kGlobalAddr = 0x2000;
+  constexpr uint32_t kScratchWord0 = 0xAA0000A0u;
+  constexpr uint32_t kScratchWord1 = 0xAA0000A1u;
+  constexpr uint32_t kGlobalWord0 = 0xBB0000B0u;
+  constexpr uint32_t kGlobalWord1 = 0xBB0000B1u;
+
+  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + 0x10000);
+  wf->set_scratch_base(kScratchBase);
+  wf->set_exec(0x3u); // lane 0 -> private aperture, lane 1 -> global
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint64_t lane_addr[2] = {kPrivateBase, kGlobalAddr};
+  const uint32_t lane_data[2][2] = {{kScratchWord0, kScratchWord1}, {kGlobalWord0, kGlobalWord1}};
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    cu.write_vgpr(vb + 0, lane, static_cast<uint32_t>(lane_addr[lane]));
+    cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(lane_addr[lane] >> 32));
+    cu.write_vgpr(vb + 2, lane, lane_data[lane][0]);
+    cu.write_vgpr(vb + 3, lane, lane_data[lane][1]);
+  }
+
+  const uint32_t stride = wf->wf_size() * static_cast<uint32_t>(sizeof(uint32_t));
+  for (uint64_t a : {kGlobalAddr, kGlobalAddr + 4, kGlobalAddr + stride, kScratchBase,
+                     kScratchBase + 4, kScratchBase + stride})
+    gpu_mem.write32(a, 0u);
+
+  // flat_store_dwordx2 v[0:1], v[2:3]
+  cdna4::FlatMachineInst enc{};
+  enc.encoding = cdna4::encoding::kFlat >> 3;
+  enc.op = cdna4::kFlatStoreDwordx2;
+  enc.seg = 0; // FLAT
+  enc.addr = 0;
+  enc.data = 2;
+  enc.saddr = 0x7F;
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(enc);
+
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(std::string_view(store->mnemonic()), "flat_store_dwordx2");
+  cu.execute_and_route(store.release(), *wf);
+  cu.flush_all();
+
+  // The global lane stays contiguous even though lane 0 went to scratch.
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr), kGlobalWord0);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + 4), kGlobalWord1);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + stride), 0u)
+      << "global lane was strided by the scratch swizzle";
+
+  // The private lane keeps the dword-interleaved layout rocm-dbgapi reads.
+  EXPECT_EQ(gpu_mem.read32(kScratchBase), kScratchWord0);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + stride), kScratchWord1);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + 4), 0u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
