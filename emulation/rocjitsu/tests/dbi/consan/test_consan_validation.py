@@ -1989,6 +1989,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-prefill", 60),
                 ("gfx950", "tp1-decode-combined", 300),
                 ("gfx1250", "tp1-decode-combined", 180),
+                ("gfx950", "clip-bf16", 300),
+                ("gfx1250", "clip-bf16", 30),
             )
             for target, workload, expected_timeout in cases:
                 with self.subTest(target=target, workload=workload):
@@ -2487,7 +2489,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", qwen_environment)
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", tp1_environment)
 
-    def test_tp1_record_replay_uses_target_bounded_validation_stride(self) -> None:
+    def test_compact_record_replay_uses_target_bounded_validation_stride(
+        self,
+    ) -> None:
         for workload_id, target, expected_stride in (
             ("tp1-prefill", "gfx942", None),
             ("tp1-prefill", "gfx950", "256"),
@@ -2497,6 +2501,10 @@ class ConSanValidationTest(unittest.TestCase):
             ("tp1-decode-combined", "gfx950", "256"),
             ("tp1-decode-combined", "gfx1201", None),
             ("tp1-decode-combined", "gfx1250", None),
+            ("clip-bf16", "gfx942", None),
+            ("clip-bf16", "gfx950", "256"),
+            ("clip-bf16", "gfx1201", None),
+            ("clip-bf16", "gfx1250", None),
         ):
             with self.subTest(workload=workload_id, target=target):
                 workload = validation.WORKLOAD_BY_ID[workload_id]

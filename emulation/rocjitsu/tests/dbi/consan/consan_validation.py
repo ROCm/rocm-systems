@@ -1504,6 +1504,10 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
         },
+        "clip-bf16": {
+            "record_replay_runtime_sample_stride": 256,
+            "run_timeout_seconds": 300,
+        },
     },
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after
