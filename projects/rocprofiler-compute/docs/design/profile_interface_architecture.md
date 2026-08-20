@@ -440,6 +440,10 @@ Implementation notes:
 
 - Profile renames each pass working directory from `out/pmc_1` to `out/{fbase}`.
 - Merge logic lives in `rocpd_data.py` (`iter_pass_rows`, `iter_workload_rows`).
+- At end of each pass, when a native counter CSV exists for a process,
+  `compact_pass_rocpd_dbs` drops unused `rocpd_info_pmc` / `rocpd_pmc_event`
+  catalog data and vacuums the database (~15 MiB → ~1 MiB per pass); analyze
+  is unchanged (kernel metadata from DB, counters from CSV).
 - Analyze still accepts legacy `results_*.csv.gz` workloads until golden fixtures
   are regenerated in a follow-up change.
 
