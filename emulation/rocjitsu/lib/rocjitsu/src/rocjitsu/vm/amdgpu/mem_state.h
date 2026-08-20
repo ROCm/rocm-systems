@@ -189,8 +189,8 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
-  bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
-  bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
+  bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
+  bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
   bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
