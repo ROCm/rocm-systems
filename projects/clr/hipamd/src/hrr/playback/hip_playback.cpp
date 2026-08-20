@@ -654,10 +654,14 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 live = ctx.regions.materialize_for(ctx, rec_ptr);
 
             if (!live && rec_ptr != 0) {
-                live = reinterpret_cast<void*>(rec_ptr);
-                // The measurement behind --warn-untranslated-args: this pointer
-                // reaches the GPU as an address belonging to another process,
-                // which is what a missing region annotation looks like.
+                // Counted and reported, but still handed to the kernel as null.
+                // Forwarding the recorded address instead would be worse than
+                // useless: the driver tends to reproduce a VA layout across
+                // runs, so a capture-time address is quite likely to be mapped
+                // in the replay process too, and the kernel would then scribble
+                // over an unrelated live buffer with nothing to show for it. A
+                // null dereference stops at the first kernel that uses the
+                // pointer, which is the failure worth having.
                 ctx.untranslated_ptr_args.fetch_add(1, std::memory_order_relaxed);
                 static std::mutex mu;
                 static std::set<std::string> warned;
@@ -668,7 +672,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 if (first)
                     fprintf(stderr,
                             "[HRR] '%s' arg[%u]: recorded 0x%llx is in no known "
-                            "allocation — passing it through unchanged\n",
+                            "allocation — passing null\n",
                             compact_kernel_name(kernel_name).c_str(), i,
                             (unsigned long long)rec_ptr);
             } else {
@@ -725,6 +729,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 if (rec_ptr < 0x10000ULL) return false;  // null/small — never a VA
                 if (!pointer_like(rec_ptr)) return false;  // packed-int false positive
                 void* live = ctx.translate_ptr(rec_ptr);
+                // Same bypassed-segment materialisation as a whole-pointer
+                // argument: a struct field pointing into memory HIP never saw
+                // resolves in no map until the segment is backed. Only an
+                // address a producer declared materialises, so a mis-flagged
+                // scalar still resolves nowhere and is left untouched below.
+                if (!live && ctx.regions_enabled)
+                    live = ctx.regions.materialize_for(ctx, rec_ptr);
                 if (!live) return false;
                 // Same region check as a whole-pointer argument: a device
                 // address embedded in a by-value struct addresses a tensor
@@ -1299,28 +1310,66 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
 }
 
 // ---- External region materialisation ----------------------------------------
+
+// Make `device` current and return the ordinal to restore afterwards, or -1 if
+// nothing was switched. An ordinal this system does not have is reported once
+// and ignored rather than failing the replay: a capture taken on an eight-GPU
+// node is still worth replaying on a smaller one, just not with the segment on
+// the device the producer named.
+static int hrr_set_region_device(int device) {
+    int count = 0;
+    if (device < 0 || hipGetDeviceCount(&count) != hipSuccess) return -1;
+    if (device >= count) {
+        static std::once_flag once;
+        std::call_once(once, [&] {
+            fprintf(stderr,
+                    "[HRR] regions: annotation names device %d but this system "
+                    "has %d — materialising on the current device instead\n",
+                    device, count);
+        });
+        return -1;
+    }
+    int cur = 0;
+    if (hipGetDevice(&cur) != hipSuccess || cur == device) return -1;
+    if (HRR_HIP_CHECK(hipSetDevice(device)) != hipSuccess) return -1;
+    return cur;
+}
+
 // A segment a producer declared but that HRR never observed. Everything the
 // archive knows about it is its base and size: no capture shim ran, so no
 // contents were recorded and no allocation event exists. Replay gives it a
 // buffer of the right size so pointers into it translate — a kernel then reads
-// fill bytes instead of dereferencing a capture-time address, which is a
-// diagnosable wrong answer rather than a fault on a foreign VA.
+// fill bytes instead of faulting on null, which is a diagnosable wrong answer
+// rather than a crash that says only that something was missing.
 hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
-                                  size_t size, void** out_live) {
+                                  size_t size, int device, void** out_live) {
     if (out_live) *out_live = nullptr;
     if (rec_base == 0 || size == 0) return hipErrorInvalidValue;
+
+    // Place the buffer on the device the producer said the segment was on.
+    // Leaving it on whatever device happens to be current would put it on the
+    // wrong GPU as soon as the recorded program used more than one: the segment
+    // is materialised by the first pointer that fails to translate, so the
+    // placement would be decided by whichever kernel touched it first rather
+    // than by where the memory actually lived.
+    const int prev = hrr_set_region_device(device);
 
     void* live = nullptr;
     hipError_t r = HRR_HIP_CHECK(hipMalloc(&live, size));
     if (r != hipSuccess) {
+        if (prev >= 0) (void)hipSetDevice(prev);
         fprintf(stderr,
-                "[HRR] regions: could not materialise segment 0x%llx (%zu bytes): "
-                "%s\n",
-                static_cast<unsigned long long>(rec_base), size,
+                "[HRR] regions: could not materialise segment 0x%llx (%zu bytes) "
+                "on device %d: %s\n",
+                static_cast<unsigned long long>(rec_base), size, device,
                 hipGetErrorString(r));
         return r;
     }
+    // Still on the segment's device: the fill runs on the null stream of the
+    // current device, which has to be the one owning the buffer.
     hrr_zero_init_alloc(ctx, live, size);
+    if (prev >= 0) (void)hipSetDevice(prev);
+
     ctx.record_alloc(rec_base, live, size);
     if (out_live) *out_live = live;
 

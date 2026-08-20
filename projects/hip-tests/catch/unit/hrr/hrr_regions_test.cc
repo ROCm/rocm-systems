@@ -168,11 +168,36 @@ constexpr int kOverrunFloats  = kFloatsPerBlock + 16384;
 // dereferenced and the capture itself is harmless.
 constexpr size_t kProbeBytes = 64 * 1024;
 constexpr size_t kProbeFarOff = 1u << 20;  // past the end of the probe alloc
+
+// A second probe, for the same bypassed-allocation case reached through a
+// pointer embedded in a by-value struct instead of passed whole. Sized apart
+// from the first so find_alloc_base can tell the two allocations apart.
+constexpr size_t kProbe2Bytes = 32 * 1024;
 }  // namespace
 
 __global__ void hrr_regions_fill(float* p, int n, float v) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) p[i] = v;
+}
+
+// Two device pointers inside one by-value argument, which is how a framework
+// hands a kernel its operands (ATen's TensorListMetadata, an OffsetCalculator,
+// any functor holding tensor bases). `known` resolves to a captured
+// allocation and is what makes the capture side tag the argument as carrying
+// embedded pointers at all; `bypassed` resolves to nothing, standing in for
+// memory allocated below the HIP API.
+struct HrrRegionsPtrPair {
+  float* known;
+  float* bypassed;
+  int    n;
+};
+
+__global__ void hrr_regions_fill_pair(HrrRegionsPtrPair a, float v) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < a.n) {
+    a.known[i]    = v;
+    a.bypassed[i] = v;
+  }
 }
 
 // ===========================================================================
@@ -225,10 +250,23 @@ TEST_CASE("Unit_HRR_Regions_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
+  // The same unresolvable pointer, this time as a field of a by-value struct.
+  // Pairing it with a pointer that does resolve is what gets the argument
+  // recorded as one carrying embedded pointers. n == 0 again.
+  char* probe2 = nullptr;
+  HIP_CHECK(hipMalloc(&probe2, kProbe2Bytes));
+  HrrRegionsPtrPair pair{block0,
+                         reinterpret_cast<float*>(probe2 + kProbeFarOff), 0};
+  hipLaunchKernelGGL(hrr_regions_fill_pair, dim3(1), dim3(threads), 0, nullptr,
+                     pair, 6.0f);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
   std::vector<float> host(kFloatsPerBlock);
   HIP_CHECK(hipMemcpy(host.data(), block0, kBlockBytes, hipMemcpyDeviceToHost));
   REQUIRE(host[0] == 4.0f);
 
+  HIP_CHECK(hipFree(probe2));
   HIP_CHECK(hipFree(probe));
   HIP_CHECK(hipFree(seg));
 }
@@ -551,6 +589,44 @@ TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[hrr]") {
     CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
     CHECK(out.find("Untranslated   : 0 ") != std::string::npos);
   }
+}
+
+// ---------------------------------------------------------------------------
+// The same bypassed segment, reached only through a pointer embedded in a
+// by-value struct. A whole-pointer argument and an embedded one are the same
+// fact about memory, so both have to materialise the segment behind them —
+// otherwise a framework that hands its kernels a struct of tensor bases, which
+// is the common case, gets none of the benefit of annotating its allocator.
+//
+// The assertion works because nothing else reaches this segment: the sidecar
+// declares only the range around the second probe, which the workload passes
+// exclusively inside the struct. A replay that ignores embedded pointers
+// materialises nothing at all.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[hrr]") {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_regions_embedded.hrr");
+  hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  const uint64_t probe2 = find_alloc_base(archive, kProbe2Bytes);
+  REQUIRE(probe2 != 0);
+
+  const uint64_t bypassed = probe2 + kProbeFarOff;
+  if (covered_by_recorded_alloc(archive, bypassed)) {
+    WARN("The driver placed an allocation over the second probe address; "
+         "skipping the embedded-pointer assertions for this run");
+    return;
+  }
+
+  install_sidecar(archive, {
+      region_rec(HRR_REGION_ADD, HRR_REGION_SEGMENT, bypassed - 4096,
+                 64 * 1024),
+  });
+
+  auto [rc, out] = hrr_playback_merged(archive, "--warn-untranslated-args");
+  INFO("Embedded-pointer replay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

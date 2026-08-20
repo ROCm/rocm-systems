@@ -239,8 +239,7 @@ struct PlaybackContext {
     // Kernel-argument pointers that resolved in no map at all — neither an
     // allocation, a VMM reservation, nor an annotated region. A non-zero count
     // is the measurement that says a capture needs region annotations: those
-    // pointers reach the GPU as capture-time addresses. See
-    // --warn-untranslated-args.
+    // pointers reach the GPU as null. See --warn-untranslated-args.
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
@@ -451,11 +450,12 @@ private:
 // Called by RegionMap when a producer declares a segment whose base resolves in
 // no map, which means the allocation bypassed the HIP dispatch table (a direct
 // HSA allocation, a foreign VMM pool, memory imported from another process).
-// Allocates a live buffer of the recorded size, applies the replay fill byte —
-// nothing in the archive can say what the contents were — and registers it in
-// alloc_map so ordinary pointer translation resolves into it.
+// Allocates a live buffer of the recorded size on `device` — the ordinal the
+// producer recorded the segment on — applies the replay fill byte (nothing in
+// the archive can say what the contents were) and registers it in alloc_map so
+// ordinary pointer translation resolves into it.
 hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
-                                  size_t size, void** out_live);
+                                  size_t size, int device, void** out_live);
 
 // Release a buffer created by hrr_materialize_region and drop its alloc_map
 // entry. `live` is the pointer that call returned.

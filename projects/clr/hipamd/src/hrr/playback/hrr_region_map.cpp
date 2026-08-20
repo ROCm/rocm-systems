@@ -101,15 +101,17 @@ void RegionMap::check_clock_against(uint64_t first_event_ns, uint64_t last_event
 // ---------------------------------------------------------------------------
 
 // Tightest enclosing entry: the largest base <= addr whose extent covers addr.
-static bool enclosing(const std::map<uint64_t, uint64_t>& m, uint64_t addr,
-                      uint64_t* base, uint64_t* size) {
+template <typename Extent>
+static bool enclosing(const std::map<uint64_t, Extent>& m, uint64_t addr,
+                      uint64_t* base, uint64_t* size, int* device = nullptr) {
     if (m.empty()) return false;
     auto it = m.upper_bound(addr);
     if (it == m.begin()) return false;
     --it;
-    if (addr >= it->first + it->second) return false;
-    if (base) *base = it->first;
-    if (size) *size = it->second;
+    if (addr >= it->first + it->second.size) return false;
+    if (base)   *base   = it->first;
+    if (size)   *size   = it->second.size;
+    if (device) *device = static_cast<int>(it->second.device);
     return true;
 }
 
@@ -120,7 +122,7 @@ void RegionMap::apply(PlaybackContext& ctx, const hrr_region_rec& r) {
 
     auto& live_set = (r.kind == HRR_REGION_BLOCK) ? blocks_ : segments_;
     if (r.op == HRR_REGION_ADD) {
-        live_set[r.base] = r.size;
+        live_set[r.base] = Extent{r.size, r.device};
         return;
     }
     live_set.erase(r.base);
@@ -164,14 +166,15 @@ void RegionMap::rewind() {
 
 void* RegionMap::materialize_for(PlaybackContext& ctx, uint64_t rec_addr) {
     uint64_t base = 0, size = 0;
-    if (!enclosing(segments_, rec_addr, &base, &size)) return nullptr;
+    int device = 0;
+    if (!enclosing(segments_, rec_addr, &base, &size, &device)) return nullptr;
 
     auto it = materialized_.find(base);
     if (it == materialized_.end()) {
         if (materialize_failed_.count(base)) return nullptr;
         void* live = nullptr;
-        if (hrr_materialize_region(ctx, base, static_cast<size_t>(size), &live)
-                != hipSuccess) {
+        if (hrr_materialize_region(ctx, base, static_cast<size_t>(size), device,
+                                   &live) != hipSuccess) {
             materialize_failed_.insert(base);
             return nullptr;
         }
