@@ -186,19 +186,46 @@ def test_fingerprint_inputs_cover_every_build_input():
         assert required in input_names, f"{required} is not a fingerprint input"
 
 
+def test_required_input_paths_cover_every_build_input():
+    """Every file the build consumes is a required input."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+
+    declared = cmake_declared_sources()
+    assert declared, (
+        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        "the build file changed shape and this parser needs updating"
+    )
+
+    required_names = {p.name for p in torch_trace_fingerprint.required_input_paths()}
+    missing = declared - required_names
+    assert not missing, f"build inputs absent from the required list: {sorted(missing)}"
+
+    for required in (
+        "CMakeLists.txt",
+        "synchronized.hpp",
+        "gsl_assert.h",
+    ):
+        assert required in required_names, f"{required} is not a required input"
+
+
 def test_required_input_paths_include_missing_files(tmp_path, monkeypatch):
-    """``required_input_paths()`` includes collector sources that are not on disk."""
+    """``required_input_paths()`` includes collector files that are not on disk."""
     monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", tmp_path)
     monkeypatch.setattr(
         torch_trace_fingerprint, "_SO_BUILDFILE", tmp_path / "CMakeLists.txt"
     )
     names = {path.name for path in torch_trace_fingerprint.required_input_paths()}
-    assert "torch_trace_collector.cpp" in names
-    assert "torch_trace_collector_module.cpp" in names
+    for name in torch_trace_fingerprint._COLLECTOR_SOURCE_NAMES:
+        assert name in names
+    for name in torch_trace_fingerprint._COLLECTOR_HEADER_NAMES:
+        assert name in names
     assert "CMakeLists.txt" in names
     assert "synchronized.hpp" in names
     assert "gsl_assert.h" in names
     assert not (tmp_path / "torch_trace_collector.cpp").exists()
+    assert not (tmp_path / "leaf_context.h").exists()
 
 
 def test_required_input_paths_exist_in_the_source_tree():
@@ -517,6 +544,9 @@ def test_runtime_build_skips_when_a_required_source_is_absent(
     joined = " ".join(msg for _, msg in diagnostics)
     assert "torch_trace_collector.cpp" in joined, (
         f"absent collector source not reported; saw {diagnostics!r}"
+    )
+    assert "leaf_context.h" in joined, (
+        f"absent collector header not reported; saw {diagnostics!r}"
     )
 
 
