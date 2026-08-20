@@ -1,4 +1,5 @@
 {
+    "_comment": "Validation rules for gfx1250. VCN hardware-accelerated JPEG decode does not dispatch HIP compute kernels, so kernel count checks are relaxed compared to the default validation-rules.json.",
     "required_tables": [
         {
             "name": "top_kernels",
@@ -16,18 +17,11 @@
                     "error_message": "Found API calls with null function names",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL"
-                },
-                {
-                    "comparison": "greater_than",
-                    "description": "Check that we have some kernel calls",
-                    "error_message": "No kernel calls found in summary",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM top_kernels"
                 }
             ]
         },
         {
-            "min_rows": 50,
+            "min_rows": 0,
             "name": "kernels",
             "required_columns": [
                 "id",
@@ -45,13 +39,6 @@
                     "error_message": "Found kernels with null function names",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM kernels WHERE name IS NULL"
-                },
-                {
-                    "comparison": "greater_than",
-                    "description": "Check that we have kernel entries",
-                    "error_message": "No kernel entries found",
-                    "expected_result": 50,
-                    "query": "SELECT COUNT(*) as count FROM kernels"
                 },
                 {
                     "comparison": "equals",
