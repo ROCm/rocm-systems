@@ -68,7 +68,7 @@ void reset_state()
     (void)roctx_range_intercept::stop_recording();
 }
 
-class RoctxRecordFnTest : public ::testing::Test
+class TorchTraceCollectorTest : public ::testing::Test
 {
 protected:
     void SetUp() override { reset_state(); }
@@ -76,12 +76,12 @@ protected:
     void TearDown() override { reset_state(); }
 };
 
-class RoctxRecordFnRealOpsTest : public RoctxRecordFnTest
+class TorchTraceCollectorRealOpsTest : public TorchTraceCollectorTest
 {
 protected:
     void SetUp() override
     {
-        RoctxRecordFnTest::SetUp();
+        TorchTraceCollectorTest::SetUp();
         if (!at::hasCUDA())
         {
             GTEST_SKIP() << "ATen built without CUDA support";
@@ -244,7 +244,7 @@ TEST(RoctxRangeIntercept, RecordsPushA)
     EXPECT_EQ(recorded.front(), "probe");
 }
 
-TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
+TEST_F(TorchTraceCollectorTest, SaveThenConsumeReturnsSavedStack)
 {
     const std::vector<StackEntry> stack = {{"A", "a"}, {"B", "b"}};
     snapshots().save(42, kThreadA, stack);
@@ -260,7 +260,7 @@ TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
     EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
 }
 
-TEST_F(RoctxRecordFnTest, ConsumeUnknownReturnsFalse)
+TEST_F(TorchTraceCollectorTest, ConsumeUnknownReturnsFalse)
 {
     std::vector<StackEntry> out;
     EXPECT_FALSE(snapshots().consume(999, kThreadA, &out));
@@ -268,7 +268,7 @@ TEST_F(RoctxRecordFnTest, ConsumeUnknownReturnsFalse)
     EXPECT_EQ(stats().snapshots_consumed.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnTest, ConsumeIsOneShot)
+TEST_F(TorchTraceCollectorTest, ConsumeIsOneShot)
 {
     snapshots().save(7, kThreadA, std::vector<StackEntry>{{"X", "x"}});
 
@@ -278,7 +278,7 @@ TEST_F(RoctxRecordFnTest, ConsumeIsOneShot)
     EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
 }
 
-TEST_F(RoctxRecordFnTest, SaveTwiceReturnsLatest)
+TEST_F(TorchTraceCollectorTest, SaveTwiceReturnsLatest)
 {
     snapshots().save(1, kThreadA, std::vector<StackEntry>{{"first", "f"}});
     snapshots().save(1, kThreadA, std::vector<StackEntry>{{"second", "s"}});
@@ -291,7 +291,7 @@ TEST_F(RoctxRecordFnTest, SaveTwiceReturnsLatest)
     EXPECT_EQ(stats().snapshots_overwritten.load(), 1u);
 }
 
-TEST_F(RoctxRecordFnTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
+TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
 {
     // Concurrent forward passes both count from zero, so one thread's snapshot
     // must not displace another's under the same sequence number.
@@ -317,7 +317,7 @@ TEST_F(RoctxRecordFnTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
     EXPECT_EQ(snapshots().pending(), 0u);
 }
 
-TEST_F(RoctxRecordFnTest, EvictsOldestPastSoftCap)
+TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
 {
     const auto seq_nrs = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
@@ -334,7 +334,7 @@ TEST_F(RoctxRecordFnTest, EvictsOldestPastSoftCap)
     EXPECT_TRUE(snapshots().consume(seq_nrs.back(), kThreadA, &out));
 }
 
-TEST_F(RoctxRecordFnTest, EvictionIsPerShard)
+TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
     const auto seq_nrs     = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     const auto other_shard = seq_nrs_on_shard(1, kThreadA, 1);
@@ -352,7 +352,7 @@ TEST_F(RoctxRecordFnTest, EvictionIsPerShard)
     EXPECT_EQ(out[0].marker, "shard1");
 }
 
-TEST_F(RoctxRecordFnTest, ConcurrentOverlappingSeqNrsAreIsolated)
+TEST_F(TorchTraceCollectorTest, ConcurrentOverlappingSeqNrsAreIsolated)
 {
     // Every thread walks the same sequence numbers, mirroring a thread-local
     // counter. Each must read back its own snapshot.
@@ -397,7 +397,7 @@ TEST_F(RoctxRecordFnTest, ConcurrentOverlappingSeqNrsAreIsolated)
     EXPECT_EQ(snapshots().pending(), 0u);
 }
 
-TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
+TEST_F(TorchTraceCollectorTest, PushPopAreBalanced)
 {
     constexpr int n = 100;
     for (int i = 0; i < n; ++i)
@@ -417,7 +417,7 @@ TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
     EXPECT_EQ(stats().user_scope_pops.load(), static_cast<std::uint64_t>(n));
 }
 
-TEST_F(RoctxRecordFnTest, PopOnEmptyBumpsCallbackErrors)
+TEST_F(TorchTraceCollectorTest, PopOnEmptyBumpsCallbackErrors)
 {
     ASSERT_TRUE(thread_state().stack.empty());
     pop_user_scope();
@@ -426,7 +426,7 @@ TEST_F(RoctxRecordFnTest, PopOnEmptyBumpsCallbackErrors)
     EXPECT_EQ(stats().callback_errors.load(), 1u);
 }
 
-TEST_F(RoctxRecordFnTest, DeepNestingPreservesOrder)
+TEST_F(TorchTraceCollectorTest, DeepNestingPreservesOrder)
 {
     constexpr int depth = 256;
     for (int i = 0; i < depth; ++i)
@@ -443,14 +443,14 @@ TEST_F(RoctxRecordFnTest, DeepNestingPreservesOrder)
     EXPECT_TRUE(thread_state().stack.empty());
 }
 
-TEST_F(RoctxRecordFnTest, InstallReturnsValidHandle)
+TEST_F(TorchTraceCollectorTest, InstallReturnsValidHandle)
 {
     const auto handle = install();
     EXPECT_NE(handle, static_cast<std::int64_t>(at::INVALID_CALLBACK_HANDLE));
     EXPECT_TRUE(is_installed());
 }
 
-TEST_F(RoctxRecordFnTest, InstallIsIdempotent)
+TEST_F(TorchTraceCollectorTest, InstallIsIdempotent)
 {
     const auto first  = install();
     const auto second = install();
@@ -458,7 +458,7 @@ TEST_F(RoctxRecordFnTest, InstallIsIdempotent)
     EXPECT_TRUE(is_installed());
 }
 
-TEST_F(RoctxRecordFnTest, UninstallClearsState)
+TEST_F(TorchTraceCollectorTest, UninstallClearsState)
 {
     install();
     ASSERT_TRUE(is_installed());
@@ -470,14 +470,14 @@ TEST_F(RoctxRecordFnTest, UninstallClearsState)
     EXPECT_EQ(handle, at::INVALID_CALLBACK_HANDLE);
 }
 
-TEST_F(RoctxRecordFnTest, UninstallWhenNotInstalledIsNoOp)
+TEST_F(TorchTraceCollectorTest, UninstallWhenNotInstalledIsNoOp)
 {
     ASSERT_FALSE(is_installed());
     uninstall();
     EXPECT_FALSE(is_installed());
 }
 
-TEST_F(RoctxRecordFnTest, InstallAfterUninstallReinstalls)
+TEST_F(TorchTraceCollectorTest, InstallAfterUninstallReinstalls)
 {
     install();
     uninstall();
@@ -487,7 +487,7 @@ TEST_F(RoctxRecordFnTest, InstallAfterUninstallReinstalls)
     EXPECT_TRUE(is_installed());
 }
 
-TEST_F(RoctxRecordFnTest, EmptyParentChainIsNoOp)
+TEST_F(TorchTraceCollectorTest, EmptyParentChainIsNoOp)
 {
     ASSERT_TRUE(thread_state().stack.empty());
     EXPECT_EQ(apply_userscope_overlay(), 0u);
@@ -495,7 +495,7 @@ TEST_F(RoctxRecordFnTest, EmptyParentChainIsNoOp)
     EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnTest, CopiesParentChain)
+TEST_F(TorchTraceCollectorTest, CopiesParentChain)
 {
     auto info = std::make_shared<RoctxUserScopeChain>(
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
@@ -511,7 +511,7 @@ TEST_F(RoctxRecordFnTest, CopiesParentChain)
     EXPECT_EQ(stats().user_scope_inherits.load(), 1u);
 }
 
-TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
+TEST_F(TorchTraceCollectorTest, DedupesIdenticalPrefix)
 {
     auto info = std::make_shared<RoctxUserScopeChain>(
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
@@ -525,7 +525,7 @@ TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
     EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
+TEST_F(TorchTraceCollectorRealOpsTest, FwdBwdCounterSanity)
 {
     install();
 
@@ -543,7 +543,7 @@ TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
     EXPECT_LE(snapshots().pending(), 4u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, LeafLabelsAndUserScope)
+TEST_F(TorchTraceCollectorRealOpsTest, LeafLabelsAndUserScope)
 {
     install();
     roctx_range_intercept::start_recording();
@@ -615,7 +615,7 @@ TEST_F(RoctxRecordFnRealOpsTest, LeafLabelsAndUserScope)
     EXPECT_GT(stats().user_scope_inherits.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
+TEST_F(TorchTraceCollectorRealOpsTest, ManyStepsCorrelation)
 {
     install();
     constexpr int n_steps = 16;
@@ -634,7 +634,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
     EXPECT_EQ(stats().callback_errors.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
+TEST_F(TorchTraceCollectorRealOpsTest, DetachedForwardBounded)
 {
     install();
     for (int i = 0; i < 50; ++i)
@@ -651,7 +651,7 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
     EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
+TEST_F(TorchTraceCollectorRealOpsTest, ConcurrentThreadsScopedMarkers)
 {
     install();
     roctx_range_intercept::start_recording();
