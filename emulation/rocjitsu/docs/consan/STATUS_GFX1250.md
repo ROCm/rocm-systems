@@ -53,7 +53,7 @@ preserve an earlier green claim.
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
 | **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Current strict clean row: all four exact host-reference oracles in 73.87 seconds; 24/24 accesses, 8/8 barriers, and no Record/Replay saturation; fresh paired/fault evidence remains | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current strict clean row: all four exact host-reference oracles in 117.90 seconds; 24/24 accesses and 4/4 barriers; prior paired 1.29x retained |
 | **P4 hip-moi WMMA attention** | 🟩 Current strict clean row: both exact oracles in 15.62 seconds with complete 18/18 access coverage; paired 1.78x retained | 🟩 Current strict clean row: both exact oracles in 16.87 seconds with 18/18 accesses, 8/8 barriers, and zero diagnostics; paired 1.17x retained | 🟩 Current strict clean row: both exact oracles in 15.86 seconds with 18/18 accesses and 8/8 applicable barriers; paired 1.15x retained | 🟩 Current strict clean row: both exact oracles in 21.52 seconds with 18/18 accesses and 4/4 barriers; paired 1.17x retained |
-| **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
+| **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.04x retained | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 Jakub cooperative matmul** | 🟩 Three exact arithmetic oracles; clean 32/32 accesses; reviewed exact-one drop breaks the skewed oracle; paired 1.139x; detector gap tracked by `bd-2sjm.1` | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 2.579x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 applicable barrier members; stride-1/offset-0 fault qualification emits a diagnostic and breaks the skewed oracle; paired 1.174x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 4/4 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 1.145x |
 
@@ -76,6 +76,20 @@ for Record/Replay and Sampled, and 4/4 barriers for Inline Shadow.  The
 Record/Replay clean diagnostic contract observes zero diagnostics.  The hook
 SHA-256 is
 `d0b15dd38c8e4da3a5195e316cda72b3d875984c40122af862b8902e1a9aa935`.
+This clean refresh preserves the previously accepted paired-overhead and fault
+evidence rather than replacing it.
+
+### 2026-08-20 Stream-K arrival clean revalidation
+
+`rebase-20260820-gfx1250-streamk-clean-170262c` runs the baseline and all four
+strict clean profiles through RocJitsu's native gfx1250 B0 simulator at source
+revision `170262caab`.  All five rows pass the exact arrival-counter and WMMA
+partial-sum oracle.  Every instrumented profile is analysis-, static-, and
+dynamic-complete with zero incomplete encounters: 4/4 accesses for every
+engine; 8/8 barriers, 10/10 atomics, and 16/16 fences for Record/Replay; 8/8
+barriers and 10/10 atomics for Sampled; and 4/4 barriers plus 10/10 atomics for
+Inline Shadow.  Record/Replay emits zero diagnostics.  The hook SHA-256 is
+`f2c2da60da4e3e3c60bf778b370de3f4c34f9cab59115ca3eceeb0f9c4141208`.
 This clean refresh preserves the previously accepted paired-overhead and fault
 evidence rather than replacing it.
 
