@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elf_test_utils import patch_hip_fatbin_to_nobits
+from elf_test_utils import patch_hip_fatbin_size, patch_hip_fatbin_to_nobits
 from rocm_kpack.artifact_utils import (
     read_artifact_manifest,
     write_artifact_manifest,
@@ -21,6 +21,9 @@ from rocm_kpack.artifact_utils import (
     extract_architecture_from_target,
 )
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.elf.surgery import ElfSurgery
+from rocm_kpack.kpack_transform import kpack_offload_binary
 
 
 class TestArtifactManifest:
@@ -338,6 +341,79 @@ class TestIsFatBinary:
         assert (
             is_fat_binary(debug_copy, toolchain) is False
         ), "SHT_NOBITS .hip_fatbin must not be treated as device code"
+
+    def test_is_fat_binary_elf_already_kpack_processed(
+        self, test_assets_dir, tmp_path, toolchain
+    ):
+        """An already-split ELF is not a fat binary, even while PROGBITS.
+
+        kpack_offload_binary() leaves the .hip_fatbin section header in place,
+        so a second splitter pass over an already-split tree used to re-enter
+        the transform and die with "Section '.rocm_kpack_ref' already exists".
+
+        The fixture pins the case that the SHT_NOBITS guard cannot catch: a
+        .hip_fatbin smaller than one page makes conservative_zero_page()
+        decline (no full pages to remove), so the section stays SHT_PROGBITS
+        after processing and only the .rocm_kpack_ref marker distinguishes it.
+        """
+        source = patch_hip_fatbin_size(
+            test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe",
+            tmp_path / "small_fatbin.exe",
+            new_size=3000,
+        )
+        assert is_fat_binary(source, toolchain) is True
+
+        processed = tmp_path / "small_fatbin_processed.exe"
+        kpack_offload_binary(
+            input_path=source,
+            output_path=processed,
+            kpack_search_paths=[".kpack/test_@GFXARCH@.kpack"],
+            kernel_name="lib/small_fatbin.exe",
+        )
+
+        surgery = ElfSurgery.load(processed)
+        assert surgery.find_section(".rocm_kpack_ref") is not None
+        fatbin = surgery.find_section(".hip_fatbin")
+        assert fatbin is not None, ".hip_fatbin header is expected to survive"
+        assert (
+            not fatbin.header.is_nobits
+        ), "fixture must keep .hip_fatbin PROGBITS, else the NOBITS guard masks this"
+
+        assert (
+            is_fat_binary(processed, toolchain) is False
+        ), "a binary carrying .rocm_kpack_ref has nothing left to split"
+
+    def test_is_fat_binary_coff_already_kpack_processed(
+        self, test_assets_dir, tmp_path, toolchain
+    ):
+        """An already-split PE/COFF binary is not a fat binary.
+
+        The COFF marker is the 8-char name .kpackrf. Nothing zero-pages
+        .hip_fat on this path, so re-splitting a PE tree always failed.
+        """
+        source = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.dll"
+        )
+        assert source.exists(), f"Test asset not found: {source}"
+        assert is_fat_binary(source, toolchain) is True
+
+        processed = tmp_path / "test_kernel_single_processed.dll"
+        kpack_offload_binary(
+            input_path=source,
+            output_path=processed,
+            kpack_search_paths=[".kpack/test_@GFXARCH@.kpack"],
+            kernel_name="bin/test_kernel_single.dll",
+        )
+
+        surgery = CoffSurgery.load(processed)
+        assert surgery.find_section(".kpackrf") is not None
+        assert (
+            surgery.find_section(".hip_fat") is not None
+        ), ".hip_fat header is expected to survive"
+
+        assert (
+            is_fat_binary(processed, toolchain) is False
+        ), "a binary carrying .kpackrf has nothing left to split"
 
 
 class TestExtractArchitectureFromTarget:
