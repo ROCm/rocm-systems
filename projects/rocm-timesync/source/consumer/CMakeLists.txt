@@ -7,6 +7,7 @@ set(ROCM_TIMESYNC_SOURCES
 )
 
 find_package(yaml-cpp REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 if(BUILD_INFLUXDB)
   list(APPEND ROCM_TIMESYNC_SOURCES influx_client.cpp)
@@ -17,18 +18,17 @@ function(rocm_timesync_configure_target target_name)
     PRIVATE
       rocm-timesync-core-headers
       yaml-cpp
+      nlohmann_json::nlohmann_json
     PUBLIC
       rocm-timesync-headers
   )
 
   if(BUILD_INFLUXDB)
     find_package(CURL REQUIRED)
-    find_package(nlohmann_json REQUIRED)
 
     target_link_libraries(${target_name}
       PRIVATE
         CURL::libcurl
-        nlohmann_json::nlohmann_json
     )
 
     target_compile_definitions(${target_name}

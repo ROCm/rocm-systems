@@ -8,8 +8,54 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
 namespace rocm_timesync
 {
+
+struct db_stats
+{
+    uint64_t writes = 0;
+    uint64_t lookup_queries = 0;
+    uint64_t lookup_exact = 0;
+    uint64_t lookup_interpolated = 0;
+    uint64_t lookup_miss_too_old = 0;
+    uint64_t lookup_miss_too_new = 0;
+    uint64_t lookup_extrapolated_backward = 0;
+    uint64_t lookup_extrapolated_forward = 0;
+    uint64_t lookup_error = 0;
+
+    std::unordered_map<std::string, uint64_t> extra;
+};
+
+struct timesync_stats {
+    std::unordered_map<std::string, db_stats> dbs;
+};
+
+inline void to_json(json& j, const db_stats& s)
+{
+    j = {
+        {"writes", s.writes},
+        {"lookup_queries", s.lookup_queries},
+        {"lookup_exact", s.lookup_exact},
+        {"lookup_interpolated", s.lookup_interpolated},
+        {"lookup_miss_too_old", s.lookup_miss_too_old},
+        {"lookup_miss_too_new", s.lookup_miss_too_new},
+        {"lookup_extrapolated_backward", s.lookup_extrapolated_backward},
+        {"lookup_extrapolated_forward", s.lookup_extrapolated_forward},
+        {"lookup_error", s.lookup_error},
+        {"extra", s.extra}
+    };
+}
+
+inline void to_json(json& j, const timesync_stats& s)
+{
+    j = json::object();
+
+    for (const auto& [name, stats] : s.dbs)
+        j[name] = stats;
+}
 
 class timesync_db
 {
@@ -29,9 +75,9 @@ public:
         Interpolated,
         ExtrapolatedBackward,
         ExtrapolatedForward,
-        ErrTooOld,
-        ErrTooNew,
-        ErrUnknown
+        MissTooOld,
+        MissTooNew,
+        Error
     };
 
     static constexpr bool IsSuccess(LookupResult r)
@@ -50,29 +96,31 @@ public:
     virtual bool write_batch(
         const std::vector<entry_t>& entries)
     {
-        for (const auto& entry : entries)
+        for (const auto& entry : entries) {
             if (!write(entry)) return false;
+            ++stats_.writes;
+        }
         return true;
     }
 
-    virtual LookupResult lookup(
-        uint32_t gpu_id,
-        uint64_t gpu_timestamp,
-        uint64_t& system_timestamp)
+    virtual LookupResult lookup(uint32_t gpu_id, uint64_t gpu_timestamp, uint64_t& system_timestamp)
     {
         timesync_point before, after;
+
+        // record the query
+        ++stats_.lookup_queries;
 
         //
         // We must have at least one point before.
         //
         if (!lookup_before(gpu_id, gpu_timestamp, before))
-            return LookupResult::ErrTooOld;
+            return record_result(LookupResult::MissTooOld);
 
         //
         // We must have at least one point after.
         //
         if (!lookup_after(gpu_id, gpu_timestamp, after))
-            return LookupResult::ErrTooNew;
+            return record_result(LookupResult::MissTooNew);
 
         //
         // Exact match.
@@ -80,52 +128,35 @@ public:
         if (before.gpu_timestamp == after.gpu_timestamp)
         {
             system_timestamp = before.system_timestamp;
-            return LookupResult::Exact;
+            return record_result(LookupResult::Exact);
         }
 
         //
         // Linear interpolation.
         //
         system_timestamp = linear_interpolation(gpu_timestamp, before, after);
-        return LookupResult::Interpolated;
+        return record_result(LookupResult::Interpolated);
     }
 
-    virtual LookupResult lookup_or_extrapolate(
-        uint32_t gpu_id,
-        uint64_t gpu_timestamp,
-        uint64_t& system_timestamp)
+    virtual LookupResult extrapolate(LookupResult lookup_res, uint32_t gpu_id, uint64_t gpu_timestamp, uint64_t& system_timestamp)
     {
         //
-        // lookup() will attempt to find the tightest range of timestamps
-        // surrounding the 'gpu_timestamp' and interpolate based on them.
-        //
-        auto res = lookup(gpu_id, gpu_timestamp, system_timestamp);
-        if (IsSuccess(res))
-            return res;
-
-        if (res == LookupResult::ErrTooOld) {
-            std::cerr << "WARNING: received request to translate point that is older than anything we have tracked" << std::endl;
-        }
-
-        //
         // We must have at least two points to extrapolate from.
-        // Either choose the oldest or newest 2, depending on whether
-        // we're extrapolating backwards or forwards
         //
         std::vector<timesync_point> pair;
 
-        if (res == LookupResult::ErrTooOld) {
+        if (lookup_res == LookupResult::MissTooOld) {
             if (!lookup_oldest_k(gpu_id, 2, pair))
-                return LookupResult::ErrUnknown;
-        } else if (res == LookupResult::ErrTooNew) {
+                return record_result(LookupResult::Error);
+        } else if (lookup_res == LookupResult::MissTooNew) {
             if (!lookup_newest_k(gpu_id, 2, pair))
-                return LookupResult::ErrUnknown;
+                return record_result(LookupResult::Error);
         } else {
-            return res;
+            return record_result(LookupResult::Error);
         }
 
         if (pair.size() != 2)
-            return LookupResult::ErrUnknown;
+            return record_result(LookupResult::Error);
 
         auto& p0 = pair[0];
         auto& p1 = pair[1];
@@ -142,23 +173,61 @@ public:
         //
         if (gpu_timestamp >= p0.gpu_timestamp && gpu_timestamp <= p1.gpu_timestamp) {
             system_timestamp = linear_interpolation(gpu_timestamp, p0, p1);
-            return LookupResult::Interpolated;
+            return record_result(LookupResult::Interpolated);
         }
 
         //
         // Linear extrapolation.
         //
         system_timestamp = linear_extrapolation(gpu_timestamp, p0, p1);
-        return (res == LookupResult::ErrTooOld) ? LookupResult::ExtrapolatedBackward : LookupResult::ExtrapolatedForward;
+        return (lookup_res == LookupResult::MissTooOld) ?
+            record_result(LookupResult::ExtrapolatedBackward) :
+            record_result(LookupResult::ExtrapolatedForward);
+    }
+
+    LookupResult lookup_or_extrapolate(uint32_t gpu_id, uint64_t gpu_timestamp, uint64_t& system_timestamp)
+    {
+        //
+        // lookup() will attempt to find the tightest range of timestamps
+        // surrounding the 'gpu_timestamp' and interpolate based on them.
+        //
+        auto res = lookup(gpu_id, gpu_timestamp, system_timestamp);
+        if (IsSuccess(res))
+            return res;
+
+        if (res == LookupResult::MissTooOld) {
+            std::cerr << "WARNING: received request to translate point that is older than anything we have tracked" << std::endl;
+        }
+
+        //
+        // extrapolate() will use the 2 nearest known timestamps as
+        // references and extrapolate to 'gpu_timestamp' based on them.
+        //
+        return extrapolate(res, gpu_id, gpu_timestamp, system_timestamp);
+    }
+
+    virtual timesync_stats stats() const
+    {
+        return {
+            { { "db", stats_ } }
+        };
     }
 
     virtual bool lookup_oldest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points) = 0;
     virtual bool lookup_newest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points) = 0;
 
-private:
-    virtual bool lookup_before(uint32_t gpu_id, uint64_t gpu_timestamp, timesync_point& point) = 0;
-    virtual bool lookup_after(uint32_t gpu_id, uint64_t gpu_timestamp, timesync_point& point) = 0;
+protected:
+    void record_write()
+    {
+        ++stats_.writes;
+    }
 
+    void record_write_batch(uint64_t batch_size)
+    {
+        stats_.writes += batch_size;
+    }
+
+private:
     uint64_t linear_interpolation(uint64_t gpu_timestamp, timesync_point& before, timesync_point& after)
     {
         const uint64_t gpu_delta = gpu_timestamp - before.gpu_timestamp;
@@ -178,6 +247,42 @@ private:
 
         return p1.system_timestamp + static_cast<int64_t>(scaled / gpu_range);
     }
+
+    LookupResult record_result(LookupResult res)
+    {
+        // record how the query was handled
+        switch (res) {
+        case LookupResult::Exact:
+            ++stats_.lookup_exact;
+            break;
+        case LookupResult::Interpolated:
+            ++stats_.lookup_interpolated;
+            break;
+        case LookupResult::ExtrapolatedBackward:
+            ++stats_.lookup_extrapolated_backward;
+            break;
+        case LookupResult::ExtrapolatedForward:
+            ++stats_.lookup_extrapolated_forward;
+            break;
+        case LookupResult::MissTooOld:
+            ++stats_.lookup_miss_too_old;
+            break;
+        case LookupResult::MissTooNew:
+            ++stats_.lookup_miss_too_new;
+            break;
+        case LookupResult::Error:
+        default:
+            ++stats_.lookup_error;
+            break;
+        }
+
+        return res;
+    }
+
+    virtual bool lookup_before(uint32_t gpu_id, uint64_t gpu_timestamp, timesync_point& point) = 0;
+    virtual bool lookup_after(uint32_t gpu_id, uint64_t gpu_timestamp, timesync_point& point) = 0;
+
+    struct db_stats stats_;
 };
 
 class cached_timesync_db : public timesync_db
@@ -203,23 +308,26 @@ public:
 
     LookupResult lookup(uint32_t gpu_id, uint64_t gpu_timestamp, uint64_t& system_timestamp) override
     {
-        ++cache_queries_;
         auto ret = cache_->lookup(gpu_id, gpu_timestamp, system_timestamp);
         if (IsSuccess(ret))
             return ret;
-        ++cache_misses_;
 
         // there is no point in querying the backing store if we missed on too new of a request
-        if (ret == LookupResult::ErrTooNew)
+        if (ret == LookupResult::MissTooNew)
             return ret;
 
-        ++backing_queries_;
-        ret = backing_->lookup(gpu_id, gpu_timestamp, system_timestamp);
-        if (IsSuccess(ret))
-            return ret;
-        ++backing_misses_;
+        return backing_->lookup(gpu_id, gpu_timestamp, system_timestamp);
+    }
 
-        return ret;
+    LookupResult extrapolate(LookupResult lookup_res, uint32_t gpu_id, uint64_t gpu_timestamp, uint64_t& system_timestamp) override
+    {
+        // use backing for old timestamps; use cache for new timestamps
+        if (lookup_res == LookupResult::MissTooOld)
+            return backing_->extrapolate(lookup_res, gpu_id, gpu_timestamp, system_timestamp);
+        else if (lookup_res == LookupResult::MissTooNew)
+            return cache_->extrapolate(lookup_res, gpu_id, gpu_timestamp, system_timestamp);
+        else
+            return LookupResult::Error;
     }
 
     bool lookup_oldest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points) override
@@ -232,6 +340,16 @@ public:
         if (cache_->lookup_newest_k(gpu_id, k, points))
             return true;
         return backing_->lookup_newest_k(gpu_id, k, points);
+    }
+
+    virtual timesync_stats stats() const override
+    {
+        return {
+            {
+                { "cache", cache_->stats().dbs.at("db") },
+                { "db", backing_->stats().dbs.at("db") }
+            }
+        };
     }
 
 private:
@@ -249,11 +367,6 @@ private:
 
     std::unique_ptr<timesync_db> cache_;
     std::unique_ptr<timesync_db> backing_;
-
-    uint64_t cache_queries_ = 0;
-    uint64_t cache_misses_ = 0;
-    uint64_t backing_queries_ = 0;
-    uint64_t backing_misses_ = 0;
 };
 
 } // namespace rocm_timesync

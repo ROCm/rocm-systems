@@ -3,6 +3,7 @@
 #include <deque>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include <cassert>
 #include <variant>
 #include <unistd.h>
@@ -10,6 +11,8 @@
 #ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
 #include <curl/curl.h>
 #endif
+
+#include <nlohmann/json.hpp>
 
 #include <rocm-timesync/rocm_timesync.hpp>
 #include <core/ipc.hpp>
@@ -43,6 +46,7 @@ static ts_config_t cfg = {};
 static ipc::channel_t* channel = nullptr;
 static std::atomic<bool> stop_requested = false;
 static timesync_db* db_client = nullptr;
+static std::string stats_f = {};
 
 static int _db_init()
 {
@@ -115,6 +119,9 @@ int timesync_client_init(const ts_client_config_t& ccfg)
 
     cfg = LoadConfig(fname);
 
+    // remember stats file
+    stats_f = ccfg.stats_file;
+
     // create db connection
     status = _db_init();
     if (status != 0)
@@ -168,6 +175,12 @@ int timesync_client_deinit()
 #ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
     curl_global_cleanup();
 #endif
+
+    if (!stats_f.empty()) {
+        std::ofstream outFile(stats_f);
+        nlohmann::json j = db_client->stats();
+        outFile << j.dump(2);
+    }
 
     delete db_client;
     db_client = nullptr;

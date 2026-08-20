@@ -104,9 +104,14 @@ influx_client::write_batch(const std::vector<entry_t>& entries)
 
     curl_easy_cleanup(curl);
 
-    return (rc == CURLE_OK &&
+    auto ret = (rc == CURLE_OK &&
             http_code >= 200 &&
             http_code < 300);
+
+    if (ret)
+        record_write_batch(entries.size());
+
+    return ret;
 }
 
 bool

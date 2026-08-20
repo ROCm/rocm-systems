@@ -22,6 +22,7 @@ memory_client::write(const entry_t& entry)
     if(max_entries_per_gpu_ >= 0 && points.size() > max_entries_per_gpu_)
         points.pop_front();
 
+    record_write();
     return true;
 }
 
@@ -49,6 +50,7 @@ memory_client::write_batch(const std::vector<entry_t>& entries)
             points.erase(points.begin(), points.begin() + (points.size() - max_entries_per_gpu_));
     }
 
+    record_write_batch(entries.size());
     return true;
 }
 

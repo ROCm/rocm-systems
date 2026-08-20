@@ -234,6 +234,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       // XXX make configurable through env I guess
       int status = ::rocm_timesync::timesync_client_init(::rocm_timesync::ts_client_config_t{
           .config_file = core::Runtime::runtime_singleton_->flag().rocm_timesync_config(),
+          .stats_file = core::Runtime::runtime_singleton_->flag().rocm_timesync_stats(),
           .precision = ::rocm_timesync::ts_precision_t::TIMESYNC_PRECISION_HIGH,
       });
       assert(status == 0 && "timesync_init failed");

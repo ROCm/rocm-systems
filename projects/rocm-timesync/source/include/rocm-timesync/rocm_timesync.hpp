@@ -13,8 +13,9 @@ typedef enum {
 } ts_precision_t;
 
 struct ts_client_config_t {
-    std::string config_file;
-    ts_precision_t precision;
+    std::string config_file{};
+    std::string stats_file{};
+    ts_precision_t precision{TIMESYNC_PRECISION_LOW};
 };
 
 int timesync_client_init(const ts_client_config_t& cfg);
