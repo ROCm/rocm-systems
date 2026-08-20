@@ -1,5 +1,5 @@
-NCCL_HOME := ../../../build
-INC := -I$(NCCL_HOME)/include -Inccl
+RCCL_ROOT := ../../..
+INC := -I. -I$(RCCL_ROOT)/src/include/plugin -I$(RCCL_ROOT)/src/include
 PLUGIN_SO := librccl-profiler-accl.so
 
 CXX := g++
@@ -14,7 +14,7 @@ LDFLAGS := -lpthread
 
 all: $(PLUGIN_SO)
 
-$(PLUGIN_SO): $(SOURCES) accl_profiler.h
+$(PLUGIN_SO): $(SOURCES) accl_profiler.h accl_shim.h
 	@echo "Compiling to create $@ from $^"
 	$(CXX) $(INC) $(CXXFLAGS) -o $@ -Wl,-soname,$(PLUGIN_SO) $(SOURCES) $(LDFLAGS)
 

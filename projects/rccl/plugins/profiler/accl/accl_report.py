@@ -116,12 +116,10 @@ def load_dir_or_file(path: str, warmup: int) -> List[Record]:
 
 
 def fmt_size(b: int) -> str:
-    if b >= 1024*1024*1024:
-        return f"{b/(1024*1024*1024):.0f}G"
-    if b >= 1024*1024:
-        return f"{b/(1024*1024):.0f}M"
-    if b >= 1024:
-        return f"{b/1024:.0f}K"
+    for unit, thresh in [("G", 1024**3), ("M", 1024**2), ("K", 1024)]:
+        if b >= thresh:
+            val = b / thresh
+            return f"{val:.0f}{unit}" if val == int(val) else f"{val:.1f}{unit}"
     return f"{b}B"
 
 
@@ -177,19 +175,21 @@ def aggregate(records: List[Record]) -> Dict[Tuple[str, int], SizeAgg]:
 
 def classify_bottleneck(agg: SizeAgg) -> str:
     """Classify the dominant bottleneck for a size point."""
-    total = agg.mean_exec_us + agg.mean_launch_us
-    if total <= 0:
+    proxy_total = (agg.mean_proxy_network_us + agg.mean_proxy_peer_wait_us +
+                   agg.mean_proxy_flush_us + agg.mean_proxy_gpu_recv_wait_us +
+                   agg.mean_proxy_gpu_wait_us)
+    # Wall-clock denominator: launch + max(kernel, proxy) since proxy and
+    # kernel overlap in time.
+    wall = agg.mean_launch_us + max(agg.mean_kernel_us, proxy_total)
+    if wall <= 0:
         return "unknown"
 
     if agg.mean_n_proxy_ops == 0:
         return "gpu-compute (no proxy)"
 
-    proxy_total = (agg.mean_proxy_network_us + agg.mean_proxy_peer_wait_us +
-                   agg.mean_proxy_flush_us + agg.mean_proxy_gpu_recv_wait_us +
-                   agg.mean_proxy_gpu_wait_us)
-    kernel_pct = agg.mean_kernel_us / total * 100
-    proxy_pct = proxy_total / total * 100
-    launch_pct = agg.mean_launch_us / total * 100
+    kernel_pct = agg.mean_kernel_us / wall * 100
+    proxy_pct = proxy_total / wall * 100
+    launch_pct = agg.mean_launch_us / wall * 100
 
     if proxy_pct > 40:
         net_dom = agg.mean_proxy_network_us + agg.mean_proxy_peer_wait_us
@@ -197,7 +197,7 @@ def classify_bottleneck(agg: SizeAgg) -> str:
         if net_dom > flush_dom:
             return "NETWORK"
         return "PROXY-FLUSH/GDR"
-    if agg.mean_proxy_gpu_wait_us / total * 100 > 20:
+    if agg.mean_proxy_gpu_wait_us / wall * 100 > 20:
         return "GPU-SCHEDULING"
     if launch_pct > 40:
         return "LAUNCH-OVERHEAD"
@@ -413,6 +413,7 @@ def main():
     p_single = sub.add_parser('single')
     p_single.add_argument('--input', required=True)
     p_single.add_argument('--warmup', type=int, default=5)
+    p_single.add_argument('--output', help='Output file (default: stdout)')
 
     p_compare = sub.add_parser('compare')
     p_compare.add_argument('--baseline', required=True)
@@ -426,7 +427,7 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    if args.output if hasattr(args, 'output') and args.output else None:
+    if args.output:
         sys.stdout = open(args.output, 'w')
 
     if args.cmd == 'single':

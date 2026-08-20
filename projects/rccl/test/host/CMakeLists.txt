@@ -130,8 +130,9 @@ set(RCCL_INCLUDE_DIRS
   ${RCCL_TEST_DIR}/common
 )
 
-# --- accl-profiler plugin directory (self-contained, no hipified sources needed) ---
+# --- accl-profiler plugin directory ---
 set(ACCL_PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/accl")
+set(RCCL_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 # --- Wrapper library for production .cc files that need link stubs ---
 add_library(rccl-source-wrappers STATIC
@@ -144,6 +145,8 @@ add_library(rccl-source-wrappers STATIC
 )
 target_include_directories(rccl-source-wrappers PRIVATE
   ${ACCL_PROFILER_DIR}
+  ${RCCL_SRC_ROOT}/src/include/plugin
+  ${RCCL_SRC_ROOT}/src/include
   ${RCCL_INCLUDE_DIRS}
 )
 target_compile_definitions(rccl-source-wrappers PRIVATE
@@ -180,6 +183,8 @@ add_executable(rccl-HostUnitTests
 
 target_include_directories(rccl-HostUnitTests PRIVATE
   ${ACCL_PROFILER_DIR}
+  ${RCCL_SRC_ROOT}/src/include/plugin
+  ${RCCL_SRC_ROOT}/src/include
   ${RCCL_INCLUDE_DIRS}
 )
 

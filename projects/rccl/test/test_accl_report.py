@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
-from accl_report import parse_jsonl  # noqa: E402
+from accl_report import parse_jsonl, fmt_size  # noqa: E402
 
 
 def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0):
@@ -89,3 +89,20 @@ def test_zero_records_after_warmup_warns(capsys):
         assert "WARNING" in captured.err
     finally:
         os.unlink(path)
+
+
+def test_fmt_size_exact_boundaries():
+    assert fmt_size(1024) == "1K"
+    assert fmt_size(1024 * 1024) == "1M"
+    assert fmt_size(1024 * 1024 * 1024) == "1G"
+
+
+def test_fmt_size_fractional():
+    assert fmt_size(1536 * 1024) == "1.5M"
+    assert fmt_size(512) == "512B"
+    assert fmt_size(2560 * 1024) == "2.5M"
+
+
+def test_fmt_size_small():
+    assert fmt_size(0) == "0B"
+    assert fmt_size(1) == "1B"

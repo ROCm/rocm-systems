@@ -9,31 +9,6 @@
 #include <sys/time.h>
 #include <time.h>
 
-// NCCL profiler event type bits (from nccl_profiler.h)
-enum {
-  ncclProfileGroup          = (1 << 0),
-  ncclProfileColl           = (1 << 1),
-  ncclProfileP2p            = (1 << 2),
-  ncclProfileProxyOp        = (1 << 3),
-  ncclProfileProxyStep      = (1 << 4),
-  ncclProfileProxyCtrl      = (1 << 5),
-  ncclProfileKernelCh       = (1 << 6),
-  ncclProfileNetPlugin      = (1 << 7),
-};
-
-// NCCL profiler event states we care about
-typedef enum {
-  ncclProfilerProxyStepSendGPUWait     = 8,
-  ncclProfilerProxyStepSendPeerWait_v4 = 20,
-  ncclProfilerProxyStepSendWait        = 9,
-  ncclProfilerProxyStepRecvWait        = 10,
-  ncclProfilerProxyStepRecvFlushWait   = 11,
-  ncclProfilerProxyStepRecvGPUWait     = 12,
-  ncclProfilerProxyCtrlIdle            = 13,
-  ncclProfilerProxyCtrlActive          = 14,
-  ncclProfilerKernelChStop             = 22,
-} acclProfilerEventState_t;
-
 // Limits
 #define ACCL_MAX_CHANNELS      64
 #define ACCL_MAX_PROXY_OPS     256
@@ -60,6 +35,7 @@ struct acclKernelChInfo {
 struct acclProxyStepInfo {
   uint64_t type;
   void*    parentObj;    // points to acclProxyOpInfo
+  void*    commCtx;      // owning acclCommContext (for pool free)
   int      step;
   uint64_t tsStartUs;
   uint64_t tsStopUs;
@@ -77,6 +53,7 @@ struct acclProxyStepInfo {
 struct acclProxyOpInfo {
   uint64_t type;
   void*    parentObj;    // points to acclCollInfo (the coll event handle)
+  void*    commCtx;      // owning acclCommContext (for pool free)
   uint8_t  channelId;
   int      peer;
   int      nSteps;
@@ -84,13 +61,15 @@ struct acclProxyOpInfo {
   int      isSend;
   uint64_t tsStartUs;
   uint64_t tsStopUs;
-  // Aggregated from steps
+  // Aggregated from steps (protected by mutex)
+  pthread_mutex_t mutex;
   uint64_t totalGpuWaitUs;
   uint64_t totalPeerWaitUs;
   uint64_t totalNetworkUs;   // sendWait + recvWait
   uint64_t totalFlushUs;
   uint64_t totalGpuRecvWaitUs;
   int      stepCount;
+  int      stepsCompleted;
 };
 
 // Per collective record
@@ -166,7 +145,12 @@ struct acclCompletedRecord {
   int hasGpuTiming;
 };
 
-// Per-communicator context
+// Pool sizes (per communicator)
+#define ACCL_COLL_POOL_SIZE      256
+#define ACCL_PROXY_OP_POOL_SIZE  1024
+#define ACCL_PROXY_STEP_POOL_SIZE 4096
+
+// Per-communicator context (owns all pools)
 struct acclCommContext {
   uint64_t    commHash;
   int         rank;
@@ -178,6 +162,19 @@ struct acclCommContext {
   FILE*       outputFile;
   char        outputPath[1024];
   pthread_mutex_t outputMutex;
+
+  // Per-comm pools
+  struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
+  int                      collPoolUsed[ACCL_COLL_POOL_SIZE];
+  pthread_mutex_t          collPoolMutex;
+
+  struct acclProxyOpInfo   proxyOpPool[ACCL_PROXY_OP_POOL_SIZE];
+  int                      proxyOpPoolUsed[ACCL_PROXY_OP_POOL_SIZE];
+  pthread_mutex_t          proxyOpPoolMutex;
+
+  struct acclProxyStepInfo proxyStepPool[ACCL_PROXY_STEP_POOL_SIZE];
+  int                      proxyStepPoolUsed[ACCL_PROXY_STEP_POOL_SIZE];
+  pthread_mutex_t          proxyStepPoolMutex;
 };
 
 #endif // ACCL_PROFILER_H_

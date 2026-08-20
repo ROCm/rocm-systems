@@ -24,7 +24,7 @@ extern "C" {
 }
 
 // Plugin API (symbol visibility is __hidden but linked within the same binary)
-#include "nccl/profiler.h"
+#include "accl_shim.h"
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
                                    int, int, int, ncclDebugLogger_t);
 extern ncclResult_t acclPluginStartEvent(void*, void**,

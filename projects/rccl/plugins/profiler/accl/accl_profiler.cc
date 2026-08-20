@@ -13,15 +13,10 @@
 #include <errno.h>
 #include <unistd.h>
 
-// NCCL profiler v5 types — v5 is a subset of v6 (no CE/proxyDiag arms)
-// but includes all fields we need. Matches the inspector plugin.
-#include "nccl/profiler.h"
+#include "accl_shim.h"
 
 #define __hidden __attribute__((visibility("hidden")))
 
-typedef void (*ncclDebugLogger_t)(int level, unsigned long flags,
-                                  const char* file, int line,
-                                  const char* fmt, ...);
 static ncclDebugLogger_t gLogFn;
 
 #define ACCL_INFO(...)  do { if (gLogFn) gLogFn(4, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
@@ -34,104 +29,86 @@ static int    gWarmupIters = 5; // ACCL_PROFILER_WARMUP_ITERS
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
 // ============================================================================
-// Collective pool — simple fixed-size pool to avoid malloc in hot path
+// Per-communicator pool allocators
 // ============================================================================
-#define ACCL_COLL_POOL_SIZE 256
-static struct acclCollInfo gCollPool[ACCL_COLL_POOL_SIZE];
-static int gCollPoolUsed[ACCL_COLL_POOL_SIZE];
-static pthread_mutex_t gCollPoolMutex = PTHREAD_MUTEX_INITIALIZER;
 
-static struct acclCollInfo* acclAllocColl() {
-  pthread_mutex_lock(&gCollPoolMutex);
+static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
+  pthread_mutex_lock(&ctx->collPoolMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    if (!gCollPoolUsed[i]) {
-      gCollPoolUsed[i] = 1;
-      memset(&gCollPool[i], 0, sizeof(gCollPool[i]));
-      pthread_mutex_init(&gCollPool[i].mutex, NULL);
-      pthread_mutex_unlock(&gCollPoolMutex);
-      return &gCollPool[i];
+    if (!ctx->collPoolUsed[i]) {
+      ctx->collPoolUsed[i] = 1;
+      memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
+      pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+      pthread_mutex_unlock(&ctx->collPoolMutex);
+      return &ctx->collPool[i];
     }
   }
-  pthread_mutex_unlock(&gCollPoolMutex);
+  pthread_mutex_unlock(&ctx->collPoolMutex);
   ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots), dropping collective", ACCL_COLL_POOL_SIZE);
   return NULL;
 }
 
-static void acclFreeColl(struct acclCollInfo* coll) {
+static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll) {
   if (!coll) return;
   pthread_mutex_destroy(&coll->mutex);
-  pthread_mutex_lock(&gCollPoolMutex);
-  int idx = (int)(coll - gCollPool);
+  pthread_mutex_lock(&ctx->collPoolMutex);
+  int idx = (int)(coll - ctx->collPool);
   if (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) {
-    gCollPoolUsed[idx] = 0;
+    ctx->collPoolUsed[idx] = 0;
   }
-  pthread_mutex_unlock(&gCollPoolMutex);
+  pthread_mutex_unlock(&ctx->collPoolMutex);
 }
 
-// ============================================================================
-// ProxyOp pool
-// ============================================================================
-#define ACCL_PROXY_OP_POOL_SIZE 1024
-static struct acclProxyOpInfo gProxyOpPool[ACCL_PROXY_OP_POOL_SIZE];
-static int gProxyOpPoolUsed[ACCL_PROXY_OP_POOL_SIZE];
-static pthread_mutex_t gProxyOpPoolMutex = PTHREAD_MUTEX_INITIALIZER;
-
-static struct acclProxyOpInfo* acclAllocProxyOp() {
-  pthread_mutex_lock(&gProxyOpPoolMutex);
+static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
+  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
   for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
-    if (!gProxyOpPoolUsed[i]) {
-      gProxyOpPoolUsed[i] = 1;
-      memset(&gProxyOpPool[i], 0, sizeof(gProxyOpPool[i]));
-      pthread_mutex_unlock(&gProxyOpPoolMutex);
-      return &gProxyOpPool[i];
+    if (!ctx->proxyOpPoolUsed[i]) {
+      ctx->proxyOpPoolUsed[i] = 1;
+      memset(&ctx->proxyOpPool[i], 0, sizeof(ctx->proxyOpPool[i]));
+      pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
+      pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+      return &ctx->proxyOpPool[i];
     }
   }
-  pthread_mutex_unlock(&gProxyOpPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
   ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots)", ACCL_PROXY_OP_POOL_SIZE);
   return NULL;
 }
 
-static void acclFreeProxyOp(struct acclProxyOpInfo* op) {
+static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op) {
   if (!op) return;
-  pthread_mutex_lock(&gProxyOpPoolMutex);
-  int idx = (int)(op - gProxyOpPool);
+  pthread_mutex_destroy(&op->mutex);
+  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
+  int idx = (int)(op - ctx->proxyOpPool);
   if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
-    gProxyOpPoolUsed[idx] = 0;
+    ctx->proxyOpPoolUsed[idx] = 0;
   }
-  pthread_mutex_unlock(&gProxyOpPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
 }
 
-// ============================================================================
-// ProxyStep pool
-// ============================================================================
-#define ACCL_PROXY_STEP_POOL_SIZE 4096
-static struct acclProxyStepInfo gProxyStepPool[ACCL_PROXY_STEP_POOL_SIZE];
-static int gProxyStepPoolUsed[ACCL_PROXY_STEP_POOL_SIZE];
-static pthread_mutex_t gProxyStepPoolMutex = PTHREAD_MUTEX_INITIALIZER;
-
-static struct acclProxyStepInfo* acclAllocProxyStep() {
-  pthread_mutex_lock(&gProxyStepPoolMutex);
+static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx) {
+  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
   for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
-    if (!gProxyStepPoolUsed[i]) {
-      gProxyStepPoolUsed[i] = 1;
-      memset(&gProxyStepPool[i], 0, sizeof(gProxyStepPool[i]));
-      pthread_mutex_unlock(&gProxyStepPoolMutex);
-      return &gProxyStepPool[i];
+    if (!ctx->proxyStepPoolUsed[i]) {
+      ctx->proxyStepPoolUsed[i] = 1;
+      memset(&ctx->proxyStepPool[i], 0, sizeof(ctx->proxyStepPool[i]));
+      pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+      return &ctx->proxyStepPool[i];
     }
   }
-  pthread_mutex_unlock(&gProxyStepPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
   ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots)", ACCL_PROXY_STEP_POOL_SIZE);
   return NULL;
 }
 
-static void acclFreeProxyStep(struct acclProxyStepInfo* step) {
+static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepInfo* step) {
   if (!step) return;
-  pthread_mutex_lock(&gProxyStepPoolMutex);
-  int idx = (int)(step - gProxyStepPool);
+  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
+  int idx = (int)(step - ctx->proxyStepPool);
   if (idx >= 0 && idx < ACCL_PROXY_STEP_POOL_SIZE) {
-    gProxyStepPoolUsed[idx] = 0;
+    ctx->proxyStepPoolUsed[idx] = 0;
   }
-  pthread_mutex_unlock(&gProxyStepPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
 }
 
 // ============================================================================
@@ -394,8 +371,11 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   if (commName) strncpy(ctx->commName, commName, sizeof(ctx->commName) - 1);
 
   pthread_mutex_init(&ctx->outputMutex, NULL);
+  pthread_mutex_init(&ctx->collPoolMutex, NULL);
+  pthread_mutex_init(&ctx->proxyOpPoolMutex, NULL);
+  pthread_mutex_init(&ctx->proxyStepPoolMutex, NULL);
 
-  // Open output file
+  // Open output file (write mode — fresh file per init to avoid stale data)
   const char* outDir = getenv("ACCL_PROFILER_OUTPUT_DIR");
   if (!outDir) outDir = "/tmp";
 
@@ -405,7 +385,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   snprintf(ctx->outputPath, sizeof(ctx->outputPath),
     "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
     outDir, rank, hostname, (int)getpid(), (unsigned long)commHash);
-  ctx->outputFile = fopen(ctx->outputPath, "a");
+  ctx->outputFile = fopen(ctx->outputPath, "w");
   if (!ctx->outputFile) {
     ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath, strerror(errno));
   }
@@ -431,6 +411,9 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     ctx->outputFile = NULL;
   }
   pthread_mutex_destroy(&ctx->outputMutex);
+  pthread_mutex_destroy(&ctx->collPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
   free(ctx);
   return ncclSuccess;
 }
@@ -452,7 +435,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       return ncclSuccess;
     }
 
-    struct acclCollInfo* coll = acclAllocColl();
+    struct acclCollInfo* coll = acclAllocColl(ctx);
     if (!coll) {
       *eHandle = NULL;
       return ncclSuccess;
@@ -522,13 +505,14 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       }
     }
 
-    struct acclProxyOpInfo* op = acclAllocProxyOp();
+    struct acclProxyOpInfo* op = acclAllocProxyOp(ctx);
     if (!op) {
       *eHandle = NULL;
       return ncclSuccess;
     }
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
+    op->commCtx = ctx;
     if (parentColl) acclCollRef(parentColl);
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
@@ -543,13 +527,14 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
   if (eDescr->type == ncclProfileProxyStep) {
     // parentObj points to our acclProxyOpInfo handle
-    struct acclProxyStepInfo* step = acclAllocProxyStep();
+    struct acclProxyStepInfo* step = acclAllocProxyStep(ctx);
     if (!step) {
       *eHandle = NULL;
       return ncclSuccess;
     }
     step->type = ncclProfileProxyStep;
     step->parentObj = eDescr->parentObj;
+    step->commCtx = ctx;
     step->step = eDescr->proxyStep.step;
     step->tsStartUs = acclGetTimeUs();
     step->lastStateTs = step->tsStartUs;
@@ -569,10 +554,11 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
   if (type == ncclProfileColl) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
+    struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
     coll->tsCollStopUs = acclGetTimeUs();
     if (acclCollDeref(coll)) {
       acclFinalizeCollective(coll);
-      acclFreeColl(coll);
+      acclFreeColl(ctx, coll);
     }
     return ncclSuccess;
   }
@@ -584,21 +570,23 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclCollInfo* coll = (struct acclCollInfo*)kch->parentObj;
     if (!coll) return ncclSuccess;
 
+    // Single deref for the per-channel ref; conditionally deref the
+    // kernel-completion ref if all channels are done.
     pthread_mutex_lock(&coll->mutex);
     coll->nKernelChCompleted++;
     int allDone = (coll->nKernelChCompleted == coll->nKernelChStarted &&
                    coll->nKernelChStarted > 0);
+    // Drop per-channel ref + kernel-completion ref (if all done) under lock
+    coll->refCount--;
+    if (allDone)
+      coll->refCount--;
+    int shouldFinalize = (coll->refCount == 0);
     pthread_mutex_unlock(&coll->mutex);
 
-    int shouldFinalize = 0;
-    if (allDone) {
-      // Deref the "kernel completion" ref
-      shouldFinalize = acclCollDeref(coll);
-    }
-    // Deref the per-channel ref
-    if (acclCollDeref(coll) || shouldFinalize) {
+    if (shouldFinalize) {
+      struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
       acclFinalizeCollective(coll);
-      acclFreeColl(coll);
+      acclFreeColl(ctx, coll);
     }
     return ncclSuccess;
   }
@@ -607,20 +595,26 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)eHandle;
     op->tsStopUs = acclGetTimeUs();
 
-    // Link this proxy op to its parent collective
     struct acclCollInfo* coll = (struct acclCollInfo*)op->parentObj;
+
+    // Snapshot the accumulated step data under the op's lock to ensure
+    // no concurrent ProxyStep stop is mid-write
     if (coll) {
+      pthread_mutex_lock(&op->mutex);
       pthread_mutex_lock(&coll->mutex);
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
         memcpy(&coll->proxyOps[coll->nProxyOps], op, sizeof(*op));
         coll->nProxyOps++;
       }
       pthread_mutex_unlock(&coll->mutex);
+      pthread_mutex_unlock(&op->mutex);
     }
-    acclFreeProxyOp(op);
+
+    struct acclCommContext* ctx = (struct acclCommContext*)op->commCtx;
+    acclFreeProxyOp(ctx, op);
     if (coll && acclCollDeref(coll)) {
       acclFinalizeCollective(coll);
-      acclFreeColl(coll);
+      acclFreeColl(ctx, coll);
     }
     return ncclSuccess;
   }
@@ -629,17 +623,22 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclProxyStepInfo* step = (struct acclProxyStepInfo*)eHandle;
     step->tsStopUs = acclGetTimeUs();
 
-    // Accumulate step timing into parent proxy op
+    // Accumulate step timing into parent proxy op under lock
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
     if (op) {
+      pthread_mutex_lock(&op->mutex);
       op->totalGpuWaitUs += step->gpuWaitUs;
       op->totalPeerWaitUs += step->peerWaitUs;
       op->totalNetworkUs += step->sendWaitUs + step->recvWaitUs;
       op->totalFlushUs += step->flushWaitUs;
       op->totalGpuRecvWaitUs += step->gpuRecvWaitUs;
       op->stepCount++;
+      op->stepsCompleted++;
+      pthread_mutex_unlock(&op->mutex);
     }
-    acclFreeProxyStep(step);
+
+    struct acclCommContext* ctx = (struct acclCommContext*)step->commCtx;
+    acclFreeProxyStep(ctx, step);
     return ncclSuccess;
   }
 
