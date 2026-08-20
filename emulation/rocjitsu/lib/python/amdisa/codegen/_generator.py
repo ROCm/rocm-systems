@@ -6551,6 +6551,11 @@ class CodeGenerator:
         'barrier_arrive': 'amdgpu::AtomicOp::BARRIER_ARRIVE',
     }
 
+    def _buffer_payload_exec_expr(self) -> str:
+        if self.isa_spec.profile.buffer_payload_reads_use_effective_exec_mask:
+            return 'd->exec_mask'
+        return 'wf.exec()'
+
     def _gen_flat_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -6630,7 +6635,7 @@ class CodeGenerator:
         L.append(f'  d->non_temporal = {nt};')
         L.append('  mubuf_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append('  uint64_t exec = wf.exec();')
+        L.append(f'  uint64_t exec = {self._buffer_payload_exec_expr()};')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -6990,7 +6995,7 @@ class CodeGenerator:
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append('  uint64_t exec = wf.exec();')
+        L.append(f'  uint64_t exec = {self._buffer_payload_exec_expr()};')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
