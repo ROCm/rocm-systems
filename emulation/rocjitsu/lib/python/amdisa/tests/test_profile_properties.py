@@ -181,6 +181,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'bool mode_has_gpr_idx_en = false;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
@@ -190,6 +191,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
+        '        .mode_has_gpr_idx_en = true,\n'
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
@@ -204,6 +206,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         'case ROCJITSU_CODE_ARCH_RDNA4:\n'
         '    return {\n'
         '        .supports_wgp_mode = true,\n'
+        '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
@@ -218,6 +221,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         'case ROCJITSU_CODE_ARCH_CDNA5:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
+        '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
@@ -297,6 +301,8 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert '&Operand::simd_vgpr_base_mut_exec' in operand_exec_cpp
     assert 'backend.simd_vgpr_base_mut != nullptr' in operand_exec_cpp
     assert 'backend.simd_notify_read64_mut != nullptr' in operand_exec_cpp
+    assert 'vgpr_msb_role() == amdgpu::VgprMsbRole::None' in operand_exec_cpp
+    assert 'apply_gpr_idx(wf, *off, amdgpu::VgprMsbRole::Dst)' not in operand_exec_cpp
     assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
 

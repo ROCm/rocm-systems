@@ -762,6 +762,14 @@ public:
   Operand src0;
 };
 
+class VPermlane64B32Vop1 : public Vop1 {
+public:
+  VPermlane64B32Vop1(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+};
+
 class VSwaprelB32Vop1 : public Vop1 {
 public:
   VSwaprelB32Vop1(const MachineInst *inst);

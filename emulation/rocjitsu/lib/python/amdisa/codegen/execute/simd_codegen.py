@@ -856,15 +856,12 @@ SIMD_VOP2_CARRY: dict[str, str] = {
 # field-bearing literal `literal` and is kept out of this path by the sharing
 # preflight). `simd_ternary_literal_operand_name()` below exposes that assumption
 # so the generator can assert it per ISA.
-# f16 forms (lane type uint32_t) convert each operand via f16_to_f32_simd and
-# round the result with f32_to_f16_simd (single final round, matching scalar).
-# util::stdx::fma is bit-identical to std::fma for all finite/Inf inputs
-# (UtilSimd.Fma_VectorMatchesScalar_BitExact, NaN inputs excluded); the f16<->f32
-# conversions are already bit-exact, so the f16 forms match by composition. When
-# an input is NaN the packed and scalar FMA may pick a different NaN operand to
-# propagate (toolchain-dependent payload); that NaN-payload divergence is
-# accepted (the result is a NaN either way).
-# v_fmac_f64 is excluded (64-bit / 2-VGPR lanes — a separate width).
+# The f16 entries here are the legacy MAD literal forms. They widen each operand
+# to f32 and narrow once after the arithmetic, matching their scalar bodies.
+# Architectural f16 FMA forms use SIMD_VOP2_FMA_F16 below instead: that path
+# performs the fused operation in native<double> chunks and applies the current
+# FP16 MODE controls without an intervening f32 rounding. v_fmac_f64 likewise
+# has a dedicated split-VGPR, MODE-aware path in SIMD_VOP2_FMA_F64.
 _FMA_ACC_F32 = '[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }'
 _FMA_ADDK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }'
 _FMA_MULK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }'
@@ -898,16 +895,9 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
     'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
     'v_madmk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
-    # --- f16 dst-accumulate ---
-    'v_fmac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
-    'v_mac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     # --- f16 inline literal ---
     'v_madak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
-    'v_fmamk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
     'v_madmk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
-    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32).
-    # Same f16 FMA functor as v_madak_f16.
-    'v_fmaak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
 }
 
 
@@ -934,27 +924,24 @@ def simd_ternary_literal_operand_name(template_name: str) -> str | None:
 
 
 SIMD_VOP2_TERNARY_ACCUMULATE = {
-    'v_fmac_f16_vop2',
     'v_fmac_f32_vop2',
     'v_fmac_dx9_zero_f32_vop2',
-    'v_mac_f16_vop2',
     'v_mac_f32_vop2',
 }
 
 
-# template_name -> cpp_fma_op_functor (dst-accumulate, over native<double>).
-#
-# 64-bit-lane VOP2 FMA. The only f64 VOP2 op reachable on CDNA4 is v_fmac_f64
-# (dst = fma(src0, vsrc1, dst), all f64). The functor is invoked as
-#   fma_op(simd<double> src0, simd<double> vsrc1, simd<double> vdst) -> simd<double>
-# inside try_execute_ternary_vop2_f64_simd (lane type fixed to double, read/written
-# through the split lo/hi 32-bit VGPR-pair path). util::stdx::fma over native<double>
-# is bit-identical to the scalar std::fma for all finite/Inf inputs; NaN-input lanes
-# may differ in propagated NaN payload (accepted). Guarded by
-# UtilSimd.FmaF64_VectorMatchesScalar_BitExact.
-SIMD_VOP2_FMA_F64: dict[str, str] = {
-    'v_fmac_f64_vop2': '[](auto a, auto b, auto d) { return util::stdx::fma(a, b, d); }',
+SIMD_VOP2_FMA_F16: dict[str, str] = {
+    'v_fmaak_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMA_F16_ADD_LITERAL',
+    'v_fmamk_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMA_F16_MULTIPLY_LITERAL',
+    'v_fmac_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMAC_F16',
 }
+
+
+# 64-bit-lane VOP2 FMA templates. The helper reads and writes split lo/hi VGPR
+# pairs, performs a native<double> fused operation under the architectural
+# FP_ROUND/FP_DENORM mode, and scalar-corrects NaN-input lanes so payload policy
+# remains identical to the scalar executor.
+SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
 
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
@@ -1267,10 +1254,10 @@ SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
     'v_pk_min_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
-# pk_fma_f16 — 3-source FMA per half. NaN-input payload divergence accepted.
-SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
-    'v_pk_fma_f16_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
+# Packed F16 FMA must round directly to F16. The available SIMD path computes
+# an F32 FMA and then narrows, which can double-round, so fused packed F16 has
+# no SIMD entry until an exact implementation exists.
+SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {}
 
 # VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
 # f32 (lo/hi). Glue extracts each f32 half (narrow32 width), applies neg/neg_hi
@@ -2147,13 +2134,12 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     ),
 }
 
-# f16 ternary — widen each src to f32, op in f32, narrow back. Same NaN
-# carve-out as the f32 path.
+# Non-fused f16 ternary operations widen each source to f32, operate in f32,
+# then narrow back. Fused FMA uses the MODE-aware native<double> route selected
+# by SIMD_VOP3_FMA_MODE_FP16 below.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
-    'v_fma_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    'v_fma_legacy_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
     # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
     'v_max3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
@@ -2179,9 +2165,11 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     ),
 }
 
+SIMD_VOP3_FMA_MODE_FP16 = {'v_fma_f16_vop3'}
+SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
+
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
-    'v_fma_f64_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     # v_div_fixup_f64: 64-bit-lane div_fixup cascade (same shape as f32, see
     # SIMD_VOP3_TERNARY_FP32 above).
     'v_div_fixup_f64_vop3': (
@@ -2200,13 +2188,8 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_mac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     'v_fmac_dx9_zero_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
 }
-SIMD_VOP3_FMAC_FP16: dict[str, str] = {
-    'v_fmac_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_mac_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
-SIMD_VOP3_FMAC_FP64: dict[str, str] = {
-    'v_fmac_f64_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
+SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
+SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
 
 # --- VOP3 ldexp (mixed-width: fp src0 + int32 src1 exp) --------------------
 #
@@ -2625,6 +2608,11 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     specc = SIMD_VOP2_CARRY.get(template_name)
     if specc is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY({specc});'
+    fma_f16_macro = SIMD_VOP2_FMA_F16.get(template_name)
+    if fma_f16_macro is not None:
+        if template_name == 'v_fmac_f16_vop2':
+            return f'  {fma_f16_macro}();'
+        return f'  {fma_f16_macro}({_FMA_K_READ});'
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None:
         cpp_t, k_expr, cpp_op = spect
@@ -2638,9 +2626,8 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
             ovfl_probe = f'  {macro}({cpp_t}, {k_expr}, {_fp16_ovfl_cpp_op(cpp_op)});'
             return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
         return probe
-    specf64 = SIMD_VOP2_FMA_F64.get(template_name)
-    if specf64 is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});'
+    if template_name in SIMD_VOP2_FMA_F64:
+        return '  ROCJITSU_TRY_SIMD_VOP2_FMA_F64();'
     spec2binf64 = SIMD_VOP2_BINARY_FP64.get(template_name)
     if spec2binf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64({spec2binf64});'
@@ -2759,6 +2746,15 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
             else 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
         )
         return f'  {macro}({spec3tf16});'
+    if template_name in SIMD_VOP3_FMA_MODE_FP16:
+        macro = (
+            'ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16'
+            if true16_vop3
+            else 'ROCJITSU_TRY_SIMD_FMA_VOP3_FP16'
+        )
+        return f'  {macro}();'
+    if template_name in SIMD_VOP3_FMA_MODE_FP64:
+        return '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP64();'
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
     if spec3tf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});'
@@ -2820,17 +2816,15 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
     if specfmacf32 is not None:
         return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32});'
-    specfmacf16 = SIMD_VOP3_FMAC_FP16.get(template_name)
-    if specfmacf16 is not None:
+    if template_name in SIMD_VOP3_FMAC_FP16:
         macro = (
-            'ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16'
+            'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16'
             if true16_vop3
-            else 'ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16'
+            else 'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16'
         )
-        return f'  {macro}({specfmacf16});'
-    specfmacf64 = SIMD_VOP3_FMAC_FP64.get(template_name)
-    if specfmacf64 is not None:
-        return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64({specfmacf64});'
+        return f'  {macro}();'
+    if template_name in SIMD_VOP3_FMAC_FP64:
+        return '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64();'
     # VOP3 ldexp: mixed-width fp src0 + int32 src1 exp.
     specldexpf32 = SIMD_VOP3_LDEXP_FP32.get(template_name)
     if specldexpf32 is not None:

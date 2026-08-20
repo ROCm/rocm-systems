@@ -18,13 +18,14 @@ from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
+    gen_cvt_scalef32,
     gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
 from amdisa.codegen.execute.vector_alu import gen_vector_unary
-from amdisa.codegen.execute.matrix import gen_mfma
+from amdisa.codegen.execute.matrix import gen_mfma as _gen_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
     gen_vector_cmp,
@@ -121,6 +122,26 @@ def _profile_for_arch(arch_name: str):
         'cdna5': Cdna5Profile,
     }
     return profile_types[arch_name]()
+
+
+def gen_mfma(
+    inst: Instruction,
+    dst: list[str],
+    src: list[str],
+    arch_name: str,
+    *,
+    supports_gpr_idx: bool | None = None,
+) -> str:
+    """Call the matrix emitter with the selected ISA profile capability."""
+    if supports_gpr_idx is None:
+        supports_gpr_idx = _profile_for_arch(arch_name).supports_gpr_idx
+    return _gen_mfma(
+        inst,
+        dst,
+        src,
+        arch_name,
+        supports_gpr_idx=supports_gpr_idx,
+    )
 
 
 @pytest.fixture
@@ -312,6 +333,26 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
     isa_header = (amdgpu_root / 'cdna5' / 'isa.h').read_text()
     assert '#include "rocjitsu/vm/' not in isa_header
     assert 'shared/dpp_sdwa_ops.h' not in isa_header
+
+
+def test_generated_execution_helper_includes_are_scoped(
+    amdgpu_generated_root: Path,
+    gfx1250_generated_root: Path,
+    execute_shared_path: Path,
+):
+    fp_include = '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"'
+
+    for path in (
+        gfx1250_generated_root / 'smem_exec.cpp',
+        amdgpu_generated_root / 'cdna4' / 'smem_exec.cpp',
+    ):
+        source = path.read_text()
+        assert fp_include not in source, path
+
+    assert fp_include in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
+
+    shared = execute_shared_path.read_text()
+    assert fp_include in shared
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -786,6 +827,22 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
+    gfx1250_generated_root: Path,
+):
+    opcodes = (gfx1250_generated_root / 'opcodes.h').read_text()
+    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
+
+    assert 'kSWaitcntSopp' not in opcodes
+    table_start = decoder.index('DecoderImpl::sub_decode_sopp = {')
+    table_end = decoder.index('\n};', table_start)
+    decode_targets = re.findall(
+        r'&(detail|DecoderImpl)::([A-Za-z0-9_]+)',
+        decoder[table_start:table_end],
+    )
+    assert decode_targets[9] == ('DecoderImpl', 'decodeInvalid')
+
+
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
     parser = object.__new__(Parser)
     sopp = SimpleNamespace(
@@ -796,17 +853,37 @@ def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | No
         primary_dt_ptrs=[-1] * 10,
     )
     sopp.primary_dt_ptrs[9] = 0
-    dte = SimpleNamespace(sub_decode_funcs=sub_decode_funcs, decode_func=None)
+    dte = SimpleNamespace(
+        sub_decode_funcs=sub_decode_funcs,
+        decode_func=None,
+        inst_name=None,
+    )
+    encoding_map = {'ENC_SOPP': sopp}
+    if arch_name == 'cdna5':
+        encoding_map['ENC_VOP1'] = SimpleNamespace(
+            insts=[Instruction('V_PERMLANE64_B32', 'ENC_VOP1', 103, [])],
+            primary_dt_ptrs=[0] * 104,
+        )
     parser.isa_spec = SimpleNamespace(
         arch_name=arch_name,
-        encoding_map={'ENC_SOPP': sopp},
+        encoding_map=encoding_map,
         primary_decode_table=[dte],
     )
     return parser, sopp, dte
 
 
-def test_gfx1250_parser_injects_s_waitcnt_compat_once_in_opcode_order():
-    parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
+def _s_waitcnt_state(sopp, dte):
+    return (
+        list(sopp.insts),
+        list(sopp.primary_dt_ptrs),
+        None if dte.sub_decode_funcs is None else list(dte.sub_decode_funcs),
+        dte.decode_func,
+        dte.inst_name,
+    )
+
+
+def test_rdna4_parser_injects_s_waitcnt_compat_once_in_opcode_order():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
 
     parser._inject_compat_insts()
     parser._inject_compat_insts()
@@ -822,6 +899,207 @@ def test_gfx1250_parser_injects_s_waitcnt_compat_once_in_opcode_order():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
+    parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
+
+    parser._inject_s_waitcnt_compat()
+
+    assert [(inst.name, inst.opcode) for inst in sopp.insts] == [
+        ('S_WAIT_ALU', 8),
+        ('S_WAIT_IDLE', 10),
+    ]
+    assert dte.sub_decode_funcs[9] is None
+
+
+def test_gfx1250_parser_injects_permlane64_compat_once():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[
+            Instruction('V_SWAP_B16', 'ENC_VOP1', 102, []),
+            Instruction('V_NOT_B16', 'ENC_VOP1', 104, []),
+        ],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 0
+    vop1.primary_dt_ptrs[104] = 0
+    dte = SimpleNamespace(sub_decode_funcs=['decodeInvalid'] * 128, decode_func=None)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[dte],
+    )
+
+    parser._inject_cdna5_permlane64_compat()
+    parser._inject_cdna5_permlane64_compat()
+
+    assert [(inst.name, inst.opcode) for inst in vop1.insts] == [
+        ('V_SWAP_B16', 102),
+        ('V_PERMLANE64_B32', 103),
+        ('V_NOT_B16', 104),
+    ]
+    permlane = vop1.insts[1]
+    assert permlane.available_encodings == frozenset({'ENC_VOP1'})
+    assert [operand.operand_type for operand in permlane.operands] == [
+        'OPR_VGPR',
+        'OPR_SRC_VGPR',
+    ]
+    assert dte.sub_decode_funcs[103] == 'decodeVPermlane64B32Vop1'
+    assert vop1.primary_dt_ptrs[103] == 0
+
+
+def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    # A unique route elsewhere in the table is not evidence for opcode 103.
+    vop1.primary_dt_ptrs[12] = 0
+    vop1.primary_dt_ptrs[102] = 1
+    vop1.primary_dt_ptrs[104] = 2
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+            for _ in range(3)
+        ],
+    )
+
+    with pytest.raises(ValueError, match='exactly one adjacent ENC_VOP1 decode route'):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert not any(inst.name == 'V_PERMLANE64_B32' for inst in vop1.insts)
+    assert vop1.primary_dt_ptrs[103] == -1
+
+
+def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
+    parser = object.__new__(Parser)
+    collision = Instruction('V_OTHER_B32', 'ENC_VOP1', 103, [])
+    vop1 = SimpleNamespace(
+        insts=[collision],
+        primary_dt_ptrs=[0] * 128,
+    )
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+        ],
+    )
+
+    with pytest.raises(
+        ValueError, match='opcode 103 is already occupied by V_OTHER_B32'
+    ):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert vop1.insts == [collision]
+    assert vop1.primary_dt_ptrs[103] == 0
+
+
+def test_gfx1250_parser_permlane64_rejects_invalid_decode_table_index_before_mutation():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 4
+    vop1.primary_dt_ptrs[104] = 4
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+        ],
+    )
+
+    with pytest.raises(ValueError, match='invalid primary decode-table index 4'):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert not any(inst.opcode == 103 for inst in vop1.insts)
+    assert vop1.primary_dt_ptrs[103] == -1
+
+
+@pytest.mark.parametrize(
+    ('decode_entry', 'message'),
+    [
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 103,
+                decode_func=None,
+                inst_name=None,
+            ),
+            'outside the selected subdecode table',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 103 + ['decodeOther'],
+                decode_func=None,
+                inst_name=None,
+            ),
+            'subdecode slot is already occupied by decodeOther',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=None,
+                decode_func='decodeOther',
+                inst_name='V_OTHER_B32',
+            ),
+            'terminal decode entry is already occupied',
+        ),
+    ],
+)
+def test_gfx1250_parser_permlane64_rejects_terminal_conflicts_before_mutation(
+    decode_entry, message
+):
+    parser = object.__new__(Parser)
+    neighbor = Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])
+    vop1 = SimpleNamespace(
+        insts=[neighbor],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 0
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[decode_entry],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert vop1.insts == [neighbor]
+    assert vop1.primary_dt_ptrs[103] == -1
+
+
+@pytest.mark.parametrize(
+    ('encoding_map', 'message'),
+    [
+        ({}, 'requires ENC_VOP1'),
+        (
+            {'ENC_VOP1': SimpleNamespace(insts=[], primary_dt_ptrs=None)},
+            'requires an ENC_VOP1 primary decode route table',
+        ),
+        (
+            {'ENC_VOP1': SimpleNamespace(insts=[], primary_dt_ptrs=[-1] * 103)},
+            'does not contain V_PERMLANE64_B32 opcode 103',
+        ),
+    ],
+)
+def test_gfx1250_parser_permlane64_rejects_missing_route_invariants(
+    encoding_map, message
+):
+    parser = object.__new__(Parser)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map=encoding_map,
+        primary_decode_table=[],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_cdna5_permlane64_compat()
+
+
 def test_s_waitcnt_compat_injection_can_patch_direct_decode_entry():
     parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=None)
 
@@ -829,6 +1107,104 @@ def test_s_waitcnt_compat_injection_can_patch_direct_decode_entry():
 
     assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
     assert dte.decode_func == 'decodeSWaitcntSopp'
+    assert dte.inst_name == 'SWaitcntSopp'
+
+
+def test_rdna4_s_waitcnt_rejects_opcode_collision_before_mutation():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    sopp.insts.insert(1, Instruction('S_OTHER', 'ENC_SOPP', 9, []))
+    before = _s_waitcnt_state(sopp, dte)
+
+    with pytest.raises(ValueError, match='opcode 9 is already occupied by S_OTHER'):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, dte) == before
+
+
+@pytest.mark.parametrize(
+    ('encoding_map', 'message'),
+    [
+        ({}, 'requires ENC_SOPP'),
+        (
+            {'ENC_SOPP': SimpleNamespace(insts=[], primary_dt_ptrs=None)},
+            'requires an ENC_SOPP primary decode route table',
+        ),
+        (
+            {'ENC_SOPP': SimpleNamespace(insts=[], primary_dt_ptrs=[-1] * 9)},
+            'does not contain S_WAITCNT opcode 9',
+        ),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message):
+    parser = object.__new__(Parser)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        encoding_map=encoding_map,
+        primary_decode_table=[],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+
+@pytest.mark.parametrize(
+    ('dt_ptr', 'message'),
+    [
+        (-1, 'has no ENC_SOPP primary decode route'),
+        (4, 'invalid primary decode-table index 4'),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_invalid_decode_route_before_mutation(dt_ptr, message):
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    sopp.primary_dt_ptrs[9] = dt_ptr
+    before = _s_waitcnt_state(sopp, dte)
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, dte) == before
+
+
+@pytest.mark.parametrize(
+    ('decode_entry', 'message'),
+    [
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 9,
+                decode_func=None,
+                inst_name=None,
+            ),
+            'outside the selected subdecode table',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 9 + ['decodeOther'],
+                decode_func=None,
+                inst_name=None,
+            ),
+            'subdecode slot is already occupied by decodeOther',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=None,
+                decode_func='decodeOther',
+                inst_name='S_OTHER',
+            ),
+            'terminal decode entry is already occupied',
+        ),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_terminal_conflicts_before_mutation(
+    decode_entry, message
+):
+    parser, sopp, _ = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    parser.isa_spec.primary_decode_table[0] = decode_entry
+    before = _s_waitcnt_state(sopp, decode_entry)
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, decode_entry) == before
 
 
 def test_s_waitcnt_compat_injection_skips_untargeted_arch():
@@ -1265,6 +1641,95 @@ def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
 
 
+def test_cdna4_matrix_bases_apply_gpr_idx_by_operand_role():
+    dense = Instruction('V_MFMA_F32_16X16X4_F32', 'ENC_VOP3P_MFMA', 0, [])
+    sparse = Instruction('V_SMFMAC_F32_16X16X64_BF16', 'ENC_VOP3P_MFMA', 0, [])
+
+    profile = CdnaProfile()
+    dense_body = gen_mfma(
+        dense,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
+    sparse_body = gen_mfma(
+        sparse,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
+
+    for role in ('Dst', 'Src0', 'Src1', 'Src2'):
+        assert f'amdgpu::VgprMsbRole::{role}' in dense_body
+        assert f'amdgpu::VgprMsbRole::{role}' in sparse_body
+    assert 'if (const_acc == amdgpu::ACC_FROM_VGPR)' in dense_body
+    assert 'apply_gpr_idx_to_mma_base' in dense_body
+    assert 'apply_gpr_idx_to_mma_base' in sparse_body
+
+
+def test_cdna5_matrix_bases_follow_profile_gpr_idx_policy():
+    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P_MFMA', 0, [])
+    profile = Cdna5Profile()
+
+    body = gen_mfma(
+        inst,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna5',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
+
+    assert not profile.supports_gpr_idx
+    assert 'apply_gpr_idx_to_mma_base' not in body
+
+
+def test_disabled_gpr_idx_capability_reaches_sparse_and_dense_mixed_matrix_branches():
+    sparse = Instruction('V_SMFMAC_F32_16X16X64_BF16', 'ENC_VOP3P_MFMA', 0, [])
+    dense = Instruction('V_MFMA_F32_16X16X32_F8_F6_F4', 'ENC_VOP3P_MFMA', 0, [])
+
+    sparse_body = gen_mfma(
+        sparse,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=False,
+    )
+    dense_body = gen_mfma(
+        dense,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=False,
+    )
+
+    assert 'apply_gpr_idx_to_mma_base' not in sparse_body
+    assert 'apply_gpr_idx_to_mma_base' not in dense_body
+    assert 'exec_f32_mixed' in dense_body
+    assert 'exec_f32_scaled_mixed' not in dense_body
+    assert 'raw_words_' not in dense_body
+
+
+def test_cdna4_wide_conversion_indexes_each_base_once():
+    body = gen_cvt_scalef32(
+        SimpleNamespace(
+            op='2xpk16_fp6_f32',
+            dst_ops=['vdst'],
+            src_ops=['src0', 'src1', 'src2'],
+            arch_name='cdna4',
+        )
+    )
+
+    for operand in ('vdst', 'src0', 'src1'):
+        assert body.count(f'auto {operand}_off = Isa::resolved_vgpr_offset') == 1
+        assert f'uint32_t {operand}_base = vb + amdgpu::apply_gpr_idx' in body
+    assert 'unified_vgpr_index()' not in body
+    assert 'rd(src0_base' in body
+    assert 'rd(src1_base' in body
+    assert 'wr(vdst_base' in body
+
+
 def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     ctx = SimpleNamespace(
         dst_ops=['vdst'],
@@ -1396,6 +1861,7 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.buffer_payload_reads_use_effective_exec_mask
     assert profile.generate_scaled_wmma_vop3px2
     assert profile.smem_address_uses_access_size
+    assert profile.ds_transpose_ignores_exec
     assert profile.vop3_cmp_sdst_size_bits == 32
     assert profile.vop3_cndmask_selector_size_bits == 32
     assert profile.vop3_carry_mask_size_bits == 32
@@ -1407,6 +1873,8 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
         ('ENC_VOP2', 'V_FMAMK_F16', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_FMAMK_F32', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_FMAMK_F64', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_MADMK_F16', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_MADMK_F32', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_ADD_F32', 'vsrc1', 'Src1'),
         ('ENC_VOP1', 'V_SWAP_B32', 'src0', 'Src0'),
         ('ENC_VDS', 'DS_STORE_ADDTID_B32', 'data0', 'Src1'),
@@ -1444,6 +1912,7 @@ def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
     assert not profile.buffer_payload_reads_use_effective_exec_mask
     assert not profile.generate_scaled_wmma_vop3px2
     assert not profile.smem_address_uses_access_size
+    assert not profile.ds_transpose_ignores_exec
     assert profile.vop3_cmp_sdst_size_bits is None
     assert profile.vop3_cndmask_selector_size_bits is None
     assert profile.vop3_carry_mask_size_bits is None
@@ -1691,7 +2160,9 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
 
 
 def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
-    gfx1250_generated_root: Path, execute_shared_path: Path
+    amdgpu_generated_root: Path,
+    gfx1250_generated_root: Path,
+    execute_shared_path: Path,
 ):
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
     vop1_exec = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
@@ -1701,6 +2172,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     vds_exec = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
     vglobal = (gfx1250_generated_root / 'vglobal.cpp').read_text()
     vopd = (gfx1250_generated_root / 'vopd.cpp').read_text()
+    cdna4_vop2_exec = (amdgpu_generated_root / 'cdna4' / 'vop2_exec.cpp').read_text()
     shared = execute_shared_path.read_text()
 
     mov_b16 = _generated_method_body(vop1_exec, 'VMovB16Vop1', 'VMovB64Vop1')
@@ -1710,6 +2182,9 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     fmac_f16 = _generated_method_body(vop2_exec, 'VFmacF16Vop2', 'VFmamkF16Vop2')
     assert 'read_lane(vdst, lane)' in fmac_f16
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
+
+    add_co = _generated_method_body(cdna4_vop2_exec, 'VAddCoU32Vop2', 'VSubCoU32Vop2')
+    assert 'execute_v_add_co_u32_vop2' in add_co
 
     for name, next_name in (
         ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
@@ -1723,9 +2198,9 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
 
     assert 'src_data[i] = regs.read_lane(inst.data0, i);' in shared
     assert (
-        'd->dst_reg_base =\n      wf.vgpr_alloc().base +\n'
-        '      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
-        'vdst.vgpr_msb_role());' in vds_exec
+        'd->dst_reg_base =\n'
+        '      wf.vgpr_alloc().base +\n'
+        '      *Isa::resolved_vgpr_offset(' in vds_exec
     )
     assert 'data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vds
     assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
@@ -1826,6 +2301,19 @@ def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
         assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in body
 
 
+def test_generated_classified_alu_latches_trapsts_before_simd_return(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(execute_shared, 'v_mul_f32_vop3', 'v_mul_f64_vop2')
+
+    classify_pos = body.index('uint32_t alu_causes = classify_mul_f32_vop3')
+    trapsts_pos = body.index('wf.set_trapsts(wf.trapsts() | alu_causes);')
+    simd_pos = body.index('ROCJITSU_TRY_SIMD_VOP3_BINARY_FP')
+    assert classify_pos < trapsts_pos < simd_pos
+    assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -1849,8 +2337,8 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'write_vop3_true16_dst' not in binary
 
     ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' not in ternary
+    assert 'fp_mode::fma_f16' in ternary
     assert 'read_vop3_true16_src' not in ternary
     assert 'write_vop3_true16_dst' not in ternary
 
@@ -1873,17 +2361,19 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_binary
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_binary
+    assert re.search(
+        r'read_vop3_true16_src\(src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
+        true16_binary,
+    )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_binary
     assert 'inst.vdst.write_lane' not in true16_binary
 
     true16_ternary = _generated_method_body(
         gfx1250_vop3_ternary, 'VFmaF16Vop3', 'VMin3I16Vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in true16_ternary
-    assert (
-        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_ternary
-    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in true16_ternary
+    assert 'fp_mode::fma_f16' in true16_ternary
+    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in true16_ternary
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_ternary
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_ternary
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in true16_ternary
@@ -3251,6 +3741,29 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
     assert 'throw util::UnimplementedInst' not in body
 
 
+def test_gfx1250_swmmac_reuse_hint_does_not_select_sparse_index_set():
+    inst = Instruction(
+        'V_SWMMAC_I32_16X16X128_IU8',
+        'ENC_VOP3P',
+        0,
+        [
+            Operand('vdst', 256, 'OPR_VGPR', True, True, False, False, 0),
+            Operand('src0', 256, 'OPR_SRC_VGPR', True, False, False, False, 1),
+            Operand('src1', 256, 'OPR_SRC_VGPR', True, False, False, False, 2),
+            Operand('src2', 256, 'OPR_SRC_VGPR', True, False, False, False, 3),
+        ],
+    )
+
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+
+    assert 'uint32_t index_key = 0u;' in body
+    assert 'index_key = inst_.opsel' not in body
+    assert (
+        'index_base, 32, index_key, extract_a, extract_b, inst_.clamp, const_acc);'
+        in body
+    )
+
+
 def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     inst = Instruction(
         'V_SWMMAC_F32_16X16X32_FP8_FP8',
@@ -3272,9 +3785,8 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
     assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
     assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, '
+        'src1_base, s2, index_base, 16, '
         'index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc, wf.wf_size());'
     ) in body
     assert 'resolve_acc' not in body
@@ -3310,9 +3822,8 @@ def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
         )
         assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
         assert (
-            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, '
-            'amdgpu::src_base(vb, src0.encoding_value_), '
-            'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, src0_base, '
+            'src1_base, s2, index_base, 16, '
             f'index_key, amdgpu::{extract_a}, amdgpu::{extract_b}, const_acc, wf.wf_size());'
         ) in body
 

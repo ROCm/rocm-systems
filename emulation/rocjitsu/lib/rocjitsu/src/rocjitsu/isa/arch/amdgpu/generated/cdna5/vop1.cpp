@@ -5215,6 +5215,40 @@ void VSwapB16Vop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
     operands.push_back(&src0);
 }
 
+VPermlane64B32Vop1::VPermlane64B32Vop1(const MachineInst *inst)
+    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+               ? "v_permlane64_b32_dpp"
+               : "v_permlane64_b32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VPermlane64B32Vop1)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  num_src_ = 1;
+  num_dst_ = 1;
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+}
+
+namespace detail {
+DecodeResult decodeVPermlane64B32Vop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop1::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
+          ? "v_permlane64_b32_dpp"
+          : "v_permlane64_b32_e32",
+      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error, LiteralSupport::None);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_PERMLANE64_B32 does not support DPP";
+  return std::make_unique<VPermlane64B32Vop1>(opcode);
+}
+} // namespace detail
+
 VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_swaprel_b32_dpp"
@@ -5227,7 +5261,9 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &src0;
   src_operands_[0] = &m0;
-  num_src_ = 1;
+  src_operands_[1] = &vdst;
+  src_operands_[2] = &src0;
+  num_src_ = 3;
   num_dst_ = 2;
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);

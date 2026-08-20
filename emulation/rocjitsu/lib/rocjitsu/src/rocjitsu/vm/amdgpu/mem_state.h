@@ -158,9 +158,11 @@ struct VectorMemState : DynamicInstState {
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
-  uint64_t exec_mask = 0; ///< Effective EXEC mask captured by address calculation.
-                          ///< Architecturally ignored accesses clear it; writeback
-                          ///< zeroes OOB lanes (exec_mask & ~lane_mask).
+  uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
+                          ///< snapshots EXEC, but ISA exceptions may replace it (for example,
+                          ///< CDNA5 DS transpose loads use an all-lanes mask), while
+                          ///< architecturally ignored accesses clear it. Writeback zeroes OOB
+                          ///< lanes (exec_mask & ~lane_mask).
   uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).
   uint32_t dst_reg_base = 0;
   uint32_t elem_size = 0;
