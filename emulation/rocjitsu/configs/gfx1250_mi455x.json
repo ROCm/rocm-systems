@@ -12,6 +12,7 @@
         "device_id": 1250,
         "family_id": 0,
         "unique_id": 1250,
+        "revision_id": 1,
         "marketing_name": "AMD Instinct MI455X",
         "simd_count": 1024,
         "max_waves_per_simd": 16,
