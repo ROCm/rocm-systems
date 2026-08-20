@@ -12,10 +12,10 @@ Pre-built simulator configs are in `configs/`:
 |---|---|
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
-| `gfx950_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
-| `gfx950_cdna4_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
-| `gfx950_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
+| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
+| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
@@ -51,11 +51,11 @@ The remaining sections describe simulator topology configs.
     },
     "links": [
       {
-        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*8+k]",
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*9+k]",
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 8 }
+          { "var_name": "k", "start": 0, "end": 9 }
         ],
         "latency": 1, "weight": 10
       }
@@ -121,5 +121,5 @@ location IDs. Each GPU gets its own command processor, memory, and
 cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on `gpu_id`.
 
-See `configs/gfx950_cdna4_kmd_2gpu.json` for a working two-GPU
+See `configs/gfx950_mi355x_kmd_2gpu.json` for a working two-GPU
 configuration used by the RCCL collective tests.

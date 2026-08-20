@@ -10,9 +10,58 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 |---|---|---|
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
+| `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
+
+### Throughput Plugin
+
+The throughput plugin counts one instruction whenever a wavefront reaches the
+before-execute hook. Counts are therefore executed **wave instructions**, not
+active-lane operations. It reports one JSON object per completed dispatch and
+one aggregate object at shutdown using the `rocjitsu.throughput.v2` JSONL
+schema. Each object contains wall time, total wave instructions, MIPS, and an
+exclusive breakdown into `scalar`, `vector`, `matrix`, `lds`, `global`,
+`control`, and `other`; the family counts always sum to the total. Each family
+reports `execution_seconds` measured between this plugin's before- and
+after-execute callbacks, `execution_mips` using only that family-local time, and
+`dispatch_mips` using the complete dispatch time. Scheduler gaps, dispatch
+setup, runtime work, and time spent executing other families are not included
+in `execution_seconds`. Program terminators close their interval in the
+wave-halt hook because they intentionally have no after-execute callback.
+When other execution plugins are enabled, their before/after hooks can fall
+inside this interval depending on registration order; run `throughput` alone
+when comparing family timing. The timestamps themselves are outside the
+measured interval but still add observer overhead to the run.
+
+For a summary record, `wall_seconds` is the inclusive span from the earliest
+dispatch begin to the latest dispatch end, including idle gaps between
+dispatches. `dispatch_seconds_sum` is the sum of completed dispatch durations.
+Dispatches that never reach the execution-end callback are omitted from both
+per-dispatch output and the summary.
+
+Memory instructions take precedence over their scalar or vector encoding. The
+`lds` and `global` families describe the instruction's pre-routing pipeline tag
+or mnemonic fallback: `lds` covers DS/local-memory instructions, while
+`global` covers global, scalar-memory, flat, buffer, image, and scratch
+instructions. A later shared-aperture FLAT-to-LDS remap is therefore still
+reported as `global`. Their `execution_seconds` measure synchronous instruction
+execution/address generation, not later routing, deferred pipeline completion,
+or stalls charged to wait instructions. Matrix includes MFMA, SMFMAC, WMMA,
+and SWMMAC instructions. Control covers branches, waits, barriers, termination,
+no-ops, sleeps, and delays.
+
+For a machine-readable report:
+
+```json
+{
+  "plugins": { "throughput": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/rocjitsu-throughput" }
+}
+```
+
+The report is written to `/tmp/rocjitsu-throughput/throughput.log`.
 
 ### Kernel Logging Plugin
 
@@ -41,13 +90,14 @@ plugin's configuration:
 {
   "plugins": {
     "race": {},
-    "logging": {}
+    "logging": {},
+    "throughput": {}
   }
 }
 ```
 
-The bundled plugins are `race` (`RaceDetectorPlugin`) and `logging`
-(`KernelLoggingPlugin`).
+The bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
+(`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`).
 
 ### Enabling plugins from the mirage CLI
 
@@ -111,8 +161,8 @@ and passes the resolved JSON object to `rocjitsu_plugin_create`.
 
 ## Plugin output
 
-Plugins write diagnostic output (race reports and kernel logs) through a
-configurable sink system rather than directly to stderr.
+Plugins write reports and logs through a configurable sink system rather than
+directly to stderr.
 This makes output testable and redirectable.
 
 ### Sink configuration
@@ -128,7 +178,8 @@ sink-related environment variables.
 
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
-`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`.
+`race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`, and
+`throughput` for `ThroughputPlugin`.
 
 ### Examples
 

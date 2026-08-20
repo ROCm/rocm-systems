@@ -663,7 +663,8 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        const void* acc) {
   static int enabled = rcclParamCeAllReduce();
   static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
@@ -675,6 +676,10 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
     }
     return false;
   }
+
+  // The CE kernels never read the bias buffer, so taking this path for
+  // ncclAllReduceWithBias would silently drop the bias from the result.
+  if (acc != nullptr) return false;
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) {

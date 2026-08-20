@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -27,16 +28,14 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
 
   // S_SCRATCH_LOAD / S_SCRATCH_STORE per CDNA4 ISA spec (section 8.2.1.1):
   // ADDR = SGPR[base] + inst_offset + { M0 or SGPR[soffset] or zero } * 64
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  const uint32_t sbase_sel = inst.sbase * 2;
+  uint64_t base = amdgpu::read_scalar_selector64(wf, sbase_sel);
   int64_t inst_offset = 0;
   if (inst.imm)
     inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t sgpr_off = 0;
   if (inst.soffset_en)
-    sgpr_off = amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+    sgpr_off = amdgpu::read_scalar_selector(wf, inst.soffset);
   uint64_t addr = base + inst_offset + sgpr_off * 64;
   util::Logger::cp([&](auto &os) {
     static thread_local uint64_t scratch_smem_count = 0;

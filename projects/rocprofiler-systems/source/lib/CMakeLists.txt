@@ -62,6 +62,7 @@ target_link_libraries(
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(policies)
 add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(backends)

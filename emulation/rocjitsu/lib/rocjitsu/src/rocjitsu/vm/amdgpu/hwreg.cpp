@@ -22,6 +22,7 @@ enum class HwregState : uint8_t {
   Unsupported,
   Mode,
   Status,
+  Trapsts,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
@@ -112,8 +113,8 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     // unmodeled state explicit but unsupported until the corresponding VM
     // state, field layouts, and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
-    {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -138,8 +139,8 @@ constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
     // named but unsupported until their VM state and privilege side effects are
     // represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
-    {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocCdna3_4, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -168,7 +169,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {4, "HW_ID_LEGACY", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -201,7 +202,7 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -232,7 +233,7 @@ constexpr HwregDescriptor RDNA3_HWREGS[] = {
     // but left unsupported until VM state and privilege side effects are added.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {3, "TRAPSTS", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -337,7 +338,7 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
     return make_table(RDNA3_HWREGS);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};
@@ -376,6 +377,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Status:
     raw_value = wf.status_raw();
     return HwregAccessResult::Success;
+  case HwregState::Trapsts:
+    raw_value = wf.trapsts();
+    return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
     raw_value = gfx9_10_gpr_alloc_raw(wf);
     return HwregAccessResult::Success;
@@ -405,7 +409,21 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::WaveSchedMode:
     wf.set_wave_sched_mode_raw(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::Trapsts:
+    // The trap handler clears the excp bit it just serviced before s_rfe, so
+    // this has to write through to wave state rather than report Unsupported.
+    wf.set_trapsts(raw_value);
+    return HwregAccessResult::Success;
   case HwregState::Status:
+    // Only reachable from a privileged (trap-handler) write; the policy check
+    // in write_hwreg_field() refuses user-mode writes before we get here. The
+    // gfx9 trap handler sets STATUS.HALT this way before returning.
+    //
+    // That makes this the other origin of STATUS.HALT, so it owns the bit now:
+    // drop any s_sendmsghalt provenance, whichever way the handler wrote it.
+    wf.set_status_raw(raw_value);
+    wf.set_self_halted(false);
+    return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
@@ -478,7 +496,12 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   case HwregWritePolicy::ReadOnly:
     return HwregAccessResult::ReadOnly;
   case HwregWritePolicy::Privileged:
-    return HwregAccessResult::Privileged;
+    // A wave running the trap handler is in privileged mode (hardware sets
+    // STATUS.PRIV on trap entry), which is exactly the context these registers
+    // are writable from. Everything else is user mode and is refused.
+    if (!wf.in_trap_handler())
+      return HwregAccessResult::Privileged;
+    break;
   case HwregWritePolicy::UserWritable:
     break;
   }
