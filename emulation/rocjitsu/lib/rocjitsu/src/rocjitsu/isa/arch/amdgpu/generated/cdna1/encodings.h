@@ -447,6 +447,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -605,6 +606,7 @@ public:
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Vop3p : public IsaInstruction<Isa> {

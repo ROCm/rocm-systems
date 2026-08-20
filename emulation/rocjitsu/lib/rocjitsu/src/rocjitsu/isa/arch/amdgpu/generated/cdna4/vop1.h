@@ -613,22 +613,6 @@ public:
   Operand src0;
 };
 
-class VExpLegacyF32Vop1 : public Vop1 {
-public:
-  VExpLegacyF32Vop1(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-};
-
-class VLogLegacyF32Vop1 : public Vop1 {
-public:
-  VLogLegacyF32Vop1(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-};
-
 class VCvtNormI16F16Vop1 : public Vop1 {
 public:
   VCvtNormI16F16Vop1(const MachineInst *inst);

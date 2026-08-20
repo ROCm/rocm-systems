@@ -837,48 +837,6 @@ void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cos_f16_vop1(*this, wf);
 }
 
-void VExpLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(
-        *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
-  }
-}
-
-void VLogLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(
-        *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
-  }
-}
-
 void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,

@@ -97,7 +97,7 @@ int cdna5_scaled_wmma_src1_size_bits(const MachineInst *inst) {
   const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);
   if (cdna5_scaled_wmma_is_f4_32x16x128(inst))
     return 256;
-  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);
+  return cdna5_matrix_fmt_operand_size_bits((high->opsel_hi_2 << 2) | high->opsel_hi, 16, 128);
 }
 
 } // namespace
@@ -2359,7 +2359,7 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
                                               128),
            OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(cdna5_matrix_fmt_operand_size_bits(
-               ((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) |
+               ((reinterpret_cast<const OpEncoding *>(inst)->opsel_hi_2 << 2) |
                 reinterpret_cast<const OpEncoding *>(inst)->opsel_hi),
                16, 128),
            OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2400,7 +2400,7 @@ void VWmmaF3216x16x128F8f6f4Vop3p::build_modifiers(std::string &out) const {
   out += " matrix_a_fmt:";
   out += cdna5_matrix_fmt_name(inst_.opsel);
   out += " matrix_b_fmt:";
-  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);
+  out += cdna5_matrix_fmt_name((inst_.opsel_hi_2 << 2) | inst_.opsel_hi);
 }
 
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
@@ -3139,7 +3139,7 @@ void VSwmmacF3216x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3189,7 +3189,7 @@ void VSwmmacF3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3239,7 +3239,7 @@ void VSwmmacF1616x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3289,7 +3289,7 @@ void VSwmmacBf1616x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3339,7 +3339,7 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3767,7 +3767,7 @@ void VSwmmacF3216x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3817,7 +3817,7 @@ void VSwmmacF3216x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3867,7 +3867,7 @@ void VSwmmacF3216x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3917,7 +3917,7 @@ void VSwmmacF3216x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3967,7 +3967,7 @@ void VSwmmacF1616x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4017,7 +4017,7 @@ void VSwmmacF1616x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4067,7 +4067,7 @@ void VSwmmacF1616x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4117,7 +4117,7 @@ void VSwmmacF1616x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4167,7 +4167,7 @@ void VSwmmacI3216x16x128Iu8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4655,7 +4655,7 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
 void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
   if (inst_.op != 0x88) {
     const uint32_t matrix_a_fmt = inst_.opsel;
-    const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+    const uint32_t matrix_b_fmt = (inst_.opsel_hi_2 << 2) | inst_.opsel_hi;
     if (matrix_a_fmt != 0) {
       out += " matrix_a_fmt:";
       out += cdna5_matrix_fmt_name(matrix_a_fmt);
@@ -4681,7 +4681,7 @@ void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
   }
   if ((scale_inst_.opsel >> 2) & 0x1u)
     out += " matrix_a_reuse";
-  if (scale_inst_.pad_14)
+  if (scale_inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 

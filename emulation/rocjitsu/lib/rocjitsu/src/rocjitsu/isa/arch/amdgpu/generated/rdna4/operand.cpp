@@ -728,18 +728,18 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_VERSION:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_WAITCNT: {
-    uint32_t expcnt = encoding_value_ & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
-    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
-    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
-  }
   case OperandType::OPR_WAIT_ALU:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_EVENT:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_MEM_DS:
     return std::to_string(encoding_value_);
+  case OperandType::OPR_WAITCNT: {
+    uint32_t expcnt = encoding_value_ & 0x7;
+    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
+    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
+    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
+  }
   }
   return std::to_string(encoding_value_);
 }

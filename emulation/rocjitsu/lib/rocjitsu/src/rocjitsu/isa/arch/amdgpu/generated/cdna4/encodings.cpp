@@ -90,9 +90,9 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sop1::default_encoding() { return inst_.ssrc0 != 255; }
+bool Sop1::default_encoding() { return (inst_.ssrc0 != 255); }
 
-bool Sop1::has_lit_0() { return inst_.ssrc0 == 255; }
+bool Sop1::has_lit_0() { return (inst_.ssrc0 == 255); }
 
 bool Sopc::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -135,13 +135,13 @@ Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sopc::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
+bool Sopc::default_encoding() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 != 255)); }
 
-bool Sopc::has_lit_0() { return inst_.ssrc0 == 255 && inst_.ssrc1 != 255; }
+bool Sopc::has_lit_0() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 != 255)); }
 
-bool Sopc::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
+bool Sopc::has_lit_1() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 == 255)); }
 
-bool Sopc::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
+bool Sopc::has_lit_0_has_lit_1() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 == 255)); }
 
 Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -149,7 +149,13 @@ Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (!default_encoding())
+    size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
+
+bool Sopp::default_encoding() { return 1; }
 
 Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -157,13 +163,15 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (hasImpliedLiteral())
+  if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
   if (hasImpliedLiteral())
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
+
+bool Sopk::default_encoding() { return 1; }
 
 bool Sopk::hasImpliedLiteral() { return inst_.op == 20; }
 
@@ -239,13 +247,13 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sop2::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
+bool Sop2::default_encoding() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 != 255)); }
 
-bool Sop2::has_lit_0() { return inst_.ssrc0 == 255 && inst_.ssrc1 != 255; }
+bool Sop2::has_lit_0() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 != 255)); }
 
-bool Sop2::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
+bool Sop2::has_lit_1() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 == 255)); }
 
-bool Sop2::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
+bool Sop2::has_lit_0_has_lit_1() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 == 255)); }
 
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -338,8 +346,6 @@ bool Vop1::has_encoded_literal32() const {
   case 72:
   case 73:
   case 74:
-  case 75:
-  case 76:
   case 77:
   case 78:
   case 79:
@@ -414,8 +420,6 @@ bool Vop1::has_encoded_sdwa() const {
   case 72:
   case 73:
   case 74:
-  case 75:
-  case 76:
   case 77:
   case 78:
   case 79:
@@ -481,14 +485,14 @@ void Vop1::build_modifiers(std::string &out) const {
 }
 
 bool Vop1::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249;
+  return (inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249);
 }
 
-bool Vop1::has_lit() { return inst_.src0 == 255; }
+bool Vop1::has_lit() { return (inst_.src0 == 255); }
 
-bool Vop1::has_dpp() { return inst_.src0 == 250; }
+bool Vop1::has_dpp() { return (inst_.src0 == 250); }
 
-bool Vop1::has_sdwa() { return inst_.src0 == 249; }
+bool Vop1::has_sdwa() { return (inst_.src0 == 249); }
 
 bool Vopc::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -871,12 +875,12 @@ void Vopc::build_modifiers(std::string &out) const {
 }
 
 bool Vopc::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249;
+  return (inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249);
 }
 
-bool Vopc::has_lit() { return inst_.src0 == 255; }
+bool Vopc::has_lit() { return (inst_.src0 == 255); }
 
-bool Vopc::has_sdwa() { return inst_.src0 == 249; }
+bool Vopc::has_sdwa() { return (inst_.src0 == 249); }
 
 bool Vop2::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -1059,14 +1063,14 @@ void Vop2::build_modifiers(std::string &out) const {
 }
 
 bool Vop2::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249;
+  return (inst_.src0 != 250 && inst_.src0 != 255 && inst_.src0 != 249);
 }
 
-bool Vop2::has_lit() { return inst_.src0 == 255; }
+bool Vop2::has_lit() { return (inst_.src0 == 255); }
 
-bool Vop2::has_dpp() { return inst_.src0 == 250; }
+bool Vop2::has_dpp() { return (inst_.src0 == 250); }
 
-bool Vop2::has_sdwa() { return inst_.src0 == 249; }
+bool Vop2::has_sdwa() { return (inst_.src0 == 249); }
 
 bool Vop2::hasImpliedLiteral() {
   return inst_.op == 23 || inst_.op == 24 || inst_.op == 36 || inst_.op == 37;

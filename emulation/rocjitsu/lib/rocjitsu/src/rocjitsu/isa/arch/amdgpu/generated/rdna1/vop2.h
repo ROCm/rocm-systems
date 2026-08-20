@@ -24,15 +24,6 @@ public:
   Operand vcc;
 };
 
-class VDot2cF32F16Vop2 : public Vop2 {
-public:
-  VDot2cF32F16Vop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand vsrc1;
-};
-
 class VAddF32Vop2 : public Vop2 {
 public:
   VAddF32Vop2(const MachineInst *inst);
@@ -117,15 +108,6 @@ public:
 class VMulHiU32U24Vop2 : public Vop2 {
 public:
   VMulHiU32U24Vop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand vsrc1;
-};
-
-class VDot4cI32I8Vop2 : public Vop2 {
-public:
-  VDot4cI32I8Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;

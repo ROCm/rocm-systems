@@ -1946,8 +1946,8 @@ void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src0, dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
   amdgpu::execute_v_fmac_f32_vop3(*this, wf);
 }
 
@@ -2266,8 +2266,8 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src0, dpp_src1_.get());
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16();
   uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);

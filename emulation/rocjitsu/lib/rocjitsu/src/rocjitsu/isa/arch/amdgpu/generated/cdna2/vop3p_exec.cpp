@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -79,36 +78,7 @@ void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    bool sel0_lo = (inst_.op_sel >> 0) & 1;
-    bool sel1_lo = (inst_.op_sel >> 1) & 1;
-    bool sel2_lo = (inst_.op_sel >> 2) & 1;
-    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
-    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
-    bool sel2_hi = inst_.op_sel_hi_2;
-    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-    uint16_t c_lo = static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2);
-    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t c_hi = static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2);
-    uint16_t rlo = amdgpu::fp_mode::fma_f16(
-        a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u,
-        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(),
-        amdgpu::floating_clamp_nan_to_zero(wf));
-    uint16_t rhi = amdgpu::fp_mode::fma_f16(
-        a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u,
-        inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp,
-        wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane,
-                                   static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
-  }
+  amdgpu::execute_v_pk_fma_f16_vop3p(*this, wf);
 }
 
 void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
