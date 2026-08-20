@@ -984,8 +984,7 @@ DecodeResult decodeVAccvgprWriteVop3p(const MachineInst *opcode,
 }
 } // namespace detail
 
-VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst,
-                                                                   bool has_vop3px2_prefix)
+VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x128_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x128F8f6f4Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
@@ -1019,27 +1018,9 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MFMA;
-  if (has_vop3px2_prefix) {
-    size_ = 16;
-    raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
-    raw_encoding_ = raw_words_.data();
-  }
 }
 
-namespace detail {
-DecodeResult decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode,
-                                                    const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3pMfma::validate_encoding(
-      "v_mfma_f32_16x16x128_f8f6f4", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
-      emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
-}
-} // namespace detail
-
-VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst,
-                                                                 bool has_vop3px2_prefix)
+VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x64F8f6f4Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
@@ -1073,24 +1054,7 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MFMA;
-  if (has_vop3px2_prefix) {
-    size_ = 16;
-    raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};
-    raw_encoding_ = raw_words_.data();
-  }
 }
-
-namespace detail {
-DecodeResult decodeVMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *opcode,
-                                                   const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3pMfma::validate_encoding(
-      "v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
-      emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
-}
-} // namespace detail
 
 VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -3879,6 +3843,92 @@ DecodeResult decodeVSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *opcode,
   return std::make_unique<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>(opcode);
 }
 } // namespace detail
+
+VMfmaScaleF3216x16x128F8f6f4Vop3px2::VMfmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst)
+    : Vop3pMfma("v_mfma_scale_f32_16x16x128_f8f6f4", reinterpret_cast<const OpEncoding *>(inst + 2),
+                selected_exec_fn(InstructionExecutionId::VMfmaScaleF3216x16x128F8f6f4Vop3px2)),
+      vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      src0(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst + 2)->cbsz,
+                                              16, 128),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->src0 +
+            ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x1u)
+                 ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                    OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                 : 0))),
+      src1(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst + 2)->blgp,
+                                              16, 128),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->src1 +
+            ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x2u)
+                 ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                    OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                 : 0))),
+      src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
+           mfma_src2_encoding(reinterpret_cast<const OpEncoding *>(inst + 2)->src2,
+                              reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd)),
+      scale_src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      scale_src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      raw_words_{inst[0], inst[1], inst[2], inst[3]} {
+  size_ = 16;
+  raw_encoding_ = raw_words_.data();
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  src_operands_[3] = &scale_src0;
+  src_operands_[4] = &scale_src1;
+  num_src_ = 5;
+  num_dst_ = 1;
+  flags_ |= MFMA;
+}
+
+VMfmaScaleF3232x32x64F8f6f4Vop3px2::VMfmaScaleF3232x32x64F8f6f4Vop3px2(const MachineInst *inst)
+    : Vop3pMfma("v_mfma_scale_f32_32x32x64_f8f6f4", reinterpret_cast<const OpEncoding *>(inst + 2),
+                selected_exec_fn(InstructionExecutionId::VMfmaScaleF3232x32x64F8f6f4Vop3px2)),
+      vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      src0(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst + 2)->cbsz,
+                                              32, 64),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->src0 +
+            ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x1u)
+                 ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                    OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                 : 0))),
+      src1(cdna4_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst + 2)->blgp,
+                                              32, 64),
+           OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst + 2)->src1 +
+            ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x2u)
+                 ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                    OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                 : 0))),
+      src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
+           mfma_src2_encoding(reinterpret_cast<const OpEncoding *>(inst + 2)->src2,
+                              reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd)),
+      scale_src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      scale_src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      raw_words_{inst[0], inst[1], inst[2], inst[3]} {
+  size_ = 16;
+  raw_encoding_ = raw_words_.data();
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  src_operands_[3] = &scale_src0;
+  src_operands_[4] = &scale_src1;
+  num_src_ = 5;
+  num_dst_ = 1;
+  flags_ |= MFMA;
+}
 
 } // namespace cdna4
 } // namespace rocjitsu

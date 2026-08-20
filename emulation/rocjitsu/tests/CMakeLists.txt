@@ -19,6 +19,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_amdgpu
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
+    rocjitsu_plugin_throughput
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -402,6 +403,7 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    xcd_distribution_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
@@ -459,6 +461,7 @@ add_executable(
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
+    wave_debug_test.cpp
     decode_execute_benchmark.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
@@ -508,6 +511,7 @@ add_executable(
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_inline_constant_correctness_test.cpp
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
@@ -883,9 +887,9 @@ rj_configure_target(scaling_test TEST)
 # The CLI handles LD_PRELOAD and config discovery. rj_add_test gives launcher
 # tests isolated runtime directories, so no RESOURCE_LOCK is needed.
 
-set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json")
 set(RJ_CDNA4_KMD_2GPU_CONFIG
-    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
@@ -982,7 +986,7 @@ endif()
 
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
 )
 
 add_executable(guest_kfd_test guest_kfd_test.cpp)
@@ -1419,6 +1423,8 @@ set(_rj_interposer_dup_tests
     SerializedReopenUnderContentionStaysRoutable
     FcntlDupfdReplacesStaleDrmTracking
     NonDrmDuplicatesClearStaleDrmTracking
+    VforkChildCloseKeepsParentKfdRoutable
+    ProcMapsNamesRemoteKfdMarker
 )
 # TSan models concurrent close/dup on one descriptor as an application-level fd
 # race even though the interposer deliberately serializes the kernel operation.
@@ -1431,6 +1437,11 @@ if(NOT RJ_ENABLE_TSAN)
     )
 endif()
 rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
+
+rj_add_interposer_test_suite(
+    InterposerDrmTest
+    DeviceInfoReportsActiveCuCount
+)
 
 rj_add_interposer_test_suite(
     InterposerGemTest
@@ -1534,6 +1545,8 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             DetectsGpuAgent
             ReportsGfx950
             ReportsWavefrontSize
+            ReportsMi350xActiveComputeUnits
+            ReportsMi350xMaxClockFrequency
     )
         rj_add_test(
             NAME "RocminfoTest.${_rocminfo_test}"
@@ -2480,6 +2493,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
+            DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
@@ -2708,4 +2722,181 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "--"
             "bin/hip_cvt_narrow_test"
     )
+endif()
+
+# --- rocgdb wave-debugging smoke test (requires rocgdb + hipcc + mirage) ---
+# Drives real ROCgdb through `mirage run` to set a GPU kernel breakpoint, stop,
+# inspect wave registers, and continue to a correct result (see
+# tests/rocgdb/debug_kernel.sh). Gated on the debugger and HIP compiler being
+# present; the harness itself skips (printing "SKIP:") if mirage is not found.
+find_program(
+    ROCGDB_EXECUTABLE
+    NAMES rocgdb
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+find_program(
+    HIPCC_EXECUTABLE
+    NAMES hipcc
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+# NO_DEFAULT_PATH: only an in-tree Mirage qualifies. An unrelated one installed
+# on PATH would be a different build than the librocjitsu.so staged below, and
+# the mismatch surfaces as an opaque "enable_debug failed (STATUS_ERROR)" rather
+# than as a version error.
+#
+# A fresh cache entry name (not MIRAGE_EXECUTABLE) is deliberate: find_program is
+# a no-op when its cache variable is already set, so any build tree configured
+# while this used HINTS -- which does not suppress the default PATH search --
+# would keep an out-of-tree hit forever and NO_DEFAULT_PATH would never apply to
+# the very trees it was added for.
+#
+# build/manylinux/bin is where emulation/mirage/scripts/mirage.sh installs, so it
+# belongs beside the two cargo target dirs; PATH_SUFFIXES covers it without
+# reopening the default search.
+find_program(
+    RJ_MIRAGE_EXECUTABLE
+    NAMES mirage
+    PATHS
+        "${CMAKE_SOURCE_DIR}/../mirage/target/release"
+        "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
+        "${CMAKE_SOURCE_DIR}/../mirage/build/manylinux"
+    PATH_SUFFIXES bin
+    NO_DEFAULT_PATH
+)
+set(MIRAGE_EXECUTABLE "${RJ_MIRAGE_EXECUTABLE}")
+# Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
+# has nothing to run the debuggee under. Registering the test anyway produced a
+# test that could only skip, or -- worse -- one that ran a Mirage which then
+# loaded whatever librocjitsu.so it happened to find, or none at all and exited
+# 127 long before reaching ROCgdb.
+# A Mirage binary older than Mirage's own sources is not usable here: this
+# branch changes the ctl and rocjitsu_sys crates, and a prebuilt binary that
+# predates them fails attachment with an opaque "enable_debug failed
+# (STATUS_ERROR)". CMake deliberately does not drive cargo, so refuse to
+# register rather than test a binary that does not match the tree, and say what
+# to run. Configure-time only, so `cargo build` needs a re-run of cmake -- which
+# the message states.
+#
+# No CONFIGURE_DEPENDS: it re-runs cmake when the *set* of matched files changes,
+# never when an existing file's mtime does, which is the only thing this gate
+# reads -- so it cannot fire for the case that matters and costs a recursive walk
+# of the whole mirage tree on every build.
+set(_rocgdb_mirage_stale FALSE)
+if(MIRAGE_EXECUTABLE)
+    # mirage is a workspace whose root package is the `mirage` binary itself
+    # (src/main.rs, declared by the top-level Cargo.toml), so the per-crate
+    # patterns alone would miss the entry point most likely to change.
+    file(
+        GLOB_RECURSE _rocgdb_mirage_sources
+        "${CMAKE_SOURCE_DIR}/../mirage/*/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/*/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/build.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.lock"
+    )
+    # Phrased as "the binary is not newer than the source" rather than the
+    # reverse: CMake's IS_NEWER_THAN is also true when the two timestamps are
+    # *equal*, so testing the source directly calls a tie stale. Ties are the
+    # common case after a checkout, a container copy, or a CI cache restore, and
+    # calling them stale silently deregisters the test with a message telling the
+    # developer to run a build they already ran.
+    foreach(_src IN LISTS _rocgdb_mirage_sources)
+        if(NOT "${MIRAGE_EXECUTABLE}" IS_NEWER_THAN "${_src}")
+            set(_rocgdb_mirage_stale TRUE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(
+    ROCGDB_EXECUTABLE
+    AND HIPCC_EXECUTABLE
+    AND MIRAGE_EXECUTABLE
+    AND NOT _rocgdb_mirage_stale
+)
+    # Stage the librocjitsu.so this build just produced into a stub ROCm root
+    # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
+    # search locations (emulation/mirage/rocjitsu/src/lib.rs kmd_search_dirs),
+    # and the search is additive, so a stub root cannot shadow anything else.
+    set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
+    # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
+    # kmd_search_dirs (emulation/mirage/rocjitsu/src/lib.rs) probes
+    # <exe_dir>/../..{,/..}/rocjitsu/build first and only then <exe_dir>/../lib,
+    # with $ROCM_HOME/lib after both. Run in place from
+    # emulation/mirage/target/debug, the third of those probes resolves to
+    # emulation/rocjitsu/build -- the developer's own tree -- so ROCM_HOME never
+    # got a look in. Running the staged copy puts none of the rocjitsu/build
+    # probes on a real directory, and <exe_dir>/../lib is this build's staged
+    # librocjitsu.so.
+    add_custom_command(
+        OUTPUT
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/lib
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/bin
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rocjitsu_shared>
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different ${MIRAGE_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/mirage
+        # copy_if_different leaves the destination's mtime alone when the bytes
+        # already match, so without this the outputs stay older than their inputs
+        # and the generator re-issues all four commands -- a byte-compare of a
+        # 69 MB binary and the shared library -- on every incremental build.
+        COMMAND
+            ${CMAKE_COMMAND} -E touch ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+        DEPENDS rocjitsu_shared ${MIRAGE_EXECUTABLE}
+        COMMENT
+            "Staging mirage + librocjitsu.so for the rocgdb debug smoke test"
+        VERBATIM
+    )
+    add_custom_target(
+        rocgdb_demo_rocm_home
+        ALL
+        DEPENDS
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+    )
+
+    rj_add_test(
+        NAME "RocgdbDebug.KernelBreakpoint"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/rocgdb/debug_kernel.sh"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 300
+        ENVIRONMENT
+            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCM_HOME=${_rocgdb_rocm_home}"
+        SKIP_REGULAR_EXPRESSION "SKIP:"
+    )
+    message(
+        STATUS
+        "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
+    )
+else()
+    # One message naming every unmet reason. Reporting only staleness when rocgdb
+    # is also missing sends the developer to `cargo build`, after which the test
+    # still does not register and nothing new is printed to say why.
+    set(_rocgdb_missing "")
+    if(NOT ROCGDB_EXECUTABLE)
+        list(APPEND _rocgdb_missing "rocgdb")
+    endif()
+    if(NOT HIPCC_EXECUTABLE)
+        list(APPEND _rocgdb_missing "hipcc")
+    endif()
+    if(NOT MIRAGE_EXECUTABLE)
+        list(APPEND _rocgdb_missing "mirage")
+    endif()
+    if(_rocgdb_mirage_stale)
+        list(
+            APPEND _rocgdb_missing
+            "a mirage newer than its sources (run `cargo build` in emulation/mirage, then re-run cmake)"
+        )
+    endif()
+    list(JOIN _rocgdb_missing ", " _rocgdb_missing)
+    message(STATUS "rocgdb debug smoke test disabled (need ${_rocgdb_missing})")
 endif()

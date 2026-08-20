@@ -99,18 +99,35 @@ public:
   /// @returns Const reference to the vector of XCD pointers.
   const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
 
-  /// @brief MES-like round-robin queue assignment across XCD command processors.
+  /// @brief MES-like queue assignment across XCD command processors.
   ///
   /// @details On real MI300X hardware, the MES firmware distributes HW queues
-  /// across XCDs. This method emulates that behavior with round-robin assignment.
-  /// Each call returns the next XCD's CP in rotation.
+  /// across XCDs. Use the process-local queue ordinal so equivalent queues from
+  /// independent processes compete for the same XCD resources.
   ///
-  /// @returns Pointer to the next CommandProcessor in rotation, or nullptr if no XCDs.
-  amdgpu::CommandProcessor *assign_queue_cp() {
+  /// @returns Pointer to the selected CommandProcessor, or nullptr if no XCDs.
+  amdgpu::CommandProcessor *assign_queue_cp(uint32_t queue_ordinal) {
     if (xcds_.empty())
       return nullptr;
-    uint32_t idx = next_xcd_assignment_++ % static_cast<uint32_t>(xcds_.size());
+    uint32_t idx = queue_ordinal % static_cast<uint32_t>(xcds_.size());
     return xcds_[idx]->command_processor();
+  }
+
+  /// @brief Per-XCD histogram of workgroups placed by each XCD's command processor.
+  ///
+  /// @details Index i is the count for xcd(i). Each entry is that CP's lifetime
+  /// running total, so this describes one grid only when it is the sole dispatch,
+  /// as in the tests; otherwise diff a snapshot taken before the dispatch against
+  /// one taken after. A single non-zero bucket means the work ran on one XCD.
+  /// @returns One entry per XCD, in XCD index order.
+  std::vector<uint64_t> dispatched_workgroups_per_xcd() const {
+    std::vector<uint64_t> counts;
+    counts.reserve(xcds_.size());
+    for (const auto *xcd_ptr : xcds_) {
+      const auto *cp = xcd_ptr->command_processor();
+      counts.push_back(cp ? cp->dispatched_workgroups() : 0);
+    }
+    return counts;
   }
 
   /// @brief Apply a function to all XCD command processors.
@@ -169,7 +186,6 @@ public:
 private:
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
-  std::atomic<uint32_t> next_xcd_assignment_{0};
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   std::vector<amdgpu::Xcd *> xcds_;

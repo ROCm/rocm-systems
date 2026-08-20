@@ -819,6 +819,11 @@
           "name": "HostApi_DestroyCommWithoutDeregister",
           "description": "Host API: destroy comm without deregister",
           "test_filter": "HostApiTest.DestroyCommWithoutDeregister"
+        },
+        {
+          "name": "HostApi_WindowRegisterInvalidArgsNullWindow",
+          "description": "Host API: window register invalid args null window",
+          "test_filter": "HostApiTest.WindowRegisterInvalidArgsNullWindow"
         }
       ]
     },

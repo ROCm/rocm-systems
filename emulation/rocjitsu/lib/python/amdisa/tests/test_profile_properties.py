@@ -20,8 +20,9 @@ from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
-    Gfx1250Profile,
+    Cdna5Profile,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
@@ -38,7 +39,7 @@ from amdisa.isa_profile import (
         (Rdna1Profile(), True),
         (Rdna3Profile(), True),
         (Rdna4Profile(), True),
-        (Gfx1250Profile(), False),
+        (Cdna5Profile(), False),
     ],
 )
 def test_supports_wgp_mode(profile, expected):
@@ -50,7 +51,7 @@ def test_supports_wgp_mode(profile, expected):
     [
         (CdnaProfile(), False, False),
         (Rdna4Profile(), True, False),
-        (Gfx1250Profile(), True, True),
+        (Cdna5Profile(), True, True),
     ],
 )
 def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
@@ -65,7 +66,7 @@ def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
         (Rdna1Profile(), False),
         (Rdna3Profile(), False),
         (Rdna4Profile(), False),
-        (Gfx1250Profile(), False),
+        (Cdna5Profile(), False),
     ],
 )
 def test_descriptor_sgpr_count_encoded(profile, expected):
@@ -77,7 +78,7 @@ def test_descriptor_sgpr_count_encoded(profile, expected):
     [
         (CdnaProfile(), 256),
         (Rdna4Profile(), 256),
-        (Gfx1250Profile(), 1024),
+        (Cdna5Profile(), 1024),
     ],
 )
 def test_max_addressable_vgprs_per_wf(profile, expected):
@@ -95,7 +96,7 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
         (Rdna3Profile(), 8, 4),
         (Rdna3_5Profile(), 8, 4),
         (Rdna4Profile(), 8, 4),
-        (Gfx1250Profile(), 16, 0),
+        (Cdna5Profile(), 16, 0),
     ],
 )
 def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64):
@@ -114,7 +115,7 @@ def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64
         Rdna3Profile(),
         Rdna3_5Profile(),
         Rdna4Profile(),
-        Gfx1250Profile(),
+        Cdna5Profile(),
     ],
 )
 def test_amdgpu_profiles_split_execution_sources(profile):
@@ -157,8 +158,8 @@ def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
         (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
         (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
         (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
-        (Gfx1250Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
-        (Gfx1250Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
+        (Cdna5Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
+        (Cdna5Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
     ],
 )
 def test_saddr_null_selector_is_encoding_specific(profile, enc_name, expected):
@@ -174,7 +175,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     specs = [
         ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
         ('rdna4', SimpleNamespace(profile=Rdna4Profile()), None),
-        ('gfx1250', SimpleNamespace(profile=Gfx1250Profile()), None),
+        ('cdna5', SimpleNamespace(profile=Cdna5Profile()), None),
     ]
 
     output = emit_isa_properties(str(tmp_path), specs).read_text()
@@ -214,7 +215,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_GFX1250:\n'
+        'case ROCJITSU_CODE_ARCH_CDNA5:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
@@ -234,13 +235,13 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
         ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
         ('rdna3_5', Rdna3_5Profile()),
         ('rdna4', Rdna4Profile()),
-        ('gfx1250', Gfx1250Profile()),
+        ('cdna5', Cdna5Profile()),
     ]
     specs = [
         (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
@@ -258,12 +259,12 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
-            arch_name='gfx1250',
+            arch_name='cdna5',
             generated_dir_name='cdna5',
             cpp_namespace='cdna5',
             opnd_selectors=[],
             operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
-            profile=Gfx1250Profile(),
+            profile=Cdna5Profile(),
         ),
         str(tmp_path),
     )
@@ -304,10 +305,10 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
     generator.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
+        arch_name='cdna5',
         generated_dir_name='cdna5',
         cpp_namespace='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
     generator.config = CodegenConfig()
     generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
@@ -390,7 +391,7 @@ def test_cdna1_split_operand_emits_simd_dispatch_methods(tmp_path):
 
 
 class TestCdnaProfile:
-    """CdnaProfile represents CDNA3 and CDNA4."""
+    """CdnaProfile holds capabilities shared by CDNA3 and CDNA4."""
 
     def setup_method(self):
         self.p = CdnaProfile()
@@ -431,6 +432,9 @@ class TestCdnaProfile:
     def test_waitcnt_lgkmcnt_mask(self):
         assert self.p.waitcnt_lgkmcnt_mask == '0x0F'
 
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
+
     def test_field_renames_flat(self):
         renames = self.p.field_renames('ENC_FLAT')
         assert renames.get('sve') == 'lds'
@@ -441,6 +445,24 @@ class TestCdnaProfile:
 
     def test_field_renames_other_enc_empty(self):
         assert self.p.field_renames('ENC_VOP2') == {}
+
+    def test_compound_mfma_is_not_a_family_default(self):
+        assert self.p.mfma_scale_vop3px2_specs == ()
+        assert self.p.inst_size_overrides == {}
+        assert self.p.vop3px2_prefix_opcode is None
+
+
+class TestCdna4Profile:
+    def setup_method(self):
+        self.p = Cdna4Profile()
+
+    def test_compound_mfma_is_explicitly_enabled(self):
+        assert tuple(spec.opcode for spec in self.p.mfma_scale_vop3px2_specs) == (
+            45,
+            46,
+        )
+        assert set(self.p.inst_size_overrides.values()) == {16}
+        assert self.p.vop3px2_prefix_opcode == 0x2C
 
 
 class TestCdna1Profile:
@@ -470,6 +492,9 @@ class TestCdna1Profile:
     def test_wave_size_inherited(self):
         assert self.p.wave_size == 64
 
+    def test_d16_loads_preserve_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is False
+
 
 class TestCdna2Profile:
     """Cdna2Profile: AccVGPR base 512, GFX9_GLC coherency, sgpr_pair scratch."""
@@ -488,6 +513,9 @@ class TestCdna2Profile:
 
     def test_flat_scratch_mechanism(self):
         assert self.p.flat_scratch_mechanism == 'sgpr_pair'
+
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
 
 
 class TestRdna1Profile:
@@ -594,9 +622,9 @@ class TestRdna4Profile:
         assert self.p.has_vopd3 is False
 
 
-class TestGfx1250Profile:
+class TestCdna5Profile:
     def setup_method(self):
-        self.p = Gfx1250Profile()
+        self.p = Cdna5Profile()
 
     def test_supported_versions(self):
         assert self.p.supported_versions == ['1.2.0']
@@ -620,7 +648,7 @@ class TestGfx1250Profile:
         )
 
     def test_generated_identities(self):
-        assert self.p.generated_arch_name == 'gfx1250'
+        assert self.p.generated_arch_name == 'cdna5'
         assert self.p.generated_dir_name == 'cdna5'
         assert self.p.cpp_namespace == 'cdna5'
 
@@ -649,6 +677,9 @@ class TestGfx1250Profile:
 
     def test_vgpr_msb_indexing(self):
         assert self.p.uses_vgpr_msb_indexing is True
+
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
 
     def test_source_split_limits_leave_precommit_margin(self):
         limits = self.p.source_split_max_bytes
@@ -795,7 +826,7 @@ class TestGfx1250Profile:
     def test_detect_profile_uses_filename_override(self, tmp_path):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
         xml.write_text('<Spec />')
-        assert _detect_profile(str(xml)) == 'gfx1250'
+        assert _detect_profile(str(xml)) == 'cdna5'
 
     def test_test_encoding_uses_primary_decode_key(self):
         generator = object.__new__(CodeGenerator)
@@ -824,12 +855,12 @@ class TestGfx1250Profile:
     def test_operand_read_lane64_preserves_literal64(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
-                arch_name='gfx1250',
+                arch_name='cdna5',
                 generated_dir_name='cdna5',
                 cpp_namespace='cdna5',
                 opnd_selectors=[],
                 operand_types=['OPR_SIMM32', 'OPR_SIMM64', 'OPR_VGPR'],
-                profile=Gfx1250Profile(),
+                profile=Cdna5Profile(),
             ),
             str(tmp_path),
         )

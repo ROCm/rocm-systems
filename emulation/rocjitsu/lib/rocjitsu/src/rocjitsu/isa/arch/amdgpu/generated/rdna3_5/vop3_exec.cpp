@@ -3781,6 +3781,10 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
@@ -3836,6 +3840,10 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));

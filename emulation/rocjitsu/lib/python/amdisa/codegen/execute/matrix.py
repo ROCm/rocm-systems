@@ -38,7 +38,7 @@ def _f8_bools(input_type: str) -> tuple[str, str]:
     )
 
 
-def _gfx1250_wmma_spec(
+def _cdna5_wmma_spec(
     result_type: str, input_type: str, M: int, N: int, K: int
 ) -> str | None:
     """Specialized gfx1250 (wave32) dense-WMMA kernel name for a given shape,
@@ -265,7 +265,7 @@ def gen_mfma(
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
-    if arch == 'gfx1250':
+    if arch == 'cdna5':
         L.append(
             f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
             f'{d}.encoding_value_, {d}.vgpr_msb_role());'
@@ -332,7 +332,7 @@ def gen_mfma(
 
     if result_type == 'F64':
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
-        if arch == 'gfx1250':
+        if arch == 'cdna5':
             L.append(f'                 src0_base,')
             L.append(f'                 src1_base,')
         else:
@@ -360,7 +360,7 @@ def gen_mfma(
             )
             L.append(f'  }};')
 
-        if arch == 'gfx1250':
+        if arch == 'cdna5':
             # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
             # signed extension, bit clear means unsigned.
             if is_swmmac:
@@ -478,7 +478,7 @@ def gen_mfma(
     else:
         # F32, F16, and BF16 matrix results accumulate in f32. gfx1250 WMMA
         # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
-        if arch == 'gfx1250' and input_type in ('F8_F6_F4', 'F8F6F4'):
+        if arch == 'cdna5' and input_type in ('F8_F6_F4', 'F8F6F4'):
             L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
             L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
             L.append(
@@ -507,7 +507,7 @@ def gen_mfma(
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
-        if arch == 'gfx1250':
+        if arch == 'cdna5':
             if is_swmmac:
                 if result_type == 'F16':
                     exec_fn = 'exec_swmmac_f16'
@@ -523,7 +523,7 @@ def gen_mfma(
             else:
                 # Dense WMMA: a specialized wave32 kernel where one exists, else
                 # the generic exec_wmma_* runtime path.
-                spec = _gfx1250_wmma_spec(result_type, input_type, M, N, K)
+                spec = _cdna5_wmma_spec(result_type, input_type, M, N, K)
                 if spec is not None:
                     if result_type in ('F32', 'BF16F32'):
                         L.append(
@@ -608,40 +608,17 @@ def gen_mfma(
             # correct extract functions and bit widths.
             L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
             L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
-            L.append('  bool dispatched;')
-            L.append('  if (!(inst_.abid & 1u)) {')
             L.append(
-                '    dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+                '  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+            )
+            L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
+            L.append(
+                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
             )
             L.append(
-                '        [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
+                f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
             )
-            L.append(
-                f'          amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
-            )
-            L.append(
-                f'                                 dst, s0b, s1b, s2, ea, eb, const_acc);'
-            )
-            L.append('        });')
-            L.append('  } else {')
-            L.append(
-                '    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
-            )
-            L.append(
-                '    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
-            )
-            L.append('    dispatched = amdgpu::dispatch_matrix_fmt_pair(')
-            L.append(
-                '        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
-            )
-            L.append(
-                f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
-            )
-            L.append(
-                f'                                        eb, const_acc, sa_base, sb_base);'
-            )
-            L.append('        });')
-            L.append('  }')
+            L.append('      });')
             L.append('  if (!dispatched)')
             L.append('    throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):

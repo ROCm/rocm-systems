@@ -1705,8 +1705,6 @@ DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode,
-                                                    const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *opcode,
                                                  const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *opcode,
@@ -1751,8 +1749,6 @@ DecodeResult decodeVMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *opcode,
                                                   const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *opcode,
                                                  const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *opcode,
-                                                   const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *opcode,
                                                 const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMfmaF3232x32x8F16Vop3pMfma(const MachineInst *opcode,
@@ -2069,6 +2065,8 @@ private:
                                      const DecodeErrorEmitter &emit_error);
   static DecodeResult decodeVop3pX2Prefix(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeCdna4MfmaF8f6f4Suffix(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error);
   static DecodeResult subDecodeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
   static DecodeResult subDecodeFlat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error);
@@ -2091,11 +2089,57 @@ private:
   static const std::array<DecodeFunc, 16> sub_decode_mtbuf;
 };
 
+namespace {
+
+bool isLegalMfmaScaleF8f6f4Selector(uint32_t selector) {
+  return (selector >= 240 && selector <= 248) || (selector >= 256 && selector <= 511);
+}
+
+bool isLegalMfmaF8f6f4Format(uint32_t format) { return format <= 4; }
+
+bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
+  constexpr uint32_t VOP3P_MFMA_ENC = 423;
+  constexpr uint32_t PREFIX_OP = 44;
+  auto enc0 = (opcode[0] >> 23) & 0x1FFu;
+  auto op0 = (opcode[0] >> 16) & 0x7Fu;
+  if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
+    return false;
+  auto enc2 = (opcode[2] >> 23) & 0x1FFu;
+  auto op2 = (opcode[2] >> 16) & 0x7Fu;
+  auto abid2 = (opcode[2] >> 11) & 0xFu;
+  return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46) && abid2 == 1u;
+}
+
+bool isValidMfmaScaleF8f6f4(const MachineInst *opcode) {
+  auto scale_src0 = opcode[1] & 0x1FFu;
+  auto scale_src1 = (opcode[1] >> 9) & 0x1FFu;
+  if (!isLegalMfmaScaleF8f6f4Selector(scale_src0) || !isLegalMfmaScaleF8f6f4Selector(scale_src1))
+    return false;
+  auto suffix = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode + 2);
+  if (!isLegalMfmaF8f6f4Format(suffix.cbsz) || !isLegalMfmaF8f6f4Format(suffix.blgp))
+    return false;
+  auto neg = (opcode[1] >> 29) & 0x7u;
+  auto neg_hi = (opcode[0] >> 8) & 0x7u;
+  return (neg & 0x3u) == 0 && (neg_hi & 0x3u) == 0;
+}
+
+} // namespace
+
 DecodeResult Decoder::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   return DecoderImpl::decode(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {
+    if (!isValidMfmaScaleF8f6f4(opcode))
+      return decodeInvalid(opcode, emit_error);
+    auto op2 = (opcode[2] >> 16) & 0x7Fu;
+    if (op2 == 45)
+      return std::make_unique<VMfmaScaleF3216x16x128F8f6f4Vop3px2>(opcode);
+    if (op2 == 46)
+      return std::make_unique<VMfmaScaleF3232x32x64F8f6f4Vop3px2>(opcode);
+    return decodeInvalid(opcode, emit_error);
+  }
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode, emit_error);
 }
@@ -2155,15 +2199,19 @@ DecodeResult DecoderImpl::subDecodeVop3p(const MachineInst *opcode,
 
 DecodeResult DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
-  const uint32_t suffix_encoding = (opcode[2] >> 23) & 0x1FFu;
-  const uint32_t suffix_opcode = (opcode[2] >> 16) & 0x7Fu;
-  if (suffix_encoding != encoding::kVop3pMfma ||
-      (suffix_opcode != kVMfmaF3216x16x128F8f6f4Vop3pMfma &&
-       suffix_opcode != kVMfmaF3232x32x64F8f6f4Vop3pMfma))
+  return decodeInvalid(opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeCdna4MfmaF8f6f4Suffix(const MachineInst *opcode,
+                                                      const DecodeErrorEmitter &emit_error) {
+  auto op = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode);
+  if (op.abid != 0u || !isLegalMfmaF8f6f4Format(op.cbsz) || !isLegalMfmaF8f6f4Format(op.blgp))
     return decodeInvalid(opcode, emit_error);
-  if (suffix_opcode == kVMfmaF3216x16x128F8f6f4Vop3pMfma)
-    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);
-  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);
+  if (op.op == 45)
+    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
+  if (op.op == 46)
+    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
+  return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeDs(const MachineInst *opcode,
@@ -4496,8 +4544,8 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_vop3p = {
     &detail::decodeVDot8I32I4Vop3p,
     &detail::decodeVDot8U32U4Vop3p,
     &DecoderImpl::decodeVop3pX2Prefix,
-    &detail::decodeVMfmaF3216x16x128F8f6f4Vop3pMfma,
-    &detail::decodeVMfmaF3232x32x64F8f6f4Vop3pMfma,
+    &DecoderImpl::decodeCdna4MfmaF8f6f4Suffix,
+    &DecoderImpl::decodeCdna4MfmaF8f6f4Suffix,
     &DecoderImpl::decodeInvalid,
     &detail::decodeVPkFmaF32Vop3p,
     &detail::decodeVPkMulF32Vop3p,

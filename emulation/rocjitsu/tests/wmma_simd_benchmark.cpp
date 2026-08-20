@@ -16,9 +16,14 @@
 ///   - f32/f16/bf16 output: SIMD uses fused FMA (matching the hardware) while the
 ///     scalar reference is non-fused, so results agree to a small tolerance.
 
+#include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -29,6 +34,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -36,6 +42,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -56,7 +63,7 @@ constexpr uint32_t S0_OFF = 0;
 constexpr uint32_t S1_OFF = 32;
 constexpr uint32_t S2_OFF = 64;
 constexpr uint32_t INDEX_OFF = 96;
-constexpr uint32_t OUT_REGS = 8; // dst window read back for the correctness check.
+constexpr uint32_t OUT_REGS = 8; // Default dst window read back for the correctness check.
 
 constexpr uint32_t INDEX_ENTRIES = 16;
 constexpr uint32_t INDEX_KEY = 0;
@@ -72,7 +79,7 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("wmma_simd_bench_mem"), l2("wmma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -139,9 +146,9 @@ struct BenchFixture {
         cu->write_vgpr(vbase + off + reg, lane, value);
   }
 
-  std::vector<uint32_t> snapshot_out() const {
-    std::vector<uint32_t> out(OUT_REGS * WF_SIZE);
-    for (uint32_t reg = 0; reg < OUT_REGS; ++reg)
+  std::vector<uint32_t> snapshot_out(uint32_t out_regs = OUT_REGS) const {
+    std::vector<uint32_t> out(out_regs * WF_SIZE);
+    for (uint32_t reg = 0; reg < out_regs; ++reg)
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
         out[reg * WF_SIZE + lane] = cu->read_vgpr(vbase + S2_OFF + reg, lane);
     return out;
@@ -190,16 +197,16 @@ void compare(const char *label, Cmp cmp, const std::vector<uint32_t> &sc,
 
 // Drive one WMMA kernel A/B: run scalar then SIMD, compare dst, then time both.
 void bench(const char *label, BenchFixture &fx, const std::function<void()> &run, double macs,
-           Cmp cmp) {
+           Cmp cmp, uint32_t out_regs = OUT_REGS) {
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
 
   util::set_force_scalar_for_testing(true);
   run();
-  auto result_scalar = fx.snapshot_out();
+  auto result_scalar = fx.snapshot_out(out_regs);
   util::set_force_scalar_for_testing(false);
   run();
-  auto result_simd = fx.snapshot_out();
+  auto result_simd = fx.snapshot_out(out_regs);
   compare(label, cmp, result_scalar, result_simd);
 
   auto time_mode = [&](bool force_scalar) -> double {
@@ -462,6 +469,62 @@ TEST(WmmaSimdBenchmark, F32_16x16x64_fp8_Specialized) {
                                                           fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x64_fp8_fp8 [specialized]", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
+
+TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 128;
+  const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
+  const uint32_t packed_fp4_one = fp4_one * 0x11111111u;
+  fx.seed_words(S0_OFF, 8, packed_fp4_one);
+  fx.seed_words(S1_OFF, 8, packed_fp4_one);
+  fx.seed_words(S2_OFF, OUT_REGS, 0);
+
+  constexpr auto prefix = cdna5::build_vop3p(0x35, {.src0 = 128, .src1 = 128, .src2 = 256});
+  auto matrix = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = S2_OFF,
+                                                                          .opsel = 4,
+                                                                          .src0 = 256 + S0_OFF,
+                                                                          .src1 = 256 + S1_OFF,
+                                                                          .src2 = 128,
+                                                                          .opsel_hi = 0});
+  matrix[0] |= 1u << 14;
+  const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+  bench("decoded v_wmma_scale_f32_16x16x128_fp4_fp4", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
+
+TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 16, K = 128;
+  constexpr uint32_t kM32OutRegs = 16;
+  const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
+  const uint32_t packed_fp4_one = fp4_one * 0x11111111u;
+  fx.seed_words(S0_OFF, 16, packed_fp4_one);
+  fx.seed_words(S1_OFF, 8, packed_fp4_one);
+  fx.seed_words(S2_OFF, kM32OutRegs, 0);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[prefix_op, label] : std::array<std::pair<uint16_t, const char *>, 2>{
+           {{0x35, "decoded v_wmma_scale_f32_32x16x128_fp4"},
+            {0x3a, "decoded v_wmma_scale16_f32_32x16x128_fp4"}}}) {
+    const auto prefix = cdna5::build_vop3p(prefix_op, {.src0 = 128, .src1 = 128, .src2 = 256});
+    auto matrix = cdna5::build_vop3p(
+        cdna5::kVWmmaF3232x16x128F4Vop3p,
+        {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 128, .opsel_hi = 3});
+    matrix[0] |= 1u << 14;
+    const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+    bench(label, fx, run, double(M) * N * K, Cmp::F32Tol, kM32OutRegs);
+  }
 }
 
 // Dense WMMA, f32 output, bf8 input, K=128 — specialized.
