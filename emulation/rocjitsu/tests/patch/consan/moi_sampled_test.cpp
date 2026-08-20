@@ -5767,6 +5767,158 @@ TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
   EXPECT_NE(atomic_island->trampoline_offset, barrier_island->trampoline_offset);
 }
 
+TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicRouteAvoidsLiveSpillBootstrap) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/4u, /*vsrc=*/6u, /*vdst=*/7u, /*return_old_value=*/false,
+      /*scope=*/2u, kArch);
+  const auto access = build_cdna4_ds_store_b32(
+      /*vaddr=*/2u, /*vdata=*/3u, /*offset=*/0u, kArch);
+  ASSERT_TRUE(wait && atomic && access);
+
+  std::vector<uint32_t> words(32u, build_s_nop(1u, kArch));
+  words.insert(words.end(), access->begin(), access->end());
+  words.push_back(0xbe80206au); // s_and_saveexec_b64 s[0:1], vcc
+  words.push_back(0xbf880000u | static_cast<uint16_t>(release.size() + 1u + atomic->size()));
+  words.insert(words.end(), release.begin(), release.end());
+  words.push_back(*wait);
+  const uint64_t atomic_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), atomic->begin(), atomic->end());
+  words.push_back(0x87fe007eu); // s_or_b64 exec, exec, s[0:1]
+  // Keep the spill-backed s0:s7 bootstrap window live across the atomic, but
+  // leave a disjoint route tuple available. An ordinary indirect entry island
+  // must qualify its own PC/SCC registers before it can reach the cave that
+  // saves the borrowed guest window.
+  constexpr std::array<uint16_t, 3> kDeadRouteSgprs = {10u, 11u, 14u};
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    if (std::ranges::find(kDeadRouteSgprs, sgpr) == kDeadRouteSgprs.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/100u, sgpr, kArch));
+  }
+  // Keep the appended cave out of direct SOPP range while retaining ordinary
+  // zero-NOP islands; this specifically exercises the non-dense route.
+  words.resize(33'000u, build_s_nop(0u, kArch));
+  words.push_back(build_s_endpgm(kArch));
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(words, "sampled_ordinary_atomic_live_bootstrap",
+                                 kCdna4Wave64AllVgprsGranulated, /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(8u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  EXPECT_NE(*assignment.indirect_pc_sgpr, 0u);
+
+  const auto atomic_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+           patch.anchor_offset == atomic_offset;
+  });
+  ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(atomic_patch->original_size, atomic->size() * sizeof(uint32_t));
+  ASSERT_TRUE(atomic_patch->relocated_guest_instruction_offset);
+  EXPECT_NE(*atomic_patch->relocated_guest_instruction_offset, atomic_offset);
+
+  const auto island = std::ranges::find_if(result.patches, [&](const auto &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == atomic_offset && patch.original_size == 0u;
+  });
+  ASSERT_NE(island, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> island_words =
+      text_words_at_offset(patched, island->trampoline_offset, island->trampoline_size);
+  ASSERT_GT(island_words.size(), 1u);
+  EXPECT_NE(island_words[1], build_s_getpc_b64(/*sdst=*/0u, kArch));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 9u;
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/4u, /*vsrc=*/6u, /*vdst=*/7u, /*return_old_value=*/true,
+      /*scope=*/2u, kArch);
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  ASSERT_TRUE(atomic && wait);
+
+  std::vector<uint32_t> words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2u, /*vdata=*/3u, index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    words.insert(words.end(), access->begin(), access->end());
+  }
+  words.insert(words.end(), release.begin(), release.end());
+  words.push_back(*wait);
+  const uint64_t atomic_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), atomic->begin(), atomic->end());
+  words.push_back(*wait);
+  words.insert(words.end(), acquire.begin(), acquire.end());
+  // Put every appended entry relay outside the early atomic's SOPP range and
+  // deny the ordinary allocator a zero-NOP island. A liveness-proven dense
+  // relay must retain the ordered edge rather than reporting partial static
+  // coverage.
+  words.resize(33'000u, build_s_nop(1u, kArch));
+  words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(4u * kAccessCount);
+  options.moi_runtime_sample_stride = 64u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 4u * kAccessCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(words, "sampled_dense_far_atomic"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  const auto atomic_sync = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+           patch.anchor_offset == atomic_offset &&
+           patch.sampled_access_kind == ConSanLdsAccessKind::Atomic;
+  });
+  ASSERT_NE(atomic_sync, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable indirect entry island") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
@@ -5826,6 +5978,178 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));
+}
+
+TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xd81a0004u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000302u); // ds_write_b32 v2, v3 offset:index*4
+  }
+  // Keep all sites near the entry and their appended relays outside SOPP
+  // reach. CDNA must share a relocatable explicit-key host just as RDNA4
+  // does; relocating a prefix would silently leave the neighboring sites
+  // uninstrumented.
+  text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "cdna4_dense_sampled"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            2u); // One relocatable host relay plus one appended dispatcher.
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("inside a relocated prefix") != std::string::npos ||
+           warning.find("entry island is unreachable") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 9u;
+  const std::array<uint16_t, 4> dead_router_sgprs = {0u, 1u, 4u, 6u};
+  std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    const auto guest = build_cdna4_ds_store_b32(
+        /*vaddr=*/0u, /*vdata=*/0u, index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(guest);
+    text_words.insert(text_words.end(), guest->begin(), guest->end());
+  }
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    if (std::ranges::find(dead_router_sgprs, sgpr) == dead_router_sgprs.end())
+      text_words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, kArch));
+  }
+  // Force both a shared far relay and automatic scalar spilling. The compact
+  // spill ABI aliases its call-return and indirect-PC pair, but CDNA's
+  // explicit route key must survive the entry island independently.
+  text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_spill_backed_dense_router", kCdna4Wave64AllVgprsGranulated,
+      /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+  EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount)
+      << testing::PrintToString(result.warnings);
+
+  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(dense_host, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_GT(dense_host->original_size, sizeof(uint32_t));
+  const uint32_t entry_island_words = dense_host->original_size / sizeof(uint32_t) - 1u;
+  const std::vector<uint32_t> island = text_words_at_offset(
+      patched, dense_host->anchor_offset + sizeof(uint32_t), entry_island_words * sizeof(uint32_t));
+  ASSERT_EQ(island.size(), entry_island_words);
+  EXPECT_EQ(std::ranges::count(island, build_s_mov_b32(*assignment.dispatch_key_sgpr,
+                                                       *assignment.indirect_pc_sgpr, kArch)),
+            0u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kBarrierCount = 9u;
+  std::vector<uint32_t> words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+  for (uint32_t index = 0u; index < kBarrierCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/0u, /*vdata=*/0u, index * sizeof(uint32_t), kArch);
+    const auto barrier = build_cdna4_s_barrier(kArch);
+    ASSERT_TRUE(access && barrier);
+    words.insert(words.end(), access->begin(), access->end());
+    words.push_back(*barrier);
+  }
+  // Keep all reserved per-site relays outside SOPP reach, and use s_nop 1 so
+  // the ordinary zero-NOP island allocator cannot hide the missing shared
+  // CDNA barrier route.
+  words.resize(33'000u, build_s_nop(1u, kArch));
+  words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(4u * kBarrierCount);
+  options.moi_runtime_sample_stride = 64u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kBarrierCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(words, "sampled_dense_far_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount)
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable entry island") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {

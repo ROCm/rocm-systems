@@ -293,7 +293,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // is particularly expensive for generated libraries containing thousands
   // of kernels, and cannot reveal any instruction that is absent from the
   // planning graph.
-  if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
+  const bool supports_explicit_key_dense_router = arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                                  arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+                                                  arch == ROCJITSU_CODE_ARCH_RDNA4;
+  if ((supports_explicit_key_dense_router || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+      use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
@@ -912,7 +916,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           return;
         }
         island_words.push_back(*save_scc);
-        island_words.push_back(build_s_mov_b32(key_sgpr, call_return_sgpr, arch));
+        // A GFX1250 scalar call supplies its route identity in the return-PC
+        // pair. Explicit-key routers have already materialized the identity
+        // at the guest anchor; copying the reusable indirect-PC pair here
+        // would destroy it before dispatch.
+        if (!explicit_dense_key)
+          island_words.push_back(build_s_mov_b32(key_sgpr, call_return_sgpr, arch));
       }
       if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
                                                    pc_sgpr, special_state.scc_save_sgpr,

@@ -1085,9 +1085,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       compute_sopp_branch_simm16(selected.front().candidate.barrier.site.text_offset,
                                  new_text.size())
           .has_value();
+  const bool cdna_has_stranded_barrier =
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      std::ranges::any_of(std::views::iota(size_t{0}, selected.size()), [&](size_t index) {
+        const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
+        const uint64_t reserved_island =
+            original_text_size + index * kIndirectIslandWords * sizeof(uint32_t);
+        return !compute_sopp_branch_simm16(anchor, new_text.size()) &&
+               !compute_sopp_branch_simm16(anchor, reserved_island);
+      });
   const bool use_dense_barrier_relay =
       (arch == ROCJITSU_CODE_ARCH_GFX1250 && !gfx1250_single_direct_barrier) ||
-      (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u);
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u) || cdna_has_stranded_barrier;
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
@@ -1227,7 +1236,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+            arch == ROCJITSU_CODE_ARCH_CDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -1657,6 +1667,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   struct Candidate {
     AtomicRecordCandidate atomic;
     consan_detail::SampledAtomicSemantics semantics;
+    uint64_t ordered_sequence_end_text_offset = 0;
     uint32_t selected_slot = 0;
     uint32_t bank_count = 1;
     bool deferred_acquire = false;
@@ -1692,16 +1703,20 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       }
       const ConSanSyncEvent *event =
           sync_index.event(ConSanSyncEventKind::Atomic, name, in_kernel, site.text_offset);
+      const ConSanSyncSequence *sequence =
+          event == nullptr ? nullptr : sync_index.sequence(event->identity);
       if (descriptor && (event == nullptr || event->execution_owners.size() != 1u ||
                          event->execution_owners.front().descriptor_file_offset != *descriptor))
         descriptor.reset();
-      candidates.push_back({{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized,
-                             descriptor, *event_kind},
-                            *semantics,
-                            0,
-                            1,
-                            false,
-                            std::nullopt});
+      candidates.push_back(
+          {{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized, descriptor,
+            *event_kind},
+           *semantics,
+           sequence == nullptr ? site.text_offset + site.size : sequence->end_text_offset,
+           0,
+           1,
+           false,
+           std::nullopt});
     }
   };
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -1724,7 +1739,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           },
           [](const Candidate &lhs, const Candidate &rhs) {
             return atomic_record_candidate_semantics_equal(lhs.atomic, rhs.atomic) &&
-                   lhs.semantics == rhs.semantics;
+                   lhs.semantics == rhs.semantics &&
+                   lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset;
           },
           [](Candidate &retained, const Candidate &) {
             // The hint is nested here, so the common direct-member invalidator
@@ -2016,9 +2032,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
     std::optional<VgprSpillSequence> spill;
+    std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<MoiPrivateEpochLayout> private_layout;
     uint32_t required_private_bytes = 0;
     uint64_t physical_anchor_offset = 0;
+    uint32_t relocated_guest_size = 0;
+    std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<Planned> selected;
   MoiSpillManagers spill_managers;
@@ -2038,8 +2057,30 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         composed_access_patch == result.patches.end()
             ? site.text_offset
             : *composed_access_patch->relocated_guest_instruction_offset;
+    uint32_t relocated_guest_size = site.size;
+    std::vector<uint32_t> trailing_guest_words;
+    if (candidate.deferred_acquire && composed_access_patch == result.patches.end() &&
+        candidate.ordered_sequence_end_text_offset > site.text_offset + site.size) {
+      const uint64_t sequence_end = candidate.ordered_sequence_end_text_offset;
+      const BasicBlock *atomic_block =
+          block_for_offset(resource_state.block_index, site.text_offset);
+      const BasicBlock *sequence_end_block =
+          block_for_offset(resource_state.block_index, sequence_end - sizeof(uint32_t));
+      const uint64_t sequence_size = sequence_end - site.text_offset;
+      if (atomic_block == nullptr || sequence_end_block != atomic_block ||
+          sequence_size > std::numeric_limits<uint32_t>::max() ||
+          sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
+        result.warnings.emplace_back(
+            "ConSan MOI sampled atomic sync could not relocate its bounded acquire suffix");
+        continue;
+      }
+      relocated_guest_size = static_cast<uint32_t>(sequence_size);
+      trailing_guest_words.resize((relocated_guest_size - site.size) / sizeof(uint32_t));
+      std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
+                  trailing_guest_words.size() * sizeof(uint32_t));
+    }
     if (physical_anchor_offset > old_text.size() ||
-        site.size > old_text.size() - physical_anchor_offset)
+        relocated_guest_size > old_text.size() - physical_anchor_offset)
       continue;
     const bool overlap = std::any_of(
         result.patches.begin(), result.patches.end(), [&](const ConSanPatchInfo &patch) {
@@ -2047,7 +2088,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             return false;
           const uint64_t patch_end =
               patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
-          return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
+          return site.text_offset < patch_end &&
+                 patch.anchor_offset < site.text_offset + relocated_guest_size;
         });
     if (overlap)
       continue;
@@ -2068,6 +2110,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                    candidate.atomic.container_name);
       continue;
     }
+    ConSanOptions candidate_options = options;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync lost its owner-local transient scalar assignment");
+      continue;
+    }
+    candidate_options.scratch_vgpr = resources->base;
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == ConSanRegisterAllocationSource::SpillRequired &&
         sampled_atomic_guest_preserves_address(site);
@@ -2088,22 +2138,33 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (options.automatic_moi_private_epoch) {
-      private_layout =
-          build_sampled_private_epoch_layout(result, *resources, options, arch, result.warnings);
+      private_layout = build_sampled_private_epoch_layout(result, *resources, candidate_options,
+                                                          arch, result.warnings);
       if (!private_layout)
         continue;
     }
     std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
       spill = build_moi_spill_sequence(
-          result, *resources, options, spill_managers, arch, result.warnings,
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
     }
+    std::optional<InlineSgprSpillSequence> scalar_spill;
+    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
+      scalar_spill = build_inline_sgpr_spill_sequence(
+          result, *resources, candidate_options, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
+          spill ? &*spill : nullptr);
+      if (!scalar_spill)
+        continue;
+    }
     const uint32_t required_private_bytes =
-        std::max(private_layout ? private_layout->ephemeral_base : 0u,
-                 spill ? spill->total_private_bytes : 0u);
+        std::max({private_layout ? private_layout->ephemeral_base : 0u,
+                  spill ? spill->total_private_bytes : 0u,
+                  scalar_spill ? scalar_spill->total_private_bytes : 0u});
     if (required_private_bytes != 0u) {
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
         auto [it, inserted] =
@@ -2114,7 +2175,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
     selected.push_back({std::move(candidate), *resources, address_plan, std::move(spill),
-                        std::move(private_layout), required_private_bytes, physical_anchor_offset});
+                        std::move(scalar_spill), std::move(private_layout), required_private_bytes,
+                        physical_anchor_offset, relocated_guest_size,
+                        std::move(trailing_guest_words)});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync found no patchable sequence");
@@ -2127,7 +2190,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
-  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   AmdGpuCodeObject original_code_object(bytes.data(), bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
@@ -2151,19 +2213,573 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
   MoiLocalNopIslandAllocator indirect_allocator(
       old_text, result, arch, kMoiLocalIndirectIslandWords, local_island_reserved_ranges);
+  std::vector<ConSanPatchInfo> patches;
+  std::vector<bool> routed_by_dense_relay(selected.size(), false);
+
+  const auto build_atomic_cave =
+      [&](const Planned &planned, uint64_t cave_offset, uint32_t &guest_instruction_offset,
+          const ConSanOptions *resolved_options = nullptr, bool preserve_guest_at_anchor = false,
+          std::span<const uint32_t> leading_guest_words = {})
+      -> std::optional<std::vector<uint32_t>> {
+    ConSanOptions candidate_options = resolved_options ? *resolved_options : options;
+    candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      // Sampled probes run after arbitrary guest code. Use the tuple captured
+      // by the automatic private-state prologue instead of descriptor SGPRs
+      // whose ABI lifetime ended at kernel entry.
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
+    if (resolved_options == nullptr &&
+        !apply_moi_transient_sgpr_assignment(candidate_options,
+                                             planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled atomic sync lost its transient scalar assignment");
+      return std::nullopt;
+    }
+    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
+      candidate_options.moi_owner_vgpr =
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
+      candidate_options.moi_epoch_vgpr =
+          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
+    } else if (!apply_moi_persistent_vgpr_assignment(
+                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
+      return std::nullopt;
+    }
+    const uint64_t return_text_offset =
+        preserve_guest_at_anchor ? planned.physical_anchor_offset
+                                 : planned.physical_anchor_offset + planned.relocated_guest_size;
+    return planned.candidate.deferred_acquire
+               ? build_sampled_pending_acquire_cave_words(
+                     bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                     planned.spill ? &*planned.spill : nullptr,
+                     planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                     planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                     planned.candidate.selected_slot, planned.candidate.bank_count,
+                     planned.candidate.release_selected_slot, layout, cave_offset,
+                     return_text_offset, result.errors, &guest_instruction_offset,
+                     planned.trailing_guest_words)
+               : build_sampled_atomic_sync_cave_words(
+                     bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
+                     planned.spill ? &*planned.spill : nullptr,
+                     planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                     planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                     planned.candidate.selected_slot, planned.candidate.bank_count, layout,
+                     cave_offset, return_text_offset, result.errors, &guest_instruction_offset,
+                     planned.trailing_guest_words, preserve_guest_at_anchor, leading_guest_words);
+  };
+  const auto append_atomic_patch =
+      [&](const Planned &planned, uint64_t cave_offset, std::span<const uint32_t> cave_words,
+          uint32_t guest_instruction_offset, bool guest_preserved_at_anchor = false) {
+        const ConSanAtomicSite &site = planned.candidate.atomic.site;
+        ConSanPatchInfo info;
+        info.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
+        info.anchor_offset = site.text_offset;
+        info.trampoline_offset = cave_offset;
+        info.original_size = guest_preserved_at_anchor ? 0u : planned.relocated_guest_size;
+        info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
+        info.relocated_guest_instruction_offset =
+            guest_preserved_at_anchor ? site.text_offset : cave_offset + guest_instruction_offset;
+        info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
+        info.sampled_first_slot = planned.candidate.selected_slot;
+        info.sampled_window_bank_count = planned.candidate.bank_count;
+        info.scratch_vgpr = planned.resources.base;
+        info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+        if (planned.private_layout) {
+          info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+          info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+          info.persistent_record_replay_workgroup_private_offsets =
+              planned.private_layout->record_replay_workgroup_offsets;
+          info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+        }
+        info.required_private_segment_size = planned.required_private_bytes;
+        if (planned.spill) {
+          info.spilled_vgpr_count = planned.spill->vgpr_count;
+          note_dynamic_stack_private_requirement(info, &*planned.spill);
+        }
+        patches.push_back(std::move(info));
+      };
+
+  // An ordered atomic can sit near the front of a large generated kernel,
+  // beyond SOPP reach of both its pristine-end relay and every appended
+  // body. CDNA atomic instructions have enough anchor space for a scalar
+  // call, so share the same liveness-proven, call-return-keyed relay model as
+  // far barriers instead of silently dropping the causal edge.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    using ContainerGroup = std::pair<std::string, std::vector<size_t>>;
+    std::map<std::string, std::vector<size_t>> owner_groups;
+    for (size_t index = 0u; index < selected.size(); ++index) {
+      const Planned &planned = selected[index];
+      const uint64_t anchor = planned.physical_anchor_offset;
+      const uint64_t reserved_island =
+          reserved_atomic_island_begin + index * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
+      const bool reserved_reachable =
+          index < reserved_atomic_island_count &&
+          compute_sopp_branch_simm16(anchor, reserved_island).has_value();
+      const bool stranded = !compute_sopp_branch_simm16(anchor, new_text.size()) &&
+                            !reserved_reachable && !indirect_allocator.has_reachable(anchor);
+      if (stranded && anchor == planned.candidate.atomic.site.text_offset &&
+          planned.relocated_guest_size >= sizeof(uint32_t))
+        owner_groups[planned.candidate.atomic.container_name].push_back(index);
+    }
+    constexpr uint64_t kMaxCommonRelayAnchorSpan =
+        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t);
+    std::vector<ContainerGroup> groups;
+    for (auto &[container, indices] : owner_groups) {
+      std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
+        return selected[lhs].physical_anchor_offset < selected[rhs].physical_anchor_offset;
+      });
+      for (size_t index : indices) {
+        const uint64_t anchor = selected[index].physical_anchor_offset;
+        if (groups.empty() || groups.back().first != container ||
+            anchor - selected[groups.back().second.front()].physical_anchor_offset >
+                kMaxCommonRelayAnchorSpan) {
+          groups.push_back({container, {}});
+        }
+        groups.back().second.push_back(index);
+      }
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
+    fixed_claims.reserve(result.patches.size() + selected.size());
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.original_size != 0u)
+        fixed_claims.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
+    }
+    for (const Planned &planned : selected) {
+      const ConSanAtomicSite &site = planned.candidate.atomic.site;
+      if (planned.relocated_guest_size != 0u)
+        fixed_claims.emplace_back(site.text_offset,
+                                  site.text_offset + planned.relocated_guest_size);
+    }
+    std::ranges::sort(fixed_claims);
+    size_t merged_claim_count = 0u;
+    for (const auto &claim : fixed_claims) {
+      if (merged_claim_count != 0u && fixed_claims[merged_claim_count - 1u].second >= claim.first) {
+        fixed_claims[merged_claim_count - 1u].second =
+            std::max(fixed_claims[merged_claim_count - 1u].second, claim.second);
+      } else {
+        fixed_claims[merged_claim_count++] = claim;
+      }
+    }
+    fixed_claims.resize(merged_claim_count);
+    std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
+    const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
+      const auto fixed = std::ranges::lower_bound(fixed_claims, begin, {},
+                                                  [](const auto &range) { return range.second; });
+      return (fixed != fixed_claims.end() && fixed->first < end) ||
+             std::ranges::any_of(claimed_hosts, [&](const auto &range) {
+               return range.first < end && begin < range.second;
+             });
+    };
+
+    for (const auto &[container, indices] : groups) {
+      const bool in_kernel = container.starts_with("kernel:");
+      const std::string_view owner_name = std::string_view(container).substr(
+          in_kernel ? sizeof("kernel:") - 1u : sizeof("function:") - 1u);
+      uint64_t owner_begin = 0u;
+      uint64_t owner_end = 0u;
+      if (in_kernel) {
+        const auto kernel = std::ranges::find(result.kernels, owner_name, &ConSanKernelInfo::name);
+        if (kernel == result.kernels.end())
+          continue;
+        owner_begin = kernel->entry_text_offset;
+        owner_end = owner_begin + kernel->code_size;
+      } else {
+        const auto function =
+            std::ranges::find(result.functions, owner_name, &ConSanFunctionInfo::name);
+        if (function == result.functions.end())
+          continue;
+        owner_begin = function->entry_text_offset;
+        owner_end = owner_begin + function->code_size;
+      }
+      std::vector<uint64_t> group_owners;
+      std::vector<uint64_t> anchors;
+      for (size_t index : indices) {
+        const Planned &planned = selected[index];
+        group_owners.insert(group_owners.end(),
+                            planned.resources.owner_descriptor_file_offsets.begin(),
+                            planned.resources.owner_descriptor_file_offsets.end());
+        anchors.push_back(planned.physical_anchor_offset);
+      }
+      std::ranges::sort(group_owners);
+      group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
+      ConSanOptions group_options = options;
+      if (!apply_moi_transient_sgpr_assignment(group_options, group_owners)) {
+        result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
+                                     container +
+                                     ": owners do not share one transient scalar assignment");
+        continue;
+      }
+      const bool spill_backed_router = group_options.automatic_moi_record_replay_sgpr_spill;
+      auto special_state = moi_special_state_sgprs(group_options);
+      auto indirect_state = moi_indirect_jump_sgprs(group_options);
+      if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
+          !indirect_state ||
+          (spill_backed_router && (!group_options.moi_record_replay_dispatch_key_sgpr ||
+                                   !group_options.moi_record_replay_call_return_sgpr))) {
+        result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
+                                     container + ": incomplete scalar router state");
+        continue;
+      }
+      // Component-local scalar spilling qualifies its bootstrap registers at
+      // the access and barrier sites known during the first resource pass.
+      // Atomic associations are selected later, after causal windows exist.
+      // Re-qualify the live-through router tuple at those actual call anchors:
+      // s_call overwrites the return pair before the body can back up borrowed
+      // guest SGPRs, and the entry island similarly consumes its PC, SCC, and
+      // key temporaries before entering the spill-protected body.
+      const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
+      const std::array complete_scalar_range{
+          MoiSgprRange{.base = 0u, .width = ordinary_sgpr_limit}};
+      MoiDenseOwnerLivenessProof host_owner_proof =
+          resource_state.prepare_dense_liveness_for_owners(group_owners, complete_scalar_range);
+      std::vector<consan_detail::ScalarOwnerContextSummary> scalar_summaries;
+      scalar_summaries.reserve(host_owner_proof.contexts.size());
+      for (const MoiKernelResourceContext *context : host_owner_proof.contexts) {
+        if (context != nullptr)
+          scalar_summaries.push_back(context->scalar_summary());
+      }
+      const auto overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
+        const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
+          return reg && range_overlaps(base, width, *reg, reg_width);
+        };
+        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+                        overlaps_optional(group_options.moi_owner_sgpr) ||
+                        overlaps_optional(group_options.moi_persistent_owner_sgpr) ||
+                        overlaps_optional(group_options.moi_persistent_epoch_sgpr) ||
+                        overlaps_optional(group_options.moi_persistent_workgroup_key_sgpr) ||
+                        overlaps_optional(group_options.moi_dispatch_id_sgpr,
+                                          moi_dispatch_state_sgpr_count(group_options));
+        for (const std::optional<uint16_t> reg :
+             {group_options.moi_record_replay_workgroup_sgprs.x,
+              group_options.moi_record_replay_workgroup_sgprs.y,
+              group_options.moi_record_replay_workgroup_sgprs.z,
+              group_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+          overlaps |= overlaps_optional(reg);
+        }
+        if (group_options.delay_mode == ConSanDelayMode::SleepVar)
+          overlaps |= range_overlaps(base, width, group_options.delay_var_ssrc, 1u);
+        return overlaps;
+      };
+      const auto dead_at_atomic_anchors = [&](uint16_t base, uint16_t width) {
+        if (!host_owner_proof.complete || host_owner_proof.contexts.empty() || width == 0u ||
+            static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
+            overlaps_reserved_scalar_state(base, width)) {
+          return false;
+        }
+        const RegisterRef range{RegClass::SGPR, base, static_cast<uint8_t>(width)};
+        for (size_t index : indices) {
+          const uint64_t anchor = selected[index].physical_anchor_offset;
+          BasicBlock *block = block_for_offset(resource_state.block_index, anchor);
+          const Instruction *instruction = instruction_at(block, anchor);
+          if (block == nullptr || instruction == nullptr)
+            return false;
+          bool saw_owner = false;
+          for (const MoiKernelResourceContext *context : host_owner_proof.contexts) {
+            if (context == nullptr || !context->block_set.contains(block))
+              continue;
+            saw_owner = true;
+            if (context->liveness_is_restricted || context->has_indirect_sgpr_access ||
+                static_cast<uint32_t>(base) + width > context->current_sgpr_count ||
+                context->liveness->any_live_before(*instruction, range)) {
+              return false;
+            }
+            const InstDefUse def_use(*instruction);
+            if (def_use.defs.contains(range) || def_use.uses.contains(range))
+              return false;
+            // Some generated helpers have a decoded join whose local CFG
+            // edge is intentionally absent from the owner scope. Liveness is
+            // then conservative about the disconnected block as a whole, but
+            // cannot carry a value across the missing edge. Reject a tuple
+            // when the text-order continuation consumes one of its registers
+            // before redefining it. This is a safety supplement only: normal
+            // CFG liveness above remains authoritative across non-lexical
+            // successors.
+            std::vector<const Instruction *> lexical_tail;
+            for (BasicBlock *owner_block : context->scope.blocks) {
+              if (owner_block == nullptr || owner_block->end_offset() <= anchor)
+                continue;
+              for (const Instruction &tail_instruction : owner_block->instructions()) {
+                if (tail_instruction.src_loc() > anchor)
+                  lexical_tail.push_back(&tail_instruction);
+              }
+            }
+            std::ranges::sort(lexical_tail, {}, &Instruction::src_loc);
+            std::vector<bool> redefined(width, false);
+            for (const Instruction *tail_instruction : lexical_tail) {
+              const InstDefUse tail_def_use(*tail_instruction);
+              for (uint16_t lane = 0u; lane < width; ++lane) {
+                const RegisterRef scalar{RegClass::SGPR, static_cast<uint16_t>(base + lane), 1u};
+                if (!redefined[lane] && tail_def_use.uses.contains(scalar))
+                  return false;
+                if (tail_def_use.defs.contains(scalar))
+                  redefined[lane] = true;
+              }
+              if (std::ranges::all_of(redefined, std::identity{}))
+                break;
+            }
+          }
+          if (!saw_owner)
+            return false;
+        }
+        return true;
+      };
+      const auto tuple_is_safe = [&](uint16_t pc, uint16_t scc, uint16_t key,
+                                     uint16_t call_return) {
+        const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}, MoiSgprRange{key, 1u},
+                                MoiSgprRange{call_return, 2u}};
+        return dead_at_atomic_anchors(pc, 2u) && dead_at_atomic_anchors(scc, 1u) &&
+               dead_at_atomic_anchors(key, 1u) && dead_at_atomic_anchors(call_return, 2u) &&
+               !range_overlaps(pc, 2u, scc, 1u) && !range_overlaps(pc, 2u, key, 1u) &&
+               (pc == call_return || !range_overlaps(pc, 2u, call_return, 2u)) &&
+               !range_overlaps(scc, 1u, key, 1u) && !range_overlaps(scc, 1u, call_return, 2u) &&
+               !range_overlaps(key, 1u, call_return, 2u) &&
+               !moi_scalar_contexts_conflict_with_physical_vcc(scalar_summaries, ranges, arch);
+      };
+
+      uint16_t jump_pc_sgpr =
+          spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
+      uint16_t saved_scc_sgpr =
+          spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+      uint16_t key_sgpr = spill_backed_router
+                              ? *group_options.moi_record_replay_dispatch_key_sgpr
+                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
+      uint16_t call_return_sgpr =
+          spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
+                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      if (spill_backed_router &&
+          !tuple_is_safe(jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr)) {
+        bool found = false;
+        if (spill_backed_router) {
+          for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
+            const uint16_t candidate_pair = static_cast<uint16_t>(pair);
+            if (!dead_at_atomic_anchors(candidate_pair, 2u))
+              continue;
+            for (uint32_t scc = 0u; !found && scc < ordinary_sgpr_limit; ++scc) {
+              const uint16_t candidate_scc = static_cast<uint16_t>(scc);
+              if (range_overlaps(candidate_scc, 1u, candidate_pair, 2u) ||
+                  !dead_at_atomic_anchors(candidate_scc, 1u)) {
+                continue;
+              }
+              for (uint32_t key = 0u; key < ordinary_sgpr_limit; ++key) {
+                const uint16_t candidate_key = static_cast<uint16_t>(key);
+                if (range_overlaps(candidate_key, 1u, candidate_pair, 2u) ||
+                    candidate_key == candidate_scc ||
+                    !tuple_is_safe(candidate_pair, candidate_scc, candidate_key, candidate_pair)) {
+                  continue;
+                }
+                jump_pc_sgpr = call_return_sgpr = candidate_pair;
+                saved_scc_sgpr = candidate_scc;
+                key_sgpr = candidate_key;
+                group_options.moi_inline_indirect_pc_sgpr = jump_pc_sgpr;
+                group_options.moi_inline_indirect_scc_sgpr = saved_scc_sgpr;
+                group_options.moi_record_replay_dispatch_key_sgpr = key_sgpr;
+                group_options.moi_record_replay_call_return_sgpr = call_return_sgpr;
+                special_state = moi_special_state_sgprs(group_options);
+                indirect_state = moi_indirect_jump_sgprs(group_options);
+                found = special_state.has_value() && indirect_state.has_value();
+                break;
+              }
+            }
+          }
+        }
+        if (!found) {
+          result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
+                                       container + ": no call-anchor-safe scalar router state");
+          continue;
+        }
+      }
+      const bool derive_key_at_entry = spill_backed_router;
+      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
+      const uint64_t host_words_count = island_words_count + 1u;
+      const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
+      const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+          group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+      auto dense_host = find_moi_dense_relay_host(
+          resource_state, old_text,
+          {
+              .owner_begin = owner_begin,
+              .owner_end = owner_end,
+              .host_word_count = static_cast<size_t>(host_words_count),
+              .anchors = anchors,
+              .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+              .owner_proof = host_owner_proof,
+              .bootstrap_ranges = host_bootstrap_ranges,
+          },
+          overlaps_existing);
+      if (!dense_host) {
+        result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
+                                     container + ": no liveness-safe relocatable host");
+        continue;
+      }
+      const uint64_t host_offset = dense_host->host_offset;
+      const uint64_t island_offset = host_offset + sizeof(uint32_t);
+      claimed_hosts.emplace_back(host_offset, host_offset + host_bytes);
+
+      constexpr uint64_t kDispatcherWordsPerSite = 20u;
+      const uint64_t dispatcher_offset = new_text.size();
+      const uint64_t dispatcher_reservation =
+          (indices.size() * kDispatcherWordsPerSite + 12u) * sizeof(uint32_t);
+      while (new_text.size() < dispatcher_offset + dispatcher_reservation)
+        append_word_bytes(new_text, build_s_nop(0, arch));
+      struct DenseBody {
+        size_t selected_index = 0u;
+        uint64_t offset = 0u;
+        std::vector<uint32_t> words;
+        uint32_t guest_instruction_offset = 0u;
+      };
+      std::vector<DenseBody> bodies;
+      for (size_t index : indices) {
+        uint32_t guest_instruction_offset = 0u;
+        const uint64_t body_offset = new_text.size();
+        auto body_words = build_atomic_cave(selected[index], body_offset, guest_instruction_offset,
+                                            &group_options);
+        if (!body_words)
+          return;
+        append_words_bytes(new_text, *body_words);
+        bodies.push_back({index, body_offset, std::move(*body_words), guest_instruction_offset});
+      }
+      const uint64_t host_body_offset = new_text.size();
+      std::vector<uint32_t> host_words = std::move(dense_host->displaced_words);
+      if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
+                                                   host_offset + host_bytes, jump_pc_sgpr,
+                                                   saved_scc_sgpr, /*capture_scc=*/true, arch)) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic relay could not return from its host");
+        return;
+      }
+      append_words_bytes(new_text, host_words);
+
+      auto island_words =
+          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                               {.jump_pc_sgpr = jump_pc_sgpr,
+                                                .saved_scc_sgpr = saved_scc_sgpr,
+                                                .key_sgpr = key_sgpr,
+                                                .call_return_sgpr = call_return_sgpr},
+                                               derive_key_at_entry, arch);
+      if (!island_words || island_words->size() != island_words_count) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic relay could not encode its island");
+        return;
+      }
+      std::memcpy(new_text.data() + island_offset, island_words->data(),
+                  island_words->size() * sizeof(uint32_t));
+      const auto host_call = build_s_call_b64(call_return_sgpr, /*next instruction=*/0, arch);
+      std::memcpy(new_text.data() + host_offset, &host_call, sizeof(uint32_t));
+
+      std::vector<uint32_t> dispatcher_words;
+      if (!derive_key_at_entry) {
+        const auto subtract_pc =
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
+        if (!subtract_pc) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense atomic relay could not encode its dispatch key");
+          return;
+        }
+        dispatcher_words.push_back(*subtract_pc);
+        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
+      }
+      const auto append_target = [&](uint64_t caller_return, uint64_t target) {
+        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+        if (!compare)
+          return false;
+        dispatcher_words.push_back(*compare);
+        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+        std::vector<uint32_t> matched_words;
+        const uint64_t matched_offset =
+            dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
+                                                     jump_pc_sgpr, saved_scc_sgpr,
+                                                     /*capture_scc=*/false, arch)) {
+          return false;
+        }
+        const auto skip =
+            instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
+        if (!skip)
+          return false;
+        dispatcher_words.push_back(*skip);
+        dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
+        return true;
+      };
+      if (!append_target(island_offset, host_body_offset))
+        return;
+      for (const DenseBody &body : bodies) {
+        const Planned &planned = selected[body.selected_index];
+        if (!append_target(planned.physical_anchor_offset + sizeof(uint32_t), body.offset))
+          return;
+      }
+      dispatcher_words.push_back(build_s_endpgm(arch));
+      if (dispatcher_words.size() * sizeof(uint32_t) > dispatcher_reservation) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic dispatcher exceeds its reserved relay space");
+        return;
+      }
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
+                  dispatcher_words.size() * sizeof(uint32_t));
+
+      ConSanPatchInfo host_info;
+      host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+      host_info.anchor_offset = host_offset;
+      host_info.original_size = static_cast<uint32_t>(host_bytes);
+      host_info.trampoline_offset = host_body_offset;
+      host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
+      host_info.owner_descriptor_file_offsets = group_owners;
+      patches.push_back(std::move(host_info));
+      ConSanPatchInfo dispatcher_info;
+      dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+      dispatcher_info.anchor_offset = selected[indices.front()].candidate.atomic.site.text_offset;
+      dispatcher_info.trampoline_offset = dispatcher_offset;
+      dispatcher_info.trampoline_size =
+          static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
+      dispatcher_info.owner_descriptor_file_offsets = group_owners;
+      patches.push_back(std::move(dispatcher_info));
+      for (const DenseBody &body : bodies) {
+        const Planned &planned = selected[body.selected_index];
+        const auto call_delta =
+            compute_sopp_branch_simm16(planned.physical_anchor_offset, island_offset);
+        if (!call_delta) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense atomic relay could not encode an atomic call");
+          return;
+        }
+        const uint32_t call = build_s_call_b64(call_return_sgpr, *call_delta, arch);
+        std::vector<uint32_t> anchor(planned.relocated_guest_size / sizeof(uint32_t),
+                                     build_s_nop(0, arch));
+        anchor.front() = call;
+        std::memcpy(new_text.data() + planned.physical_anchor_offset, anchor.data(),
+                    planned.relocated_guest_size);
+        append_atomic_patch(planned, body.offset, body.words, body.guest_instruction_offset);
+        routed_by_dense_relay[body.selected_index] = true;
+      }
+    }
+  }
+
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
+  if (!placement_planner.reserve_appended_prefix(new_text.size() - old_text.size())) {
+    result.errors.emplace_back("ConSan MOI sampled atomic dense relay reservation failed");
+    return;
+  }
   std::vector<MoiLocalNopIsland> appended_indirect_islands;
-  if (selected.size() > 1u) {
+  const size_t ordinary_selected_count =
+      static_cast<size_t>(std::ranges::count(routed_by_dense_relay, false));
+  if (ordinary_selected_count > 1u) {
     const uint64_t island_bytes =
         static_cast<uint64_t>(kMoiLocalIndirectIslandWords) * sizeof(uint32_t);
     const uint64_t bank_offset = placement_planner.appended_end();
-    const uint64_t bank_bytes = selected.size() * island_bytes;
+    const uint64_t bank_bytes = ordinary_selected_count * island_bytes;
     std::string bank_error;
     if (!placement_planner.reserve_appended_prefix(bank_bytes, &bank_error)) {
       result.errors.emplace_back("ConSan MOI sampled atomic island bank failed: " + bank_error);
       return;
     }
-    appended_indirect_islands.reserve(selected.size());
-    for (size_t index = 0; index < selected.size(); ++index) {
+    appended_indirect_islands.reserve(ordinary_selected_count);
+    for (size_t index = 0; index < ordinary_selected_count; ++index) {
       appended_indirect_islands.push_back({bank_offset + index * island_bytes, false});
       for (uint32_t word = 0; word < kMoiLocalIndirectIslandWords; ++word)
         append_word_bytes(new_text, build_s_nop(0, arch));
@@ -2178,55 +2794,182 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     return std::nullopt;
   };
-  std::vector<ConSanPatchInfo> patches;
   for (size_t planned_index = 0; planned_index < selected.size(); ++planned_index) {
+    if (routed_by_dense_relay[planned_index])
+      continue;
     const Planned &planned = selected[planned_index];
     const ConSanAtomicSite &site = planned.candidate.atomic.site;
     const uint64_t physical_anchor_offset = planned.physical_anchor_offset;
-    const uint64_t cave_offset = placement_planner.appended_end();
-    ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = planned.resources.base;
-    if (planned.private_layout) {
-      // Sampled probes run after arbitrary guest code.  Use the tuple captured
-      // by the automatic private-state prologue instead of descriptor SGPRs
-      // whose ABI lifetime ended at kernel entry.
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
+    uint64_t entry_anchor_offset = physical_anchor_offset;
+    uint32_t entry_original_size = planned.relocated_guest_size;
+    std::vector<uint32_t> leading_guest_words;
+    bool preserve_guest_at_anchor = false;
+    const bool release_only_no_return =
+        !planned.candidate.deferred_acquire && !consan_atomic_is_compare_exchange(site) &&
+        !site.returns_old_value.value_or(false) &&
+        !(planned.spill && sampled_atomic_spill_overlaps_guest_operands(*planned.spill, site));
+    if (release_only_no_return && physical_anchor_offset == site.text_offset &&
+        planned.relocated_guest_size == site.size) {
+      BasicBlock *block = block_for_offset(resource_state.block_index, physical_anchor_offset);
+      const Instruction *prefix = nullptr;
+      if (block != nullptr) {
+        for (const Instruction &instruction : block->instructions()) {
+          if (instruction.size() > 0 &&
+              instruction.src_loc() + static_cast<uint64_t>(instruction.size()) ==
+                  physical_anchor_offset) {
+            prefix = &instruction;
+          }
+        }
+      }
+      if (prefix != nullptr && prefix->size() >= static_cast<int>(sizeof(uint32_t)) &&
+          prefix->size() % static_cast<int>(sizeof(uint32_t)) == 0) {
+        const uint64_t prefix_begin = prefix->src_loc();
+        const uint64_t prefix_end = physical_anchor_offset;
+        const bool overlaps_patch = std::ranges::any_of(result.patches, [&](const auto &patch) {
+          const uint64_t patch_end =
+              patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
+          return prefix_begin < patch_end && patch.anchor_offset < prefix_end;
+        });
+        if (!overlaps_patch && prefix_end <= old_text.size()) {
+          entry_anchor_offset = prefix_begin;
+          entry_original_size = static_cast<uint32_t>(prefix->size());
+          leading_guest_words.resize(entry_original_size / sizeof(uint32_t));
+          std::memcpy(leading_guest_words.data(), old_text.data() + entry_anchor_offset,
+                      entry_original_size);
+          preserve_guest_at_anchor = true;
+        }
+      }
     }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+    ConSanOptions route_options = options;
+    if (!apply_moi_transient_sgpr_assignment(route_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled atomic sync lost its transient scalar assignment");
-      return;
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");
+      continue;
     }
-    if (planned.private_layout || moi_uses_scalar_persistent_state(candidate_options)) {
-      candidate_options.moi_owner_vgpr =
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner);
-      candidate_options.moi_epoch_vgpr =
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
-    } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
-      return;
+    if (route_options.automatic_moi_record_replay_sgpr_spill) {
+      const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
+      const std::array complete_scalar_range{
+          MoiSgprRange{.base = 0u, .width = ordinary_sgpr_limit}};
+      MoiDenseOwnerLivenessProof route_owner_proof =
+          resource_state.prepare_dense_liveness_for_owners(
+              planned.resources.owner_descriptor_file_offsets, complete_scalar_range);
+      std::vector<consan_detail::ScalarOwnerContextSummary> route_scalar_summaries;
+      route_scalar_summaries.reserve(route_owner_proof.contexts.size());
+      for (const MoiKernelResourceContext *context : route_owner_proof.contexts) {
+        if (context != nullptr)
+          route_scalar_summaries.push_back(context->scalar_summary());
+      }
+      const auto route_overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
+        const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
+          return reg && range_overlaps(base, width, *reg, reg_width);
+        };
+        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+                        overlaps_optional(route_options.moi_owner_sgpr) ||
+                        overlaps_optional(route_options.moi_persistent_owner_sgpr) ||
+                        overlaps_optional(route_options.moi_persistent_epoch_sgpr) ||
+                        overlaps_optional(route_options.moi_persistent_workgroup_key_sgpr) ||
+                        overlaps_optional(route_options.moi_dispatch_id_sgpr,
+                                          moi_dispatch_state_sgpr_count(route_options));
+        for (const std::optional<uint16_t> reg :
+             {route_options.moi_record_replay_workgroup_sgprs.x,
+              route_options.moi_record_replay_workgroup_sgprs.y,
+              route_options.moi_record_replay_workgroup_sgprs.z,
+              route_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+          overlaps |= overlaps_optional(reg);
+        }
+        if (route_options.delay_mode == ConSanDelayMode::SleepVar)
+          overlaps |= range_overlaps(base, width, route_options.delay_var_ssrc, 1u);
+        return overlaps;
+      };
+      const auto route_dead_at_anchor = [&](uint16_t base, uint16_t width) {
+        if (!route_owner_proof.complete || route_owner_proof.contexts.empty() || width == 0u ||
+            static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
+            route_overlaps_reserved_scalar_state(base, width)) {
+          return false;
+        }
+        const RegisterRef range{RegClass::SGPR, base, static_cast<uint8_t>(width)};
+        BasicBlock *block = block_for_offset(resource_state.block_index, physical_anchor_offset);
+        const Instruction *instruction = instruction_at(block, physical_anchor_offset);
+        if (block == nullptr || instruction == nullptr)
+          return false;
+        bool saw_owner = false;
+        for (const MoiKernelResourceContext *context : route_owner_proof.contexts) {
+          if (context == nullptr || !context->block_set.contains(block))
+            continue;
+          saw_owner = true;
+          if (context->liveness_is_restricted || context->has_indirect_sgpr_access ||
+              static_cast<uint32_t>(base) + width > context->current_sgpr_count ||
+              context->liveness->any_live_before(*instruction, range)) {
+            return false;
+          }
+          const InstDefUse def_use(*instruction);
+          if (def_use.defs.contains(range) || def_use.uses.contains(range))
+            return false;
+          std::vector<const Instruction *> lexical_tail;
+          for (BasicBlock *owner_block : context->scope.blocks) {
+            if (owner_block == nullptr || owner_block->end_offset() <= physical_anchor_offset)
+              continue;
+            for (const Instruction &tail_instruction : owner_block->instructions()) {
+              if (tail_instruction.src_loc() > physical_anchor_offset)
+                lexical_tail.push_back(&tail_instruction);
+            }
+          }
+          std::ranges::sort(lexical_tail, {}, &Instruction::src_loc);
+          std::vector<bool> redefined(width, false);
+          for (const Instruction *tail_instruction : lexical_tail) {
+            const InstDefUse tail_def_use(*tail_instruction);
+            for (uint16_t lane = 0u; lane < width; ++lane) {
+              const RegisterRef scalar{RegClass::SGPR, static_cast<uint16_t>(base + lane), 1u};
+              if (!redefined[lane] && tail_def_use.uses.contains(scalar))
+                return false;
+              if (tail_def_use.defs.contains(scalar))
+                redefined[lane] = true;
+            }
+            if (std::ranges::all_of(redefined, std::identity{}))
+              break;
+          }
+        }
+        return saw_owner;
+      };
+      const auto route_tuple_is_safe = [&](uint16_t pc, uint16_t scc) {
+        const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}};
+        return route_dead_at_anchor(pc, 2u) && route_dead_at_anchor(scc, 1u) &&
+               !range_overlaps(pc, 2u, scc, 1u) &&
+               !moi_scalar_contexts_conflict_with_physical_vcc(route_scalar_summaries, ranges,
+                                                               arch);
+      };
+      auto route_state = moi_indirect_jump_sgprs(route_options);
+      if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {
+        bool found = false;
+        for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
+          const uint16_t candidate_pair = static_cast<uint16_t>(pair);
+          if (!route_dead_at_anchor(candidate_pair, 2u))
+            continue;
+          for (uint32_t scc = 0u; scc < ordinary_sgpr_limit; ++scc) {
+            const uint16_t candidate_scc = static_cast<uint16_t>(scc);
+            if (!route_tuple_is_safe(candidate_pair, candidate_scc))
+              continue;
+            route_options.moi_inline_indirect_pc_sgpr = candidate_pair;
+            route_options.moi_inline_indirect_scc_sgpr = candidate_scc;
+            route_state = moi_indirect_jump_sgprs(route_options);
+            found = route_state.has_value();
+            if (found)
+              break;
+          }
+        }
+        if (!found) {
+          result.warnings.emplace_back(
+              "ConSan MOI sampled atomic sync has no call-anchor-safe ordinary route");
+          continue;
+        }
+      }
     }
+    const uint64_t cave_offset = placement_planner.appended_end();
     uint32_t guest_instruction_offset = 0;
     auto cave_words =
-        planned.candidate.deferred_acquire
-            ? build_sampled_pending_acquire_cave_words(
-                  bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                  planned.spill ? &*planned.spill : nullptr,
-                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, planned.candidate.bank_count,
-                  planned.candidate.release_selected_slot, layout, cave_offset,
-                  physical_anchor_offset + site.size, result.errors, &guest_instruction_offset)
-            : build_sampled_atomic_sync_cave_words(
-                  bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                  planned.spill ? &*planned.spill : nullptr,
-                  planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, planned.candidate.bank_count, layout,
-                  cave_offset, physical_anchor_offset + site.size, result.errors,
-                  &guest_instruction_offset);
+        build_atomic_cave(planned, cave_offset, guest_instruction_offset, &route_options,
+                          preserve_guest_at_anchor, leading_guest_words);
     if (!cave_words) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync could not lower associated " +
@@ -2235,7 +2978,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       continue;
     }
     const bool direct_entry =
-        compute_sopp_branch_simm16(physical_anchor_offset, cave_offset).has_value();
+        compute_sopp_branch_simm16(entry_anchor_offset, cave_offset).has_value();
     std::optional<uint64_t> indirect_entry_island;
     if (!direct_entry) {
       const uint64_t reserved_island =
@@ -2243,14 +2986,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           planned_index * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
       if (planned_index < reserved_atomic_island_count && reserved_island <= new_text.size() &&
           kMoiLocalIndirectIslandWords * sizeof(uint32_t) <= new_text.size() - reserved_island &&
-          compute_sopp_branch_simm16(physical_anchor_offset, reserved_island)) {
+          compute_sopp_branch_simm16(entry_anchor_offset, reserved_island)) {
         indirect_entry_island = reserved_island;
       }
     }
     if (!direct_entry && !indirect_entry_island) {
-      indirect_entry_island = claim_appended_island(physical_anchor_offset);
+      indirect_entry_island = claim_appended_island(entry_anchor_offset);
       if (!indirect_entry_island)
-        indirect_entry_island = indirect_allocator.claim_reachable(physical_anchor_offset);
+        indirect_entry_island = indirect_allocator.claim_reachable(entry_anchor_offset);
     }
     if (!direct_entry && !indirect_entry_island) {
       result.warnings.emplace_back(
@@ -2260,7 +3003,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        physical_anchor_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+        entry_anchor_offset, entry_original_size, cave_words->size() * sizeof(uint32_t),
+        &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI sampled atomic sync placement failed: " +
                                  placement_error);
@@ -2276,46 +3020,33 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       result.errors.emplace_back("ConSan MOI sampled atomic sync forward branch is out of range");
       return;
     }
-    std::vector<uint32_t> anchor(site.size / sizeof(uint32_t), build_s_nop(0, arch));
+    std::vector<uint32_t> anchor(entry_original_size / sizeof(uint32_t), build_s_nop(0, arch));
     if (anchor.empty())
       return;
     anchor.front() = build_s_branch(*fwd, arch);
-    std::memcpy(new_text.data() + physical_anchor_offset, anchor.data(),
+    std::memcpy(new_text.data() + entry_anchor_offset, anchor.data(),
                 anchor.size() * sizeof(uint32_t));
     if (indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, physical_anchor_offset,
-            options, planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI sampled atomic sync patch")) {
+            new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset,
+            route_options, planned.resources.owner_descriptor_file_offsets, arch, patches,
+            result.errors, "ConSan MOI sampled atomic sync patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);
 
-    ConSanPatchInfo info;
-    info.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
-    info.anchor_offset = site.text_offset;
-    info.trampoline_offset = cave_offset;
-    info.original_size = site.size;
-    info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-    info.relocated_guest_instruction_offset = cave_offset + guest_instruction_offset;
-    info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
-    info.sampled_first_slot = planned.candidate.selected_slot;
-    info.sampled_window_bank_count = planned.candidate.bank_count;
-    info.scratch_vgpr = planned.resources.base;
-    info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    if (planned.private_layout) {
-      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
-      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
-      info.persistent_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+    if (preserve_guest_at_anchor) {
+      ConSanPatchInfo prefix_info;
+      prefix_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+      prefix_info.anchor_offset = entry_anchor_offset;
+      prefix_info.original_size = entry_original_size;
+      prefix_info.trampoline_offset = cave_offset;
+      prefix_info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
+      prefix_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+      patches.push_back(std::move(prefix_info));
     }
-    info.required_private_segment_size = planned.required_private_bytes;
-    if (planned.spill) {
-      info.spilled_vgpr_count = planned.spill->vgpr_count;
-      note_dynamic_stack_private_requirement(info, &*planned.spill);
-    }
-    patches.push_back(std::move(info));
+    append_atomic_patch(planned, cave_offset, *cave_words, guest_instruction_offset,
+                        preserve_guest_at_anchor);
   }
   if (!replace_consan_text(patcher, new_text, options, "MOI sampled atomic sync", result)) {
     return;
