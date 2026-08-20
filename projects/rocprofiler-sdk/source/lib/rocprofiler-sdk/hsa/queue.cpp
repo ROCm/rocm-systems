@@ -44,6 +44,9 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/range_replay/executor.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
+#include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -314,6 +317,16 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
+    // A range replay pass writes its already-transformed packets to the same ring the application
+    // submits through, which lands back here on this thread. Forward them untouched: transforming
+    // them a second time would mint a second dispatch record and a second completion signal for
+    // each packet.
+    if(interceptor_passthrough())
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
     const bool no_real_consumers =
@@ -321,8 +334,10 @@ WriteInterceptor(const void* packets,
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
+    const bool has_range_replay  = range_replay::has_active_range_replay_contexts();
 
-    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay))
+    if(pkt_count == 0 ||
+       (no_real_consumers && !graph_launch_active && !has_kernel_replay && !has_range_replay))
     {
         writer(packets, pkt_count);
         return;
@@ -356,6 +371,24 @@ WriteInterceptor(const void* packets,
     {
         writer(packets, pkt_count);
         return;
+    }
+
+    // Range replay: record this submission into the range open on this thread, or note that it
+    // breaks the isolation of a range open on another thread for the same agent. Recording happens
+    // before the packets are submitted, while their kernarg blocks still hold this launch's
+    // arguments. Skipped while this thread is itself replaying a range: those packets are the
+    // recording being re-submitted.
+    if(has_range_replay && range_replay::any_range_open() && !range_replay::this_thread_replaying())
+    {
+        if(auto* open_range = range_replay::current_range(); open_range != nullptr)
+        {
+            range_replay::note_submission(queue, packets_arr, pkt_count, graph_launch_active);
+            range_replay::ensure_entry_snapshot(*open_range, queue, writer);
+        }
+        else
+        {
+            range_replay::note_foreign_dispatch(queue.get_agent().get_rocp_agent()->id.handle);
+        }
     }
 
     if(has_kernel_replay)
@@ -1000,15 +1033,16 @@ WriteInterceptor(const void* packets,
         }
     }
 
-    // Kernel-replay reader side: while a replay service is active, a non-replay dispatch on this
-    // agent must not submit into a replay's snapshot->restore window -- restore() would revert this
+    // Replay reader side: while a replay service is active, a non-replay dispatch on this agent
+    // must not submit into a replay's snapshot->restore window -- restore() would revert this
     // dispatch's device writes. Hold the per-agent SHARED lock across the submit below so a replay
     // writer waits for in-flight submits to finish and cannot open its window until we return,
-    // while ordinary dispatches still run concurrently with each other. Gated on has_kernel_replay
-    // so non-replay runs take no lock at all. (The async GPU tail is handled by the replay window's
-    // agent-wide drain, not by this lock.)
+    // while ordinary dispatches still run concurrently with each other. Gated on the replay
+    // services so non-replay runs take no lock at all, and skipped on a thread that is replaying a
+    // range: it already holds this same mutex as a writer. (The async GPU tail is handled by the
+    // replay window's agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
-    if(has_kernel_replay)
+    if((has_kernel_replay || has_range_replay) && !range_replay::this_thread_replaying())
         replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
 
     bool should_batch_packets = true;
