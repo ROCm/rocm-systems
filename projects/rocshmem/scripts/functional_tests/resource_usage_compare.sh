@@ -198,11 +198,28 @@ _find_build_config() {
 measure_device_bitcode() {
   local bc_file="$1" arch="$2" build_config="$3" commit="$4" out_csv="$5"
 
-  local clangxx
-  clangxx="$(command -v clang++)" || {
-    echo "error: clang++ not found in PATH (need a ROCm clang++ with AMDGPU backend support)" >&2
-    return 1
-  }
+  # Same search order as DeviceBitcode.cmake's find_program(LLVM_CLANG ...)
+  # (plus ROCM_HOME), so this backend-compile uses the same ROCm clang++ that
+  # built the .bc, falling back to PATH only if none of those are set.
+  local -a _clangxx_candidates=()
+  [[ -n "${ROCM_PATH:-}" ]] && _clangxx_candidates+=("$ROCM_PATH/llvm/bin/clang++")
+  [[ -n "${ROCM_HOME:-}" ]] && _clangxx_candidates+=("$ROCM_HOME/llvm/bin/clang++")
+  [[ -n "${THEROCK_TOOLCHAIN_ROOT:-}" ]] && \
+    _clangxx_candidates+=("$THEROCK_TOOLCHAIN_ROOT/lib/llvm/bin/clang++")
+
+  local clangxx="" _candidate
+  for _candidate in "${_clangxx_candidates[@]}"; do
+    if [[ -x "$_candidate" ]]; then
+      clangxx="$_candidate"
+      break
+    fi
+  done
+  if [[ -z "$clangxx" ]]; then
+    clangxx="$(command -v clang++)" || {
+      echo "error: clang++ not found! (need a ROCm clang++ with AMDGPU backend support)" >&2
+      return 1
+    }
+  fi
 
   local workdir
   workdir="$(mktemp -d /tmp/rocshmem-device-bitcode-XXXXXX)"
