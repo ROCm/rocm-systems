@@ -111,11 +111,43 @@ Range replay v1 is scoped to what the existing snapshot can restore correctly.
 | HIP graph launches inside a range | declined (`GRAPH_LAUNCH`) |
 | Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
 
+## Multi-GPU and collectives
+
 Multi-GPU ranges — the case that matters for RCCL and MPI, where a range's dispatches on one agent
-are causally tied to dispatches and transfers on another — are follow-on work. The per-agent lock and
-the agent-scoped snapshot are already the right shape for it, but coordinating the *entry* to a
-replay window across agents (and across ranks) is a separate problem: a collective's participants
-must all restore and re-execute together or none of them can.
+are causally tied to dispatches and transfers on another — are follow-on work. Two parts of the
+existing design already point the right way, and one piece is missing.
+
+What works in favor: snapshots are agent-scoped and the replay lock is per-agent, so per-rank
+snapshots *compose*. A collective's kernels write into peer device memory, and those writes land in
+the destination rank's own allocations — so if every rank snapshots its own agent and every rank
+restores before every pass, the union covers the peer writes too. Nothing about the snapshot needs
+to become distributed.
+
+What is missing is agreement. A collective's kernels rendezvous: they spin on flags in peer memory.
+If one rank replays a collective and another does not, the replaying rank's kernel waits for a peer
+that never arrives. So participating ranks must replay in lockstep — same pass count, entering each
+pass together — and, critically, **a range declined on one rank must be abandoned on all of them**.
+
+A tool can arrange the lockstep part with the existing API, because `pass_count_cb` and
+`replay_continue_cb` are tool callbacks: it can allreduce the pass count and the continue-decision
+inside them. It cannot arrange the abandonment part. Eligibility is not known at `CONFIG` (the range
+has not run yet), and by `CLOSE` the passes have already happened. There is no point in the current
+API where a tool learns that its range is replayable and can still veto it.
+
+That argues for one addition before the API stabilizes: a **vetoable pre-replay notification**,
+delivered from `rocprofiler_range_replay_end()` after eligibility is fully determined — after the
+drain, the allocation-stability check, and kernarg staging — but before the first pass rewinds device
+memory. A tool would allreduce the status across the communicator and veto unless every rank is
+eligible. It is a small change (the executor already computes everything in that order; the callback
+slots in before the pass loop) and it is the enabler for the entire distributed case, so it is worth
+doing deliberately rather than discovering later that the API cannot express it.
+
+Host-side and network state is the harder limit. Intra-node collectives over xGMI are
+peer-to-peer device writes, which the snapshot covers. Inter-node collectives involve a host proxy
+thread and NIC queue-pair state that no device snapshot rewinds, so those ranges are outside what
+this mechanism can reproduce. For GPU-aware MPI the practical guidance is to bracket the *compute*
+phases between communication rather than the communication itself — which is also where the
+interesting counters are.
 
 ## Documentation in this section
 

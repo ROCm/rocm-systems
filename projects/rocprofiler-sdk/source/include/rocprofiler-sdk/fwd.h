@@ -412,6 +412,10 @@ typedef enum rocprofiler_kernel_replay_operation_t  // NOLINT(performance-enum-s
  * recorded dispatches are submitted, exit after they complete); the application's own execution of
  * the range is pass 0 and raises no PASS callback. CLOSE is delivered once from
  * ::rocprofiler_range_replay_end and carries the replay outcome.
+ *
+ * A vetoable pre-replay operation is anticipated as future work, for the point after a range's
+ * eligibility is known but before the first pass rewinds device memory. It is not implemented and
+ * not in this enum. @see `source/docs/conceptual/range_replay/index.md`
  */
 typedef enum rocprofiler_range_replay_operation_t  // NOLINT(performance-enum-size)
 {
