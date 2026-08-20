@@ -1227,6 +1227,7 @@ class _NativeGtestTarget:
     d128_block_oracle: str
     d128_block_fault_uses_oracle: bool = False
     d128_block_run_timeout_seconds: int | None = None
+    d128_pressure_run_timeout_seconds: int | None = None
 
 
 def _cdna_gtest_target(
@@ -1283,6 +1284,11 @@ NATIVE_GTEST_TARGETS = {
         # across both exact host-reference cases. The native gfx1250 simulator
         # completes that stronger contract in roughly 102 seconds.
         d128_block_run_timeout_seconds=150,
+        # The pressure suite exercises all four host-reference cases in one
+        # process. Inline Shadow currently needs roughly 118 seconds under the
+        # native simulator, so retain the same 1.5x target-specific margin as
+        # the D128 block Record/Replay row.
+        d128_pressure_run_timeout_seconds=180,
     ),
 }
 
@@ -1442,6 +1448,7 @@ def _native_gtest_overrides(
             ),
             f"HipMoi{suite}D128AttentionPressure",
             "FullKvDoubleBufferedExactContextMatchesHostReference",
+            run_timeout_seconds=target.d128_pressure_run_timeout_seconds,
         ),
         "wmma-attention": _attention_override(
             _native_gtest_path(

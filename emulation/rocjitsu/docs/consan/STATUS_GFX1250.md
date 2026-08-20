@@ -51,7 +51,7 @@ preserve an earlier green claim.
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Fresh clean run passes three of four exact cases with 40/40 accesses and 4/4 barriers statically complete; the fourth exceeds the 30-second row deadline | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current paired 1.29x; 40/40 accesses, 4/4 barriers |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Current strict clean row: all four exact host-reference oracles in 73.87 seconds; 24/24 accesses, 8/8 barriers, and no Record/Replay saturation; fresh paired/fault evidence remains | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current strict clean row: all four exact host-reference oracles in 117.90 seconds; 24/24 accesses and 4/4 barriers; prior paired 1.29x retained |
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 At `fff5f3597b`: spot rerun exact in 7.81 seconds; 18/18 accesses and 4/4 barriers; paired 1.17x retained | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
 | **P4 hip-moi tree atomic-OR** | 🟩 Current paired 6.55x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.04x retained | 🟩 Current paired 2.57x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.19x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
@@ -81,6 +81,44 @@ where the older row retained 18 visible access records and four barriers. The
 gfx1250 D128 manifest therefore uses a target-specific 150-second process
 bound. A host regression test pins that bound, verifies that the runner uses
 it, and separately pins gfx950 to the ordinary 30-second bound.
+
+### 2026-08-20 D128 pressure revalidation
+
+The post-merge rebuild changed the target-native executable to 24 admitted
+access ranges and exposed two independent prototype defects. Inline Shadow
+first rejected the dense transformed object because every two-word gfx1250
+access relay reserved 20 words, while a stranded singleton that must relocate
+its host requires 28 words: five for return-PC matching, three for the guest
+return adjustment, one conditional branch, six for the long return, plus the
+12-word relocated host arm and terminator. The gfx1250 reservation now follows
+that worst-case construction. A host regression creates two dense reach
+partitions, forces the two-site partition to retain a relocated host, and
+requires the transform to succeed. The retained
+`rebase-20260820-gfx1250-d128-pressure-inline-reservation-measure` clean row,
+with hook SHA-256
+`9493c8b4995d47c2578d7707d26966377e4da8b5e72462492797bc9a98f1949e`,
+accepts all four exact cases in 117.90 seconds with 24/24 accesses, 4/4
+barriers, complete dynamic analysis, and no diagnostics.
+
+Record/Replay then reported typed owner-table saturation (`flags=0x5`) after
+retaining only 1,023 address groups at its hottest site, despite occupying
+just 5,219 of 1,048,576 table slots. The emitted hash had passed the scalar LDS
+address-key register number as the vector-only VOP operand, so dynamic
+addresses did not affect the home slot and the site formed a 1,024-probe
+collision chain. The operands are now ordered so the scalar address key is the
+legal scalar source. The existing emitted-code host regression now pins that
+exact instruction contract. The retained
+`rebase-20260820-gfx1250-d128-pressure-rr-address-hash-fix` clean row, with hook
+SHA-256
+`6e8b4a01991d18bfb0d17f17c98510672556fdab74dd490d18e4529be73042c1`,
+accepts all four exact cases in 73.87 seconds with 24/24 accesses, 8/8
+barriers, 31,256 committed identities, 2,048 address groups at the formerly
+failing site, complete dynamic analysis, and no saturation or diagnostics.
+
+The gfx1250 D128-pressure manifest now uses a target-specific 180-second
+process bound, providing the same approximate 1.5x simulator margin as the
+D128-block row. Runner tests pin both that effective bound and the unchanged
+ordinary 30-second gfx950 bound.
 
 ### Target-native Jakub matmul
 

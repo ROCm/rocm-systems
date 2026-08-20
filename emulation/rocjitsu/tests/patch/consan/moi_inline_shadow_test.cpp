@@ -1004,8 +1004,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
       // v0:v31 are ordinary and v32:v39 are live accumulators. The automatic
       // owner/epoch/workgroup tuple exactly consumes the v29:v31 ordinary tail.
-      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
-                      kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
     });
     append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/false,
                                 /*sgpr_count=*/0u,
@@ -1033,8 +1032,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     EXPECT_EQ(result.resolved_moi_epoch_vgpr, 30u);
     EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 31u);
     const auto prologue = std::ranges::find(
-        result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
-        &ConSanPatchInfo::kind);
+        result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
     ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
     EXPECT_GE(*prologue->entry_scalar_backup_vgpr, 1u);
@@ -1046,9 +1044,9 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     std::memcpy(&descriptor,
                 result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(descriptor));
-    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3,
-                              kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
-              7u);
+    EXPECT_EQ(
+        AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+        7u);
     EXPECT_TRUE(result.final_validation_passed);
   }
 }
@@ -5254,6 +5252,60 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u); // One relocatable host plus one appended return-PC dispatcher.
+}
+
+TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kFirstWindowAccessCount = 2u;
+  constexpr uint32_t kSecondWindowAccessCount = 6u;
+  constexpr uint32_t kAccessCount = kFirstWindowAccessCount + kSecondWindowAccessCount;
+  constexpr size_t kSecondWindowWord = 65'580u;
+  std::vector<uint32_t> text_words(kSecondWindowWord + 32u, build_s_mov_b32(100u, 100u, kArch));
+  const auto append_window = [&](size_t cursor, uint32_t access_count) {
+    for (uint32_t index = 0u; index < access_count; ++index) {
+      const auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds,
+                                          {.addr = 0u, .data0 = static_cast<uint8_t>(index)});
+      text_words[cursor++] = store[0];
+      text_words[cursor++] = store[1];
+    }
+  };
+  // Eight total sites activate appended routing, while the SOPP reachability
+  // partition leaves a two-site first dispatcher. Non-NOP filler forces each
+  // partition to relocate a host arm instead of claiming a pristine island.
+  append_window(/*cursor=*/32u, kFirstWindowAccessCount);
+  append_window(kSecondWindowWord, kSecondWindowAccessCount);
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82u;
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  options.moi_exec_save_sgpr = 60u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_two_site_dense_inline_shadow"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.moi_candidates.size(), kAccessCount);
+  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
+    EXPECT_GT(candidate.size, sizeof(uint32_t));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            4u); // One relocated host and one appended dispatcher per window.
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  })) << testing::PrintToString(result.patches);
 }
 
 TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {

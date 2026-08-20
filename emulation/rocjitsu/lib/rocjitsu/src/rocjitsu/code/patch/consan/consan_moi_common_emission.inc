@@ -1701,8 +1701,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto mix_address = instrumentation::build_v_mul_lo_u32_literal(
         owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
         owner_bank_vgpr, arch);
-    const auto combine_address = instrumentation::build_v_xor_b32(
-        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), address_key_sgpr, arch);
+    const auto combine_address =
+        instrumentation::build_v_xor_b32(owner_bank_vgpr, address_key_sgpr, owner_bank_vgpr, arch);
     const auto mix_site = instrumentation::build_v_mul_lo_u32_literal(
         owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
         owner_bank_vgpr, arch);

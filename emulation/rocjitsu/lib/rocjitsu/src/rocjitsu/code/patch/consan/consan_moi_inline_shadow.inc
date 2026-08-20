@@ -199,10 +199,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   constexpr uint64_t kIndirectIslandWords = 8u;
-  // A dense dispatcher may need one comparison, one conditional branch, and
-  // a long jump per site, plus a fixed relocated-host route. Twenty words per
-  // site safely amortizes that fixed route even for small owner groups.
-  constexpr uint64_t access_relay_words = 20u;
+  // A gfx1250 dispatcher can contain a stranded singleton. Its worst case is
+  // a 12-word relocated-host arm, a 15-word two-word-access arm (return-PC
+  // match, guest-return adjustment, conditional branch, and long jump), plus
+  // the final terminator. Keep RDNA4's compact spacing: its explicit-key
+  // groups do not carry the gfx1250 call-return and adjustment sequences.
+  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 28u : 20u;
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_set<uint64_t> dynamic_lds_descriptors;

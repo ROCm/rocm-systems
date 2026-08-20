@@ -793,8 +793,8 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const auto restore_original =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_RDNA4);
   const auto combine_address_identity = instrumentation::build_v_xor_b32(
-      static_cast<uint16_t>(scratch + 7u), vector_source_vgpr(static_cast<uint16_t>(scratch + 7u)),
-      address_key, ROCJITSU_CODE_ARCH_RDNA4);
+      static_cast<uint16_t>(scratch + 7u), address_key, static_cast<uint16_t>(scratch + 7u),
+      ROCJITSU_CODE_ARCH_RDNA4);
   const auto loop_branch =
       instrumentation::build_s_cbranch_execnz(/*offset_dwords=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_original_exec && read_address && select_address && narrow_address &&
