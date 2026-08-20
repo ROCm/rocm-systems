@@ -1187,6 +1187,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
   ConSanMoiRecordReplayResult replay;
   const uint32_t access_count = std::min({header.access_record_count, header.access_record_capacity,
                                           span_size_u32(access_records.size())});
+  replay.published_access_count = static_cast<uint32_t>(std::count_if(
+      access_records.begin(), access_records.begin() + access_count,
+      [&](const ConSanMoiAccessRecord &record) { return !is_unpublished_access(record); }));
   replay.dropped_access_count =
       header.access_record_count > access_count ? header.access_record_count - access_count : 0;
   const uint32_t barrier_count =
@@ -1268,7 +1271,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
 
     ReplayWorkgroupState state(static_cast<uint64_t>(exact_shadow_entries.size()) *
                                    consan_moi_exact_shadow::granule_bytes,
-                               access_count);
+                               replay.published_access_count);
     state.generation = generation;
     state.workgroup_x = workgroup_x;
     state.workgroup_y = workgroup_y;
@@ -1382,10 +1385,12 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     Kind kind = Kind::Access;
   };
   std::vector<ReplayEvent> events;
-  events.reserve(static_cast<size_t>(access_count) + barrier_count + atomic_events.size() +
-                 fence_events.size());
-  for (uint32_t i = 0; i < access_count; ++i)
-    events.push_back({access_records[i].event_index, i, i, ReplayEvent::Kind::Access});
+  events.reserve(static_cast<size_t>(replay.published_access_count) + barrier_count +
+                 atomic_events.size() + fence_events.size());
+  for (uint32_t i = 0; i < access_count; ++i) {
+    if (!is_unpublished_access(access_records[i]))
+      events.push_back({access_records[i].event_index, i, i, ReplayEvent::Kind::Access});
+  }
   for (uint32_t i = 0; i < barrier_count; ++i)
     events.push_back(
         {barrier_records[i].event_index, access_count + i, i, ReplayEvent::Kind::Barrier});

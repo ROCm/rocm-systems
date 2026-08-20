@@ -17,6 +17,7 @@ struct ConSanMoiExactByteAccessResult {
 };
 
 struct ConSanMoiRecordReplayResult {
+  uint32_t published_access_count = 0;
   uint32_t processed_access_count = 0;
   uint32_t processed_barrier_count = 0;
   uint32_t processed_atomic_count = 0;

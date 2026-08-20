@@ -59,7 +59,7 @@ scratch before promotion.
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟩 post-rebase accepted bundle: exact MFMA oracle, complete 12/12 accesses plus 4/4 barriers, paired 15.61x, and a reviewed exact-one barrier drop that fails the oracle and produces one Record/Replay diagnosis; containment, health, cleanup, and clean provenance pass | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before either oracle | 🟩 current generation-qualified bundle: both exact clean oracles, zero diagnostics, complete 12/12 accesses plus 4/4 barriers, paired 15.56x, reviewed exact-one qualified miss, bounded memory and cleanup, containment, health, and clean provenance |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 34.8x paired slowdown, and a reviewed exact-one release-order fault with pass/qualified-miss outcome, containment, health, cleanup, and clean provenance | 🟥 current planner requires a spill for a dynamic-stack owner, which is unsupported, and rejects before an oracle | 🟥 current dynamic-stack owner has no safe scalar placement and rejects before an oracle |
 | **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 47.08x paired slowdown, and a reviewed exact-one producer-release atomic-order fault with pass/no-diagnosis outcome, containment, health, and clean provenance | 🟥 current physical rerun rejects before an oracle: the dynamic-stack owner needs transient spilling and its synchronization-aware Sampled state also needs a per-workitem sequence below a full ordinary VGPR bank; the existing private-state fallback is incompatible with a compiler-managed dynamic stack | 🟥 current dynamic-stack owner has a full ordinary VGPR bank, so persistent scalar placement rejects the object before an oracle |
-| **P4 hip-moi Jakub attention** | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed | 🩶 Target-native simulator baseline passes; profile unassessed |
+| **P4 hip-moi Jakub attention** | 🟨 Current physical clean row passes all four exact oracles with complete 338/338 access coverage; paired overhead and reviewed-fault acceptance remain | 🟧 Current physical row passes all four exact oracles and statically patches 338/338 accesses plus 35/35 barriers, but the standard 65,536-stride runtime policy records no visible evidence and fails the strict dynamic gate | 🟥 Current physical planner cannot encode its Sampled entry island and rejects before an oracle | 🟨 Current physical clean row passes all four exact oracles with complete 338/338 accesses plus 35/35 barriers and zero diagnostics; paired overhead and reviewed-fault acceptance remain |
 
 ### 2026-08-20 rebuilt D128-pressure regression
 
@@ -163,6 +163,31 @@ correctness question and supersedes the older 9/36 raw-barrier denominator,
 but it does not promote the cell: cross-dispatch identity for full-pressure
 CDNA owners needs a higher-level state design rather than weakening the
 existing fail-closed owner exclusion.
+
+### 2026-08-20 Jakub physical clean refresh
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-jakub-clean-all-27c0851`
+records one physical-gfx950 baseline and all four current clean profiles.  The
+baseline passes all four parameterized exact oracles.  SuperCollider preserves
+those results with complete 338/338 access coverage.  Inline Shadow also
+preserves all four results with complete 338/338 accesses plus 35/35 barriers,
+zero diagnostics, and a complete dynamic verdict.  Their paired-overhead and
+reviewed-fault bundles remain to be collected.
+
+Record/Replay preserves all four numeric results and statically patches every
+one of the same 338 accesses and 35 barriers, but the standard runtime stride
+of 65,536 observes no records across the four one-workgroup dispatches.  It
+therefore exits through the strict missing-evidence gate rather than qualifying
+the row.  Exploratory physical runs with denser strides retained all four
+oracles and committed 107,520 records at stride 1 or 33,792 records from one
+selected dispatch at stride 4, but both exceeded 90 seconds in host replay.
+A replay fix now excludes unpublished fixed-table slots from event scheduling
+and state sizing, with a 262,144-slot sparse-table regression; processing the
+actual published records remains too slow, so the row stays orange.  Sampled
+fails earlier: its planner cannot encode the first entry island and rejects the
+code object before an oracle.  These are distinct engine issues; neither is
+reported as a workload failure.
 
 ### Current-matrix executable audit
 

@@ -2769,6 +2769,7 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   const ConSanMoiRecordReplayResult replay =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
 
+  EXPECT_EQ(replay.published_access_count, 2u);
   EXPECT_EQ(replay.processed_access_count, 2u);
   EXPECT_EQ(replay.unsupported_access_count, 0u);
   EXPECT_TRUE(replay.conflict);
@@ -2778,6 +2779,7 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   records[2].claim_token = 1;
   const ConSanMoiRecordReplayResult malformed =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+  EXPECT_EQ(malformed.published_access_count, 3u);
   EXPECT_EQ(malformed.processed_access_count, 3u);
   EXPECT_EQ(malformed.unsupported_access_count, 1u);
 
@@ -2785,6 +2787,7 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   records[2].site_token = 1;
   const ConSanMoiRecordReplayResult partial_site =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+  EXPECT_EQ(partial_site.published_access_count, 3u);
   EXPECT_EQ(partial_site.processed_access_count, 3u);
   EXPECT_EQ(partial_site.unsupported_access_count, 1u);
 
@@ -2792,8 +2795,39 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   records[2].flags = 2;
   const ConSanMoiRecordReplayResult partial_flags =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+  EXPECT_EQ(partial_flags.published_access_count, 3u);
   EXPECT_EQ(partial_flags.processed_access_count, 3u);
   EXPECT_EQ(partial_flags.unsupported_access_count, 1u);
+}
+
+TEST(ConSanMoi, RecordReplayDoesNotScheduleSparseTableCapacity) {
+  constexpr uint32_t kCapacity = 1u << 18u;
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/kCapacity,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = kCapacity;
+
+  std::vector<ConSanMoiAccessRecord> records(kCapacity);
+  records.front().wave_id = 1;
+  records.front().access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+  records.front().lds_byte_count = 4;
+  records.front().cell_count = 1;
+  records.back().wave_id = 1;
+  records.back().event_index = 1;
+  records.back().access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read);
+  records.back().lds_byte_count = 4;
+  records.back().cell_count = 1;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_EQ(replay.published_access_count, 2u);
+  EXPECT_EQ(replay.processed_access_count, 2u);
+  EXPECT_EQ(replay.unsupported_access_count, 0u);
+  EXPECT_FALSE(replay.metadata_full);
 }
 
 TEST(ConSanMoi, RecordReplayReportsDroppedBarrierRecords) {

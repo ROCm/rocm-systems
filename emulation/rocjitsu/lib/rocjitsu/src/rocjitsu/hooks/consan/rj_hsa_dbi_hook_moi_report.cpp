@@ -1567,7 +1567,7 @@ private:
             replay.diagnostic_capacity_exhausted ? 1u : 0u;
         log_message(kLogInfo,
                     "ConSan MOI auto replay reader=%llu generation=%llu code_object=%s "
-                    "processed_access=%u "
+                    "published_access=%u processed_access=%u "
                     "processed_barriers=%u processed_atomics=%u processed_fences=%u "
                     "dropped_access=%u "
                     "dropped_barriers=%u unsupported_access=%u unsupported_atomics=%u "
@@ -1579,12 +1579,13 @@ private:
                     static_cast<unsigned long long>(entry.reader),
                     static_cast<unsigned long long>(replay_header.generation),
                     entry.input_fingerprint.empty() ? "missing" : entry.input_fingerprint.c_str(),
-                    replay.processed_access_count, replay.processed_barrier_count,
-                    replay.processed_atomic_count, replay.processed_fence_count,
-                    replay.dropped_access_count, replay.dropped_barrier_count,
-                    replay.unsupported_access_count, replay.unsupported_atomic_count,
-                    replay.unsupported_fence_count, replay.emitted_diagnostic_count,
-                    replay.conflict ? "true" : "false", replay.metadata_full ? "true" : "false",
+                    replay.published_access_count, replay.processed_access_count,
+                    replay.processed_barrier_count, replay.processed_atomic_count,
+                    replay.processed_fence_count, replay.dropped_access_count,
+                    replay.dropped_barrier_count, replay.unsupported_access_count,
+                    replay.unsupported_atomic_count, replay.unsupported_fence_count,
+                    replay.emitted_diagnostic_count, replay.conflict ? "true" : "false",
+                    replay.metadata_full ? "true" : "false",
                     replay.diagnostic_capacity_exhausted ? "true" : "false",
                     replay_header.diagnostic_capacity, provenance.repaired_diagnostic_count,
                     provenance.unresolved_diagnostic_count, exact_shadow_entries.size());
