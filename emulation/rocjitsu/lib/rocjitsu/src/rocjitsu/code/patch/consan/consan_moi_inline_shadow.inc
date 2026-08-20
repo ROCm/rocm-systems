@@ -2208,6 +2208,64 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   return true;
 }
 
+[[nodiscard]] bool
+append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptions &options,
+                                 const ConSanMoiWorkgroupSources &workgroup_sources,
+                                 uint16_t residue_vgpr, uint16_t temporary_vgpr,
+                                 uint16_t coordinate_vgpr, rj_code_arch_t arch) {
+  if (!append_moi_report_dispatch_id_pair(words, options, residue_vgpr, temporary_vgpr, arch,
+                                          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+    return false;
+  }
+  const auto mix = [&](uint16_t source) {
+    const auto word = instrumentation::build_v_xor_b32(residue_vgpr, vector_source_vgpr(source),
+                                                       residue_vgpr, arch);
+    if (!word)
+      return false;
+    words.push_back(*word);
+    return true;
+  };
+  if (!mix(temporary_vgpr))
+    return false;
+  const std::array<std::pair<const ConSanMoiWorkgroupSource *, uint32_t>, 4> tuple_sources = {{
+      {&workgroup_sources.x, 0u},
+      {&workgroup_sources.y, 1u},
+      {&workgroup_sources.z, 2u},
+      {&workgroup_sources.cluster_workgroup_id, 3u},
+  }};
+  for (const auto &[source, dimension_shift] : tuple_sources) {
+    if (!source->has_value())
+      continue;
+    if (!consan_detail::append_workgroup_source_value(words, *source, coordinate_vgpr, arch))
+      return false;
+    if (dimension_shift != 0u) {
+      const auto distinguish_dimension = instrumentation::build_v_lshlrev_b32(
+          coordinate_vgpr, scalar_positive_inline_u32(dimension_shift), coordinate_vgpr, arch);
+      if (!distinguish_dimension)
+        return false;
+      words.push_back(*distinguish_dimension);
+    }
+    if (!mix(coordinate_vgpr))
+      return false;
+  }
+  const auto shift = instrumentation::build_v_lshrrev_b32(
+      temporary_vgpr, scalar_positive_inline_u32(16), residue_vgpr, arch);
+  if (!shift)
+    return false;
+  words.push_back(*shift);
+  if (!mix(temporary_vgpr))
+    return false;
+  const auto multiply = instrumentation::build_v_mul_lo_u32_literal(
+      residue_vgpr, temporary_vgpr, 0x85ebca6bu, residue_vgpr, arch);
+  const auto mask = instrumentation::build_v_and_b32_literal(
+      residue_vgpr, options.moi_runtime_sample_stride - 1u, residue_vgpr, arch);
+  if (!multiply || !mask)
+    return false;
+  words.insert(words.end(), multiply->begin(), multiply->end());
+  words.insert(words.end(), mask->begin(), mask->end());
+  return true;
+}
+
 [[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
                                                   uint64_t first_address, uint32_t element_size,
                                                   uint16_t index_vgpr, uint16_t address_vgpr,
@@ -2262,7 +2320,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
     std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
@@ -2490,6 +2549,30 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     words.insert(words.end(), add->begin(), add->end());
   }
   if (runtime_sampled) {
+    if (runtime_workgroup_gate_in_body) {
+      if (!append_sampled_workgroup_residue(words, options, *workgroup_sources, bank_vgpr,
+                                            high_vgpr, low_vgpr, arch)) {
+        errors.emplace_back(
+            "ConSan MOI runtime sampled probe could not select a private-state workgroup");
+        return std::nullopt;
+      }
+      const auto selected_value = instrumentation::build_v_mov_b32_literal(
+          high_vgpr, options.moi_runtime_sample_offset, arch);
+      const auto selected =
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch);
+      const auto narrow_selected =
+          instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+      if (!selected_value || !selected || !narrow_selected) {
+        errors.emplace_back(
+            "ConSan MOI runtime sampled probe could not encode its body workgroup gate");
+        return std::nullopt;
+      }
+      words.insert(words.end(), selected_value->begin(), selected_value->end());
+      words.push_back(*selected);
+      if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::VccZero))
+        return std::nullopt;
+      words.push_back(*narrow_selected);
+    }
     // Sample addresses while retaining every wave which touches the selected
     // cell. Selecting owners here would discard the cross-wave evidence that
     // the sampled checker needs in order to identify a race.
@@ -2955,8 +3038,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     uint32_t pending_acquire_owner_bank_count, const VgprSpillSequence *spill,
     std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr,
+    std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
   if (!access_ranges || access_ranges->empty()) {
@@ -3121,7 +3204,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
         window_bank_count, range_index == 0u && !spill_backed_operand_recovery,
         pending_acquire_owner_bank_count, preserved_lds_byte_offset_vgpr, spill,
         spilled_lds_byte_offset_vgpr, sampled_causal_windows_offset, sampled_watchpoints_offset,
-        sampled_pending_acquires_offset, errors,
+        sampled_pending_acquires_offset, runtime_workgroup_gate_in_body, errors,
         range_index == 0u ? &range_guest_instruction_offset : nullptr,
         range_index == 0u ? &range_guest_instruction_word_count : nullptr);
     if (!range_words)
@@ -3162,13 +3245,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
 }
 
 [[nodiscard]] constexpr uint64_t
-moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
+moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
+                                          bool has_cluster_workgroup_id = false) {
   // A complete persistent vector tuple needs two more words per coordinate
   // than the scalar form: v_readfirstlane plus its VALU-to-SALU dependency
   // wait. Keep the envelope exact enough that large generated objects do not
   // push otherwise-reachable relays beyond SOPP branch range.
-  constexpr uint64_t kGateWordsWithoutGuest = 26u;
-  return kGateWordsWithoutGuest +
+  constexpr uint64_t kXyzGateWordsWithoutGuest = 26u;
+  constexpr uint64_t kVectorClusterMixWords = 3u;
+  return kXyzGateWordsWithoutGuest + (has_cluster_workgroup_id ? kVectorClusterMixWords : 0u) +
          (static_cast<uint64_t>(guest_byte_count) + sizeof(uint32_t) - 1u) / sizeof(uint32_t);
 }
 
@@ -3255,7 +3340,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
   // all-workgroups-at-once event.
   if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
       !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch))
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
+                                        residue, arch))
     return std::nullopt;
 
   words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
@@ -3337,7 +3424,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count) {
   words.push_back(*mix_dispatch);
   if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
       !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
-      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch))
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
+                                        residue, arch))
     return std::nullopt;
   words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
   words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));

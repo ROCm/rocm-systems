@@ -1966,6 +1966,7 @@ class ConSanValidationTest(unittest.TestCase):
             ),
         )
         self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 90)
+        self.assertEqual(workloads["tp1-prefill"]["run_timeout_seconds"], 60)
         self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),
@@ -1980,6 +1981,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "d128-pressure", 180),
                 ("gfx950", "jakub-attention", 30),
                 ("gfx1250", "jakub-attention", 90),
+                ("gfx950", "tp1-prefill", 30),
+                ("gfx1250", "tp1-prefill", 60),
             )
             for target, workload, expected_timeout in cases:
                 with self.subTest(target=target, workload=workload):

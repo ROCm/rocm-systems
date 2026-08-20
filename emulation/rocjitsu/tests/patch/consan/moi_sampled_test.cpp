@@ -395,6 +395,128 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
   }));
 }
 
+TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint16_t kClusterWorkgroupTtmp = 6u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words[0] = build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(kClusterWorkgroupTtmp),
+                                  ROCJITSU_CODE_ARCH_GFX1250);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_sampled_fast_gate_fallback"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("spill-safe body gate") != std::string::npos;
+  }));
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
+  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
+  for (uint32_t offset : {
+           *access->persistent_record_replay_workgroup_private_offsets.x,
+           *access->persistent_record_replay_workgroup_private_offsets.y,
+           *access->persistent_record_replay_workgroup_private_offsets.z,
+           *access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id,
+       }) {
+    const auto load = instrumentation::build_private_load_b32(coordinate_vgpr, offset,
+                                                              ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_TRUE(load);
+    EXPECT_TRUE(contains_subsequence(cave, *load));
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint16_t kClusterWorkgroupTtmp = 6u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words[0] = build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(kClusterWorkgroupTtmp),
+                                  ROCJITSU_CODE_ARCH_GFX1250);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_sampled_cluster_gate"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_TRUE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> patched_words = text_words_at_offset(
+      patched, /*text_offset=*/0u, static_cast<uint32_t>(patched.text_sections().front()->size()));
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id);
+  const uint16_t persistent_cluster =
+      *prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id;
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  EXPECT_NE(std::ranges::find(prologue_words,
+                              build_v_mov_b32_e32(persistent_cluster,
+                                                  ttmp_scalar_operand(kClusterWorkgroupTtmp),
+                                                  ROCJITSU_CODE_ARCH_GFX1250)),
+            prologue_words.end());
+  const auto read_cluster = instrumentation::build_v_readfirstlane_b32(
+      /*sdst=*/85u, persistent_cluster, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto dependency_wait =
+      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto cluster_mix = instrumentation::build_s_sub_u32(
+      /*sdst=*/86u, /*ssrc0=*/86u, /*ssrc1=*/85u, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(read_cluster);
+  ASSERT_TRUE(dependency_wait);
+  ASSERT_TRUE(cluster_mix);
+  const std::array<uint32_t, 3> expected_cluster_mix = {*read_cluster, *dependency_wait,
+                                                        *cluster_mix};
+  EXPECT_TRUE(contains_subsequence(patched_words, expected_cluster_mix));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
@@ -2852,7 +2974,7 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Cdna4PrivateWorkgroupStateFallsBackFromSampledFastGate) {
+TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(640u, build_s_nop(0, kArch));
@@ -2893,8 +3015,23 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateFallsBackFromSampledFastGate) {
   ASSERT_NE(access, result.patches.end());
   EXPECT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("runtime workgroup fast gate unavailable") != std::string::npos;
+    return warning.find("spill-safe body gate") != std::string::npos;
   }));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  ASSERT_TRUE(access->scratch_vgpr);
+  const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
+  for (uint32_t offset : {
+           *access->persistent_record_replay_workgroup_private_offsets.x,
+           *access->persistent_record_replay_workgroup_private_offsets.y,
+           *access->persistent_record_replay_workgroup_private_offsets.z,
+       }) {
+    const auto load = instrumentation::build_private_load_b32(coordinate_vgpr, offset, kArch);
+    ASSERT_TRUE(load);
+    EXPECT_TRUE(contains_subsequence(cave, *load));
+  }
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -3961,9 +4098,9 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
       build_s_mov_b64(kRdna4ExecLo, publication_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(narrow_claim);
   ASSERT_TRUE(restore_exec);
-  // Each site first narrows to the selected LDS-cell residue, then narrows for
-  // the winning publisher and collision-accounting paths.
-  EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *narrow_claim), 7);
+  // Each site first narrows to its selected workgroup and LDS-cell residue,
+  // then narrows for the winning publisher and collision-accounting paths.
+  EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *narrow_claim), 9);
   EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *restore_exec), 6);
   for (const ConSanPatchInfo &patch : std::span<const ConSanPatchInfo>(result.patches).first(2u)) {
     ASSERT_TRUE(patch.scratch_vgpr);

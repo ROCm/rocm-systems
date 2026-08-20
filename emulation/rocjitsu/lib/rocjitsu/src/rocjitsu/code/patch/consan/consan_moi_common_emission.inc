@@ -290,14 +290,22 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
   if (workgroup_key_offset)
     persistent_end += SpillManager::kSlotBytes;
   ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
-  std::optional<std::array<uint64_t, 3>> record_replay_workgroup_offset_values;
+  std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
   if (include_record_replay_workgroup) {
-    record_replay_workgroup_offset_values = std::array<uint64_t, 3>{
+    const bool include_cluster_workgroup_id =
+        arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        std::ranges::any_of(
+            resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+              const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+              return kernel != nullptr && kernel->uses_gfx1250_cluster_workgroup_id;
+            });
+    record_replay_workgroup_offset_values = std::array<uint64_t, 4>{
         persistent_end,
         persistent_end + SpillManager::kSlotBytes,
         persistent_end + 2u * SpillManager::kSlotBytes,
+        include_cluster_workgroup_id ? persistent_end + 3u * SpillManager::kSlotBytes : 0u,
     };
-    persistent_end += 3u * SpillManager::kSlotBytes;
+    persistent_end += (include_cluster_workgroup_id ? 4u : 3u) * SpillManager::kSlotBytes;
   }
   const auto private_limit = address_free_scratch_private_limit(arch);
   if (!private_limit) {
@@ -314,6 +322,10 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
         .x = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[0]),
         .y = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[1]),
         .z = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[2]),
+        .cluster_workgroup_id = (*record_replay_workgroup_offset_values)[3] != 0u
+                                    ? std::optional<uint32_t>(static_cast<uint32_t>(
+                                          (*record_replay_workgroup_offset_values)[3]))
+                                    : std::nullopt,
     };
   }
   const auto ephemeral_base =
@@ -899,7 +911,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                             "MOI Record/Replay workgroup y", errors) ||
       reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.z,
                                             *options.scratch_vgpr, scratch_count,
-                                            "MOI Record/Replay workgroup z", errors))
+                                            "MOI Record/Replay workgroup z", errors) ||
+      reject_optional_scratch_range_overlap(
+          options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, *options.scratch_vgpr,
+          scratch_count, "MOI Record/Replay cluster workgroup ID", errors))
     return std::nullopt;
   auto byte_count = byte_count_for_candidate(candidate);
   if (!byte_count) {

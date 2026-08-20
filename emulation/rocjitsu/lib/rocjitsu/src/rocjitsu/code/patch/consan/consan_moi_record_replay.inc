@@ -130,8 +130,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
+  const bool has_cluster_workgroup_id =
+      std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
+        return candidate->uses_gfx1250_cluster_workgroup_id;
+      });
   const uint64_t runtime_gate_island_words = moi_runtime_workgroup_gate_reserved_words(
-      static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)));
+      static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
+      has_cluster_workgroup_id);
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
   // Spill-backed groups need room for the extra scalar-save arm, while truly

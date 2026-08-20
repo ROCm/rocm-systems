@@ -47,7 +47,7 @@ preserve an earlier green claim.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator reports the same 17 generated long-return targets; no accepted overhead |
-| **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
+| **P1 Sharktank TP1 prefill** | 🟩 Fresh exact prefill oracle with complete 352/352 access coverage; current paired 1.17x retained | 🟧 Fresh exact oracle and complete static 352/352 accesses plus 74/74 barriers, but the standard 65,536-stride policy records no visible evidence and fails the dynamic gate | 🟩 Fresh exact clean oracle with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Fresh exact clean oracle in 31.07 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest now retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
@@ -72,6 +72,70 @@ target-capable prebuilt wheel or source build is therefore an external
 prerequisite for all eight rows.  The strict doctor catches this before an E2E
 artifact is accepted; substituting gfx950 code objects or bypassing RocJitsu is
 not valid gfx1250 evidence.
+
+### 2026-08-20 TP1 prefill post-fast-gate regression
+
+Artifact
+`rebase-20260820-gfx1250-tp1-prefill-all-efea098` records a clean-tree
+baseline and all four strict profiles through RocJitsu at source revision
+`efea0981fd` and hook SHA-256
+`663aae26c332ae2eaa8780ebd9020646f27e5c3d20eb44ae77f1dbb7204ecf24`.
+The baseline and SuperCollider rows pass the exact prefill oracle in 11.19 and
+12.14 seconds; SuperCollider retains complete 352/352 access coverage.
+
+The other three rows expose distinct current gaps.  Record/Replay passes the
+numeric oracle and statically patches 352/352 accesses plus 74/74 barriers,
+but records no visible evidence across 32 instrumented dispatch packets under
+the standard 65,536-stride policy, so its dynamic verdict is incomplete.
+Sampled fails closed before execution because its dense fast-gate fallback
+emits 2,988 bytes after reserving a 3,100-byte body.  Inline Shadow statically
+patches 352/352 accesses plus 37/37 barriers and begins execution, but exceeds
+the manifest's 30-second process bound before an oracle or teardown verdict.
+The matrix is demoted immediately rather than retaining older green claims;
+each cell must be rerun after its issue is fixed.
+
+The Sampled follow-up artifact
+`rebase-20260820-gfx1250-tp1-prefill-sampled-body-gate-fix` fixes both the
+dense layout rejection and the behavioral failure exposed immediately after
+it.  Treating an unavailable early workgroup gate as address-only sampling
+admitted hundreds of unrelated workgroups into the finite causal-window
+banks, producing 173 false conflicts on this correct workload.  Private
+entry-captured workgroup state is now filtered by a vector gate inside the
+spill-safe probe body, before its independent LDS-cell selection.  The exact
+oracle passes in 19.94 seconds with complete 352/352 access and 64/64 barrier
+coverage, 620 visible sampled records, zero diagnostics or conflicts, and a
+complete dynamic verdict.  A gfx1250 dense/private-state host regression and
+the corresponding gfx950 AccVGPR-boundary regression pin the two lowerings.
+The candidate-tree hook SHA-256 is
+`18d108f47cf3972487eb96cac0ee0bebe0c04212359cbb1293954bc703823c01`.
+
+Inline Shadow's failure was a stale automation bound rather than an engine
+defect.  Artifact `rebase-20260820-gfx1250-tp1-prefill-inline-timeout-fix`
+runs without a command-line timeout override and records the target-resolved
+60-second manifest contract.  The exact oracle passes in 31.07 seconds with
+complete 352/352 access and 37/37 barrier coverage and a complete dynamic
+verdict.  The corresponding host regression requires gfx1250 TP1 prefill to
+resolve to 60 seconds while gfx950 retains the ordinary 30-second bound.
+
+### 2026-08-20 cluster workgroup identity persistence
+
+The Sampled gate audit also found that the persistent exact-workgroup tuple
+retained x/y/z but not gfx1250's cluster-local workgroup ID.  A later gate or
+report could therefore read the entry TTMP after arbitrary guest code instead
+of using an entry-captured value.  Automatic placement now allocates and
+captures a fourth persistent coordinate only for gfx1250 kernels which
+actually consume the cluster ID.  Scalar, vector, and private-state prologues,
+resource exclusion, emitted gates, reports, and final validation all carry the
+same optional coordinate; other targets and gfx1250 kernels without this ABI
+input keep the three-coordinate layout.
+
+Two focused host regressions pin both paths.  The dense fast-gate test requires
+the entry prologue to capture TTMP6 and the later gate to hash the persistent
+copy.  The spill-backed test requires all four coordinates to be captured in
+private memory and loaded by the body gate.  The complete 678-test
+`ConSanMoi.*` host suite passes with these checks.  This is structural proof of
+the repaired lowering; the next clustered E2E refresh remains responsible for
+new runtime evidence rather than reinterpreting the earlier accepted bundle.
 
 ### 2026-08-20 current Jakub clean refresh
 

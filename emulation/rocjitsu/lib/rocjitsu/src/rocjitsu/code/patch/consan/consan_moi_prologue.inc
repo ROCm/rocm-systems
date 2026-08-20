@@ -227,13 +227,17 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   if (!scalar_destinations.complete() && !vector_destinations.complete())
     return true;
 
-  const std::array<const ConSanMoiWorkgroupSource *, 3> source_tuple = {&sources.x, &sources.y,
-                                                                        &sources.z};
-  const std::array<std::optional<uint16_t>, 3> scalar_tuple = {
-      scalar_destinations.x, scalar_destinations.y, scalar_destinations.z};
-  const std::array<std::optional<uint16_t>, 3> vector_tuple = {
-      vector_destinations.x, vector_destinations.y, vector_destinations.z};
+  const std::array<const ConSanMoiWorkgroupSource *, 4> source_tuple = {
+      &sources.x, &sources.y, &sources.z, &sources.cluster_workgroup_id};
+  const std::array<std::optional<uint16_t>, 4> scalar_tuple = {
+      scalar_destinations.x, scalar_destinations.y, scalar_destinations.z,
+      scalar_destinations.cluster_workgroup_id};
+  const std::array<std::optional<uint16_t>, 4> vector_tuple = {
+      vector_destinations.x, vector_destinations.y, vector_destinations.z,
+      vector_destinations.cluster_workgroup_id};
   for (size_t index = 0; index < source_tuple.size(); ++index) {
+    if (!scalar_tuple[index] && !vector_tuple[index])
+      continue;
     const ConSanMoiWorkgroupSource &source = *source_tuple[index];
     if (!source.is_well_formed() || !source.has_value()) {
       errors.emplace_back(
@@ -1113,10 +1117,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (workgroup_key_offset)
     workgroup_key_store =
         instrumentation::build_private_store_b32(scratch_vgpr, *workgroup_key_offset, arch);
-  std::array<std::optional<std::vector<uint32_t>>, 3> record_replay_workgroup_stores;
-  const std::array<std::optional<uint32_t>, 3> record_replay_workgroup_offset_values = {
+  std::array<std::optional<std::vector<uint32_t>>, 4> record_replay_workgroup_stores;
+  const std::array<std::optional<uint32_t>, 4> record_replay_workgroup_offset_values = {
       record_replay_workgroup_offsets.x, record_replay_workgroup_offsets.y,
-      record_replay_workgroup_offsets.z};
+      record_replay_workgroup_offsets.z, record_replay_workgroup_offsets.cluster_workgroup_id};
   for (size_t index = 0; index < record_replay_workgroup_offset_values.size(); ++index) {
     if (record_replay_workgroup_offset_values[index]) {
       record_replay_workgroup_stores[index] = instrumentation::build_private_store_b32(
@@ -1209,9 +1213,12 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       errors.emplace_back("ConSan MOI private exact workgroup tuple requires entry ABI sources");
       return std::nullopt;
     }
-    const std::array<ConSanMoiWorkgroupSource, 3> sources = {
-        workgroup_sources->x, workgroup_sources->y, workgroup_sources->z};
+    const std::array<ConSanMoiWorkgroupSource, 4> sources = {
+        workgroup_sources->x, workgroup_sources->y, workgroup_sources->z,
+        workgroup_sources->cluster_workgroup_id};
     for (size_t index = 0; index < sources.size(); ++index) {
+      if (!record_replay_workgroup_offset_values[index])
+        continue;
       if (!sources[index].has_value() || !consan_detail::append_workgroup_source_value(
                                              words, sources[index], scratch_vgpr, arch)) {
         errors.emplace_back(
@@ -1601,7 +1608,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     for (const std::optional<uint32_t> offset :
          {access_patch->persistent_record_replay_workgroup_private_offsets.x,
           access_patch->persistent_record_replay_workgroup_private_offsets.y,
-          access_patch->persistent_record_replay_workgroup_private_offsets.z}) {
+          access_patch->persistent_record_replay_workgroup_private_offsets.z,
+          access_patch->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id}) {
       if (offset)
         persistent_end = std::max(persistent_end, *offset + SpillManager::kSlotBytes);
     }
@@ -1676,7 +1684,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       }
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active_kernel->descriptor_file_offset, arch, source_errors,
-          /*uses_gfx1250_cluster_workgroup_id=*/false, full_payload_user_sgpr_count);
+          kernel.uses_gfx1250_cluster_workgroup_id, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;
@@ -1875,7 +1883,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     required = std::max<uint32_t>(required, *options.moi_dispatch_id_vgpr + 2u);
   for (const std::optional<uint16_t> reg :
        {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-        options.moi_record_replay_workgroup_vgprs.z}) {
+        options.moi_record_replay_workgroup_vgprs.z,
+        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
     if (reg)
       required = std::max<uint32_t>(required, *reg + 1u);
   }
@@ -1899,7 +1908,8 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
                   overlaps(options.moi_inline_visible_evidence_sgpr);
   for (const std::optional<uint16_t> reg :
        {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
-        options.moi_record_replay_workgroup_sgprs.z}) {
+        options.moi_record_replay_workgroup_sgprs.z,
+        options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
     conflict |= overlaps(reg);
   }
   return !conflict;
@@ -1926,7 +1936,8 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
   }
   for (const std::optional<uint16_t> reg :
        {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
-        options.moi_record_replay_workgroup_vgprs.z}) {
+        options.moi_record_replay_workgroup_vgprs.z,
+        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
     if (overlaps(reg))
       return true;
   }
@@ -2184,7 +2195,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       }
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active.descriptor_file_offset, arch, source_errors,
-          /*uses_gfx1250_cluster_workgroup_id=*/false, full_payload_user_sgpr_count);
+          kernel.uses_gfx1250_cluster_workgroup_id, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;
@@ -2306,9 +2317,11 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
           static_cast<uint32_t>(*options.moi_persistent_workgroup_key_sgpr) + 1u);
-    for (const std::optional<uint16_t> reg : {kernel_options.moi_record_replay_workgroup_sgprs.x,
-                                              kernel_options.moi_record_replay_workgroup_sgprs.y,
-                                              kernel_options.moi_record_replay_workgroup_sgprs.z}) {
+    for (const std::optional<uint16_t> reg :
+         {kernel_options.moi_record_replay_workgroup_sgprs.x,
+          kernel_options.moi_record_replay_workgroup_sgprs.y,
+          kernel_options.moi_record_replay_workgroup_sgprs.z,
+          kernel_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
       if (reg)
         required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
     }

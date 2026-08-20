@@ -2370,7 +2370,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     fence_guest.size = static_cast<uint32_t>(candidate.fence.size + displaced_tail_bytes);
     auto gate = build_moi_runtime_workgroup_gate_call_words(
         bytes, fence_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
-        moi_runtime_workgroup_gate_reserved_words(fence_guest.size), arch);
+        moi_runtime_workgroup_gate_reserved_words(
+            fence_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+        arch);
     if (!gate) {
       errors.emplace_back(
           "ConSan MOI fence record patch could not encode its runtime workgroup gate");

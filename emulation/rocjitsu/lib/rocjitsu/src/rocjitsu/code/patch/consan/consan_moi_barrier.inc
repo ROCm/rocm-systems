@@ -212,7 +212,9 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     barrier_guest.size = candidate.site.size;
     auto gate = build_moi_runtime_workgroup_gate_call_words(
         bytes, barrier_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
-        moi_runtime_workgroup_gate_reserved_words(barrier_guest.size), arch);
+        moi_runtime_workgroup_gate_reserved_words(
+            barrier_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+        arch);
     if (!gate) {
       errors.emplace_back(
           "ConSan MOI barrier record patch could not encode its runtime workgroup gate");

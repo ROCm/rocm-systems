@@ -3706,11 +3706,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           "ConSan final validation found an incomplete private Record/Replay workgroup tuple");
     }
     if (private_workgroup.complete()) {
-      const std::array<uint32_t, 3> offsets = {
-          *private_workgroup.x,
-          *private_workgroup.y,
-          *private_workgroup.z,
-      };
+      std::vector<uint32_t> offsets = {*private_workgroup.x, *private_workgroup.y,
+                                       *private_workgroup.z};
+      if (private_workgroup.cluster_workgroup_id)
+        offsets.push_back(*private_workgroup.cluster_workgroup_id);
       if (!patch.persistent_private_state_end) {
         errors.emplace_back(
             "ConSan final validation found a private Record/Replay workgroup tuple without a "
@@ -3811,7 +3810,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           if (workgroup_vgprs.complete()) {
             requirement.require_full_workgroup_id = true;
             for (const std::optional<uint16_t> reg :
-                 {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z}) {
+                 {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z,
+                  workgroup_vgprs.cluster_workgroup_id}) {
+              if (!reg)
+                continue;
               requirement.required_vgpr_count = std::max<uint16_t>(
                   requirement.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
             }
@@ -3838,7 +3840,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             for (const std::optional<uint16_t> reg :
                  {result.resolved_moi_record_replay_workgroup_sgprs.x,
                   result.resolved_moi_record_replay_workgroup_sgprs.y,
-                  result.resolved_moi_record_replay_workgroup_sgprs.z}) {
+                  result.resolved_moi_record_replay_workgroup_sgprs.z,
+                  result.resolved_moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+              if (!reg)
+                continue;
               requirement.required_sgpr_count = std::max<uint16_t>(
                   requirement.required_sgpr_count, static_cast<uint16_t>(*reg + 1u));
             }

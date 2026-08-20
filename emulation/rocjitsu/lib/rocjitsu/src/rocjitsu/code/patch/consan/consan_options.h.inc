@@ -280,8 +280,11 @@ struct ConSanMoiPersistentWorkgroupRegisters {
   std::optional<uint16_t> x;
   std::optional<uint16_t> y;
   std::optional<uint16_t> z;
+  /// gfx1250's cluster-local workgroup coordinate. This remains empty on
+  /// architectures whose launch identity is exactly the x/y/z tuple.
+  std::optional<uint16_t> cluster_workgroup_id = std::nullopt;
 
-  [[nodiscard]] bool empty() const { return !x && !y && !z; }
+  [[nodiscard]] bool empty() const { return !x && !y && !z && !cluster_workgroup_id; }
   [[nodiscard]] bool complete() const { return x && y && z; }
 
   auto operator<=>(const ConSanMoiPersistentWorkgroupRegisters &) const = default;
@@ -293,8 +296,9 @@ struct ConSanMoiPersistentWorkgroupPrivateOffsets {
   std::optional<uint32_t> x;
   std::optional<uint32_t> y;
   std::optional<uint32_t> z;
+  std::optional<uint32_t> cluster_workgroup_id = std::nullopt;
 
-  [[nodiscard]] bool empty() const { return !x && !y && !z; }
+  [[nodiscard]] bool empty() const { return !x && !y && !z && !cluster_workgroup_id; }
   [[nodiscard]] bool complete() const { return x && y && z; }
 
   auto operator<=>(const ConSanMoiPersistentWorkgroupPrivateOffsets &) const = default;
@@ -599,12 +603,9 @@ struct ConSanOptions {
   /// exposed together so operators and qualification tests can reproduce an
   /// observed exhaustion without a test-only path.
   PlanningWorkLimit sopp_relay_planning_work_limit = kDefaultSoppRelayPlanningWorkLimit;
-  PlanningWorkLimit direct_reservoir_planning_work_limit =
-      kDefaultDirectReservoirPlanningWorkLimit;
-  PlanningWorkLimit lds_relay_layout_planning_work_limit =
-      kDefaultLdsRelayLayoutPlanningWorkLimit;
-  PlanningWorkLimit lds_convergence_planning_work_limit =
-      kDefaultLdsConvergencePlanningWorkLimit;
+  PlanningWorkLimit direct_reservoir_planning_work_limit = kDefaultDirectReservoirPlanningWorkLimit;
+  PlanningWorkLimit lds_relay_layout_planning_work_limit = kDefaultLdsRelayLayoutPlanningWorkLimit;
+  PlanningWorkLimit lds_convergence_planning_work_limit = kDefaultLdsConvergencePlanningWorkLimit;
   /// Internal immutable baseline set by the public transform entry point and
   /// retained by every staged composition pass.
   std::optional<size_t> patched_image_growth_input_bytes;

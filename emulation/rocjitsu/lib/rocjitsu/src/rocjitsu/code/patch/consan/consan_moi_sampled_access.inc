@@ -176,6 +176,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     std::optional<uint16_t> gfx1250_vgpr_msb_mode;
     bool runtime_fast_gate = false;
     bool dense_runtime_fast_gate = false;
+    bool runtime_workgroup_gate_in_body = false;
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_owner_offset;
     std::optional<uint16_t> private_owner_shift;
@@ -196,19 +197,24 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
-  // The fast gate has 26 fixed worst-case words: dispatch/workgroup mixing for
-  // a complete persistent VGPR tuple, a literal residue comparison, branches,
-  // SCC preservation, and the long jump. Reserving a larger unconditional
-  // envelope for an offset-zero profile makes thousand-site images exceed
-  // direct-branch reach even though each emitted gate only needs a few dozen
-  // words.
+  // The fast gate has 26 fixed worst-case words for x/y/z, plus three when a
+  // gfx1250 kernel reads the cluster-local workgroup coordinate. Reserving a
+  // larger unconditional envelope for an offset-zero profile makes
+  // thousand-site images exceed direct-branch reach even though each emitted
+  // gate only needs a few dozen words.
   uint64_t max_candidate_instruction_words = 0u;
   for (const ConSanMoiCandidate *candidate : candidates) {
     max_candidate_instruction_words = std::max(
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
-  const uint64_t sampled_access_island_words = 26u + max_candidate_instruction_words;
+  const bool has_cluster_workgroup_id =
+      std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
+        return candidate->uses_gfx1250_cluster_workgroup_id;
+      });
+  const uint64_t sampled_access_island_words = moi_runtime_workgroup_gate_reserved_words(
+      static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
+      has_cluster_workgroup_id);
   const uint64_t access_island_word_count =
       options.moi_runtime_sample_stride > 1u ? sampled_access_island_words : kIndirectIslandWords;
   const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
@@ -600,12 +606,17 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         candidate_options.moi_owner_vgpr = --state_vgpr;
       candidate_options.moi_epoch_vgpr = --state_vgpr;
     }
-    const bool runtime_fast_gate =
-        !candidate_options.automatic_moi_record_replay_sgpr_spill && use_indirect_appended &&
-        !use_dense_call && !uses_local_entry_island && options.moi_runtime_sample_stride > 1u;
+    const bool has_private_workgroup_sources =
+        candidate_options.moi_record_replay_workgroup_private_offsets.complete();
+    const bool runtime_fast_gate = !candidate_options.automatic_moi_record_replay_sgpr_spill &&
+                                   use_indirect_appended && !use_dense_call &&
+                                   !uses_local_entry_island && !has_private_workgroup_sources &&
+                                   options.moi_runtime_sample_stride > 1u;
     const bool dense_runtime_fast_gate =
         !candidate_options.automatic_moi_record_replay_sgpr_spill && use_dense_call &&
-        options.moi_runtime_sample_stride > 1u;
+        !has_private_workgroup_sources && options.moi_runtime_sample_stride > 1u;
+    const bool runtime_workgroup_gate_in_body =
+        options.moi_runtime_sample_stride > 1u && !runtime_fast_gate && !dense_runtime_fast_gate;
     ConSanMoiCandidate lowered_candidate = candidate;
     lowered_candidate.kernel_descriptor_file_offset = workgroup_descriptor;
     const auto prior_patch = std::find_if(
@@ -630,7 +641,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
-        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
+        runtime_workgroup_gate_in_body, candidate_errors, &probe_guest_instruction_offset,
+        &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -718,6 +730,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
     planned.runtime_fast_gate = runtime_fast_gate;
     planned.dense_runtime_fast_gate = dense_runtime_fast_gate;
+    planned.runtime_workgroup_gate_in_body = runtime_workgroup_gate_in_body;
+    if (runtime_workgroup_gate_in_body) {
+      add_unique_warning(
+          "ConSan MOI sampled runtime workgroup selection uses the spill-safe body gate");
+    }
     if (private_layout)
       planned.private_epoch_offset = private_layout->epoch_offset;
     if (private_layout)
@@ -1124,7 +1141,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           consan_moi_sampled_pending_acquire_owner_bank_count(
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
+          planned_patch.private_owner_offset, planned_patch.private_owner_shift,
+          planned_patch.runtime_workgroup_gate_in_body, result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -1226,17 +1244,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               if (fast_gate)
                 island_words = std::move(*fast_gate);
             }
-            // This gate is only an early workgroup/dispatch rejection.  The
-            // probe body still performs the authoritative LDS-cell selection
-            // and chooses its evidence bank.  Entry-captured workgroup state
-            // may live in private memory, which cannot be read safely before
-            // a spill-backed body saves guest VGPRs.  Retain correct sampling
-            // through the ordinary indirect entry instead of treating the
-            // optional fast path as a transform requirement.
             if (island_words.empty()) {
-              add_unique_warning(
-                  "ConSan MOI sampled runtime workgroup fast gate unavailable; using "
-                  "address-only sampling");
+              result.errors.insert(result.errors.end(), workgroup_errors.begin(),
+                                   workgroup_errors.end());
+              result.errors.emplace_back(
+                  "ConSan MOI sampled probe could not encode its runtime workgroup gate");
+              return;
             }
           }
           if (island_words.empty() &&
@@ -1270,9 +1283,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               dense_gate_words = std::move(*gate);
           }
           if (dense_gate_words.empty()) {
-            add_unique_warning(
-                "ConSan MOI sampled dense runtime workgroup fast gate unavailable; using "
-                "address-only sampling");
+            result.errors.insert(result.errors.end(), workgroup_errors.begin(),
+                                 workgroup_errors.end());
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode its dense runtime workgroup gate");
+            return;
           }
         }
         uint32_t body_guest_instruction_offset = 0;
@@ -1442,7 +1457,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                     layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
-                planned_patch.private_owner_shift, result.errors);
+                planned_patch.private_owner_shift, planned_patch.runtime_workgroup_gate_in_body,
+                result.errors);
             if (words) {
               const size_t planned_words =
                   static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));

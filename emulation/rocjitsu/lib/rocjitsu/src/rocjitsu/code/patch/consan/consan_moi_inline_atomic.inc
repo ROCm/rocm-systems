@@ -458,7 +458,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     atomic_guest.size = candidate.site.size;
     auto gate = build_moi_runtime_workgroup_gate_call_words(
         bytes, atomic_guest, options, workgroup_sources, cave_text_offset, return_text_offset,
-        moi_runtime_workgroup_gate_reserved_words(atomic_guest.size), arch);
+        moi_runtime_workgroup_gate_reserved_words(
+            atomic_guest.size, workgroup_sources.cluster_workgroup_id.has_value()),
+        arch);
     if (!gate) {
       errors.emplace_back(
           "ConSan MOI atomic record patch could not encode its runtime workgroup gate");

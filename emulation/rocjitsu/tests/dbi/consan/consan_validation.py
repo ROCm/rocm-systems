@@ -1488,19 +1488,29 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
     )
 
 
+TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
+    "gfx1250": {
+        # The strict Inline Shadow row completes in roughly 31 seconds after
+        # transformation under RocJitsu. Keep a bounded twofold margin without
+        # weakening the ordinary physical-target timeout.
+        "tp1-prefill": {"run_timeout_seconds": 60},
+    },
+}
+
+
 def _resolved_workload(target: str, workload: Workload) -> Workload:
     """Materialize one target's command overrides from a canonical registry row."""
-    if workload.kind != "gtest":
-        return workload
-    overrides = NATIVE_GTEST_WORKLOAD_OVERRIDES.get(target)
-    if overrides is None:
-        return workload
-    override = overrides.get(workload.id)
-    if override is None:
-        raise ValidationError(
-            f"{target} gtest workload has no target-specific registry entry: {workload.id}"
-        )
-    return replace(workload, **override)
+    override = dict(TARGET_WORKLOAD_OVERRIDES.get(target, {}).get(workload.id, {}))
+    if workload.kind == "gtest":
+        native_overrides = NATIVE_GTEST_WORKLOAD_OVERRIDES.get(target)
+        if native_overrides is not None:
+            native_override = native_overrides.get(workload.id)
+            if native_override is None:
+                raise ValidationError(
+                    f"{target} gtest workload has no target-specific registry entry: {workload.id}"
+                )
+            override.update(native_override)
+    return replace(workload, **override) if override else workload
 
 
 def resolved_workload_relative_path(target: str, workload_id: str) -> str:

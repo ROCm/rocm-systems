@@ -54,7 +54,7 @@ scratch before promotion.
 | **P1 Sharktank TP1 decode/combined** | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 access coverage, 1.33x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 1.41x maximum paired slowdown, reviewed exact-one DPP-phase qualified miss with complete 240/240 plus 61/61 surviving coverage, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: both exact clean and paired oracles, complete 240/240 accesses plus 62/62 barriers, 31.2x maximum slowdown, reviewed exact-one pass/no-diagnosis fault, containment, health, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 access coverage, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 1.57x combined paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current VCC-safe spill-backed bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 167.0x maximum slowdown, reviewed exact-one fail/no-diagnosis fault, containment, health, and clean provenance |
 | **P3 CLIP BF16** | 🟩 current accepted bundle: cosine clean and paired oracle, complete 45/45 access coverage, 1.07x paired slowdown, reviewed exact-one final-barrier qualified miss, bounded execution, cleanup, health, and clean provenance | 🟩 current dispatch-isolated bundle: cosine clean and paired oracle, complete 45/45 accesses plus 24/24 barriers, 1.29x paired slowdown, reviewed exact-one final-barrier qualified miss, bounded execution, cleanup, health, and clean provenance | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before installing the instrumented object | 🟩 current private-key bundle: cosine clean and paired oracle, complete 45/45 accesses plus 24/24 barriers with zero incomplete encounters, 1.51x paired slowdown, reviewed exact-one final-barrier qualified miss, bounded execution, cleanup, health, and clean provenance |
-| **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟩 post-rebase accepted bundle: exact oracle, complete 12/12 accesses plus 4/4 barriers, paired 16.78x, and a reviewed exact-one barrier drop that fails the oracle and produces one Record/Replay diagnosis; containment, health, cleanup, and clean provenance pass | 🟧 Current physical row passes both exact clean oracles with 59/128 accesses plus all 49 barriers instrumented; the optional private-state fast gate now falls back safely, but 69 access sites still fail resource planning | 🟩 current generation-qualified bundle: both exact clean oracles, zero diagnostics, complete 12/12 accesses plus 4/4 barriers, paired 15.76x, reviewed exact-one qualified miss, bounded memory and cleanup, containment, health, and clean provenance |
+| **P4 hip-moi D128 block attention** | 🟩 current accepted bundle: exact clean, 12/12 coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟩 post-rebase accepted bundle: exact oracle, complete 12/12 accesses plus 4/4 barriers, paired 16.78x, and a reviewed exact-one barrier drop that fails the oracle and produces one Record/Replay diagnosis; containment, health, cleanup, and clean provenance pass | 🟧 Current physical row passes both exact clean oracles with 59/128 accesses plus all 49 barriers instrumented; private workgroup state now uses a spill-safe body gate, but 69 access sites still fail resource planning | 🟩 current generation-qualified bundle: both exact clean oracles, zero diagnostics, complete 12/12 accesses plus 4/4 barriers, paired 15.76x, reviewed exact-one qualified miss, bounded memory and cleanup, containment, health, and clean provenance |
 | **P4 hip-moi D128 pressure attention** | 🟧 Current rebuilt workload passes all four exact clean oracles, but instruments only 112/248 supported accesses; 136 sites fail placement or lowering | 🟧 Current bounded 29-access run passes all four numeric oracles. The fourth oracle is dynamically complete with 29/118 accesses plus 5/10 nonredundant barriers instrumented; static coverage remains incomplete | 🟥 Current rebuilt workload is rejected before its first oracle because the sampled probe cannot encode its entry island | 🟧 Current unrestricted physical run passes all four exact clean oracles with zero diagnostics, but only one of four independent kernel components is admitted: 73/252 accesses plus 5/28 nonredundant barriers patch; the remaining components fail closed on their code-object-wide dispatch-ID scalar overlap |
 | **P4 hip-moi MFMA attention** | 🟩 current accepted bundle: two exact clean oracles, 12/12 group-FLAT coverage, paired overhead, reviewed exact-one fault, containment, health, and clean provenance | 🟩 post-rebase accepted bundle: exact MFMA oracle, complete 12/12 accesses plus 4/4 barriers, paired 15.61x, and a reviewed exact-one barrier drop that fails the oracle and produces one Record/Replay diagnosis; containment, health, cleanup, and clean provenance pass | 🟥 current planner rejects persistent state at the ordinary-VGPR/AccVGPR boundary before either oracle | 🟩 current generation-qualified bundle: both exact clean oracles, zero diagnostics, complete 12/12 accesses plus 4/4 barriers, paired 15.56x, reviewed exact-one qualified miss, bounded memory and cleanup, containment, health, and clean provenance |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 34.8x paired slowdown, and a reviewed exact-one release-order fault with pass/qualified-miss outcome, containment, health, cleanup, and clean provenance | 🟥 current planner requires a spill for a dynamic-stack owner, which is unsupported, and rejects before an oracle | 🟥 current dynamic-stack owner has no safe scalar placement and rejects before an oracle |
@@ -201,16 +201,29 @@ The baseline passes both exact clean oracles in 0.129 seconds.  Sampled also
 passes both exact clean oracles and exits successfully in 1.224 seconds, with
 59/128 access sites, all 49/49 barriers, and a complete dynamic verdict.
 
-The prior rejection was caused by an optional workgroup/dispatch fast gate,
-not by the authoritative Sampled body.  At the gfx950 ordinary-VGPR/AccVGPR
-boundary, entry-captured workgroup state can live in private memory and cannot
-be read before the spill-backed body saves guest VGPRs.  The planner now uses
-its ordinary indirect entry when that early gate cannot be encoded; the body
-still performs the LDS-cell selection and evidence-bank choice.  A focused
-host regression constructs this exact private-state boundary and requires a
-successful transform, retained workgroup state, the typed fallback warning,
-and final validation.  Static coverage is still incomplete because 69 access
-sites fail resource planning, so this cell is orange rather than green.
+The prior rejection was caused by the workgroup/dispatch gate.  At the gfx950
+ordinary-VGPR/AccVGPR boundary, entry-captured workgroup state can live in
+private memory and cannot be read before the spill-backed body saves guest
+VGPRs.  A later gfx1250 clean-workload run proved that simply omitting this
+gate is behaviorally unsound because unrelated workgroups can collide in the
+finite causal-window banks.  The planner now emits the same workgroup
+selection inside the spill-safe body before its independent LDS-cell
+selection.  A focused host regression constructs this exact private-state
+boundary and requires a successful transform, retained workgroup state, the
+typed body-gate warning, and final validation.  Static coverage is still
+incomplete because 69 access sites fail resource planning, so this cell is
+orange rather than green; the physical row must also be refreshed after the
+body-gate correction.
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-d128-block-sampled-body-gate-fix`
+performs that physical refresh with candidate-tree hook SHA-256
+`18d108f47cf3972487eb96cac0ee0bebe0c04212359cbb1293954bc703823c01`.
+Both exact host-reference tests pass, the process exits cleanly in 0.819
+seconds, and the report contains zero diagnostics or sampled conflicts.  The
+static result is unchanged at 59/128 accesses and 49/49 barriers, with a
+complete dynamic verdict; the row therefore remains orange solely because of
+the 69 resource-planning omissions.
 
 ### Current-matrix executable audit
 
