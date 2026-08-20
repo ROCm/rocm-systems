@@ -899,7 +899,8 @@
         {"name": "HostApi_StressManySmallPuts", "description": "Host API: stress many small puts", "test_filter": "HostApiTest.StressManySmallPuts"},
         {"name": "HostApi_PutToSelf", "description": "Host API: put to self", "test_filter": "HostApiTest.PutToSelf"},
         {"name": "HostApi_DoubleDeregister", "description": "Host API: double deregister", "test_filter": "HostApiTest.DoubleDeregister"},
-        {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"}
+        {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"},
+        {"name": "HostApi_WindowRegisterInvalidArgsNullWindow", "description": "Host API: window register invalid args null window", "test_filter": "HostApiTest.WindowRegisterInvalidArgsNullWindow"}
       ]
     },
     "host_api_tests_symmem": {

@@ -2313,7 +2313,13 @@ TEST(CfgAnalysis, Gfx1250CarriesLaneStashAcrossProvenBlockBoundary) {
   auto *consumer = block_starting_at(blocks, 52);
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 60u);
+  const IndirectCallFixup &restored = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(restored.source_target_offset, 60u);
+  // This stash restores into the pair the getpc wrote, so the producer and consumer registers
+  // coincide. Pinning that is the counterpart to the split case below: the rewrite must name the
+  // producer, and when the two are equal that has to stay indistinguishable from naming either.
+  EXPECT_EQ(restored.source_builder_sreg, 0u);
+  EXPECT_EQ(restored.source_call_sreg, 0u);
 }
 
 TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
@@ -3078,7 +3084,14 @@ TEST(CfgAnalysis, Gfx1250LaneRestoreReachesConsumerAcrossBranch) {
   auto *consumer = block_starting_at(blocks, 52);
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 60u);
+  const IndirectCallFixup &restored = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(restored.source_target_offset, 60u);
+  // Here the stash restores into a different pair than the getpc wrote, and the rewrite regenerates
+  // the add against the producer. Asserting both is what makes this a discovery-path check: the
+  // layout-level test builds its fixup by hand, so it would still pass if PcValue propagation or
+  // fixup_for_value dropped the producer pair on the way through.
+  EXPECT_EQ(restored.source_builder_sreg, 0u);
+  EXPECT_EQ(restored.source_call_sreg, 20u);
 }
 
 TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
@@ -3115,6 +3128,9 @@ TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
   }
   ASSERT_NE(copied_call, nullptr);
   EXPECT_EQ(copied_call->source_target_offset, 28u);
+  // Same producer/consumer split, reached by a register-pair copy rather than a lane stash.
+  EXPECT_EQ(copied_call->source_builder_sreg, kSourceSreg);
+  EXPECT_EQ(copied_call->source_call_sreg, kCopiedSreg);
 }
 
 TEST(CfgAnalysis, Gfx1250DirectCallOverwritesPcBuilderInReturnPair) {
@@ -5438,6 +5454,21 @@ std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, words.data()) : nullptr);
 }
 
+std::unique_ptr<Instruction> decode_gfx1250_compound(const std::array<uint32_t, 4> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, words.data()) : nullptr);
+}
+
+std::array<uint32_t, 4> gfx1250_scale16_words(uint16_t scale_src0, uint16_t scale_src1) {
+  constexpr uint16_t kVgprEncoding = 256;
+  const auto prefix =
+      cdna5::build_vop3p(0x3a, {.src0 = scale_src0, .src1 = scale_src1, .src2 = 256});
+  const auto matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+      {.vdst = 96, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 32, .src2 = 256 + 96});
+  return {prefix[0], prefix[1], matrix[0], matrix[1]};
+}
+
 TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
   // v_cmp_eq_u32_e64 s53, 32, v4. gfx1250 is wave32-only, so the comparison
   // mask occupies s53 and must not make liveness treat the adjacent s54 as
@@ -5449,6 +5480,35 @@ TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 53, 1}));
   EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Scale16ScalarSourcesUseSingleSgprs) {
+  auto inst = decode_gfx1250_compound(gfx1250_scale16_words(0, 2));
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 0, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 2, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 1, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 3, 1}));
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Scale16VectorSourcesUseVgprPairs) {
+  auto inst = decode_gfx1250_compound(gfx1250_scale16_words(256 + 64, 256 + 66));
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 64, 2}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 66, 2}));
+}
+
+TEST(GeneratedInstDefUse, Gfx1250Scale16InlineSourcesUseNoRegisters) {
+  auto inst = decode_gfx1250_compound(gfx1250_scale16_words(128, 128));
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 0, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 128, 1}));
 }
 
 // DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],

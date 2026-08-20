@@ -734,6 +734,8 @@ enum class InstructionExecutionId : size_t {
   VSmfmacF3232x32x32Bf8Fp8Vop3pMfma,
   VSmfmacF3232x32x32Fp8Bf8Vop3pMfma,
   VSmfmacF3232x32x32Fp8Fp8Vop3pMfma,
+  VMfmaScaleF3216x16x128F8f6f4Vop3px2,
+  VMfmaScaleF3232x32x64F8f6f4Vop3px2,
   VNopVop3,
   VMovB32Vop3,
   VReadfirstlaneB32Vop3,

@@ -76,8 +76,10 @@ const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {
                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";
 }
 
-int cdna5_scale_operand_size_bits(const MachineInst *inst) {
-  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;
+int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector) {
+  const bool is_vgpr = selector >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
+                       selector <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX;
+  return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;
 }
 
 int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {
@@ -4623,10 +4625,12 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
            reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
       src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-      scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
-                 reinterpret_cast<const OpEncoding *>(inst)->src0),
-      scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
-                 reinterpret_cast<const OpEncoding *>(inst)->src1),
+      scale_src0(
+          cdna5_scale_operand_size_bits(inst, reinterpret_cast<const OpEncoding *>(inst)->src0),
+          OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      scale_src1(
+          cdna5_scale_operand_size_bits(inst, reinterpret_cast<const OpEncoding *>(inst)->src1),
+          OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
   raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
   raw_encoding_ = raw_words_.data();

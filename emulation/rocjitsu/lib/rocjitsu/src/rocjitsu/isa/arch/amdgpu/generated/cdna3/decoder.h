@@ -21,7 +21,7 @@ namespace cdna3 {
 
 class Decoder {
 public:
-  static constexpr std::size_t kMaxInstructionWords = 4;
+  static constexpr std::size_t kMaxInstructionWords = 2;
   static DecodeResult decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 };
 

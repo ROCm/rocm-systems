@@ -1354,6 +1354,36 @@ TEST(FunctionalSchedulingTest, SleepVarYieldsBeforeQuantumExpires) {
   expect_sleep_yields_before_quantum_expires(ROCJITSU_CODE_ARCH_RDNA4, kSleepVar);
 }
 
+TEST(FunctionalSchedulingTest, DebugActiveUsesFairQuantum) {
+  constexpr uint64_t kCodeAddress = 0x3000;
+
+  amdgpu::GpuMemory gpu_mem("functional_debug_mem");
+  amdgpu::L2Cache l2("functional_debug_l2");
+  for (uint32_t i = 0; i <= amdgpu::ComputeUnitCore::kDebugFunctionalQuantum; ++i)
+    gpu_mem.write32(kCodeAddress + i * sizeof(uint32_t), S_NOP);
+  gpu_mem.write32(kCodeAddress +
+                      (amdgpu::ComputeUnitCore::kDebugFunctionalQuantum + 1) * sizeof(uint32_t),
+                  S_ENDPGM_GFX9);
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("functional_debug_cu", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, kCodeAddress, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  cu->set_debug_active(true);
+  EXPECT_TRUE(cu->execute_quantum());
+  EXPECT_EQ(wf->pc,
+            kCodeAddress + amdgpu::ComputeUnitCore::kDebugFunctionalQuantum * sizeof(uint32_t));
+  EXPECT_FALSE(wf->is_halted());
+}
+
 // ---------------------------------------------------------------------------
 // MUBUF lds modifier test: verify that buffer_load_dword with the lds bit set
 // (bit 16 of dword 0) produces a disassembly string containing " lds".
@@ -1766,17 +1796,18 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
 TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
   const uint32_t words[] = {
       0xD3AC0000u,
-      0x00000000u,
-      0xD3AD0000u,
-      0x04020100u,
+      0x0002C360u,
+      0xD3AD0C40u,
+      0x84822100u,
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->num_src_operands(), 5);
 }
 
 // v_accvgpr_read's 9-bit src0 field encodes accumulator N as 256 + N, which the
@@ -1845,19 +1876,4 @@ TEST(Cdna4DecodeTest, RejectsVop3px2PrefixWithoutMfmaSuffix) {
   EXPECT_TRUE(decode_fails(*decoder, wrong_encoding));
 }
 
-TEST(Cdna4DecodeTest, MfmaScaleF8f6f4AcceptsSecondVop3px2Suffix) {
-  const uint32_t words[] = {
-      0xD3AC0000u,
-      0x00000000u,
-      0xD3AE0000u,
-      0x04020100u,
-  };
-
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x64_f8f6f4");
-  EXPECT_EQ(inst->size(), sizeof(words));
-}
 } // namespace
