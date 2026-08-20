@@ -740,11 +740,11 @@ void Buffer::destroy() {
     return;
   }
 
+  // The root buffer owns this descriptor even if interop mapping failed before
+  // kind_ could be changed to MEMORY_KIND_INTEROP.
+  freeInteropImageDescriptor();
+
   if (kind_ == MEMORY_KIND_INTEROP) {
-    // Owns the interop image descriptor allocated in Buffer::create for swizzle-metadata SRD
-    // reconstruction. Image views borrow it and early-return in Image::destroy without freeing,
-    // and the backing buffer is torn down after its views, so freeing it here is safe.
-    freeInteropImageDescriptor();
     destroyInteropBuffer();
     return;
   }
