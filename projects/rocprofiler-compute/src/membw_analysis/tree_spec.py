@@ -17,9 +17,7 @@ from utils.utils_common import load_yaml
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
-# Structural edits (add/remove nodes, rename keys) change the hash
-# and require updating it here. Reordering and threshold-only edits are safe.
-_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
+_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset({"130c7c02241037c3"})
 
 
 def load_tree_spec(arch: str) -> TreeSpec:
