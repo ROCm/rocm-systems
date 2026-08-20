@@ -15,10 +15,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textual.widgets import Static
 
-from utils.mem_chart_common import format_mem_chart_heading
 from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
 from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
-from utils.utils_common import is_gfx9, is_gfx115x
+from utils.mem_chart_gfx1250 import plot_mem_chart as plot_mem_chart_gfx1250
+from utils.utils_common import is_gfx115x, is_gfx1250
 
 # Constants
 MIN_PLOT_WIDTH = 20
@@ -318,25 +318,18 @@ class MemoryChart(Static):
             # Route to arch-specific chart renderer
             mspec = getattr(self.app, "mspec", None)
             gpu_arch = mspec.gpu_arch if mspec else ""
-            if is_gfx9(gpu_arch):
-                plot_func = plot_mem_chart_gfx9
-            elif is_gfx115x(gpu_arch):
+            if is_gfx115x(gpu_arch):
                 plot_func = plot_mem_chart_gfx11
+            elif is_gfx1250(gpu_arch):
+                plot_func = plot_mem_chart_gfx1250
             else:
-                self.update("Error: Memory chart not supported by this architecture.")
-                return
+                plot_func = plot_mem_chart_gfx9
 
             original_stdout = sys.stdout
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    heading = format_mem_chart_heading("per_kernel")
-                    if is_gfx115x(gpu_arch):
-                        result = plot_func(metric_dict, chart_title=heading)
-                    else:
-                        result = plot_func(
-                            metric_dict, chart_title=heading, gpu_arch=gpu_arch
-                        )
+                    result = plot_func("per_kernel", metric_dict)
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout
