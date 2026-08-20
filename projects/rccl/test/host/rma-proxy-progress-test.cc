@@ -203,6 +203,8 @@ protected:
     std::vector<std::unique_ptr<ncclRmaProxyDesc>> descs_;
     // Sequence storage for descriptors that need a readySeq pointer.
     std::deque<uint64_t> seqStore_;
+    // doneSeq storage for in-progress descriptors under completion polling.
+    std::deque<uint64_t> doneSeqStore_;
 
     void SetUp() override {
         comm_ = std::make_unique<ncclComm>();
@@ -258,6 +260,35 @@ protected:
         circular_[static_cast<size_t>(peer) * kQueueSize + idx] = d.get();
         pis_[peer] = pi + 1;
 
+        ncclRmaProxyDesc* raw = d.get();
+        descs_.push_back(std::move(d));
+        return raw;
+    }
+
+    // Allocate a single PutSignal descriptor already issued to the network
+    // (a live request from FakeNet) and enqueue it on `peer`'s in-progress
+    // queue, bumping inflightRequests[targetRank] to match. Gives the desc a
+    // doneSeq slot (initialised to a sentinel != opSeq) so completion can be
+    // observed to publish opSeq into it.
+    ncclRmaProxyDesc* PushInProgressPutSignal(int peer, uint32_t targetRank,
+                                              uint64_t opSeq = 1) {
+        auto d = std::make_unique<ncclRmaProxyDesc>();
+        std::memset(d.get(), 0, sizeof(ncclRmaProxyDesc));
+        d->rmaDescType = ncclRmaDescTypePutSignal;
+        d->rmaDescState = ncclRmaDescStateInProgress;
+        d->putSignal.targetRank = static_cast<int>(targetRank);
+        d->putSignal.signal.op = 0;
+        d->opSeq = opSeq;
+
+        doneSeqStore_.push_back(~opSeq);  // sentinel distinct from opSeq
+        d->doneSeq = &doneSeqStore_.back();
+
+        // Issue a real request through the fake so completion has something to
+        // test, and account the credit as the issue path would have.
+        EXPECT_EQ(net_.issue(targetRank, &d->putSignal.request), ncclSuccess);
+        inflight_[targetRank]++;
+
+        ncclIntruQueueEnqueue(&inProgress_[peer], d.get());
         ncclRmaProxyDesc* raw = d.get();
         descs_.push_back(std::move(d));
         return raw;
@@ -350,6 +381,54 @@ TEST_F(RmaProxyProgressTest, SinglePut_PoolExhausted_NotLost_Regression2119) {
     // Credit accounting untouched; no request handed out to the pending desc.
     EXPECT_EQ(inflight_[target], 1u);
     EXPECT_EQ(desc->putSignal.request, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Test #3 -- completion returns a credit.
+//
+// When the network reports an in-progress put done, ncclRmaProxyPollNonPersist-
+// Completion must: decrement inflightRequests[target] (return the credit), null
+// the request handle, publish opSeq into doneSeq (RELEASE for the GPU), dequeue
+// the descriptor from the in-progress queue, and destroy it.
+// ---------------------------------------------------------------------------
+TEST_F(RmaProxyProgressTest, Completion_ReturnsCredit) {
+    const int peer = 1;
+    const uint32_t target = 1;
+    const uint64_t opSeq = 7;
+
+    ncclRmaProxyDesc* desc = PushInProgressPutSignal(peer, target, opSeq);
+    ASSERT_EQ(inflight_[target], 1u);
+    ASSERT_EQ(net_.outstanding, 1);
+    ASSERT_EQ(InProgressHead(peer), desc);
+    void* issuedReq = desc->putSignal.request;
+    ASSERT_NE(issuedReq, nullptr);
+
+    // Record which descriptor gets destroyed.
+    ncclRmaProxyDesc* destroyed = nullptr;
+    ScopedHook destroy(g_rmaDestroyDesc,
+        [&](struct ncclComm*, struct ncclRmaProxyDesc** d) -> ncclResult_t {
+            destroyed = *d;
+            *d = nullptr;
+            return ncclSuccess;
+        });
+
+    // Mark the request complete, then poll completion.
+    net_.completeRequest(issuedReq);
+    EXPECT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
+              ncclSuccess);
+
+    // Credit returned; request nulled; pool slot freed.
+    EXPECT_EQ(inflight_[target], 0u);
+    EXPECT_EQ(desc->putSignal.request, nullptr);
+    EXPECT_EQ(net_.outstanding, 0);
+
+    // doneSeq published with the descriptor's opSeq.
+    EXPECT_EQ(doneSeqStore_.back(), opSeq);
+
+    // Descriptor dequeued from in-progress and destroyed.
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+    EXPECT_EQ(destroyed, desc);
+    EXPECT_EQ(destroy.calls, 1);
 }
 
 }  // namespace
