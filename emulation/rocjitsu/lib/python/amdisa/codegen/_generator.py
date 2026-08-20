@@ -3938,14 +3938,178 @@ class CodeGenerator:
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
+    def _cdna_mfma_f8f6f4_vop3px2_specs(self):
+        instruction_names = {
+            inst.name for enc in self.isa_spec.inst_encodings for inst in enc.insts
+        }
+        return tuple(
+            spec
+            for spec in getattr(self.isa_spec.profile, "mfma_scale_vop3px2_specs", ())
+            if spec.dense_name in instruction_names
+        )
+
     def _supports_cdna_mfma_f8f6f4_vop3px2(self) -> bool:
-        return self.isa_spec.arch_name.lower() == 'cdna4'
+        return bool(self._cdna_mfma_f8f6f4_vop3px2_specs())
 
     def _is_cdna_mfma_f8f6f4_vop3px2_suffix(self, inst: Instruction) -> bool:
-        return (
-            self._supports_cdna_mfma_f8f6f4_vop3px2()
-            and inst.name in self.isa_spec.profile.inst_size_overrides
+        return any(
+            inst.name == spec.dense_name
+            for spec in self._cdna_mfma_f8f6f4_vop3px2_specs()
         )
+
+    def _emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers(self) -> str:
+        opcodes = ' || '.join(
+            f'op2 == {spec.opcode}' for spec in self._cdna_mfma_f8f6f4_vop3px2_specs()
+        )
+        prefix_opcode = self._cdna_mfma_f8f6f4_vop3px2_specs()[0].prefix_opcode
+        return textwrap.dedent(f'''\
+            namespace {{
+
+            bool isLegalMfmaScaleF8f6f4Selector(uint32_t selector) {{
+              return (selector >= 240 && selector <= 248) || (selector >= 256 && selector <= 511);
+            }}
+
+            bool isLegalMfmaF8f6f4Format(uint32_t format) {{ return format <= 4; }}
+
+            bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {{
+              constexpr uint32_t VOP3P_MFMA_ENC = 423;
+              constexpr uint32_t PREFIX_OP = {prefix_opcode};
+              auto enc0 = (opcode[0] >> 23) & 0x1FFu;
+              auto op0 = (opcode[0] >> 16) & 0x7Fu;
+              if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
+                return false;
+              auto enc2 = (opcode[2] >> 23) & 0x1FFu;
+              auto op2 = (opcode[2] >> 16) & 0x7Fu;
+              auto abid2 = (opcode[2] >> 11) & 0xFu;
+              return enc2 == VOP3P_MFMA_ENC && ({opcodes}) && abid2 == 1u;
+            }}
+
+            bool isValidMfmaScaleF8f6f4(const MachineInst *opcode) {{
+              auto scale_src0 = opcode[1] & 0x1FFu;
+              auto scale_src1 = (opcode[1] >> 9) & 0x1FFu;
+              if (!isLegalMfmaScaleF8f6f4Selector(scale_src0) ||
+                  !isLegalMfmaScaleF8f6f4Selector(scale_src1))
+                return false;
+              auto suffix = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode + 2);
+              if (!isLegalMfmaF8f6f4Format(suffix.cbsz) ||
+                  !isLegalMfmaF8f6f4Format(suffix.blgp))
+                return false;
+              auto neg = (opcode[1] >> 29) & 0x7u;
+              auto neg_hi = (opcode[0] >> 8) & 0x7u;
+              return (neg & 0x3u) == 0 && (neg_hi & 0x3u) == 0;
+            }}
+
+            }} // namespace
+            ''')
+
+    def _emit_cdna_mfma_f8f6f4_vop3px2_classes(self) -> str:
+        classes = []
+        for spec in self._cdna_mfma_f8f6f4_vop3px2_specs():
+            classes.append(textwrap.dedent(f'''\
+                    class {spec.class_name} : public Vop3pMfma {{
+                    public:
+                      {spec.class_name}(const MachineInst *inst);
+                      void execute_impl(amdgpu::Wavefront &wf);
+
+                      Operand vdst;
+                      Operand src0;
+                      Operand src1;
+                      Operand src2;
+                      Operand scale_src0;
+                      Operand scale_src1;
+
+                    private:
+                      std::array<uint32_t, 4> raw_words_{{}};
+                    }};
+                    '''))
+        return '\n'.join(classes)
+
+    def _emit_cdna_mfma_f8f6f4_vop3px2_impls(self) -> _ImplOutputs:
+        outputs = _ImplOutputs()
+        for spec in self._cdna_mfma_f8f6f4_vop3px2_specs():
+            exec_fn = self._split_execute_expr(spec.class_name)
+            output_bits = spec.m * spec.n * 32 // 64
+            outputs.model.append(textwrap.dedent(f'''\
+                    {spec.class_name}::{spec.class_name}(const MachineInst *inst)
+                        : Vop3pMfma("{spec.mnemonic}",
+                                    reinterpret_cast<const OpEncoding *>(inst + 2), {exec_fn}),
+                          vdst({output_bits}, OperandType::OPR_VGPR_OR_ACCVGPR,
+                               (reinterpret_cast<const OpEncoding *>(inst + 2)->vdst +
+                                (reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd
+                                     ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                                     : 0))),
+                          src0(cdna4_matrix_fmt_operand_size_bits(
+                                   reinterpret_cast<const OpEncoding *>(inst + 2)->cbsz,
+                                   {spec.m}, {spec.k}),
+                               OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+                               (reinterpret_cast<const OpEncoding *>(inst + 2)->src0 +
+                                ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x1u)
+                                     ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                                        OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                                     : 0))),
+                          src1(cdna4_matrix_fmt_operand_size_bits(
+                                   reinterpret_cast<const OpEncoding *>(inst + 2)->blgp,
+                                   {spec.n}, {spec.k}),
+                               OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
+                               (reinterpret_cast<const OpEncoding *>(inst + 2)->src1 +
+                                ((reinterpret_cast<const OpEncoding *>(inst + 2)->acc & 0x2u)
+                                     ? (OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN -
+                                        OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+                                     : 0))),
+                          src2({output_bits}, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
+                               mfma_src2_encoding(
+                                   reinterpret_cast<const OpEncoding *>(inst + 2)->src2,
+                                   reinterpret_cast<const OpEncoding *>(inst + 2)->acc_cd)),
+                          scale_src0(32, OperandType::OPR_SRC_SIMPLE,
+                                     reinterpret_cast<const OpEncoding *>(inst)->src0),
+                          scale_src1(32, OperandType::OPR_SRC_SIMPLE,
+                                     reinterpret_cast<const OpEncoding *>(inst)->src1),
+                          raw_words_{{inst[0], inst[1], inst[2], inst[3]}} {{
+                      size_ = 16;
+                      raw_encoding_ = raw_words_.data();
+                      dst_operands_[0] = &vdst;
+                      src_operands_[0] = &src0;
+                      src_operands_[1] = &src1;
+                      src_operands_[2] = &src2;
+                      src_operands_[3] = &scale_src0;
+                      src_operands_[4] = &scale_src1;
+                      num_src_ = 5;
+                      num_dst_ = 1;
+                      flags_ |= MFMA;
+                    }}
+                    '''))
+            outputs.execution.append(textwrap.dedent(f'''\
+                    void {spec.class_name}::execute_impl(amdgpu::Wavefront &wf) {{
+                      auto &cu = wf.cu();
+                      uint32_t vb = wf.vgpr_alloc().base;
+                      uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+                      uint32_t const_acc;
+                      uint32_t s2 = amdgpu::resolve_acc(
+                          vb, dst, src2.encoding_value_, const_acc,
+                          [&] {{ return amdgpu::RegisterAccess(wf).read_scalar(src2); }});
+                      uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+                      uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+                      uint32_t scale_a = raw_words_[1] & 0x1FFu;
+                      uint32_t scale_b = (raw_words_[1] >> 9) & 0x1FFu;
+                      uint32_t scale_a_byte =
+                          ((raw_words_[0] >> 11) & 1u) | (((raw_words_[1] >> 27) & 1u) << 1);
+                      uint32_t scale_b_byte =
+                          ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
+                      uint32_t c_modifier = amdgpu::wmma_c_modifier(
+                          (raw_words_[1] >> 29) & 7u, (raw_words_[0] >> 8) & 7u);
+                      bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
+                          inst_.cbsz, inst_.blgp,
+                          [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{
+                            amdgpu::exec_f32_scaled_mixed(
+                                cu, {spec.m}, {spec.n}, {spec.k}, 1, a_bits, b_bits, dst, s0b,
+                                s1b, s2, ea, eb, const_acc, vb, scale_a, scale_b, scale_a_byte,
+                                scale_b_byte, c_modifier);
+                          }});
+                      if (!dispatched)
+                        throw util::UnimplementedInst(mnemonic());
+                    }}
+                    '''))
+        return outputs
 
     def _cdna5_f8f6f4_wmma_shape(
         self, inst: Instruction
@@ -3963,12 +4127,14 @@ class CodeGenerator:
     def _cdna4_f8f6f4_mfma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
-        if not self._is_cdna_mfma_f8f6f4_vop3px2_suffix(inst):
-            return None
-        m = re.match(r'V_MFMA_F32_(\d+)X(\d+)X(\d+)_?F8F6F4$', inst.name)
-        if not m:
-            return None
-        return tuple(int(x) for x in m.groups())
+        return next(
+            (
+                (spec.m, spec.n, spec.k)
+                for spec in self._cdna_mfma_f8f6f4_vop3px2_specs()
+                if inst.name == spec.dense_name
+            ),
+            None,
+        )
 
     def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
         return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
@@ -4178,8 +4344,10 @@ class CodeGenerator:
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
-                '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector) {\n'
+                '  const bool is_vgpr = selector >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&\n'
+                '                       selector <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX;\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;\n'
                 '}\n'
                 '\n'
                 'int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
@@ -4296,9 +4464,13 @@ class CodeGenerator:
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
                   src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(
+                                 inst, reinterpret_cast<const OpEncoding *>(inst)->src0),
+                             OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(
+                                 inst, reinterpret_cast<const OpEncoding *>(inst)->src1),
+                             OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
@@ -4385,13 +4557,21 @@ class CodeGenerator:
               const uint32_t matrix_a_scale_fmt = scale_inst_.neg & 0x3u;
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               const bool scale16 = scale_inst_.op == 0x3a;
+              const bool scale0_inline_zero =
+                  scale_src0.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
+              const bool scale1_inline_zero =
+                  scale_src1.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
 
               auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
-                // For regular scaled WMMA, the inline integer-zero encoding
-                // selects a neutral E8M0 word rather than the numerical value 0.
-                if (!scale16 &&
-                    operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
-                  return 0x7f7f7f7fu;
+                // Inline zero supplies a neutral E8M0 scale for every K block.
+                if (operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+                  return 0x7f7f7f7f7f7f7f7full;
+                // Scalar scale sources use only bits 7:0, repeated for every K
+                // block. VGPR scale sources retain their packed per-block bytes.
+                if (operand.encoding_value() >= 0 && operand.encoding_value() <= 105) {
+                  const uint64_t byte = amdgpu::RegisterAccess(wf).read_lane(operand, lane) & 0xffu;
+                  return byte * 0x0101010101010101ull;
+                }
                 return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
                                : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
               };
@@ -4408,7 +4588,8 @@ class CodeGenerator:
                                                    src1_base, s2, amdgpu::extract_fp4,
                                                    amdgpu::extract_fp4, const_acc, scale0, scale1,
                                                    matrix_a_scale, matrix_b_scale,
-                                                   matrix_a_scale_fmt, matrix_b_scale_fmt, scale16,
+                                                   scale0_inline_zero ? 0u : matrix_a_scale_fmt,
+                                                   scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
                                                    amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
                 dispatched = true;
               } else {
@@ -4418,7 +4599,8 @@ class CodeGenerator:
                       amdgpu::exec_wmma_f32_scaled_mixed(
                           cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2,
                           extract_a, extract_b, const_acc, scale0, scale1, matrix_a_scale,
-                          matrix_b_scale, matrix_a_scale_fmt, matrix_b_scale_fmt, scale16,
+                          matrix_b_scale, scale0_inline_zero ? 0u : matrix_a_scale_fmt,
+                          scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
                           amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
                     });
               }
@@ -4435,6 +4617,52 @@ class CodeGenerator:
 
             bool isVop3pOp(const MachineInst opcode, uint32_t op) {
               return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
+            }
+
+            bool isGfx1250WmmaScaleSource(uint32_t selector, bool scale16) {
+              if (selector <= 105u || selector == 128u)
+                return true;
+              if (selector < 256u || selector > 511u)
+                return false;
+              return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
+            }
+
+            bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                                   uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+              if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+                return false;
+              if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+                return true;
+              if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) ||
+                  (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+                return false;
+              return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+            }
+
+            bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
+              const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
+              const auto *matrix = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
+              const bool scale16 = scale->op == 0x3au;
+              // Accept LLVM's encoding as an alias for the ISA-canonical constant.
+              const bool fixed_src2_valid = scale->src2 == 0x080u || scale->src2 == 0x100u;
+              if (scale->vdst != 0u || (scale->neg_hi & 0x4u) != 0u ||
+                  (scale->opsel & 0x2u) != 0u || scale->clamp != 0u || !fixed_src2_valid ||
+                  (scale->opsel_hi & 0x2u) != 0u || (scale->neg & 0x4u) != 0u ||
+                  (matrix->neg_hi & 0x3u) != 0u || matrix->clamp != 0u ||
+                  (matrix->neg & 0x3u) != 0u)
+                return false;
+              if (!isGfx1250WmmaScaleSource(scale->src0, scale16) ||
+                  !isGfx1250WmmaScaleSource(scale->src1, scale16))
+                return false;
+
+              const uint32_t scale_a_fmt = scale->neg & 0x3u;
+              const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
+              if (matrix->op == 0x88u)
+                return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
+              const uint32_t matrix_a_fmt = matrix->opsel;
+              const uint32_t matrix_b_fmt = (matrix->pad_14 << 2u) | matrix->opsel_hi;
+              return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
+                                                       scale_b_fmt);
             }
 
             } // namespace
@@ -4544,6 +4772,131 @@ class CodeGenerator:
             body_uses_true16=body_uses_true16,
             enabled=enabled,
         )
+
+    # The trap-handler control ops are spelled differently per ISA. Every
+    # spelling has to be listed: an omitted one derives as `true_nop` and its
+    # generated execute_impl() comes out an empty body, which leaves that ISA's
+    # trap handlers unable to return at all. GFX1250 spells the return
+    # S_RFE_I64 (SOP1 opcode 74).
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
+    _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
+
+    def _sleep_body(self, sem: InstructionSemantics) -> str:
+        """execute() body for S_SLEEP / S_SLEEP_VAR.
+
+        The MR ISA gives these no pseudocode, so they derive as `true_nop` and
+        the generator used to emit the yield alone. The delay *is* the whole
+        instruction -- there is no result register -- so retiring it in one step
+        leaves it with no effect and lets a sleep loop spin at the speed of its
+        own scalar code. That is not only a performance detail: an asynchronous
+        debugger suspend then lands uniformly across the loop body instead of
+        overwhelmingly on the sleep, and -O0 loop bodies are full of short
+        windows where the compiler has forced EXEC to all lanes to spill an
+        AGPR. Stopping inside one reports every lane active, which
+        gdb.rocm/lane-info.exp catches by comparing the stopped lane states
+        against the ones it recorded at a breakpoint. That expect test is the
+        only guard -- the C++ ISA harness lists s_sleep in SKIP_PREFIXES -- so
+        the policy belongs here, where a regeneration cannot drop it.
+        """
+        # S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks; S_SLEEP_VAR takes
+        # the same 7-bit count from a scalar operand instead of the literal.
+        count = (
+            'static_cast<uint32_t>(simm16.encoding_value_)'
+            if sem.name == 'S_SLEEP'
+            else 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)'
+        )
+        return (
+            '  constexpr uint32_t kSleepClocksPerUnit = 64;\n'
+            f'  wf.set_sleep_cycles(kSleepClocksPerUnit * ({count} & 0x7Fu));\n'
+            '  wf.cu().request_functional_yield();'
+        )
+
+    def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
+        """execute() body for a trap-handler control op, or None if not one.
+
+        The MR ISA carries no pseudocode for these, so they derive as
+        `true_nop`. They are not nops: the configured GPU trap handler returns
+        through S_RFE and reports through S_SENDMSG, and leaving them empty
+        silently disables ROCgdb's whole stop/resume path (see
+        docs/rocgdb-debugging.md). The bodies belong here rather than in a
+        hand-edit of the generated header, which a regeneration would drop.
+        """
+        if sem.name in self._TRAP_RETURN_NAMES:
+            # Return from exception: restore the PC the trap handler saved in
+            # ssrc0. The 48-bit mask drops the status bits the hardware packs
+            # into the high half, and the instruction size is subtracted
+            # because the interpreter advances the PC after execute() returns.
+            return (
+                # Bare operand and size_ spellings: that is the arch-local form
+                # every generated execute_impl() uses, and
+                # _write_shared_execute_templates() lifts them to inst.ssrc0 /
+                # inst.size() for the shared template. Writing the lifted form
+                # here instead compiles only on the ISAs that happen to share
+                # the body -- S_RFE_I64 is gfx1250-only, so it does not.
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
+                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
+                '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
+                '  // MSG_INTERRUPT -- and restoring that is part of returning, not part of\n'
+                '  // stopping for a debugger: a handler that returns without stopping the wave\n'
+                '  // used to leave its mask installed, so the application ran on with every lane\n'
+                '  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees\n'
+                '  // lanes that converged out of a branch reported active again) and is\n'
+                '  // permanent, because nothing later puts the application\'s mask back.\n'
+                '  if (wf.in_trap_handler())\n'
+                '    wf.set_exec(wf.trap_saved_exec());\n'
+                '  wf.set_in_trap_handler(false);\n'
+                '\n'
+                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
+                '  // stopped for the debugger; honour that on the way out.\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '    wf.set_debug_single_step(false);\n'
+                '    wf.set_debug_halted(true);\n'
+                '  } else {\n'
+                '    // Nothing is halting the wave any more, so an s_sendmsghalt marker\n'
+                '    // left over from an earlier stop is stale. Leaving it set would make\n'
+                '    // the next resume clear a HALT the handler raises later.\n'
+                '    wf.set_self_halted(false);\n'
+                '  }'
+            )
+
+        if sem.name in self._TRAP_SENDMSG_NAMES:
+            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
+            # tells KFD it has stopped; the CU turns it into a debug event.
+            body = (
+                '  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);\n'
+                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
+                '    wf.set_trap_interrupt_sent(true);\n'
+                '  wf.cu().handle_sendmsg(wf, message);'
+            )
+            if sem.name == 'S_SENDMSGHALT':
+                # "...and then HALT the wavefront". The halt is architectural,
+                # so publish it in STATUS.HALT and not only in the debugger's
+                # private flag: the s_rfe path above reads STATUS.HALT to decide
+                # whether the wave stays stopped, and saw 0 for a wave this
+                # instruction had already halted. Both halves now agree, and a
+                # debugger reading STATUS sees the same thing the wave does.
+                body += (
+                    '\n'
+                    '\n'
+                    '  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the\n'
+                    '  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.\n'
+                    '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                    '  wf.set_status_raw(wf.status_raw() | kStatusHalt);\n'
+                    '  wf.set_debug_halted(true);\n'
+                    '  // Remember who raised the bit. The trap handler also raises HALT, via\n'
+                    '  // s_setreg just before it returns, and there it means "keep the wave\n'
+                    '  // stopped" -- the opposite of what it means here, where the wave has\n'
+                    '  // already reported and is waiting to be resumed. The CWSR record cannot\n'
+                    '  // distinguish the two, so the resume path reads this instead.\n'
+                    '  wf.set_self_halted(true);'
+                )
+            return body
+
+        return None
 
     def _gen_execute_body(
         self, inst: Instruction, sem: InstructionSemantics, enc_name: str = ''
@@ -4873,13 +5226,13 @@ class CodeGenerator:
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
 
-        # Sleep has no architectural register effect, but FUNCTIONAL execution
-        # must return to the event loop so peer CUs can make progress.
-        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
-            return '  wf.cu().request_functional_yield();'
-
         if cls == 'true_nop':
-            return '  (void)wf;'
+            # Sleep has no architectural register effect, but FUNCTIONAL
+            # execution must return to the event loop so peer CUs can make
+            # progress.
+            if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+                return self._sleep_body(sem)
+            return self._trap_control_body(sem) or '  (void)wf;'
 
         if cls == 'gpr_idx':
             if op == 'on':
@@ -5060,17 +5413,39 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append(
+                '    target = wf.code_load_bias() + static_cast<int32_t>(encoded);'
+            )
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(f'  uint64_t next_pc = wf.pc + size_;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append('    target = next_pc - 20 + static_cast<int32_t>(encoded);')
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
@@ -5604,9 +5979,9 @@ class CodeGenerator:
             return (
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
-                '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+                '  const uint32_t dst_sel = inst_.sdata;\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -5794,6 +6169,7 @@ class CodeGenerator:
         nd = sem.num_elems if elem_size == 4 else 1
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(f'  d->dst_selector = inst_.sdata;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
         L.append(f'  d->sign_extend = {str(sem.sign_extend).lower()};')
@@ -5821,11 +6197,10 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'smem_store')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
-        L.append('  auto &cu = wf.cu();')
-        L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append('  const uint32_t sdata_sel = inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append(
-            '    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);'
+            '    d->store_data[i] = amdgpu::read_scalar_selector(wf, sdata_sel + i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
@@ -6404,6 +6779,11 @@ class CodeGenerator:
         'barrier_arrive': 'amdgpu::AtomicOp::BARRIER_ARRIVE',
     }
 
+    def _buffer_payload_exec_expr(self) -> str:
+        if self.isa_spec.profile.buffer_payload_reads_use_effective_exec_mask:
+            return 'd->exec_mask'
+        return 'wf.exec()'
+
     def _gen_flat_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -6483,7 +6863,7 @@ class CodeGenerator:
         L.append(f'  d->non_temporal = {nt};')
         L.append('  mubuf_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append('  uint64_t exec = wf.exec();')
+        L.append(f'  uint64_t exec = {self._buffer_payload_exec_expr()};')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -6843,7 +7223,7 @@ class CodeGenerator:
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append('  uint64_t exec = wf.exec();')
+        L.append(f'  uint64_t exec = {self._buffer_payload_exec_expr()};')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -8100,12 +8480,7 @@ class CodeGenerator:
 
                     class_ctor_decl = cgen.FunctionDeclaration(
                         cgen.Value('', inst.fmt_name),
-                        [cgen.Value('const MachineInst *', 'inst')]
-                        + (
-                            [cgen.Value('bool', 'has_vop3px2_prefix = false')]
-                            if self._is_cdna_mfma_f8f6f4_vop3px2_suffix(inst)
-                            else []
-                        ),
+                        [cgen.Value('const MachineInst *', 'inst')],
                     )
                     public_members.append(class_ctor_decl)
                     public_members.append(
@@ -8962,40 +9337,10 @@ class CodeGenerator:
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
 
-                    # Per-instruction size overrides (e.g., VOP3PX2 128-bit
-                    # instructions decoded under 64-bit VOP3P_MFMA).
-                    _size_overrides = self.isa_spec.profile.inst_size_overrides
-                    if inst.name in _size_overrides:
-                        if self._is_cdna_mfma_f8f6f4_vop3px2_suffix(inst):
-                            ctor_body_parts.append(
-                                f'if (has_vop3px2_prefix) {{'
-                                f' size_ = {_size_overrides[inst.name]};'
-                                ' raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};'
-                                ' raw_encoding_ = raw_words_.data();'
-                                '}'
-                            )
-                        else:
-                            ctor_body_parts.append(
-                                f'size_ = {_size_overrides[inst.name]};'
-                            )
-                            ctor_body_parts.append(
-                                'raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};'
-                                'raw_encoding_ = raw_words_.data();'
-                            )
-                        private_members.append(
-                            cgen.Statement('std::array<uint32_t, 4> raw_words_{}')
-                        )
-
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
                         f'{inst.fmt_name}::'
-                        f'{inst.fmt_name}(const MachineInst *inst'
-                        + (
-                            ', bool has_vop3px2_prefix'
-                            if self._is_cdna_mfma_f8f6f4_vop3px2_suffix(inst)
-                            else ''
-                        )
-                        + ') '
+                        f'{inst.fmt_name}(const MachineInst *inst) '
                         f': {init_list} '
                         f'{{{ctor_body}}}'
                     )
@@ -9860,23 +10205,37 @@ class CodeGenerator:
                         False,
                     ),
                 ]
-                _has_size_overrides = any(
-                    i.name in self.isa_spec.profile.inst_size_overrides
-                    for i in all_insts
+                needs_compound_array = (
+                    self._supports_cdna_mfma_f8f6f4_vop3px2()
+                    and enc.enc_name.upper() == 'ENC_VOP3P'
                 )
-                if _has_size_overrides:
-                    h_includes.append(('array', True))
                 if (
                     self._supports_cdna5_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    if not _has_size_overrides:
+                    if not needs_compound_array:
                         h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
                         cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
                     scaled_outputs = self._emit_cdna5_scaled_wmma_vop3px2_impls()
+                    class_func_impls.model.extend(
+                        cgen.Line(impl) for impl in scaled_outputs.model
+                    )
+                    class_func_impls.execution.extend(
+                        cgen.Line(impl) for impl in scaled_outputs.execution
+                    )
+
+                if (
+                    self._supports_cdna_mfma_f8f6f4_vop3px2()
+                    and enc.enc_name.upper() == 'ENC_VOP3P'
+                ):
+                    h_includes.append(('array', True))
+                    inst_classes.append(
+                        cgen.Line(self._emit_cdna_mfma_f8f6f4_vop3px2_classes())
+                    )
+                    scaled_outputs = self._emit_cdna_mfma_f8f6f4_vop3px2_impls()
                     class_func_impls.model.extend(
                         cgen.Line(impl) for impl in scaled_outputs.model
                     )
@@ -9944,7 +10303,7 @@ class CodeGenerator:
                     class_func_impls.model.insert(
                         0, cgen.Line(self._emit_mfma_operand_helpers())
                     )
-                    if self.isa_spec.arch_name.lower() == 'cdna4':
+                    if self._supports_cdna_mfma_f8f6f4_vop3px2():
                         class_func_impls.model.insert(
                             0, cgen.Line(self._emit_cdna4_matrix_fmt_helpers())
                         )
@@ -10555,6 +10914,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
@@ -10579,9 +10939,28 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
             probe = simd_probe_line(mnemonic, true16_vop3=is_true16_vop3)
+            alu_classifiers = {
+                'v_mul_f32_vop2': 'classify_mul_f32_vop2',
+                'v_mul_f32_vop3': 'classify_mul_f32_vop3',
+                'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
+                'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
+                'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
+                'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
+            }
+            classifier = alu_classifiers.get(mnemonic)
+            if classifier is not None:
+                lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
             if probe is not None:
-                lines.append(probe)
+                if classifier is None:
+                    lines.append(probe)
+                else:
+                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append(probe.replace('  ', '    ', 1))
+                    lines.append('  }')
             lines.append(prefixed_body)
+            if classifier is not None:
+                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             lines.append('}')
             lines.append('')
 
@@ -12679,6 +13058,26 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             class_impl.append(
                 cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers())
             )
+        if self._supports_cdna_mfma_f8f6f4_vop3px2():
+            factory_cases = ''.join(
+                f'    if (op2 == {spec.opcode})\n'
+                f'      return std::make_unique<{spec.class_name}>(opcode);\n'
+                for spec in self._cdna_mfma_f8f6f4_vop3px2_specs()
+            )
+            class_impl.append(
+                cgen.Line(self._emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers())
+            )
+            decode_body.append(
+                cgen.Line(
+                    '  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {\n'
+                    '    if (!isValidMfmaScaleF8f6f4(opcode))\n'
+                    '      return decodeInvalid(opcode, emit_error);\n'
+                    '    auto op2 = (opcode[2] >> 16) & 0x7Fu;\n'
+                    f'{factory_cases}'
+                    '    return decodeInvalid(opcode, emit_error);\n'
+                    '  }\n'
+                )
+            )
         decode_body.extend(
             [
                 cgen.Statement(
@@ -12794,6 +13193,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                 '  if (!isVop3pOp(opcode[2], 0x33) && '
                                 '!isVop3pOp(opcode[2], 0x88))\n'
                                 '    return decodeInvalid(opcode, emit_error);\n'
+                                '  if (!isGfx1250WmmaScalePairValid(opcode))\n'
+                                '    return decodeInvalid(opcode, emit_error);\n'
                             ),
                             cgen.Statement(
                                 'return std::make_unique<VWmmaScaleF32Vop3px2>(opcode)'
@@ -12804,68 +13205,64 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             else:
                 raise ValueError('gfx1250 scaled WMMA requires a VOP3P decode table')
 
-        _vop3px2_opcode = self.isa_spec.profile.vop3px2_prefix_opcode
-        if _vop3px2_opcode is not None:
-            _ie_names = {
-                inst.name for ie in self.isa_spec.inst_encodings for inst in ie.insts
-            }
-            _vop3px2_active = any(
-                n in _ie_names for n in self.isa_spec.profile.inst_size_overrides
-            )
-            if _vop3px2_active:
-                for _dte in self.isa_spec.primary_decode_table:
-                    if (
-                        _dte is not None
-                        and not _dte.is_primary
-                        and _dte.sub_decode_funcs is not None
-                        and _dte.sub_decode_table
-                        and 'vop3p' in _dte.sub_decode_table
+        _vop3px2_specs = self._cdna_mfma_f8f6f4_vop3px2_specs()
+        if _vop3px2_specs:
+            for _dte in self.isa_spec.primary_decode_table:
+                if (
+                    _dte is not None
+                    and not _dte.is_primary
+                    and _dte.sub_decode_funcs is not None
+                    and _dte.sub_decode_table
+                    and 'vop3p' in _dte.sub_decode_table
+                ):
+                    _pfx = 'decodeVop3pX2Prefix'
+                    _prefix_opcode = _vop3px2_specs[0].prefix_opcode
+                    if _dte.sub_decode_funcs[_prefix_opcode] not in (
+                        'decodeInvalid',
+                        _pfx,
                     ):
-                        _pfx = 'decodeVop3pX2Prefix'
-                        _dte.sub_decode_funcs[_vop3px2_opcode] = _pfx
-                        for ie in self.isa_spec.inst_encodings:
-                            for inst in ie.insts:
-                                if (
-                                    inst.name
-                                    in self.isa_spec.profile.inst_size_overrides
-                                    and not self._is_cdna_mfma_f8f6f4_vop3px2_suffix(
-                                        inst
-                                    )
-                                ):
-                                    _dte.sub_decode_funcs[inst.opcode] = 'decodeInvalid'
-                        if self._supports_cdna_mfma_f8f6f4_vop3px2():
-                            _custom_decode_bodies[_pfx] = cgen.Block(
-                                [
-                                    cgen.Line(
-                                        '  const uint32_t suffix_encoding = '
-                                        '(opcode[2] >> 23) & 0x1FFu;\n'
-                                        '  const uint32_t suffix_opcode = '
-                                        '(opcode[2] >> 16) & 0x7Fu;\n'
-                                        '  if (suffix_encoding != encoding::kVop3pMfma ||\n'
-                                        '      (suffix_opcode != '
-                                        'kVMfmaF3216x16x128F8f6f4Vop3pMfma &&\n'
-                                        '       suffix_opcode != '
-                                        'kVMfmaF3232x32x64F8f6f4Vop3pMfma))\n'
-                                        '    return decodeInvalid(opcode, emit_error);\n'
-                                        '  if (suffix_opcode == '
-                                        'kVMfmaF3216x16x128F8f6f4Vop3pMfma)\n'
-                                        '    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);\n'
-                                        '  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);\n'
-                                    )
-                                ]
+                        raise ValueError(
+                            f'CDNA scaled MFMA prefix conflicts with VOP3P opcode '
+                            f'{_prefix_opcode}'
+                        )
+                    _dte.sub_decode_funcs[_prefix_opcode] = _pfx
+                    _suffix_fn = 'decodeCdna4MfmaF8f6f4Suffix'
+                    dense_factory_cases = ''.join(
+                        f'  if (op.op == {spec.opcode})\n'
+                        f'    return std::make_unique<{spec.dense_class_name}>(opcode);\n'
+                        for spec in _vop3px2_specs
+                    )
+                    for spec in _vop3px2_specs:
+                        if _dte.sub_decode_funcs[spec.opcode] not in (
+                            'decodeInvalid',
+                            f'decode{spec.dense_class_name}',
+                            _suffix_fn,
+                        ):
+                            raise ValueError(
+                                f'CDNA scaled MFMA suffix conflicts with VOP3P opcode '
+                                f'{spec.opcode}'
                             )
-                        else:
-                            _custom_decode_bodies[_pfx] = cgen.Block(
-                                [
-                                    cgen.Statement(
-                                        f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
-                                    ),
-                                    cgen.Statement(
-                                        f'return {_dte.sub_decode_table}[op.op](opcode + 2, emit_error)'
-                                    ),
-                                ]
-                            )
-                        break
+                        _dte.sub_decode_funcs[spec.opcode] = _suffix_fn
+                    _custom_decode_bodies[_suffix_fn] = cgen.Block(
+                        [
+                            cgen.Statement(
+                                "auto op = *reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode)"
+                            ),
+                            cgen.Line(
+                                '  if (op.abid != 0u || !isLegalMfmaF8f6f4Format(op.cbsz) ||\n'
+                                '      !isLegalMfmaF8f6f4Format(op.blgp))\n'
+                                '    return decodeInvalid(opcode, emit_error);\n'
+                            ),
+                            cgen.Line(dense_factory_cases),
+                            cgen.Statement('return decodeInvalid(opcode, emit_error)'),
+                        ]
+                    )
+                    _custom_decode_bodies[_pfx] = cgen.Block(
+                        [cgen.Statement('return decodeInvalid(opcode, emit_error)')]
+                    )
+                    break
+            else:
+                raise ValueError('CDNA scaled MFMA requires a VOP3P decode table')
         for _fn, _body in _custom_primary_decode_bodies.items():
             _decl = cgen.FunctionDeclaration(
                 cgen.Value('static DecodeResult', _fn),

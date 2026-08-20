@@ -20,6 +20,7 @@ from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     Cdna5Profile,
     MemoryCoherencyModel,
@@ -234,7 +235,7 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
         ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
@@ -390,7 +391,7 @@ def test_cdna1_split_operand_emits_simd_dispatch_methods(tmp_path):
 
 
 class TestCdnaProfile:
-    """CdnaProfile represents CDNA3 and CDNA4."""
+    """CdnaProfile holds capabilities shared by CDNA3 and CDNA4."""
 
     def setup_method(self):
         self.p = CdnaProfile()
@@ -441,6 +442,24 @@ class TestCdnaProfile:
 
     def test_field_renames_other_enc_empty(self):
         assert self.p.field_renames('ENC_VOP2') == {}
+
+    def test_compound_mfma_is_not_a_family_default(self):
+        assert self.p.mfma_scale_vop3px2_specs == ()
+        assert self.p.inst_size_overrides == {}
+        assert self.p.vop3px2_prefix_opcode is None
+
+
+class TestCdna4Profile:
+    def setup_method(self):
+        self.p = Cdna4Profile()
+
+    def test_compound_mfma_is_explicitly_enabled(self):
+        assert tuple(spec.opcode for spec in self.p.mfma_scale_vop3px2_specs) == (
+            45,
+            46,
+        )
+        assert set(self.p.inst_size_overrides.values()) == {16}
+        assert self.p.vop3px2_prefix_opcode == 0x2C
 
 
 class TestCdna1Profile:

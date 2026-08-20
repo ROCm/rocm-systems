@@ -20,14 +20,14 @@ namespace rocjitsu::cdna5 {
 
 /// @brief Decoded CDNA5 buffer resource descriptor fields.
 struct BufferResource {
-  uint64_t base_address = 0;
-  uint64_t num_records = 0;
-  uint32_t raw_stride = 0;
-  uint32_t stride = 0;
-  uint8_t stride_scale = 0;
-  bool swizzle_enabled = false;
-  bool oob_select = false;
-  uint8_t type = 0;
+  uint64_t base_address = 0;         ///< 57-bit byte address from SRD bits 56:0.
+  uint64_t num_records = 0;          ///< 45-bit buffer size in bytes.
+  uint32_t raw_stride = 0;           ///< Unscaled 14-bit byte stride.
+  uint32_t stride = 0;               ///< Effective byte stride after scaling.
+  uint8_t stride_scale_encoding = 0; ///< Encoding selecting multiplier 1, 4, 8, or 32.
+  bool swizzle_enabled = false;      ///< SRD bit 124.
+  bool oob_select = false;           ///< SRD bit 125.
+  uint8_t type = 0;                  ///< SRD bits 127:126; zero identifies a buffer.
 };
 
 BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd2, uint32_t srd3);

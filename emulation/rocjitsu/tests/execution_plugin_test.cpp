@@ -11,6 +11,7 @@
 
 #include "aql_queue.h"
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -53,9 +54,12 @@ RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "rocjitsu/vm/plugins/throughput/plugin.h"
 
+#include <flatbuffers/flexbuffers.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -73,6 +77,7 @@ RJ_DIAGNOSTIC_POP
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -113,6 +118,10 @@ constexpr uint32_t S_NOP = sopp(0);
 constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
 
+constexpr uint32_t vgpr_src(uint32_t reg) { return 256u + reg; }
+
+using mma_test::make_cdna4_mfma_scale_words;
+
 // CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
   return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
@@ -150,6 +159,11 @@ public:
     flags_ |= MEMORY_OP;
     set_data(std::move(state));
   }
+};
+
+class TestWaitcntInstruction : public Instruction {
+public:
+  TestWaitcntInstruction() : Instruction("s_waitcnt", nullptr) {}
 };
 
 struct ForceScalarOverride {
@@ -884,6 +898,282 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+class ThroughputTestInstruction final : public Instruction {
+public:
+  explicit ThroughputTestInstruction(std::string_view mnemonic, uint64_t flags = 0,
+                                     std::unique_ptr<DynamicInstState> state = nullptr)
+      : Instruction(mnemonic, nullptr) {
+    flags_ = flags;
+    set_data(std::move(state));
+  }
+};
+
+struct ParsedThroughputRecord {
+  std::string record;
+  uint64_t dispatch_id = 0;
+  std::string kernel_name;
+  std::string kernel_symbol;
+  uint64_t workgroups = 0;
+  uint64_t waves_per_workgroup = 0;
+  double wall_seconds = 0.0;
+  uint64_t wave_instructions = 0;
+  double mips = 0.0;
+  uint64_t dispatches = 0;
+  double dispatch_seconds_sum = 0.0;
+  plugins::throughput::InstructionCounts family_instructions{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> execution_seconds{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> execution_mips{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> dispatch_mips{};
+};
+
+std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view jsonl) {
+  std::vector<ParsedThroughputRecord> records;
+  std::istringstream lines{std::string(jsonl)};
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.empty())
+      continue;
+
+    flexbuffers::Builder builder;
+    if (!plugin_detail::flexbuffer_from_json(line, builder)) {
+      ADD_FAILURE() << "invalid JSONL record: " << line;
+      continue;
+    }
+    auto root = flexbuffers::GetRoot(builder.GetBuffer());
+    if (!root.IsMap()) {
+      ADD_FAILURE() << "throughput record is not a JSON object";
+      continue;
+    }
+    auto object = root.AsMap();
+    const auto schema = object["schema"];
+    const auto record_type = object["record"];
+    EXPECT_TRUE(schema.IsString()) << "schema must be a string";
+    EXPECT_TRUE(record_type.IsString()) << "record must be a string";
+    if (!schema.IsString() || !record_type.IsString())
+      continue;
+    EXPECT_EQ(schema.AsString().str(), "rocjitsu.throughput.v2");
+
+    ParsedThroughputRecord record;
+    record.record = record_type.AsString().str();
+
+    const auto wall_seconds = object["wall_seconds"];
+    const auto wave_instructions = object["wave_instructions"];
+    const auto throughput_mips = object["mips"];
+    const auto families_value = object["families"];
+    EXPECT_TRUE(wall_seconds.IsNumeric()) << "wall_seconds must be numeric";
+    EXPECT_TRUE(wave_instructions.IsIntOrUint()) << "wave_instructions must be an integer";
+    EXPECT_TRUE(throughput_mips.IsNumeric()) << "mips must be numeric";
+    EXPECT_TRUE(families_value.IsMap()) << "families must be an object";
+    if (!wall_seconds.IsNumeric() || !wave_instructions.IsIntOrUint() ||
+        !throughput_mips.IsNumeric() || !families_value.IsMap())
+      continue;
+    record.wall_seconds = wall_seconds.AsDouble();
+    record.wave_instructions = wave_instructions.AsUInt64();
+    record.mips = throughput_mips.AsDouble();
+
+    if (record.record == "dispatch") {
+      const auto dispatch_id = object["dispatch_id"];
+      const auto kernel_name = object["kernel_name"];
+      const auto kernel_symbol = object["kernel_symbol"];
+      const auto grid = object["grid"];
+      const auto workgroup = object["workgroup"];
+      const auto workgroups = object["workgroups"];
+      const auto waves_per_workgroup = object["waves_per_workgroup"];
+      EXPECT_TRUE(dispatch_id.IsIntOrUint()) << "dispatch_id must be an integer";
+      EXPECT_TRUE(kernel_name.IsString()) << "kernel_name must be a string";
+      EXPECT_TRUE(kernel_symbol.IsString()) << "kernel_symbol must be a string";
+      EXPECT_TRUE(grid.IsAnyVector()) << "grid must be an array";
+      EXPECT_TRUE(workgroup.IsAnyVector()) << "workgroup must be an array";
+      EXPECT_TRUE(workgroups.IsIntOrUint()) << "workgroups must be an integer";
+      EXPECT_TRUE(waves_per_workgroup.IsIntOrUint()) << "waves_per_workgroup must be an integer";
+      if (grid.IsAnyVector()) {
+        const auto values = grid.AsVector();
+        EXPECT_EQ(values.size(), 3u);
+        for (size_t i = 0; i < values.size(); ++i)
+          EXPECT_TRUE(values[i].IsIntOrUint()) << "grid[" << i << "] must be an integer";
+      }
+      if (workgroup.IsAnyVector()) {
+        const auto values = workgroup.AsVector();
+        EXPECT_EQ(values.size(), 3u);
+        for (size_t i = 0; i < values.size(); ++i)
+          EXPECT_TRUE(values[i].IsIntOrUint()) << "workgroup[" << i << "] must be an integer";
+      }
+      if (dispatch_id.IsIntOrUint())
+        record.dispatch_id = dispatch_id.AsUInt64();
+      if (kernel_name.IsString())
+        record.kernel_name = kernel_name.AsString().str();
+      if (kernel_symbol.IsString())
+        record.kernel_symbol = kernel_symbol.AsString().str();
+      if (workgroups.IsIntOrUint())
+        record.workgroups = workgroups.AsUInt64();
+      if (waves_per_workgroup.IsIntOrUint())
+        record.waves_per_workgroup = waves_per_workgroup.AsUInt64();
+    } else if (record.record == "summary") {
+      const auto dispatches = object["dispatches"];
+      const auto dispatch_seconds_sum = object["dispatch_seconds_sum"];
+      EXPECT_TRUE(dispatches.IsIntOrUint()) << "dispatches must be an integer";
+      EXPECT_TRUE(dispatch_seconds_sum.IsNumeric()) << "dispatch_seconds_sum must be numeric";
+      if (dispatches.IsIntOrUint())
+        record.dispatches = dispatches.AsUInt64();
+      if (dispatch_seconds_sum.IsNumeric())
+        record.dispatch_seconds_sum = dispatch_seconds_sum.AsDouble();
+    } else {
+      ADD_FAILURE() << "unknown throughput record type: " << record.record;
+    }
+
+    auto families = families_value.AsMap();
+    for (size_t i = 0; i < plugins::throughput::kInstructionFamilyCount; ++i) {
+      const auto family = static_cast<plugins::throughput::InstructionFamily>(i);
+      const auto family_name = plugins::throughput::ThroughputPlugin::family_name(family);
+      const auto family_value = families[family_name.data()];
+      EXPECT_TRUE(family_value.IsMap()) << "families." << family_name << " must be an object";
+      if (!family_value.IsMap())
+        continue;
+      const auto values = family_value.AsMap();
+      const auto instructions = values["instructions"];
+      const auto execution_seconds = values["execution_seconds"];
+      const auto execution_mips = values["execution_mips"];
+      const auto dispatch_mips = values["dispatch_mips"];
+      EXPECT_TRUE(instructions.IsIntOrUint())
+          << "families." << family_name << ".instructions must be an integer";
+      EXPECT_TRUE(execution_seconds.IsNumeric())
+          << "families." << family_name << ".execution_seconds must be numeric";
+      EXPECT_TRUE(execution_mips.IsNumeric())
+          << "families." << family_name << ".execution_mips must be numeric";
+      EXPECT_TRUE(dispatch_mips.IsNumeric())
+          << "families." << family_name << ".dispatch_mips must be numeric";
+      if (instructions.IsIntOrUint())
+        record.family_instructions[i] = instructions.AsUInt64();
+      if (execution_seconds.IsNumeric())
+        record.execution_seconds[i] = execution_seconds.AsDouble();
+      if (execution_mips.IsNumeric())
+        record.execution_mips[i] = execution_mips.AsDouble();
+      if (dispatch_mips.IsNumeric())
+        record.dispatch_mips[i] = dispatch_mips.AsDouble();
+    }
+    records.push_back(std::move(record));
+  }
+  return records;
+}
+
+uint64_t family_total(const ParsedThroughputRecord &record) {
+  uint64_t total = 0;
+  for (const uint64_t count : record.family_instructions)
+    total += count;
+  return total;
+}
+
+TEST(ThroughputPluginTest, ClassifiesExclusiveInstructionFamilies) {
+  using plugins::throughput::InstructionFamily;
+  using plugins::throughput::ThroughputPlugin;
+
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_add_u32")),
+            InstructionFamily::Scalar);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_add_f32")),
+            InstructionFamily::Vector);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_wmma_f32_16x16x16_f16")),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_swmmac_f32_16x16x32_f8")),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction(
+                "ds_read_b32", MEMORY_OP, std::make_unique<VectorMemState>(LOCAL_MEM))),
+            InstructionFamily::Lds);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("ds_read_b32", MEMORY_OP)),
+            InstructionFamily::Lds);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction(
+                "s_load_b32", MEMORY_OP, std::make_unique<ScalarMemState>())),
+            InstructionFamily::Global);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("global_load_b32", MEMORY_OP)),
+            InstructionFamily::Global);
+  EXPECT_EQ(
+      ThroughputPlugin::classify(ThroughputTestInstruction("s_branch", BRANCH | IGNORES_EXEC)),
+      InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_endpgm", PROGRAM_TERMINATOR)),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_nop")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_sleep")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_delay_alu")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("exp")), InstructionFamily::Other);
+}
+
+TEST(ThroughputPluginTest, ReportsExactWaveInstructionCountsAsJsonl) {
+  using plugins::throughput::InstructionFamily;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {vop1_encode(/*v_mov_b32 opcode=*/1, /*vdst=*/0, /*constant 0=*/128),
+                           S_NOP, S_ENDPGM};
+  f.run_kernel(code, 3);
+  f.shutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  const auto &dispatch = records[0];
+  EXPECT_EQ(dispatch.record, "dispatch");
+  EXPECT_GT(dispatch.dispatch_id, 0u);
+  EXPECT_FALSE(dispatch.kernel_name.empty());
+  EXPECT_FALSE(dispatch.kernel_symbol.empty());
+  EXPECT_GT(dispatch.workgroups, 0u);
+  EXPECT_GT(dispatch.waves_per_workgroup, 0u);
+  EXPECT_GT(dispatch.wall_seconds, 0.0);
+  EXPECT_EQ(dispatch.wave_instructions, 3u);
+  EXPECT_GT(dispatch.mips, 0.0);
+  EXPECT_EQ(family_total(dispatch), dispatch.wave_instructions);
+  EXPECT_EQ(dispatch.family_instructions[static_cast<size_t>(InstructionFamily::Vector)], 1u);
+  EXPECT_EQ(dispatch.family_instructions[static_cast<size_t>(InstructionFamily::Control)], 2u);
+  EXPECT_GT(dispatch.execution_seconds[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.execution_seconds[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+  EXPECT_GT(dispatch.execution_mips[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.execution_mips[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+  EXPECT_GT(dispatch.dispatch_mips[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.dispatch_mips[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_GT(summary.dispatch_seconds_sum, 0.0);
+  EXPECT_GT(summary.wall_seconds, 0.0);
+  EXPECT_GT(summary.mips, 0.0);
+  EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);
+  EXPECT_EQ(summary.family_instructions, dispatch.family_instructions);
+  EXPECT_EQ(summary.execution_seconds, dispatch.execution_seconds);
+  EXPECT_EQ(summary.execution_mips, dispatch.execution_mips);
+  EXPECT_EQ(family_total(summary), summary.wave_instructions);
+}
+
+TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
+  using plugins::throughput::InstructionFamily;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+  f.shutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  const auto &dispatch = records[0];
+  const size_t control = static_cast<size_t>(InstructionFamily::Control);
+  EXPECT_EQ(dispatch.wave_instructions, 1u);
+  EXPECT_EQ(dispatch.family_instructions[control], 1u);
+  EXPECT_GT(dispatch.execution_seconds[control], 0.0);
 }
 
 TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
@@ -2230,6 +2520,144 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
                        ~uint64_t{0});
 }
 
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteCallbacks) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/0, vgpr_src(96), vgpr_src(97));
+  const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
+
+  f.run_kernel(code.data(), code.size());
+
+  size_t before_count = 0;
+  for (const auto &event : plugin->events)
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+      ++before_count;
+  EXPECT_EQ(before_count, 0u);
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPrefixSize) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(96), vgpr_src(97));
+  const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
+
+  f.run_kernel(code.data(), code.size());
+
+  std::vector<HookEvent> before_events;
+  for (const auto &event : plugin->events)
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+      before_events.push_back(event);
+  ASSERT_EQ(before_events.size(), 2u);
+  EXPECT_EQ(before_events[0].mnemonic, "v_mfma_scale_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(before_events[1].mnemonic, "s_endpgm");
+  ASSERT_GE(before_events[1].pc, before_events[0].pc);
+  EXPECT_EQ(before_events[1].pc - before_events[0].pc, 16u);
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 16;
+  constexpr uint32_t kAccumulator = 32;
+  constexpr uint32_t kScaleA = 96;
+  constexpr uint32_t kScaleB = 97;
+
+  for (uint32_t byte = 0; byte < 4; ++byte) {
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(~uint64_t{0});
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        cu->write_vgpr(vb + kSrc0 + reg, lane, 0x2222'2222u);
+        cu->write_vgpr(vb + kSrc1 + reg, lane, 0x2222'2222u);
+      }
+      for (uint32_t reg = 0; reg < 4; ++reg)
+        cu->write_vgpr(vb + kAccumulator + reg, lane, 0);
+      cu->write_vgpr(vb + kScaleA, lane, 0x7F7F'7F7Fu);
+      cu->write_vgpr(vb + kScaleB, lane, 0x7F7F'7F7Fu);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(kScaleA),
+                                                   vgpr_src(kScaleB), byte, byte);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+
+    const uint8_t expected_mask = static_cast<uint8_t>(1u << byte);
+    bool saw_scale_a = false;
+    bool saw_scale_b = false;
+    std::map<uint32_t, std::pair<uint64_t, uint8_t>> read_unions;
+    const auto reads = vgpr_read_events(*plugin);
+    for (const auto &event : reads) {
+      auto &[lane_mask, byte_mask] = read_unions[event.physical_reg];
+      lane_mask |= event.lane_mask;
+      byte_mask |= event.byte_mask;
+      if (event.physical_reg == vb + kScaleA) {
+        EXPECT_EQ(event.byte_mask, expected_mask) << "A byte=" << byte;
+        saw_scale_a = true;
+      } else if (event.physical_reg == vb + kScaleB) {
+        EXPECT_EQ(event.byte_mask, expected_mask) << "B byte=" << byte;
+        saw_scale_b = true;
+      }
+    }
+    EXPECT_TRUE(saw_scale_a) << "byte=" << byte;
+    EXPECT_TRUE(saw_scale_b) << "byte=" << byte;
+
+    std::map<uint32_t, std::pair<uint64_t, uint8_t>> expected_unions;
+    for (uint32_t reg :
+         {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
+          kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+      expected_unions.emplace(vb + reg, std::pair{~uint64_t{0}, ExecutionPlugin::kFullByteMask});
+    expected_unions.emplace(vb + kScaleA, std::pair{~uint64_t{0}, expected_mask});
+    expected_unions.emplace(vb + kScaleB, std::pair{~uint64_t{0}, expected_mask});
+    EXPECT_EQ(read_unions, expected_unions) << "byte=" << byte;
+  }
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 16;
+  constexpr uint32_t kAccumulator = 32;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(~uint64_t{0});
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      cu->write_vgpr(vb + kSrc0 + reg, lane, 0x2222'2222u);
+      cu->write_vgpr(vb + kSrc1 + reg, lane, 0x2222'2222u);
+      cu->write_vgpr(vb + kAccumulator + reg, lane, 0);
+    }
+  }
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, /*+1.0f=*/242,
+                                                 /*1/(2*pi)=*/248);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_instruction(inst.get(), *wf);
+
+  std::set<uint32_t> actual_regs;
+  for (const auto &event : vgpr_read_events(*plugin))
+    actual_regs.insert(event.physical_reg - vb);
+  std::set<uint32_t> expected_regs;
+  for (uint32_t reg :
+       {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
+        kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+    expected_regs.insert(reg);
+  EXPECT_EQ(actual_regs, expected_regs);
+}
+
 TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
   Wave32PluginFixture f;
   auto *plugin = f.attach_ordering_plugin();
@@ -2881,6 +3309,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   dropped->lds_dst = true;
   dropped->lds_per_lane_addr = true;
   dropped->wf_size = writer->wf_size();
+  dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0x1u;
   dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
   TestMemoryInstruction dropped_inst(std::move(dropped));
@@ -2899,6 +3328,95 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
+
+class IgnoredGlobalMemoryRaceTest : public ::testing::TestWithParam<AtomicOp> {};
+
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                               waves);
+
+  constexpr uint32_t kDestinationVgpr = 7;
+  auto ignored = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  ignored->elem_size = 4;
+  ignored->num_elems = 1;
+  ignored->is_load = true;
+  ignored->atomic_op = GetParam();
+  ignored->exec_mask = 0;
+  ignored->lane_mask = 0;
+  ignored->wf_size = wf->wf_size();
+  ignored->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  TestMemoryInstruction ignored_inst(std::move(ignored));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
+                                         /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                               waves);
+
+  constexpr uint32_t kDestinationVgpr = 7;
+  auto load = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  load->elem_size = 4;
+  load->num_elems = 1;
+  load->is_load = true;
+  load->exec_mask = 0x1u;
+  load->lane_mask = 0x1u;
+  load->wf_size = wf->wf_size();
+  load->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  TestMemoryInstruction load_inst(std::move(load));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load_inst, *wf);
+
+  auto ignored = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  ignored->elem_size = 4;
+  ignored->num_elems = 1;
+  ignored->is_load = false;
+  ignored->atomic_op = GetParam();
+  ignored->exec_mask = 0;
+  ignored->lane_mask = 0;
+  ignored->wf_size = wf->wf_size();
+  TestMemoryInstruction ignored_inst(std::move(ignored));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+
+  wf->set_wait_target(/*vmcnt=*/1, /*lgkmcnt=*/0, /*expcnt=*/0);
+  TestWaitcntInstruction waitcnt;
+  f.plugin_group_->onAmdgpuAfterExecuteInstruction(wf->pc, waitcnt, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
+                                         /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
+                         ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
 
 TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {
   std::vector<std::string> events;
