@@ -1216,7 +1216,7 @@ above), not from renaming architecture-specific source.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 The CDNA lane-read decoder regression is fixed: current strict analysis and the 533,071,032-byte report plan complete, then patching the 49.6 MB bundled object exceeds the ordinary 30-second bound before the oracle | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices. Current Record/Replay artifact `rebase-20260820-gfx950-pytorch-mode-rr-vcc-dst` records the post-decoder latency frontier; the other named artifacts retain the per-profile frontiers. |
+| P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 A 120-second diagnostic run now completes in 100.60 seconds with the exact oracle, complete dynamic evidence, all 25,503 supported accesses and 3,920 barriers patched, and lossless replay of 13,017 accesses plus 49 barriers. The row still fails its ordinary 30-second contract, and static analysis remains incomplete because 20/25,523 discovered access sites are unsupported | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices. Current Record/Replay artifact `rebase-20260820-gfx950-pytorch-mode-rr-replay-contract` records the post-decoder, post-replay-compaction frontier; the other named artifacts retain the per-profile frontiers. |
 | P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 3,056/230,438 supported accesses | 🟥 Current one-repetition run reaches the 60-second bound before an oracle or coverage verdict | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact values/indices across FP64 register pressure and BF16 coverage. Record/Replay artifact `consan-gfx950-pytorch-topk-rr-clean-20260722-010` records the bounded frontier; the SuperCollider artifact retains its current-hook coverage evidence. |
 | P1 | `torch.sort` over segmented rows | 🩶 Baseline exact; profile unassessed | 🟨 Exact segmented-sort oracle and dynamic execution pass; all 56,380 supported accesses and 6,032 barriers patch, runtime evidence is complete, and replay reports no conflict or unsupported records.  Static analysis remains incomplete because 504/56,884 discovered accesses are unsupported | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifact `consan-gfx950-pytorch-sort-rr-dense-host-fix-20260722-195514`; elapsed 46.84 s.  Global dense-host exclusion removes the former cross-partition overlapping-patch rejection; the remaining gate is the 504 unsupported access shapes. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟧 Current exact oracle and dynamic execution pass with 102/102 supported accesses patched, but the aggregate analysis/static verdict is incomplete | 🟨 Current target-bounded stride-1 row passes the exact oracle in 146.47 seconds with complete 179/179 accesses plus 84/84 barriers, 352 visible records, zero diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault refresh remain | 🟨 Current exact oracle passes in 7.71 seconds with complete 179/179 access plus 84/84 barrier coverage, zero forbidden diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Current exact oracle passes in 28.95 seconds with complete 179/179 access plus 84/84 barrier coverage and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Current all-profile artifact `rebase-20260820-gfx950-pytorch-histc-all-X38XO3` records the original selection regression and clean rows; `rebase-20260820-gfx950-pytorch-histc-rr-stride-fix-ZJHioX` records its accepted repair. The earlier green bundle remains useful comparison evidence, but paired/fault refresh is required at the repaired current tip. |
@@ -1310,6 +1310,38 @@ allocation, and enters patching. The contained process then reaches the
 ordinary 30-second bound before patch completion, so no workload oracle or
 coverage verdict is available. The remaining red frontier is therefore
 large-object patch latency, not decoding or resource placement.
+
+An explicit 120-second diagnostic run in artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-mode-rr-120s`
+then reached substantially farther. The 6.67-second waitcheck and 5.76-second
+inventory were followed by a successful 19.12-second transform with 32,019
+patches. The exact value/index oracle passed after 32.31 seconds of device
+execution, and the report contained 13,017 committed access records plus 49
+barriers with zero diagnostics. Teardown nevertheless reached the 120-second
+bound because automatic replay iterated the fixed table's full 4,194,304-slot
+capacity rather than its committed records.
+
+Automatic replay now compacts only entirely zero, never-published slots before
+model replay and provenance repair. Partially initialized Empty records remain
+visible and fail closed. The producer log separately preserves the report ABI's
+1,788,288-record diagnostic capacity and exposes the 13,017-record replay
+scratch capacity. Conventional hook/model tests pin sparse first/last-slot
+replay, the all-zero versus partial-record boundary, and parser treatment of
+the two capacities.
+
+Final artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-mode-rr-replay-contract`
+uses rebuilt hook SHA-256
+`fe709b00fa9445c74c87a5f2ecd071b9a03d4d9e20e67de123f47293ad7c9781`.
+The diagnostic run exits normally in 100.60 seconds and passes the exact
+oracle. It patches all 25,503 supported accesses and all 3,920 physical barrier
+sites; the report-plan value 1,003,520 is barrier-record capacity, not a static
+site count. Replay consumes all 13,017 committed access records and 49 barrier
+records with no drops, unsupported records, conflict, metadata exhaustion, or
+diagnostics. Dynamic evidence is complete. Static analysis remains incomplete
+only because 20 of 25,523 discovered accesses are semantically unsupported.
+The remaining gates are therefore the ordinary 30-second latency contract and
+those 20 access shapes, rather than decoding, placement, or replay loss.
 
 The portable rows are now registered for gfx950.  The next step is an
 all-profile clean inventory, followed by focused repair of the first typed

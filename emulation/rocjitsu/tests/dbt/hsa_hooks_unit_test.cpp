@@ -504,6 +504,7 @@ std::vector<std::optional<rocjitsu::ConSanMoiReportLayoutOverride>>
 bool g_seed_auto_replay_report_on_load = false;
 bool g_seed_auto_replay_report_succeeded = false;
 bool g_seed_auto_replay_invalid_site_token = false;
+bool g_seed_auto_replay_sparse_capacity = false;
 bool g_seed_auto_sampled_report_on_load = false;
 bool g_seed_auto_sampled_report_succeeded = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
@@ -1080,7 +1081,10 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
 
     auto *const report = static_cast<uint8_t *>(g_core_memory_allocations.back());
     auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(report);
-    header->access_record_count = 2;
+    const uint32_t second_record_index =
+        g_seed_auto_replay_sparse_capacity ? layout.access_record_capacity - 1u : 1u;
+    header->access_record_count =
+        g_seed_auto_replay_sparse_capacity ? layout.access_record_capacity : 2u;
     auto *const records =
         reinterpret_cast<rocjitsu::ConSanMoiAccessRecord *>(report + layout.access_records_offset);
     records[0] = {
@@ -1097,7 +1101,7 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
         .epoch = 3,
         .event_index = 1,
     };
-    records[1] = {
+    records[second_record_index] = {
         .generation = header->generation,
         .workgroup_x = 0,
         .wave_id = 2,
@@ -1113,7 +1117,7 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     };
     if (g_seed_auto_replay_invalid_site_token) {
       records[0].site_token = layout.record_replay_logical_access_range_count;
-      records[1].site_token = layout.record_replay_logical_access_range_count;
+      records[second_record_index].site_token = layout.record_replay_logical_access_range_count;
     }
     g_seed_auto_replay_report_succeeded = true;
   }
@@ -1702,6 +1706,7 @@ void reset_code_object_observations() {
   g_seed_auto_replay_report_on_load = false;
   g_seed_auto_replay_report_succeeded = false;
   g_seed_auto_replay_invalid_site_token = false;
+  g_seed_auto_replay_sparse_capacity = false;
   g_seed_auto_sampled_report_on_load = false;
   g_seed_auto_sampled_report_succeeded = false;
   g_transform_override_result = {};
@@ -5950,8 +5955,9 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
   EXPECT_EQ(g_core_memory_free_calls, 1);
   for (std::string_view field :
        {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
-        "conflict=true", "metadata_full=false", "diagnostic_capacity_exhausted=false",
-        "diagnostic_capacity=1", "provenance_repaired=0", "provenance_unresolved=0"}) {
+        "replay_input_access=2", "conflict=true", "metadata_full=false",
+        "diagnostic_capacity_exhausted=false", "diagnostic_capacity=1", "provenance_repaired=0",
+        "provenance_unresolved=0"}) {
     EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
   }
   const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
@@ -5962,6 +5968,49 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
         "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)", "second_lds=[16,20)",
         "first_kind=2", "second_kind=2"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, AutoReplayCompactsSparseFixedCapacityBeforeReplay) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_seed_auto_replay_report_on_load = true;
+  g_seed_auto_replay_sparse_capacity = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    EXPECT_TRUE(hook.installed()) << hook.error();
+    if (hook.installed()) {
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
+  EXPECT_EQ(g_core_memory_free_calls, 1);
+  for (std::string_view field :
+       {"committed_records=2", "replay_input_access=2", "published_access=2", "processed_access=2",
+        "dropped_access=0", "diagnostics=1", "conflict=true"}) {
+    EXPECT_NE(log.find(field), std::string::npos) << field << '\n' << log;
   }
 }
 

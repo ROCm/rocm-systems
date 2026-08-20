@@ -142,12 +142,19 @@ def moi_auto_replay(
     metadata_full: bool = False,
     capacity_exhausted: bool = False,
     diagnostic_capacity: int = 1,
+    replay_scratch_diagnostic_capacity: int | None = None,
     provenance_repaired: int = 0,
     provenance_unresolved: int = 0,
     code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     if conflict is None:
         conflict = diagnostics != 0
+    scratch_capacity = (
+        ""
+        if replay_scratch_diagnostic_capacity is None
+        else "replay_scratch_diagnostic_capacity="
+        f"{replay_scratch_diagnostic_capacity} "
+    )
     return (
         f"ConSan MOI auto replay reader={reader} generation={generation} "
         f"code_object={code_object_fingerprint} diagnostics={diagnostics} "
@@ -156,6 +163,7 @@ def moi_auto_replay(
         "diagnostic_capacity_exhausted="
         f"{'true' if capacity_exhausted else 'false'} "
         f"diagnostic_capacity={diagnostic_capacity} "
+        f"{scratch_capacity}"
         f"provenance_repaired={provenance_repaired} "
         f"provenance_unresolved={provenance_unresolved}"
     )
@@ -897,6 +905,29 @@ class ConSanValidationTest(unittest.TestCase):
                 for reason in summary["reasons"]
             ),
             summary["reasons"],
+        )
+
+    def test_replay_scratch_capacity_does_not_replace_report_capacity(self) -> None:
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1, visible_records=100, diagnostic_capacity=100),
+                    moi_auto_replay(
+                        7,
+                        1,
+                        0,
+                        diagnostic_capacity=100,
+                        replay_scratch_diagnostic_capacity=2,
+                    ),
+                )
+            ),
+            contract,
+        )
+
+        self.assertTrue(summary["accepted"], summary)
+        self.assertEqual(
+            summary["readers"]["reader=7,generation=1"]["diagnostic_capacity"], 100
         )
 
     def test_record_replay_parser_normalizes_producer_output(self) -> None:

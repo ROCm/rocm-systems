@@ -276,6 +276,75 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
             << " new_total_ms=" << probe_ms + inventory_ms + retry_ms << '\n';
 }
 
+TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
+  const char *path = std::getenv("RJ_CONSAN_BENCHMARK_OBJECT");
+  if (path == nullptr)
+    GTEST_SKIP() << "set RJ_CONSAN_BENCHMARK_OBJECT to an AMDGPU code object";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
+  const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(input), {});
+  ASSERT_FALSE(bytes.empty());
+
+  const auto timed = [](auto &&action) {
+    const auto begin = std::chrono::steady_clock::now();
+    auto result = action();
+    return std::pair{
+        std::move(result),
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count(),
+    };
+  };
+  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
+  // Match the standard hook profile used for large E2E objects. The unit-test
+  // defaults deliberately select only one site and would make this benchmark
+  // measure a different transformation.
+  inventory_options.moi_track_barriers = true;
+  inventory_options.moi_track_atomics = true;
+  inventory_options.max_patches = 65'536;
+  inventory_options.max_patches_is_expert_limit = false;
+  inventory_options.moi_runtime_sample_stride = 65'536;
+  const auto [inventory, inventory_ms] =
+      timed([&] { return try_patch_consan(bytes, inventory_options); });
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_FALSE(inventory.modified);
+  const ConSanMoiAutoReportInventory capacity =
+      inventory_consan_moi_auto_report(inventory, inventory_options, bytes);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
+  ASSERT_TRUE(plan.complete());
+  const auto layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(layout);
+
+  ConSanOptions live = inventory_options;
+  live.moi_report_buffer_address = 0x123456780000ull;
+  live.moi_report_buffer_size = plan.required_bytes;
+  live.moi_report_layout = *layout;
+  ConSanResult retry_inventory = inventory;
+  const auto [fresh, fresh_ms] = timed([&] { return try_patch_consan(bytes, live); });
+  const auto [retried, retry_ms] = timed([&] {
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory),
+                                                 moi_inventory_retry_config(live), bytes);
+  });
+
+  ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(fresh.errors) << testing::PrintToString(fresh.warnings);
+  ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  const ConSanMoiAutoReportInventory required =
+      inventory_consan_moi_auto_report(retried, live, bytes);
+  EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
+
+  std::set<std::pair<bool, std::string_view>> candidate_owners;
+  for (const ConSanMoiCandidate &candidate : retried.moi_candidates)
+    candidate_owners.emplace(candidate.in_kernel, candidate.container_name);
+
+  std::cout << "report_retry_benchmark bytes=" << bytes.size() << " inventory_ms=" << inventory_ms
+            << " fresh_live_ms=" << fresh_ms << " retry_ms=" << retry_ms
+            << " candidates=" << retried.moi_candidates.size()
+            << " candidate_owners=" << candidate_owners.size()
+            << " patches=" << retried.patches.size() << " output_bytes=" << retried.elf_bytes.size()
+            << '\n';
+}
+
 TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
   const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/true);

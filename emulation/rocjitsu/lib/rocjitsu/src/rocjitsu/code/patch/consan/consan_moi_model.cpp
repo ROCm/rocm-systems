@@ -1174,22 +1174,14 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     }
     return std::nullopt;
   };
-  auto is_unpublished_access = [](const ConSanMoiAccessRecord &record) {
-    return record.claim_token == 0 && record.generation == 0 && record.workgroup_x == 0 &&
-           record.workgroup_y == 0 && record.workgroup_z == 0 && record.wave_id == 0 &&
-           record.lane_mask == 0 && record.instruction_offset == 0 &&
-           record.access_kind == static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty) &&
-           record.lds_byte_offset == 0 && record.lds_byte_count == 0 && record.start_cell == 0 &&
-           record.cell_count == 0 && record.epoch == 0 && record.event_index == 0 &&
-           record.site_token == 0 && record.flags == 0;
-  };
-
   ConSanMoiRecordReplayResult replay;
   const uint32_t access_count = std::min({header.access_record_count, header.access_record_capacity,
                                           span_size_u32(access_records.size())});
-  replay.published_access_count = static_cast<uint32_t>(std::count_if(
-      access_records.begin(), access_records.begin() + access_count,
-      [&](const ConSanMoiAccessRecord &record) { return !is_unpublished_access(record); }));
+  replay.published_access_count = static_cast<uint32_t>(
+      std::count_if(access_records.begin(), access_records.begin() + access_count,
+                    [](const ConSanMoiAccessRecord &record) {
+                      return !consan_moi_access_record_is_unpublished(record);
+                    }));
   replay.dropped_access_count =
       header.access_record_count > access_count ? header.access_record_count - access_count : 0;
   const uint32_t barrier_count =
@@ -1388,7 +1380,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
   events.reserve(static_cast<size_t>(replay.published_access_count) + barrier_count +
                  atomic_events.size() + fence_events.size());
   for (uint32_t i = 0; i < access_count; ++i) {
-    if (!is_unpublished_access(access_records[i]))
+    if (!consan_moi_access_record_is_unpublished(access_records[i]))
       events.push_back({access_records[i].event_index, i, i, ReplayEvent::Kind::Access});
   }
   for (uint32_t i = 0; i < barrier_count; ++i)
@@ -1603,7 +1595,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     // front. A never-executed site therefore remains an all-zero slot; it is
     // neither a malformed access nor evidence loss. Any partially initialized
     // Empty record still falls through to the fail-closed unsupported path.
-    if (is_unpublished_access(record))
+    if (consan_moi_access_record_is_unpublished(record))
       continue;
     const std::optional<ConSanMoiShadowAccessKind> access_kind =
         decode_access_kind(record.access_kind);

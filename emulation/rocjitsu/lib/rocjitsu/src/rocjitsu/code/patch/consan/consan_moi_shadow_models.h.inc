@@ -1153,6 +1153,20 @@ consan_moi_record_replay_access_records(ConSanMoiReportHeader &header,
                                         std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
                                         std::span<uint64_t> exact_shadow_entries);
 
+/// Fixed per-site Record/Replay tables publish their static capacity in the
+/// header. Slots which were never executed remain entirely zero, while a
+/// partially published zero-kind slot must still reach replay and fail closed.
+[[nodiscard]] constexpr bool
+consan_moi_access_record_is_unpublished(const ConSanMoiAccessRecord &record) {
+  return record.claim_token == 0 && record.generation == 0 && record.workgroup_x == 0 &&
+         record.workgroup_y == 0 && record.workgroup_z == 0 && record.wave_id == 0 &&
+         record.lane_mask == 0 && record.instruction_offset == 0 &&
+         record.access_kind == static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty) &&
+         record.lds_byte_offset == 0 && record.lds_byte_count == 0 && record.start_cell == 0 &&
+         record.cell_count == 0 && record.epoch == 0 && record.event_index == 0 &&
+         record.site_token == 0 && record.flags == 0;
+}
+
 [[nodiscard]] ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     ConSanMoiReportHeader &header, std::span<const ConSanMoiAccessRecord> access_records,
     std::span<const ConSanMoiBarrierRecord> barrier_records,

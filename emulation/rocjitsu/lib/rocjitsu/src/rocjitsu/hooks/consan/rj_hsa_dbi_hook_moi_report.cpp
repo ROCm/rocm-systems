@@ -1206,11 +1206,23 @@ private:
     }
     const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
         bytes + expected_layout.access_records_offset);
-    const uint32_t committed_records = static_cast<uint32_t>(std::count_if(
-        records, records + visible_records, [](const rocjitsu::ConSanMoiAccessRecord &record) {
-          return record.access_kind !=
-                 static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Empty);
-        }));
+    uint32_t committed_records = 0;
+    std::vector<rocjitsu::ConSanMoiAccessRecord> replay_access_records;
+    if (expected_engine == ConSanMoiEngine::RecordReplay)
+      replay_access_records.reserve(std::min(visible_records, header->event_counter));
+    for (uint32_t i = 0; i < visible_records; ++i) {
+      const rocjitsu::ConSanMoiAccessRecord &record = records[i];
+      if (record.access_kind != static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Empty)) {
+        ++committed_records;
+      }
+      // Fixed per-site tables expose their entire capacity as visible. Replay
+      // only the published slots, but retain a partially initialized Empty
+      // record so the model reports it as unsupported instead of hiding it.
+      if (expected_engine == ConSanMoiEngine::RecordReplay &&
+          !rocjitsu::consan_moi_access_record_is_unpublished(record)) {
+        replay_access_records.push_back(record);
+      }
+    }
     const RecordReplayPressureTelemetry record_replay_pressure = record_replay_pressure_telemetry(
         *header, expected_engine,
         std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
@@ -1507,11 +1519,10 @@ private:
                   static_cast<unsigned>(fence.kind), fence.scope, fence.semantics,
                   static_cast<unsigned long long>(fence.communication_token));
     }
-    if (visible_records != 0 || visible_barriers != 0 || visible_atomics != 0 ||
+    if (!replay_access_records.empty() || visible_barriers != 0 || visible_atomics != 0 ||
         visible_fences != 0) {
       uint64_t required_shadow_entries = 0;
-      for (uint32_t i = 0; i < visible_records; ++i) {
-        const rocjitsu::ConSanMoiAccessRecord &record = records[i];
+      for (const rocjitsu::ConSanMoiAccessRecord &record : replay_access_records) {
         uint64_t record_end = static_cast<uint64_t>(record.start_cell) + record.cell_count;
         if (record_end == 0 && record.lds_byte_count != 0) {
           const rocjitsu::ConSanMoiLdsCellRange range =
@@ -1533,16 +1544,18 @@ private:
                     static_cast<unsigned long long>(kMaxAutoReplayShadowEntries));
       } else {
         rocjitsu::ConSanMoiReportHeader replay_header = *header;
+        replay_header.access_record_count = static_cast<uint32_t>(replay_access_records.size());
+        replay_header.access_record_capacity = replay_header.access_record_count;
         replay_header.diagnostic_count = 0;
-        replay_header.diagnostic_capacity = std::min(header->diagnostic_capacity, visible_records);
+        replay_header.diagnostic_capacity =
+            std::min(header->diagnostic_capacity, replay_header.access_record_count);
         std::vector<rocjitsu::ConSanMoiDiagnosticRecord> diagnostics(
             replay_header.diagnostic_capacity);
         std::vector<uint64_t> exact_shadow_entries(
             static_cast<size_t>(std::max<uint64_t>(required_shadow_entries, 1u)));
         const rocjitsu::ConSanMoiRecordReplayResult replay =
             rocjitsu::consan_moi_record_replay_access_records(
-                replay_header,
-                std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
+                replay_header, replay_access_records,
                 std::span<const rocjitsu::ConSanMoiBarrierRecord>(barriers, visible_barriers),
                 std::span<const rocjitsu::ConSanMoiRecordReplayAtomicEvent>(atomics,
                                                                             visible_atomics),
@@ -1552,9 +1565,8 @@ private:
             std::min<uint32_t>(replay.emitted_diagnostic_count, diagnostics.size());
         const rocjitsu::ConSanMoiReplayProvenanceRepair provenance =
             rocjitsu::repair_consan_moi_record_replay_provenance(
-                std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
-                std::span<rocjitsu::ConSanMoiDiagnosticRecord>(diagnostics.data(),
-                                                               replay_visible_diagnostics));
+                replay_access_records, std::span<rocjitsu::ConSanMoiDiagnosticRecord>(
+                                           diagnostics.data(), replay_visible_diagnostics));
         summary.replay_conflict_count = replay.conflict ? 1u : 0u;
         summary.replay_diagnostic_count = replay.emitted_diagnostic_count;
         summary.replay_dropped_access_count = replay.dropped_access_count;
@@ -1567,28 +1579,29 @@ private:
             replay.diagnostic_capacity_exhausted ? 1u : 0u;
         log_message(kLogInfo,
                     "ConSan MOI auto replay reader=%llu generation=%llu code_object=%s "
-                    "published_access=%u processed_access=%u "
+                    "replay_input_access=%zu published_access=%u processed_access=%u "
                     "processed_barriers=%u processed_atomics=%u processed_fences=%u "
                     "dropped_access=%u "
                     "dropped_barriers=%u unsupported_access=%u unsupported_atomics=%u "
                     "unsupported_fences=%u diagnostics=%u "
                     "conflict=%s metadata_full=%s diagnostic_capacity_exhausted=%s "
-                    "diagnostic_capacity=%u "
+                    "diagnostic_capacity=%u replay_scratch_diagnostic_capacity=%u "
                     "provenance_repaired=%u provenance_unresolved=%u "
                     "shadow_entries=%zu",
                     static_cast<unsigned long long>(entry.reader),
                     static_cast<unsigned long long>(replay_header.generation),
                     entry.input_fingerprint.empty() ? "missing" : entry.input_fingerprint.c_str(),
-                    replay.published_access_count, replay.processed_access_count,
-                    replay.processed_barrier_count, replay.processed_atomic_count,
-                    replay.processed_fence_count, replay.dropped_access_count,
-                    replay.dropped_barrier_count, replay.unsupported_access_count,
-                    replay.unsupported_atomic_count, replay.unsupported_fence_count,
-                    replay.emitted_diagnostic_count, replay.conflict ? "true" : "false",
-                    replay.metadata_full ? "true" : "false",
+                    replay_access_records.size(), replay.published_access_count,
+                    replay.processed_access_count, replay.processed_barrier_count,
+                    replay.processed_atomic_count, replay.processed_fence_count,
+                    replay.dropped_access_count, replay.dropped_barrier_count,
+                    replay.unsupported_access_count, replay.unsupported_atomic_count,
+                    replay.unsupported_fence_count, replay.emitted_diagnostic_count,
+                    replay.conflict ? "true" : "false", replay.metadata_full ? "true" : "false",
                     replay.diagnostic_capacity_exhausted ? "true" : "false",
-                    replay_header.diagnostic_capacity, provenance.repaired_diagnostic_count,
-                    provenance.unresolved_diagnostic_count, exact_shadow_entries.size());
+                    header->diagnostic_capacity, replay_header.diagnostic_capacity,
+                    provenance.repaired_diagnostic_count, provenance.unresolved_diagnostic_count,
+                    exact_shadow_entries.size());
         for (uint32_t i = 0; i < replay_visible_diagnostics; ++i) {
           const rocjitsu::ConSanMoiDiagnosticRecord &diagnostic = diagnostics[i];
           log_message(kLogInfo,
