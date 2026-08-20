@@ -13,6 +13,7 @@ from membw.models import NodeSpec, TreeSpec
 from utils.logger import console_error
 from utils.utils_common import load_yaml
 
+# Duplicated from engine._OPS keys to avoid circular import (engine imports tree_spec).
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
@@ -23,7 +24,7 @@ _KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
 
 def load_tree_spec(arch: str) -> TreeSpec:
     """Load and validate the tree spec for an architecture."""
-    spec_path = _tree_spec_path(arch)
+    spec_path = tree_spec_path(arch)
     if not spec_path.exists():
         console_error("membw", f"No tree spec for arch {arch!r}: {spec_path}")
     raw = load_yaml(spec_path)
@@ -53,7 +54,7 @@ def collect_metric_keys(spec: TreeSpec) -> frozenset[str]:
 # --- Private helpers ---
 
 
-def _tree_spec_path(arch: str) -> Path:
+def tree_spec_path(arch: str) -> Path:
     """Return the path to the tree spec YAML for an architecture."""
     return (
         config.rocprof_compute_home
@@ -116,6 +117,8 @@ def _parse_nodes(
 
         level = node_dict.get("level", parent_level)
         raw_children = node_dict.get("children", {})
+        if not isinstance(raw_children, dict):
+            console_error("membw", f"Node {node_id!r}: 'children' must be a mapping")
         children = _parse_nodes(raw_children, parent_level=level)
         raw_siblings_false = node_dict.get("requires_siblings_false", [])
 
@@ -165,7 +168,7 @@ def _validate_node(
     """Validate a single node and recurse into children."""
     is_catch_all = node.requires_parent and len(node.requires_siblings_false) > 0
 
-    if node.level and node.level not in _VALID_LEVELS:
+    if node.level not in _VALID_LEVELS:
         errors.append(f"Node {node.id!r}: invalid level {node.level!r}")
 
     if is_catch_all:
