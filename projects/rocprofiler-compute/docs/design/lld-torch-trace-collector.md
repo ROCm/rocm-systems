@@ -404,7 +404,7 @@ must tolerate the missing field: `_parse_function_backend` in
   otherwise; `ON` makes an absent torch a configure error;
   `OFF` skips the directory. Any other value stops the configure.
   `TORCH_TRACE_PYTHON` selects the interpreter, defaulting to the one CMake finds.
-  `TORCH_TRACE_SOURCE_FINGERPRINT` and `TORCH_TRACE_CXX11_ABI` are required.
+  `TORCH_TRACE_SOURCE_FINGERPRINT` is required.
 - CMake locates the interpreter with `find_package(Python3)` and the wheel with
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
@@ -414,9 +414,10 @@ must tolerate the missing field: `_parse_function_backend` in
   `TORCH_TRACE_SOURCE_FINGERPRINT`.
 - A static core library carries the shared source and its usage requirements —
   the torch and roctx includes and libraries, `synchronized`, `gsl_assert`, the
-  debug-info flag, and `_GLIBCXX_USE_CXX11_ABI` set to
-  `TORCH_TRACE_CXX11_ABI` — and both the pybind11 `MODULE`
-  and the gtest binary link it and inherit them.
+  debug-info flag, and `_GLIBCXX_USE_CXX11_ABI=1` — and both the pybind11 `MODULE`
+  and the gtest binary link it and inherit them. Official ROCm libtorch 2.10+ is
+  CXX11 ABI, so the compile definition is hardcoded and the loader does not pass
+  `TORCH_TRACE_CXX11_ABI`.
 - `torch_python` is resolved separately and linked only into the pybind module. It
   leaves Python symbols undefined and names no `libpython` of its own, so only a
   consumer already loaded by an interpreter can resolve them.
