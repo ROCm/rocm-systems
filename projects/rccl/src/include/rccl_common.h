@@ -131,6 +131,8 @@ NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName)
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
+// rcclUseReduceScatterDirect plus a redop check; Direct ReduceScatter cannot run scaled ops.
+bool rcclReduceScatterShouldTakeDirectPath(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op);
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
 size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
 // Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.

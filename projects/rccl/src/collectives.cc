@@ -924,7 +924,7 @@ static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, 
   if (ncclGroupDepth == 0 && op == ncclSum && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
     return RCCL_RS_HIERARCHICAL;
   }
-  if (ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, msgSize)) {
+  if (ncclGroupDepth == 0 && rcclReduceScatterShouldTakeDirectPath(comm, msgSize, op)) {
     return RCCL_RS_DIRECT;
   }
   return RCCL_RS_RING;

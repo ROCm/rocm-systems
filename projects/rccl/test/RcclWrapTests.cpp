@@ -1655,6 +1655,33 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
 }
 
+// Direct ReduceScatter reduces the gathered peer slices with PreOpSrcs=0, an unscaled
+// sum, so ncclAvg and user-defined PreMulSum must fall back to ring even when the
+// arch/node/size window would otherwise select the direct path.
+TEST(Rcclwrap, RcclReduceScatterShouldTakeDirectPathRejectsScaledOps)
+{
+    ncclComm_t            mockComm = nullptr;
+    struct ncclTopoSystem mockTopo;
+    struct ncclTopoNode   mockGpu;
+    CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+    mockComm->nNodes = 2;
+    // DRS needs PXN; seed the per-comm cache so the test does not depend on the
+    // NCCL_PXN_DISABLE env var or on the rank-count auto-detect heuristic.
+    mockComm->pxnDisable = 0;
+
+    size_t msgSize = 256 * 1024; // inside the 2-node 128KiB..2MiB window
+    ASSERT_TRUE(rcclUseReduceScatterDirect(mockComm, msgSize))
+        << "mock comm must be DRS-eligible for the redop expectations below to mean anything";
+
+    EXPECT_TRUE(rcclReduceScatterShouldTakeDirectPath(mockComm, msgSize, ncclSum));
+    EXPECT_TRUE(rcclReduceScatterShouldTakeDirectPath(mockComm, msgSize, ncclMin));
+    EXPECT_FALSE(rcclReduceScatterShouldTakeDirectPath(mockComm, msgSize, ncclAvg));
+    EXPECT_FALSE(
+        rcclReduceScatterShouldTakeDirectPath(mockComm, msgSize, static_cast<ncclRedOp_t>(ncclNumOps)));
+
+    CleanupMockComm(mockComm);
+}
+
 TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
 {
     const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;

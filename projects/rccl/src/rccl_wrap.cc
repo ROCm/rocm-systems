@@ -792,6 +792,12 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   return false;
 }
 
+bool rcclReduceScatterShouldTakeDirectPath(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op) {
+  // Direct ReduceScatter's local reduce uses PreOpSrcs=0 / postOp=false, so
+  // ncclAvg and user-defined PreMulSum (op >= ncclNumOps) fall back to ring.
+  return op < ncclAvg && rcclUseReduceScatterDirect(comm, msgSize);
+}
+
 RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
 
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
