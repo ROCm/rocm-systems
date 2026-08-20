@@ -223,7 +223,11 @@ measure_device_bitcode() {
 
   local workdir
   workdir="$(mktemp -d /tmp/rocshmem-device-bitcode-XXXXXX)"
-  trap 'rm -rf "$workdir"' RETURN
+  # A RETURN trap isn't scoped to this function -- left registered, it also
+  # fires on the *caller's* next return, by which point $workdir is out of
+  # scope and set -u aborts the script ("workdir: unbound variable"). Clear
+  # it as part of firing so it only ever runs once, for this call.
+  trap 'rm -rf "$workdir"; trap - RETURN' RETURN
 
   local raw_log="$workdir/raw.log"
   local summary_log="$workdir/resource_usage_summary.log"
