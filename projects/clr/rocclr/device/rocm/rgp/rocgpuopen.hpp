@@ -494,6 +494,17 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   bool     sqtt_instruction_tokens_;     //!< true = full instruction-level tokens
   bool     sqtt_capture_code_objects_;   //!< true = include ELF binaries as RDF chunks
 
+  //! Compute the effective aqlprofile capture SE_MASK.
+  //!
+  //! aqlprofile's gfx12 path has no per-SE detail selector (occupancy_mode is global), unlike
+  //! PAL's sqtt.seDetailedMask.  Detailed (instruction-timing) tokens are therefore captured on
+  //! every SE in the capture mask, multiplying trace size by the SE count.  PAL only gathers
+  //! detailed tokens on a single SE (seDetailedMask = 0x1); to match that behaviour and file size
+  //! we restrict the capture mask to the tool-supplied seMask when instruction tokens are enabled.
+  //! Without instruction tokens every SE is captured (mask = all present SEs) as before.
+  //! @return The SE bitmask to pass as HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK.
+  uint32_t EffectiveCaptureSeMask() const;
+
   // Dispatch-index capture window (CaptureTriggerMode::Index).
   // When captureMode == Index the tool specifies an inclusive [start, stop] dispatch range.
   // captureStartIndex is compared against global_disp_count_ to decide when to begin SQTT;

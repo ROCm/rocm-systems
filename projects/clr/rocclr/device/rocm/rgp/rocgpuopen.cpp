@@ -677,6 +677,26 @@ void RocUberTraceCaptureMgr::WaitForDriverResume() {
 
 
 // ================================================================================================
+// Compute the effective aqlprofile capture SE_MASK (see header for the full rationale).
+// When instruction tokens are enabled, mirror PAL by restricting detailed capture to the
+// tool-supplied seMask (typically SE0 only); otherwise capture every present shader engine.
+uint32_t RocUberTraceCaptureMgr::EffectiveCaptureSeMask() const {
+  const uint32_t num_se = static_cast<uint32_t>(device_->info().numberOfShaderEngines_);
+  const uint32_t all_se_mask =
+      (num_se > 0 && num_se < 32u) ? ((1u << num_se) - 1u) : 0xFFFFFFFFu;
+
+  if (!sqtt_instruction_tokens_) {
+    // No detailed tokens: capturing every SE costs little and preserves full-frame coverage.
+    return all_se_mask;
+  }
+
+  // Detailed capture: honor the tool's seMask so instruction tokens land on a single SE like
+  // PAL.  Clamp to present SEs and fall back to SE0 if the tool supplied an empty mask.
+  const uint32_t requested = sqtt_se_mask_ & all_se_mask;
+  return (requested != 0) ? requested : 0x1u;
+}
+
+// ================================================================================================
 // IRocTraceController::OnTraceRequested — called by RocTraceSession when a tool calls
 // UberTrace::RequestTrace() via RPC.  Accept the trace immediately; SQTT hardware setup
 // happens in PreDispatch once the preparation dispatches have run.
@@ -698,10 +718,36 @@ bool RocUberTraceCaptureMgr::OnTraceRequested(::roc::RocTraceSession* pSession) 
   {
     const auto& cfg       = uber_trace_svc_->GetTraceConfig();
     num_prep_frames_      = cfg.numPrepDispatches;
-    sqtt_output_size_     = static_cast<size_t>(cfg.sqttMemoryLimitInMb) * 1024u * 1024u;
     sqtt_se_mask_         = cfg.seMask;
     sqtt_instruction_tokens_  = cfg.enableInstructionTokens;
     sqtt_capture_code_objects_= cfg.captureCodeObjects;
+
+    // SQTT buffer sizing — mirror PAL's GpaSession semantics (gpaSession.cpp:4374-4432).
+    // The RGP tool sends gpuMemoryLimitInMb as a PER-SHADER-ENGINE budget, and PAL allocates
+    // that amount for every SE (summing into one buffer), multiplying by 4 for detailed
+    // (instruction-token) captures.
+    //
+    // aqlprofile, however, treats profile->output_buffer.size as a TOTAL and divides it evenly
+    // across the enabled SEs (sqtt_builder.h GetBaseStep: buffer_per_se = total / PopCount(mask)).
+    // We must therefore pre-multiply the tool's per-SE budget by the number of SEs we actually
+    // capture, so each captured SE receives the full requested budget.  Undersizing here
+    // overflows/wraps the per-SE buffer on real workloads and produces a malformed .rgp — the
+    // original ROCr-vs-PAL capacity gap.  The captured-SE count comes from EffectiveCaptureSeMask()
+    // (a single SE when instruction tokens are enabled, all present SEs otherwise).
+    const uint32_t capture_mask = EffectiveCaptureSeMask();
+    uint32_t se_scale = 0;
+    for (uint32_t m = capture_mask; m != 0; m >>= 1) se_scale += (m & 1u);
+    if (se_scale == 0) se_scale = 1u;
+    // Detailed (instruction-token) traces emit far more data per SE; PAL grows the per-SE buffer
+    // 4x in this case (DetailSqttSeBufferMultiplier).  Mirror that here.
+    const uint32_t detail_scale = sqtt_instruction_tokens_ ? 4u : 1u;
+    const size_t per_se_bytes = static_cast<size_t>(cfg.sqttMemoryLimitInMb) * 1024u * 1024u;
+    sqtt_output_size_     = per_se_bytes * se_scale * detail_scale;
+
+    fprintf(stderr, "[CLR-Ctrl] OnTraceRequested: SQTT sizing perSE=%uMB x %u SE (mask=0x%x)"
+            " x %u detail => total=%zuMB\n",
+            cfg.sqttMemoryLimitInMb, se_scale, capture_mask, detail_scale,
+            sqtt_output_size_ / (1024u * 1024u));
     // Index-mode window: preparationStartIndex marks when prep counting begins;
     // captureDispatchCount drives the stop index (0 = unlimited).
     capture_index_mode_   = cfg.indexMode;
@@ -809,19 +855,23 @@ bool RocUberTraceCaptureMgr::BeginSqttTrace(VirtualGPU* gpu) {
   // only and halves the per-SE buffer (PopCount==2).  So to capture every shader engine we must
   // explicitly pass a mask with one bit set per present SE: (1 << numSE) - 1.
   //
-  // The tool-supplied seMask (sqtt_se_mask_) is deliberately ignored for capture selection and
-  // instead mirrors PAL's seDetailedMask semantics via the per-SE instructionTimingEnabled flag
-  // in the SqttData chunk header (see below).  aqlprofile has no per-SE detail knob; detail is
-  // controlled globally through SIMD_SELECTION / OCCUPANCY_MODE.
-  const uint32_t num_se = static_cast<uint32_t>(device_->info().numberOfShaderEngines_);
-  const uint32_t capture_se_mask =
-      (num_se > 0 && num_se < 32u) ? ((1u << num_se) - 1u) : 0xFFFFFFFFu;
+  // aqlprofile has no per-SE detail knob (OCCUPANCY_MODE is global), so detailed instruction
+  // tokens are captured on every SE in this mask.  EffectiveCaptureSeMask() therefore restricts
+  // the mask to the tool-supplied seMask (typically SE0) when instruction tokens are enabled,
+  // matching PAL's seDetailedMask outcome and file size; without detail it captures all SEs.
+  const uint32_t capture_se_mask = EffectiveCaptureSeMask();
   sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK,
                                   capture_se_mask };
 
-  // SIMD_SELECTION — all SIMDs when instruction tokens are enabled; SIMD 0 only otherwise.
-  sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION,
-                                  sqtt_instruction_tokens_ ? 0xFu : 0x1u };
+  // SIMD_SELECTION — the SIMD to collect detailed (per-instruction) tokens from.  On gfx12 the
+  // SQ_THREAD_TRACE_MASK.SIMD_SEL field is a 2-bit *selector* (mask 0x3), not the gfx9-era
+  // "all SIMDs" bitmask, so a value like 0xF truncates to SIMD 3 and 0x1 selects SIMD 1.  That
+  // value is echoed into the SQTT header token's detail_simd_id, and RGP's parser assumes
+  // detail_simd_id == 0 when indexing instruction-timing wave slots (rgp_data_set_loader:
+  // RgpDataSetAllocationProfileAddInstToken); a non-zero SIMD corrupts slot accounting and the
+  // trace loads as malformed.  PAL always programs SIMD_SEL = 0 ("detailed tokens from SIMD 0",
+  // gfx12PerfExperiment.cpp) regardless of detail mode, so mirror that here.
+  sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, 0u };
 
   // OCCUPANCY_MODE — suppress instruction token hardware capture when not requested.
   // aqlprofile defaults to full token capture (INST/INST_PC bits set in TOKEN_MASK);
@@ -1050,6 +1100,19 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
   Hsa::agent_get_info(device->getBackendDevice(),
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
                       &max_waves_per_cu);
+  // Physical topology, queried raw from HSA (before rocdevice.cpp's WGP adjustments).
+  uint32_t phys_simd_per_cu = 0;
+  Hsa::agent_get_info(device->getBackendDevice(),
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                      &phys_simd_per_cu);
+  uint32_t phys_se_count = 0;
+  Hsa::agent_get_info(device->getBackendDevice(),
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                      &phys_se_count);
+  uint32_t phys_cu_total = 0;
+  Hsa::agent_get_info(device->getBackendDevice(),
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                      &phys_cu_total);
 
   // CPU info chunk — vendor/brand/cores left zero (not exposed via HSA for compute).
   CpuInfo cpu = {};
@@ -1060,13 +1123,23 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
   AsicInfo asic = {};
   asic.header = MakeChunkHeader(kAsicInfo, 0, static_cast<int32_t>(sizeof(AsicInfo)));
   {
-    const uint32_t waves_per_simd = (di.simdPerCU_ > 0)
-                                    ? (max_waves_per_cu / di.simdPerCU_) : max_waves_per_cu;
     const uint64_t engine_mhz     = di.maxEngineClockFrequency_;
     const uint64_t mem_mhz        = di.maxMemoryClockFrequency_;
-    // shaderEngines comes from the actual SE count reported by iterate_data.
-    const uint32_t total_cu = di.maxComputeUnits_;
-    const int32_t  se_count = (num_se > 0) ? num_se : 1;
+    // RGP/PAL describe the ASIC in PHYSICAL terms (each RDNA CU = 2 SIMD32), so query the
+    // physical topology straight from HSA rather than reusing device::Info fields that
+    // rocdevice.cpp mutates for WGP mode (simdPerCU_ doubled, CU counts halved). shaderEngines
+    // is the physical chip total, NOT the number of captured SEs (num_se): an SE-masked capture
+    // emits a single SqttData chunk but AsicInfo must still describe the whole chip, and each
+    // chunk carries its own shader_engine index.
+    const uint32_t phys_cu     = (phys_cu_total > 0) ? phys_cu_total : di.maxComputeUnits_;
+    const int32_t  se_count    = static_cast<int32_t>(phys_se_count > 0 ? phys_se_count : 1u);
+    const uint32_t simd_per_cu = (phys_simd_per_cu > 0) ? phys_simd_per_cu : di.simdPerCU_;
+    const uint32_t waves_per_simd = (simd_per_cu > 0) ? (max_waves_per_cu / simd_per_cu) : max_waves_per_cu;
+    // SGPRs per SIMD: gfx10+ (RDNA) do not share SGPRs between waves, so device::Info holds
+    // UINT32_MAX as a sentinel. RGP/PAL report the physical count, which PAL derives as
+    // wavesPerSimd * 128 (e.g. gfx12: 16 * 128 = 2048). Pre-RDNA keep the device::Info value.
+    const int32_t  sgprs_per_simd = (maj >= 10) ? static_cast<int32_t>(waves_per_simd * 128u)
+                                                : static_cast<int32_t>(di.sgprsPerSimd_);
 
     asic.traceShaderCoreClock       = engine_mhz * 1000000ULL;
     asic.traceMemoryClock           = mem_mhz    * 1000000ULL;
@@ -1078,8 +1151,8 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
     asic.vgprsPerSimd               = static_cast<int32_t>(di.vgprsPerSimd_);
     asic.minimumVgprAlloc           = static_cast<int32_t>(di.vgprAllocGranularity_);
     asic.vgprAllocGranularity       = static_cast<int32_t>(di.vgprAllocGranularity_);
-    asic.sgprsPerSimd               = static_cast<int32_t>(di.sgprsPerSimd_);
-    asic.simdPerComputeUnit         = static_cast<int32_t>(di.simdPerCU_);
+    asic.sgprsPerSimd               = sgprs_per_simd;
+    asic.simdPerComputeUnit         = static_cast<int32_t>(simd_per_cu);
     asic.wavefrontsPerSimd          = static_cast<int32_t>(waves_per_simd);
     asic.ldsSize                    = static_cast<int32_t>(isa.localMemSizePerCU());
     asic.gfxIpLevel                 = GfxVerToIpLevel(maj, min);
@@ -1093,7 +1166,7 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
     asic.ldsGranularity             = (maj == 10 && min >= 3) ? 1024u : 512u;
     asic.shaderEngines              = se_count;
     asic.computeUnitPerShaderEngine = (se_count > 0)
-                                      ? static_cast<int32_t>(total_cu / se_count) : 0;
+                                      ? static_cast<int32_t>(phys_cu / se_count) : 0;
     strncpy(asic.gpuName, di.boardName_, sizeof(asic.gpuName) - 1);
 
     // Fill cuMask[se][sa]: HSA has no per-SE/SA mask API, so derive from topology.
@@ -1105,7 +1178,7 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
     if (sa_per_se < 1) sa_per_se = 1;
 
     const uint32_t cu_per_sa = (se_count > 0 && sa_per_se > 0)
-                                ? (total_cu / (static_cast<uint32_t>(se_count) * sa_per_se)) : 0;
+                                ? (phys_cu / (static_cast<uint32_t>(se_count) * sa_per_se)) : 0;
     // Build a mask with all cu_per_sa low bits set (max 16 bits per the cuMask field width).
     const uint16_t active_cu_mask = (cu_per_sa >= 16) ? 0xFFFFu
                                   : (cu_per_sa > 0)   ? static_cast<uint16_t>((1u << cu_per_sa) - 1u)
@@ -1236,6 +1309,32 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
     }
     fprintf(stderr, "[CLR-Diag] CollectSqttResults: iterate_data FAILED status=%d err=%s\n",
             static_cast<int>(iter_status), err ? err : "(none)");
+
+    // OUT_OF_RESOURCES means the SQTT ring buffer overflowed/wrapped: the hardware
+    // overwrote the start of the trace, so the captured data is not just truncated but
+    // uninterpretable. Do NOT emit a .rgp from it — a malformed file is worse than none.
+    // Abort the capture: skip the DMA copy, skip RDF chunk writes, cancel the trace session
+    // (resets it to Ready so the tool's CollectTrace fails cleanly), and release resources.
+    if (iter_status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
+      fprintf(stderr,
+              "[CLR-Ctrl] CollectSqttResults: SQTT buffer overflowed (trace does not fit in "
+              "%zu bytes) — aborting capture, no .rgp will be produced. Reduce the traced "
+              "workload or increase the trace memory limit.\n",
+              allocated_size);
+      // Keep sqtt_output_size_ correct for FreeSqttResources() (iterate_data may have
+      // clobbered it via profile write-back; see the snapshot note above).
+      sqtt_output_size_ = allocated_size;
+      FreeSqttResources();
+      sqtt_state_ = SqttState::Idle;
+      if (roc_trace_session_ != nullptr) {
+        const bool canceled = roc_trace_session_->CancelTrace();
+        fprintf(stderr,
+                "[CLR-Ctrl] CollectSqttResults: CancelTrace returned %s, session state=%d\n",
+                canceled ? "true" : "false",
+                static_cast<int>(roc_trace_session_->GetState()));
+      }
+      return;
+    }
   }
 
   // Compute the actual data extent from per-SE entries: max(offset + size).
@@ -1294,6 +1393,17 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
       const uint32_t sqtt_ver =
           static_cast<uint32_t>(RgpFile::GfxVerToSqttVersion(gfx_maj, gfx_min));
 
+      // SqttDataHeader.traceBufferSize is the PER-SHADER-ENGINE buffer allocation, not the
+      // total (PAL: traceInfo.bufferSize = seLayout.dataSize, gpaSession.cpp:2354). sqtt_output_size_
+      // is the TOTAL we allocate (per_se x numSE x detail); aqlprofile partitions it evenly across
+      // the enabled SEs (sqtt_builder.h GetBaseStep), so the per-SE capacity is total / numSE — which
+      // matches the `capacity=` value the [AQL-Diag] readback reports. Writing the full total here
+      // makes each SE advertise a >512MB buffer, which RGP rejects as malformed.
+      const uint32_t se_count_for_size =
+          (iter_ctx.entries.size() > 0) ? static_cast<uint32_t>(iter_ctx.entries.size()) : 1u;
+      const uint64_t per_se_trace_buffer_size =
+          static_cast<uint64_t>(sqtt_output_size_) / se_count_for_size;
+
       for (uint32_t se_idx = 0; se_idx < static_cast<uint32_t>(iter_ctx.entries.size()); ++se_idx) {
         const SeEntry& se = iter_ctx.entries[se_idx];
 
@@ -1311,9 +1421,14 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
           uint32_t reserved                 : 30;
         };
 
-        const bool instr_enabled =
-            sqtt_instruction_tokens_ &&
-            (sqtt_se_mask_ == 0 || (sqtt_se_mask_ & (1u << se_idx)) != 0);
+        // aqlprofile captures detailed tokens uniformly on every SE in the capture mask (no
+        // per-SE detail knob).  EffectiveCaptureSeMask() restricts that mask to the tool's
+        // seMask (SE0) when instruction tokens are enabled, so iterate_data only yields the
+        // captured SE(s) here — each of which genuinely carries INST/INST_PC tokens.  The flag
+        // must mirror the actual capture (setting it on an SE whose stream lacks detail, or
+        // clearing it on one that has detail, makes RGP reject the file as malformed), so it
+        // simply follows the global instruction-token setting.
+        const bool instr_enabled = sqtt_instruction_tokens_;
 
         SqttDataHeader hdr = {};
         hdr.pciId                     = di.pcieDeviceId_;
@@ -1322,7 +1437,7 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         hdr.instrumentationVersionSpec = 1;  // instrumentation spec version (API-agnostic)
         hdr.instrumentationVersionApi  = 0;  // API-specific version (OpenCL = 0)
         hdr.wgpIndex                  = 0;   // not tracked per-dispatch in HSA path
-        hdr.traceBufferSize           = static_cast<uint64_t>(sqtt_output_size_);
+        hdr.traceBufferSize           = per_se_trace_buffer_size;  // PER-SE, not total
         hdr.instructionTimingEnabled  = instr_enabled ? 1u : 0u;
         hdr.execPopTokensEnabled      = 0;
 
@@ -1439,22 +1554,43 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
                             &ai_sa_per_se);
         if (ai_sa_per_se < 1) ai_sa_per_se = 1;
+        // Physical topology queried straight from HSA (raw, before WGP adjustment). RGP/PAL
+        // describe the ASIC in physical terms (RDNA CU = 2 SIMD32), so we must NOT reuse
+        // device::Info fields that rocdevice.cpp mutates for WGP mode (simdPerCU_ doubled,
+        // maxComputeUnits_/maxPhysicalComputeUnits_ both halved). num_se is physical here too:
+        // with an SE-masked capture only one SqttData chunk is emitted, but AsicInfo must still
+        // report the whole chip (each chunk carries its own shader_engine index).
+        uint32_t ai_phys_simd_per_cu = 0;
+        Hsa::agent_get_info(device_->getBackendDevice(),
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                            &ai_phys_simd_per_cu);
+        uint32_t ai_phys_se = 0;
+        Hsa::agent_get_info(device_->getBackendDevice(),
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                            &ai_phys_se);
+        uint32_t ai_phys_cu_total = 0;
+        Hsa::agent_get_info(device_->getBackendDevice(),
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                            &ai_phys_cu_total);
 
         const device::Info& ai_di    = device_->info();
         const amd::Isa&     ai_isa   = device_->isa();
         const uint32_t ai_gfx_maj    = ai_isa.versionMajor();
         const uint32_t ai_gfx_min    = ai_isa.versionMinor();
-        const int32_t  ai_se_count   = static_cast<int32_t>(
-                                         iter_ctx.entries.size() > 0
-                                         ? iter_ctx.entries.size() : 1u);
-        const uint32_t ai_total_cu   = ai_di.maxComputeUnits_;
+        // Shader-engine count is the PHYSICAL chip total (not the number of captured SEs).
+        const int32_t  ai_se_count   = static_cast<int32_t>(ai_phys_se > 0 ? ai_phys_se : 1u);
         const uint64_t ai_engine_mhz = ai_di.maxEngineClockFrequency_;
         const uint64_t ai_mem_mhz    = ai_di.maxMemoryClockFrequency_;
-        const uint32_t ai_wpsimd     = (ai_di.simdPerCU_ > 0)
-                                       ? (ai_max_waves / ai_di.simdPerCU_) : ai_max_waves;
+        // Physical CU layout RGP/PAL expect, taken straight from HSA (raw, WGP-independent).
+        const uint32_t ai_phys_cu     = (ai_phys_cu_total > 0) ? ai_phys_cu_total : ai_di.maxComputeUnits_;
+        const uint32_t ai_simd_per_cu = (ai_phys_simd_per_cu > 0) ? ai_phys_simd_per_cu : ai_di.simdPerCU_;
+        const uint32_t ai_wpsimd     = (ai_simd_per_cu > 0)
+                                       ? (ai_max_waves / ai_simd_per_cu) : ai_max_waves;
+        const int32_t  ai_sgprs      = (ai_gfx_maj >= 10) ? static_cast<int32_t>(ai_wpsimd * 128u)
+                                                          : static_cast<int32_t>(ai_di.sgprsPerSimd_);
         const uint32_t ai_cu_per_sa  = (ai_se_count > 0 && ai_sa_per_se > 0)
-                                       ? (ai_total_cu / (static_cast<uint32_t>(ai_se_count)
-                                                         * ai_sa_per_se)) : 0;
+                                       ? (ai_phys_cu / (static_cast<uint32_t>(ai_se_count)
+                                                        * ai_sa_per_se)) : 0;
         const uint16_t ai_cu_mask    = (ai_cu_per_sa >= 16) ? 0xFFFFu
                                      : (ai_cu_per_sa > 0)
                                        ? static_cast<uint16_t>((1u << ai_cu_per_sa) - 1u) : 0u;
@@ -1469,13 +1605,13 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         ai.deviceId                   = static_cast<int32_t>(ai_di.pcieDeviceId_);
         ai.deviceRevisionId           = static_cast<int32_t>(ai_asic_rev);
         ai.vgprsPerSimd               = static_cast<int32_t>(ai_di.vgprsPerSimd_);
-        ai.sgprsPerSimd               = static_cast<int32_t>(ai_di.sgprsPerSimd_);
+        ai.sgprsPerSimd               = ai_sgprs;
         ai.shaderEngines              = ai_se_count;
         ai.computeUnitPerShaderEngine = (ai_se_count > 0)
                                         ? static_cast<int32_t>(
-                                            ai_total_cu / static_cast<uint32_t>(ai_se_count))
+                                            ai_phys_cu / static_cast<uint32_t>(ai_se_count))
                                         : 0;
-        ai.simdPerComputeUnit         = static_cast<int32_t>(ai_di.simdPerCU_);
+        ai.simdPerComputeUnit         = static_cast<int32_t>(ai_simd_per_cu);
         ai.wavefrontsPerSimd          = static_cast<int32_t>(ai_wpsimd);
         ai.minimumVgprAlloc           = static_cast<int32_t>(ai_di.vgprAllocGranularity_);
         ai.vgprAllocGranularity       = static_cast<int32_t>(ai_di.vgprAllocGranularity_);
