@@ -12,7 +12,7 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
+from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
 from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
@@ -25,7 +25,12 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx115x
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    is_gfx9,
+    is_gfx115x,
+    is_gfx1250,
+)
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -805,6 +810,7 @@ def format_table_output(
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
     )
 
     if use_mem_chart:
@@ -822,6 +828,17 @@ def format_table_output(
         if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
+                    mem_data,
+                    chart_title=_mem_chart_heading(
+                        int(table_config["id"]),
+                        args.normal_unit,
+                    ),
+                )
+                + "\n"
+            )
+        elif is_gfx1250(gpu_arch):
+            content += (
+                mem_chart_gfx1250.plot_mem_chart(
                     mem_data,
                     chart_title=_mem_chart_heading(
                         int(table_config["id"]),
@@ -991,11 +1008,19 @@ def show_all(
                 if processed_df.empty:
                     continue
 
-                # For gfx115x mem_chart panels, collect all tables and merge
-                # into a single chart on the first table; skip subsequent ones.
-                is_mem_chart = table_config.get(
-                    "cli_style"
-                ) == "mem_chart" and not _tty_view_is_table(args)
+                # For mem_chart panels, collect all tables and merge
+                # into a single chart; skip individual table output.
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
+                is_mem_chart = (
+                    table_config.get("cli_style") == "mem_chart"
+                    and not _tty_view_is_table(args)
+                    and (
+                        is_gfx9(gpu_arch)
+                        or is_gfx115x(gpu_arch)
+                        or is_gfx1250(gpu_arch)
+                    )
+                )
 
                 if is_mem_chart and is_gfx115x(gpu_arch) and len(runs) == 1:
                     has_cols = (
@@ -1025,13 +1050,29 @@ def show_all(
                 int((panel or {}).get("id", 300)),
                 args.normal_unit,
             )
-            panel_content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    mem_chart_data,
-                    chart_title=heading,
+            if is_gfx115x(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx11.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
+            elif is_gfx9(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
+                    + "\n"
+                )
+            elif is_gfx1250(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx1250.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            else:
+                pass
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.

@@ -49,6 +49,11 @@ def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
 
 
+def is_gfx1250(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx1250 architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx1250"))
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
