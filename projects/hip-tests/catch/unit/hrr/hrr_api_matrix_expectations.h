@@ -17,7 +17,7 @@
  * the aim-labs reporter from drifting into disagreeing about what an API is
  * supposed to do at replay.
  *
- * Generated 2026-08-06 from 551 HIP APIs.
+ * Generated 2026-08-20 from 552 HIP APIs.
  */
 
 #pragma once
@@ -241,6 +241,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipDeviceGetExecutionCtx", "T4", 0, false, true, false, false},
     {"hipDeviceGetGraphMemAttribute", "T4", 1, false, true, false, false},
     {"hipDeviceGetLimit", "T4", 0, false, true, false, false},
+    {"hipDeviceGetLuid", "T4", 0, false, true, false, false},
     {"hipDeviceGetMemPool", "T4", 0, false, true, false, false},
     {"hipDeviceGetName", "T4", 1, false, true, false, false},
     {"hipDeviceGetPCIBusId", "T4", 1, false, true, false, false},

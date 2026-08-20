@@ -5948,9 +5948,9 @@ static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipDeviceGetLuid(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetLuid*>(payload);
-  char _out_luid{};
+  alignas(8) unsigned char _outbuf_luid[8]{};
   unsigned int _out_deviceNodeMask{};
-  hipError_t _r = (hipError_t)hipDeviceGetLuid(&_out_luid, &_out_deviceNodeMask, (hipDevice_t)a->device);
+  hipError_t _r = (hipError_t)hipDeviceGetLuid((char*)_outbuf_luid, &_out_deviceNodeMask, (hipDevice_t)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceGetLuid", a->ret);
     return hipSuccess;
