@@ -157,7 +157,11 @@ target selection, kernel filtering, corpus scans, and its C API.
 
 ## Minimal gfx1250 simulator repro
 
-This runs native `gfx1250` code in the RocJITsu simulator; no DBT is involved.
+This runs native `gfx1250` B0 code in the RocJITsu simulator; no DBT is
+involved. The simulator config advertises a nonzero ASIC revision so ROCr does
+not mistake the synthetic agent for physical gfx1250 A0 and insert its
+B0-to-A0 HotSwap translator.
+
 Save the following as `/tmp/gfx1250-sanitizer-repro.hip`:
 
 ```cpp

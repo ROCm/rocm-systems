@@ -468,4 +468,22 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   }
 }
 
+TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
+  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250.json",
+                                    rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  ASSERT_EQ(loaded.device.revision_id, 1u);
+
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(debug_gpu_info(loaded.device));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("capability"));
+  const uint32_t capability = static_cast<uint32_t>(props["capability"]);
+  const uint32_t asic_revision =
+      (capability & HSA_CAP_ASIC_REVISION_MASK) >> HSA_CAP_ASIC_REVISION_SHIFT;
+  EXPECT_EQ(asic_revision, loaded.device.revision_id);
+}
+
 } // namespace
