@@ -47,9 +47,11 @@ namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
+const std::string CDNA5_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
+constexpr uint32_t kCdna5GpuId = 1250;
 
 // A part with no modelled CWSR record layout. gfx1100 is not a debug target:
-// kmd::cwsr_layout_modelled() covers gfx942/gfx950 only, and the driver has to
+// kmd::cwsr_layout_modelled() covers gfx942/gfx950/gfx1250, and the driver has to
 // decline stops there rather than publish a record rocm-dbgapi would misparse.
 const std::string RDNA3_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 constexpr uint32_t kRdna3GpuId = 7019;
@@ -194,6 +196,11 @@ protected:
 class KfdIoctlRdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
+};
+
+class KfdIoctlCdna5Test : public KfdIoctlTest {
+protected:
+  void SetUp() override { SetUpWithConfig(CDNA5_CONFIG_PATH); }
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -3444,9 +3451,9 @@ TEST(KfdTopologyTest, TrapDebugSupportTracksTheModelledCwsrLayouts) {
     const char *name;
   };
   // Every part the arch-keyed predicate accepts, and a representative spread of
-  // the ones it does not: an older gfx9, an RDNA3 and the newest gfx12.
-  constexpr Part kModelled[] = {{90402u, "gfx942"}, {90500u, "gfx950"}};
-  constexpr Part kUnmodelled[] = {{90010u, "gfx90a"}, {110000u, "gfx1100"}, {120500u, "gfx1250"}};
+  // the ones it does not: an older gfx9 and two RDNA generations.
+  constexpr Part kModelled[] = {{90402u, "gfx942"}, {90500u, "gfx950"}, {120500u, "gfx1250"}};
+  constexpr Part kUnmodelled[] = {{90010u, "gfx90a"}, {110000u, "gfx1100"}, {120000u, "gfx1200"}};
 
   for (const Part &part : kModelled) {
     const rocjitsu::kmd::DebugTopology topology =
@@ -3482,6 +3489,7 @@ TEST(KfdTopologyTest, ArchAndGcSpellingsOfTheCwsrGateAgree) {
       {ROCJITSU_CODE_ARCH_CDNA2, 90010u, "gfx90a"},
       {ROCJITSU_CODE_ARCH_CDNA3, 90402u, "gfx942"},
       {ROCJITSU_CODE_ARCH_CDNA4, 90500u, "gfx950"},
+      {ROCJITSU_CODE_ARCH_CDNA5, 120500u, "gfx1250"},
       {ROCJITSU_CODE_ARCH_RDNA3, 110000u, "gfx1100"},
       {ROCJITSU_CODE_ARCH_RDNA4, 120000u, "gfx1200"},
   };
@@ -3517,6 +3525,127 @@ TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
 
   EXPECT_NE(topology.capability & HSA_CAP_ATS_PRESENT, 0u);
   EXPECT_NE(topology.capability2 & HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED, 0u);
+}
+
+TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kStatus = 1u | (5u << 1) | (1u << 7) | (1u << 19);
+  constexpr uint32_t kMode = (1u << 25) | (0xA5u << 12) | 0xF0u;
+  constexpr uint32_t kTrapsts = 0x7Fu | (1u << 7) | (1u << 8) | (1u << 10) | (1u << 11) |
+                                (0x7u << 12) | (0x1Fu << 22) | (1u << 28) | (0x3u << 30);
+  constexpr uint32_t kTrapCtrl = 0x2AAu;
+  constexpr uint32_t kXnackStatePriv = 0x00057F7Fu;
+  constexpr uint32_t kEditedXnackStatePriv = 0x00015555u;
+  constexpr uint32_t kXnackMask = 0xA5A55A5Au;
+  constexpr uint32_t kNumVgprs = 1024;
+
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL, /*sgprs=*/16, kNumVgprs);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_dispatch_id(7);
+  wave->set_status_raw(kStatus);
+  wave->set_mode_raw(kMode);
+  wave->set_trapsts(kTrapsts);
+  wave->set_gfx1250_trap_ctrl_raw(kTrapCtrl);
+  wave->set_gfx1250_xnack_state_priv_raw(kXnackStatePriv);
+  wave->set_gfx1250_xnack_mask_raw(kXnackMask);
+  wave->set_debug_halted(true);
+
+  uint32_t queue_id = create.queue_id;
+  kfd_ioctl_dbg_trap_args control{};
+  control.pid = static_cast<uint32_t>(getpid());
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+  states[0].num_sgprs = 16;
+  states[0].num_vgprs = kNumVgprs;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(states[0].state_priv & ((1u << 19) | (1u << 20)), (1u << 19) | (1u << 20));
+  EXPECT_EQ(states[0].mode, kMode);
+  EXPECT_EQ(states[0].trap_ctrl, kTrapCtrl);
+  EXPECT_EQ(states[0].xnack_state_priv, kXnackStatePriv);
+  EXPECT_EQ(states[0].xnack_mask, kXnackMask);
+
+  states[0].wave_stopped = false;
+  states[0].xnack_state_priv = kEditedXnackStatePriv;
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                  kCwsrAddress, kCwsrSize, states,
+                  [&](uint64_t address, uint32_t value) {
+                    memory->write32(address, value, driver_->local_process_id());
+                  },
+                  ROCJITSU_CODE_ARCH_CDNA5)
+                  .ok);
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+
+  EXPECT_EQ(wave->status_raw(), kStatus);
+  EXPECT_EQ(wave->mode_raw(), kMode);
+  EXPECT_EQ(wave->trapsts(), kTrapsts);
+  EXPECT_EQ(wave->gfx1250_trap_ctrl_raw(), kTrapCtrl);
+  EXPECT_EQ(wave->gfx1250_xnack_state_priv_raw(), kEditedXnackStatePriv);
+  EXPECT_EQ(wave->gfx1250_xnack_mask_raw(), kXnackMask);
+  EXPECT_FALSE(wave->debug_halted());
 }
 
 // rocm-dbgapi enumerates the target's compute queues to locate each queue's
@@ -3816,10 +3945,10 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
     state.num_sgprs = 16;
     state.num_vgprs = 4;
   }
-  ASSERT_TRUE(
-      rocjitsu::kmd::deserialize_queue_cwsr(kCwsrAddress, kCwsrSize, states, [&](uint64_t address) {
-        return memory->read32(address, driver_->local_process_id());
-      }));
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA4));
   auto stopped = std::find_if(states.begin(), states.end(),
                               [](const auto &state) { return state.wave_stopped; });
   ASSERT_NE(stopped, states.end());
@@ -4342,21 +4471,22 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
   states[0].num_sgprs = 16;
   states[0].num_vgprs = 4;
-  ASSERT_TRUE(
-      rocjitsu::kmd::deserialize_queue_cwsr(kCwsrAddress, kCwsrSize, states, [&](uint64_t address) {
-        return memory->read32(address, driver_->local_process_id());
-      }));
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA4));
   // The debugger sees the application's lanes, and the live register is
   // untouched by having published them.
   EXPECT_EQ(states[0].exec, kInterruptedExec);
   EXPECT_EQ(wave->exec(), kHandlerExec);
 
   states[0].exec = kDebuggerExec;
-  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kCwsrAddress, kCwsrSize, states,
-                                                  [&](uint64_t address, uint32_t value) {
-                                                    memory->write32(address, value,
-                                                                    driver_->local_process_id());
-                                                  })
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                  kCwsrAddress, kCwsrSize, states,
+                  [&](uint64_t address, uint32_t value) {
+                    memory->write32(address, value, driver_->local_process_id());
+                  },
+                  ROCJITSU_CODE_ARCH_CDNA4)
                   .ok);
   control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -4380,18 +4510,19 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   control.suspend_queues.num_queues = 1;
   control.suspend_queues.exception_mask = 0;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
-  ASSERT_TRUE(
-      rocjitsu::kmd::deserialize_queue_cwsr(kCwsrAddress, kCwsrSize, states, [&](uint64_t address) {
-        return memory->read32(address, driver_->local_process_id());
-      }));
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA4));
   // The wave has not stopped for the debugger yet -- the handler has only asked
   // -- so the record describes it as running, exactly as it did before.
   EXPECT_FALSE(states[0].wave_stopped);
-  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kCwsrAddress, kCwsrSize, states,
-                                                  [&](uint64_t address, uint32_t value) {
-                                                    memory->write32(address, value,
-                                                                    driver_->local_process_id());
-                                                  })
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                  kCwsrAddress, kCwsrSize, states,
+                  [&](uint64_t address, uint32_t value) {
+                    memory->write32(address, value, driver_->local_process_id());
+                  },
+                  ROCJITSU_CODE_ARCH_CDNA4)
                   .ok);
   control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -4537,7 +4668,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
     }
     ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
         kCwsrAddress, kCwsrSize, states,
-        [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); }));
+        [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+        ROCJITSU_CODE_ARCH_CDNA4));
     auto selected = std::find_if(states.begin(), states.end(), [&](const auto &state) {
       return step == 0 ? state.group_ids[0] == 0 && state.wave_in_group == 0
                        : state.wave_id == kSteppingWaveId;
@@ -4553,11 +4685,12 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
     selected->wave_stopped = false;
     selected->mode |= kModeDebugEn;
     selected->trapsts &= ~kTrapAfterInst;
-    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(kCwsrAddress, kCwsrSize, states,
-                                                    [&](uint64_t address, uint32_t value) {
-                                                      memory->write32(address, value,
-                                                                      driver_->local_process_id());
-                                                    })
+    ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                    kCwsrAddress, kCwsrSize, states,
+                    [&](uint64_t address, uint32_t value) {
+                      memory->write32(address, value, driver_->local_process_id());
+                    },
+                    ROCJITSU_CODE_ARCH_CDNA4)
                     .ok);
     control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
     control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -4580,7 +4713,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
       ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
       ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
           kCwsrAddress, kCwsrSize, states,
-          [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); }));
+          [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+          ROCJITSU_CODE_ARCH_CDNA4));
       auto stopped_peer = std::find_if(states.begin(), states.end(), [&](const auto &state) {
         return state.wave_id != kSteppingWaveId;
       });
@@ -4592,7 +4726,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
                       kCwsrAddress, kCwsrSize, states,
                       [&](uint64_t address, uint32_t value) {
                         memory->write32(address, value, driver_->local_process_id());
-                      })
+                      },
+                      ROCJITSU_CODE_ARCH_CDNA4)
                       .ok);
       control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
       control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);

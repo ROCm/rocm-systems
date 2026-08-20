@@ -22,6 +22,12 @@ enum class HwregState : uint8_t {
   Unsupported,
   Mode,
   Status,
+  StatePrivGfx1250,
+  ExcpFlagPrivGfx1250,
+  ExcpFlagUserGfx1250,
+  TrapCtrlGfx1250,
+  XnackStatePrivGfx1250,
+  XnackMaskGfx1250,
   Trapsts,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
@@ -103,6 +109,49 @@ uint32_t gfx1250_ib_sts_raw(const Wavefront &wf) {
   const WaitCounters &counters = wf.wait_counters();
   return field_value(counters.dscnt, 3, 6) | field_value(counters.vmcnt, 9, 6) |
          field_value(counters.vscnt, 24, 6);
+}
+
+// RocJITsu keeps the scalar condition, priorities, and halt state in its
+// common internal STATUS word. gfx12.5 exposes those fields through
+// STATE_PRIV instead, so shader HWREG accesses need an explicit translation.
+// SCRATCH_EN is derived from the live scratch allocation just as the hardware
+// initializes it at wave creation.
+uint32_t gfx1250_state_priv_raw(const Wavefront &wf) {
+  return gfx1250_state_priv_from_status(wf.status_raw(), wf.scratch_base() != 0);
+}
+
+void set_gfx1250_state_priv_raw(Wavefront &wf, uint32_t value) {
+  wf.set_status_raw(update_status_from_gfx1250_state_priv(wf.status_raw(), value));
+  // A privileged STATE_PRIV write, rather than S_SENDMSGHALT, owns HALT.
+  wf.set_self_halted(false);
+}
+
+// gfx12.5 split the legacy TRAPSTS/MODE state into EXCP_FLAG_PRIV,
+// EXCP_FLAG_USER and TRAP_CTRL. RocJITsu keeps the execution-facing causes in
+// its common representation, so shader HWREG accesses translate the complete
+// architected field inventory in both directions. EXCP_FLAG_USER's two texture
+// flags have no legacy slot and are held separately on the wave.
+uint32_t gfx1250_excp_flag_priv_raw(const Wavefront &wf) {
+  return gfx1250_excp_flag_priv_from_trapsts(wf.trapsts());
+}
+
+void set_gfx1250_excp_flag_priv_raw(Wavefront &wf, uint32_t value) {
+  wf.set_trapsts(update_trapsts_from_gfx1250_excp_flag_priv(wf.trapsts(), value));
+}
+
+uint32_t gfx1250_excp_flag_user_raw(const Wavefront &wf) {
+  return (wf.trapsts() & 0x7Fu) | wf.gfx1250_excp_flag_user_extra_raw();
+}
+
+void set_gfx1250_excp_flag_user_raw(Wavefront &wf, uint32_t value) {
+  wf.set_trapsts(update_trapsts_from_gfx1250_excp_flag_user(wf.trapsts(), value));
+  wf.set_gfx1250_excp_flag_user_extra_raw(value & (0x3u << 30));
+}
+
+uint32_t gfx1250_trap_ctrl_raw(const Wavefront &wf) { return wf.gfx1250_trap_ctrl_raw(); }
+
+void set_gfx1250_trap_ctrl_raw(Wavefront &wf, uint32_t value) {
+  wf.set_gfx1250_trap_ctrl_raw(value);
 }
 
 // UserWritable records ISA privilege, not simulator completeness. If a
@@ -289,7 +338,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     // departure recorded in cdna5::Isa.
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {4, "WAVE_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx1250, HwregWritePolicy::Privileged},
     {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::IbStsGfx1250, HwregWritePolicy::ReadOnly},
@@ -299,17 +348,17 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {14, "FLUSH_IB", HwregState::Unsupported, HwregWritePolicy::UserWritable},
     {15, "PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {16, "PERF_SNAPSHOT_DATA2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {18, "WAVE_EXCP_FLAG_USER", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {19, "WAVE_TRAP_CTRL", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::ExcpFlagPrivGfx1250, HwregWritePolicy::Privileged},
+    {18, "WAVE_EXCP_FLAG_USER", HwregState::ExcpFlagUserGfx1250, HwregWritePolicy::UserWritable},
+    {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx1250, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
-    {33, "WAVE_XNACK_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {34, "WAVE_XNACK_MASK", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {33, "WAVE_XNACK_STATE_PRIV", HwregState::XnackStatePrivGfx1250, HwregWritePolicy::Privileged},
+    {34, "WAVE_XNACK_MASK", HwregState::XnackMaskGfx1250, HwregWritePolicy::Privileged},
 };
 
 template <size_t N> constexpr HwregTable make_table(const HwregDescriptor (&entries)[N]) {
@@ -377,6 +426,24 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Status:
     raw_value = wf.status_raw();
     return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx1250:
+    raw_value = gfx1250_state_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx1250:
+    raw_value = gfx1250_excp_flag_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx1250:
+    raw_value = gfx1250_excp_flag_user_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx1250:
+    raw_value = gfx1250_trap_ctrl_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx1250:
+    raw_value = wf.gfx1250_xnack_state_priv_raw();
+    return HwregAccessResult::Success;
+  case HwregState::XnackMaskGfx1250:
+    raw_value = wf.gfx1250_xnack_mask_raw();
+    return HwregAccessResult::Success;
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
     return HwregAccessResult::Success;
@@ -424,6 +491,24 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     wf.set_status_raw(raw_value);
     wf.set_self_halted(false);
     return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx1250:
+    set_gfx1250_state_priv_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx1250:
+    set_gfx1250_excp_flag_priv_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx1250:
+    set_gfx1250_excp_flag_user_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx1250:
+    set_gfx1250_trap_ctrl_raw(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx1250:
+    wf.set_gfx1250_xnack_state_priv_raw(raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::XnackMaskGfx1250:
+    wf.set_gfx1250_xnack_mask_raw(raw_value);
+    return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
@@ -440,6 +525,66 @@ uint32_t insert_hwreg_field(uint32_t raw_value, uint32_t src, const DecodedHwreg
 }
 
 } // namespace
+
+uint32_t gfx1250_state_priv_from_status(uint32_t status, bool scratch_enabled) {
+  uint32_t value = ((status & 1u) << 9) | (((status >> 1) & 0xFu) << 10);
+  value |= ((status >> 13) & 1u) << 14;
+  value |= (scratch_enabled ? 1u : 0u) << 18;
+  value |= ((status >> 19) & 1u) << 19;
+  value |= ((status >> 7) & 1u) << 20;
+  return value;
+}
+
+uint32_t update_status_from_gfx1250_state_priv(uint32_t status, uint32_t state_priv) {
+  constexpr uint32_t kMappedStatus =
+      (1u << 0) | (0xFu << 1) | (1u << 7) | Wavefront::kStatusHaltMask | (1u << 19);
+  status &= ~kMappedStatus;
+  status |= (state_priv >> 9) & 1u;
+  status |= ((state_priv >> 10) & 0xFu) << 1;
+  status |= ((state_priv >> 14) & 1u) << 13;
+  status |= ((state_priv >> 19) & 1u) << 19;
+  status |= ((state_priv >> 20) & 1u) << 7;
+  return status;
+}
+
+uint32_t gfx1250_excp_flag_priv_from_trapsts(uint32_t trapsts) {
+  uint32_t value = ((trapsts >> 7) & 1u) << 0;
+  value |= ((trapsts >> 12) & 0x7u) << 1;
+  value |= ((trapsts >> 8) & 1u) << 4;
+  value |= ((trapsts >> 10) & 1u) << 5;
+  value |= ((trapsts >> 11) & 1u) << 6;
+  value |= ((trapsts >> 22) & 1u) << 7;
+  value |= ((trapsts >> 23) & 1u) << 8;
+  value |= ((trapsts >> 24) & 1u) << 9;
+  value |= ((trapsts >> 26) & 1u) << 10;
+  value |= ((trapsts >> 25) & 1u) << 11;
+  value |= ((trapsts >> 28) & 1u) << 12;
+  value |= trapsts & (0x3u << 30);
+  return value;
+}
+
+uint32_t update_trapsts_from_gfx1250_excp_flag_priv(uint32_t trapsts, uint32_t excp_flag_priv) {
+  constexpr uint32_t kMappedTrapsts = (1u << 7) | (1u << 8) | (1u << 10) | (1u << 11) |
+                                      (0x7u << 12) | (0x1Fu << 22) | (1u << 28) | (0x3u << 30);
+  trapsts &= ~kMappedTrapsts;
+  trapsts |= ((excp_flag_priv >> 0) & 1u) << 7;
+  trapsts |= ((excp_flag_priv >> 1) & 0x7u) << 12;
+  trapsts |= ((excp_flag_priv >> 4) & 1u) << 8;
+  trapsts |= ((excp_flag_priv >> 5) & 1u) << 10;
+  trapsts |= ((excp_flag_priv >> 6) & 1u) << 11;
+  trapsts |= ((excp_flag_priv >> 7) & 1u) << 22;
+  trapsts |= ((excp_flag_priv >> 8) & 1u) << 23;
+  trapsts |= ((excp_flag_priv >> 9) & 1u) << 24;
+  trapsts |= ((excp_flag_priv >> 10) & 1u) << 26;
+  trapsts |= ((excp_flag_priv >> 11) & 1u) << 25;
+  trapsts |= ((excp_flag_priv >> 12) & 1u) << 28;
+  trapsts |= excp_flag_priv & (0x3u << 30);
+  return trapsts;
+}
+
+uint32_t update_trapsts_from_gfx1250_excp_flag_user(uint32_t trapsts, uint32_t excp_flag_user) {
+  return (trapsts & ~0x7Fu) | (excp_flag_user & 0x7Fu);
+}
 
 uint32_t hwreg_id(uint16_t hwreg) { return hwreg & 0x3Fu; }
 

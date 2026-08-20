@@ -12,6 +12,8 @@ Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
+bool Wavefront::uses_separate_trap_ctrl() const { return cu_.arch() == ROCJITSU_CODE_ARCH_CDNA5; }
+
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 
 void Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {

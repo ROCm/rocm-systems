@@ -14,6 +14,23 @@ namespace amdgpu {
 
 class Wavefront;
 
+/// @brief Encode the gfx12.5 STATE_PRIV fields backed by internal STATUS.
+[[nodiscard]] uint32_t gfx1250_state_priv_from_status(uint32_t status, bool scratch_enabled);
+
+/// @brief Replace internal STATUS fields represented by gfx12.5 STATE_PRIV.
+[[nodiscard]] uint32_t update_status_from_gfx1250_state_priv(uint32_t status, uint32_t state_priv);
+
+/// @brief Encode gfx12.5 EXCP_FLAG_PRIV from RocJITsu's common TRAPSTS state.
+[[nodiscard]] uint32_t gfx1250_excp_flag_priv_from_trapsts(uint32_t trapsts);
+
+/// @brief Replace common TRAPSTS fields represented by gfx12.5 EXCP_FLAG_PRIV.
+[[nodiscard]] uint32_t update_trapsts_from_gfx1250_excp_flag_priv(uint32_t trapsts,
+                                                                  uint32_t excp_flag_priv);
+
+/// @brief Replace common TRAPSTS fields represented by gfx12.5 EXCP_FLAG_USER.
+[[nodiscard]] uint32_t update_trapsts_from_gfx1250_excp_flag_user(uint32_t trapsts,
+                                                                  uint32_t excp_flag_user);
+
 /// @brief Result of a shader HWREG read or write.
 ///
 /// @details Success means the addressed HWREG field is backed by wave state and

@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -2434,7 +2435,26 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) 
 
 namespace {
 
-kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
+uint32_t gfx1250_status(uint32_t status) {
+  // SCC, priorities and HALT moved to STATE_PRIV. The remaining fields used by
+  // dbgapi retain their gfx9 positions.
+  return status & ~((0x1Fu << 0) | (1u << 7) | (1u << 13) | (1u << 19));
+}
+
+uint32_t internal_status_from_gfx1250(const kmd::CwsrWaveState &state) {
+  uint32_t status = amdgpu::update_status_from_gfx1250_state_priv(state.status, state.state_priv);
+  status &= ~amdgpu::Wavefront::kStatusHaltMask;
+  if (state.saved_status_halt)
+    status |= amdgpu::Wavefront::kStatusHaltMask;
+  return status;
+}
+
+uint32_t internal_trapsts_from_gfx1250(const kmd::CwsrWaveState &state) {
+  uint32_t trapsts = amdgpu::update_trapsts_from_gfx1250_excp_flag_priv(0, state.excp_flag_priv);
+  return amdgpu::update_trapsts_from_gfx1250_excp_flag_user(trapsts, state.excp_flag_user);
+}
+
+kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch) {
   kmd::CwsrWaveState state;
   const uint32_t raw_status = wf.status_raw();
   state.pc = wf.pc;
@@ -2481,6 +2501,21 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   const uint32_t application_status = wf.in_trap_handler() ? wf.trap_saved_status() : raw_status;
   state.status =
       state.wave_stopped ? application_status | (1u << 13) : application_status & ~(1u << 13);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    uint32_t debug_status = application_status;
+    if (state.wave_stopped)
+      debug_status |= amdgpu::Wavefront::kStatusHaltMask;
+    else
+      debug_status &= ~amdgpu::Wavefront::kStatusHaltMask;
+    state.state_priv =
+        amdgpu::gfx1250_state_priv_from_status(debug_status, state.flat_scratch != 0);
+    state.status = gfx1250_status(application_status);
+    state.excp_flag_priv = amdgpu::gfx1250_excp_flag_priv_from_trapsts(state.trapsts);
+    state.excp_flag_user = (state.trapsts & 0x7Fu) | wf.gfx1250_excp_flag_user_extra_raw();
+    state.trap_ctrl = wf.gfx1250_trap_ctrl_raw();
+    state.xnack_state_priv = wf.gfx1250_xnack_state_priv_raw();
+    state.xnack_mask = wf.gfx1250_xnack_mask_raw();
+  }
   state.trap_id = wf.trap_id();
   state.wave_id = wf.debug_wave_id();
   state.group_ids = wf.wg_coord();
@@ -2555,7 +2590,7 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
           auto *wave = cu->wf(i);
           if (wave->debug_stopped() && wave->process_id() == process_id &&
               wave->queue_id() == queue_id)
-            waves.push_back(build_cwsr_wave_state(*wave));
+            waves.push_back(build_cwsr_wave_state(*wave, gpu->soc->arch()));
         }
       });
     }
@@ -2587,7 +2622,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
   bool publish_ok = true;
   const auto layout = kmd::serialize_queue_cwsr_bulk(
-      ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
+      ctx_base, ctx_size, waves,
+      [&](uint64_t address, std::span<const uint8_t> bytes) {
         if (target_mem.get() < 0) {
           memory->write_block(address, bytes, process_id);
           return;
@@ -2600,7 +2636,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
                              " pid=", std::dec, proc->client_pid(), " rc=", written,
                              " errno=", errno);
         }
-      });
+      },
+      gpu->soc->arch());
   if (!layout.ok || !publish_ok)
     return false;
 
@@ -2748,7 +2785,7 @@ bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
     util::Logger::warn(
         "wave stops not published on gpu_id=", gpu_id,
         ": no CWSR record layout is modelled for arch=", static_cast<int>(gpu->soc->arch()),
-        "; GPU debugging is supported on gfx942/gfx950 only");
+        "; GPU debugging is supported on gfx942/gfx950/gfx1250 only");
   }
   return false;
 }
@@ -2879,14 +2916,20 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
     return false;
 
   static constexpr uint32_t kTrapstsBits[] = {1u << 7, 1u << 12, 1u << 13, 1u << 14};
-  constexpr uint32_t kModeExcpEnAddrWatch = 1u << 19;
   const auto saved = wave.debug_stop_state();
   uint32_t trapsts = wave.trapsts();
   for (uint32_t slot = 0; slot < KfdProcess::DebugSession::kMaxAddressWatches; ++slot)
     if ((matched_slots & (uint32_t{1} << slot)) != 0)
       trapsts |= kTrapstsBits[slot];
   wave.set_trapsts(trapsts);
-  wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
+  auto *gpu = find_gpu(gpu_id);
+  if (gpu && gpu->soc && gpu->soc->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    constexpr uint32_t kTrapCtrlAddrWatch = 1u << 7;
+    wave.set_gfx1250_trap_ctrl_raw(wave.gfx1250_trap_ctrl_raw() | kTrapCtrlAddrWatch);
+  } else {
+    constexpr uint32_t kModeExcpEnAddrWatch = 1u << 19;
+    wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
+  }
   wave.debug_trap(0);
   if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size)) {
     wave.restore_debug_stop_state(saved);
@@ -3113,7 +3156,8 @@ util::UniqueHandle SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) co
   return util::UniqueHandle(safe_fcntl(session->second.target_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
 }
 
-void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
+void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state,
+                                      rj_code_arch_t arch) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   constexpr uint32_t kStatusHaltMask = amdgpu::Wavefront::kStatusHaltMask;
   wave.pc = state.pc;
@@ -3136,7 +3180,9 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   // record's HALT to the interrupted state the handler restores and leave the
   // live register to the handler.
   const uint32_t restored_status =
-      (state.status & ~kStatusHaltMask) | (state.saved_status_halt ? kStatusHaltMask : 0u);
+      arch == ROCJITSU_CODE_ARCH_CDNA5
+          ? internal_status_from_gfx1250(state)
+          : (state.status & ~kStatusHaltMask) | (state.saved_status_halt ? kStatusHaltMask : 0u);
   if (wave.in_trap_handler())
     wave.set_trap_saved_status(restored_status);
   else
@@ -3154,7 +3200,14 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
     wave.set_self_halted(false);
   }
   wave.set_mode_raw(state.mode);
-  wave.set_trapsts(state.trapsts);
+  wave.set_trapsts(arch == ROCJITSU_CODE_ARCH_CDNA5 ? internal_trapsts_from_gfx1250(state)
+                                                    : state.trapsts);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    wave.set_gfx1250_excp_flag_user_extra_raw(state.excp_flag_user & (0x3u << 30));
+    wave.set_gfx1250_trap_ctrl_raw(state.trap_ctrl);
+    wave.set_gfx1250_xnack_state_priv_raw(state.xnack_state_priv);
+    wave.set_gfx1250_xnack_mask_raw(state.xnack_mask);
+  }
   wave.set_debug_wave_id(state.wave_id);
   wave.set_aql_packet_id(state.queue_packet_id);
   const uint32_t stack_pointer = wave.debug_read_sgpr(32);
@@ -3170,7 +3223,7 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   // the round trip from disagreeing about which slots carry register state.
   if (!state.sgprs.empty())
     for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-      if (s != 32 && s != 33 && !kmd::cwsr_sgpr_slot_is_aliased(s))
+      if (s != 32 && s != 33 && !kmd::cwsr_sgpr_slot_is_aliased(s, arch))
         wave.debug_write_sgpr(s, state.sgprs[s]);
   if (!state.vgprs.empty())
     for (uint32_t r = 0; r < state.num_vgprs; ++r)
@@ -3186,7 +3239,9 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   wave.set_scratch_base(state.flat_scratch);
   wave.debug_write_sgpr(32, stack_pointer);
   wave.debug_write_sgpr(33, stack_frame);
-  const bool single_step = !state.wave_stopped && (state.mode & kModeDebugEnMask) != 0;
+  const bool single_step = !state.wave_stopped && (arch == ROCJITSU_CODE_ARCH_CDNA5
+                                                       ? (state.trap_ctrl & (1u << 9)) != 0
+                                                       : (state.mode & kModeDebugEnMask) != 0);
   wave.set_debug_single_step(single_step);
   wave.set_debug_halted(state.wave_stopped);
   // debug_suspended is deliberately left set here. Clearing it per wave made
@@ -3244,7 +3299,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             if (wave->debug_stopped() && wave->process_id() == proc->process_id() &&
                 wave->queue_id() == context.queue_id) {
               stopped.push_back(wave);
-              states.push_back(build_cwsr_wave_state(*wave));
+              states.push_back(build_cwsr_wave_state(*wave, gpu->soc->arch()));
               owners.push_back(cu);
             }
           }
@@ -3275,7 +3330,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
       util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
       bool read_ok = true;
       restored = kmd::deserialize_queue_cwsr_bulk(
-          context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
+          context.base, context.size, states,
+          [&](uint64_t address, std::span<uint8_t> bytes) {
             if (target_mem.get() < 0) {
               memory->read_block(address, bytes, proc->process_id());
               return;
@@ -3289,7 +3345,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
                                  " pid=", std::dec, proc->client_pid(), " rc=", bytes_read,
                                  " errno=", errno);
             }
-          });
+          },
+          gpu->soc->arch());
       restored = restored && read_ok;
     }
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
@@ -3330,8 +3387,9 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             stopped[wave_index]->lds().write(stopped[wave_index]->lds_base(),
                                              states[state_index].lds.data(),
                                              static_cast<uint32_t>(states[state_index].lds.size()));
-          owners[wave_index]->with_wave_state_locked(
-              [&] { apply_cwsr_to_wave(*stopped[wave_index], states[state_index]); });
+          owners[wave_index]->with_wave_state_locked([&] {
+            apply_cwsr_to_wave(*stopped[wave_index], states[state_index], gpu->soc->arch());
+          });
         }
       }
     }

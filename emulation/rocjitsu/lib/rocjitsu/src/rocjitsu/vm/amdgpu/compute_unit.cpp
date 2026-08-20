@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
 #include "util/log.h"
@@ -730,8 +731,26 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       auto config = trap_handler_resolver_(*active);
       if (config && config->tba != 0) {
         const uint64_t saved_pc = active->pc;
+        const uint32_t saved_status = active->status_raw();
         active->set_ttmp(0, static_cast<uint32_t>(saved_pc));
-        active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+        if (this->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+          // gfx12.5 trap entry uses a 57-bit PC and carries the four-bit trap
+          // id in TTMP1[31:28]. TTMP11[23] carries DebugEnabled, while TTMP12
+          // receives STATE_PRIV. These fields are the first-level trap ABI
+          // consumed by ROCr's trap_handler_gfx12.s.
+          active->set_ttmp(1, (static_cast<uint32_t>(saved_pc >> 32) & 0x01FFFFFFu) |
+                                  ((trap_id & 0xFu) << 28));
+          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
+          active->set_ttmp(11, (active->ttmp(11) & ~(1u << 23)) | debug_enabled);
+          constexpr uint16_t kWholeStatePriv = 4u | (31u << 11);
+          uint32_t state_priv = 0;
+          const auto state_result = read_hwreg_field(*active, kWholeStatePriv, state_priv);
+          assert(state_result == HwregAccessResult::Success);
+          (void)state_result;
+          active->set_ttmp(12, state_priv);
+        } else {
+          active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+        }
         // Dispatch identity. Which TTMPs carry it is architecture-specific and
         // this must not disagree with what CWSR publishes for the same wave, or
         // rocm-dbgapi correlates the stopped wave to the wrong workgroup.
@@ -748,15 +767,17 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
           active->set_ttmp(9, wg[1]);
           active->set_ttmp(10, wg[2]);
         }
-        active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
-                                 (active->wave_in_group() & 0x3Fu));
-        active->set_ttmp(12, active->status_raw());
-        const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
-        active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
+        if (this->arch() != ROCJITSU_CODE_ARCH_CDNA5) {
+          active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
+                                   (active->wave_in_group() & 0x3Fu));
+          active->set_ttmp(12, saved_status);
+          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
+          active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
+        }
         active->set_ttmp(14, static_cast<uint32_t>(config->tma));
         active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
         active->set_trap_id(trap_id);
-        active->set_trap_saved_status(active->status_raw());
+        active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
         // A fresh handler entry owns the halt state from here on; a marker left
@@ -764,6 +785,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         // s_sendmsghalt that has already been resumed past.
         active->set_self_halted(false);
         active->set_in_trap_handler(true);
+        if (this->arch() == ROCJITSU_CODE_ARCH_CDNA5)
+          active->set_status_raw(saved_status | kPrivilegedStatusBit);
         active->pc = config->tba;
         delete inst;
         return;
@@ -955,8 +978,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // the generated call sites use. A local copy here would keep checking the
   // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes =
-      (active->mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
+  const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
   if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
       alu_exception_handler_(*active))
     return;

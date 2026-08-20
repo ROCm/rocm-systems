@@ -5550,6 +5550,79 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
     wf->halt();
 }
 
+TEST(HwregHelperTest, Gfx1250TrapHandlerRegistersRoundTripArchitectedFields) {
+  amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_trap_regs_mem");
+  amdgpu::L2Cache l2("hwreg_helper_gfx1250_trap_regs_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kExcpPriv = 0xC0001FFFu;
+  constexpr uint32_t kExcpUser = 0xC000007Fu;
+  constexpr uint32_t kTrapCtrl = 0x3FFu;
+  constexpr uint32_t kMode = (1u << 25) | (0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT) | 0xF0u;
+  constexpr uint32_t kXnackState = 0x00057F7Fu;
+  constexpr uint32_t kXnackMask = 0xA5A55A5Au;
+  uint32_t value = 0;
+
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Privileged);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Privileged);
+
+  wf->set_in_trap_handler(true);
+  wf->set_mode_raw(kMode);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(18), kExcpUser),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(wf->mode_raw(), kMode);
+  EXPECT_EQ(wf->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(0xA5u));
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33), kXnackState),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(34), kXnackMask),
+            amdgpu::HwregAccessResult::Success);
+
+  for (const auto &[id, expected] :
+       std::array<std::pair<uint32_t, uint32_t>, 5>{{{17, kExcpPriv},
+                                                     {18, kExcpUser},
+                                                     {19, kTrapCtrl},
+                                                     {33, kXnackState},
+                                                     {34, kXnackMask}}}) {
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(id), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected) << "HWREG id " << id;
+  }
+
+  // Partial writes are what ROCr's gfx12.5 trap handler uses to restore
+  // SAVE_CONTEXT and the XNACK replay fields before S_RFE_I64.
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17, 5, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(17, 5, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33, 16, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(33, 16, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+
+  wf->set_in_trap_handler(false);
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
   amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_hwreg_ids_mem");
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_hwreg_ids_l2");

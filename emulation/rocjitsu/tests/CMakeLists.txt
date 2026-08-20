@@ -2870,6 +2870,24 @@ if(
         ENVIRONMENT
             "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
             "ROCM_HOME=${_rocgdb_rocm_home}"
+            "MIRAGE_PROFILE=mi350x"
+            "OFFLOAD_ARCH=gfx950"
+            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx950/config"
+            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx950/state"
+        SKIP_REGULAR_EXPRESSION "SKIP:"
+    )
+    rj_add_test(
+        NAME "RocgdbDebug.Gfx1250KernelBreakpoint"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/rocgdb/debug_kernel.sh"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 300
+        ENVIRONMENT
+            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCM_HOME=${_rocgdb_rocm_home}"
+            "MIRAGE_PROFILE=mi450x"
+            "OFFLOAD_ARCH=gfx1250"
+            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx1250/config"
+            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx1250/state"
         SKIP_REGULAR_EXPRESSION "SKIP:"
     )
     message(
