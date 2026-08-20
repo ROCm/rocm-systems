@@ -34,6 +34,7 @@ enum class StatsLevel : uint64_t {
 enum class StatsBackend {
     Fastpath,
     Fallback,
+    Host,
     Count,
 };
 

@@ -132,8 +132,10 @@ void expect_file_registration(hipFile::MSys &msys, hipFile::MLibMountHelper &mli
 //  ENUM VALUE HELPERS
 // ***********************************************************************
 
-constexpr std::array<hipMemoryType, 1> SupportedHipMemoryTypes{hipMemoryTypeDevice};
-constexpr std::array<hipMemoryType, 5> UnsupportedHipMemoryTypes{
-    hipMemoryTypeArray,   hipMemoryTypeHost,         hipMemoryTypeManaged,
-    hipMemoryTypeUnified, hipMemoryTypeUnregistered,
+constexpr std::array SupportedHipMemoryTypes{hipMemoryTypeDevice, hipMemoryTypeHost};
+constexpr std::array UnsupportedHipMemoryTypes{
+    hipMemoryTypeArray,
+    hipMemoryTypeManaged,
+    hipMemoryTypeUnified,
+    hipMemoryTypeUnregistered,
 };

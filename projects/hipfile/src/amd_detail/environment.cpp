@@ -75,3 +75,9 @@ Environment::stats_level()
 {
     return Environment::get<unsigned int>(Environment::STATS_LEVEL);
 }
+
+optional<bool>
+Environment::host()
+{
+    return Environment::get<bool>(Environment::HOST);
+}

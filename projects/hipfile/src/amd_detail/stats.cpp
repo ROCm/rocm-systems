@@ -296,6 +296,8 @@ namespace reportUtil {
                 return "Fastpath";
             case StatsBackend::Fallback:
                 return "Fallback";
+            case StatsBackend::Host:
+                return "Host";
             case StatsBackend::Count:
                 [[fallthrough]];
             default:

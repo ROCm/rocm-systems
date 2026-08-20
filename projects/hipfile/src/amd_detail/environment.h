@@ -60,6 +60,16 @@ public:
     /// nullopt if HIPFILE_UNSUPPORTED_FILE_SYSTEMS was unset or had a value other than
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
+
+    /// @brief Enable or disable the host backend
+    ///
+    /// If enabled (default), file ↔ host-memory transfers use host when
+    /// liburing is available. Set to false to fall back to pread/pwrite.
+    static constexpr const char *const HOST{"HIPFILE_HOST"};
+
+    /// @brief Get the value of HIPFILE_HOST from the environment
+    /// @return An optional boolean if HIPFILE_HOST was set, nullopt otherwise.
+    static std::optional<bool> host();
 };
 
 }

@@ -35,9 +35,11 @@ expect_buffer_registration(MHip &mhip, hipMemoryType memory_type)
 {
     hipPointerAttribute_t attrs{};
     attrs.type = memory_type;
-    HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
-    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    if (memory_type == hipMemoryTypeDevice) {
+        HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
+        EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    }
 }
 
 struct HipFileBuffer : public HipFileOpened {

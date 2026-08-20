@@ -5,6 +5,7 @@
 
 #include "backend/fallback.h"
 #include "backend/fastpath.h"
+#include "backend/host.h"
 #include "batch/batch.h"
 #include "buffer.h"
 #include "configuration.h"
@@ -277,9 +278,11 @@ DriverState::getBackends() const
     static bool once = [&]() {
         std::shared_ptr<Fallback> fallback_backend = std::make_shared<Fallback>();
         std::shared_ptr<Fastpath> fastpath_backend = std::make_shared<Fastpath>();
+        std::shared_ptr<Host>     host_backend     = std::make_shared<Host>();
         fastpath_backend->register_fallback_backend(fallback_backend);
         backends.push_back(fallback_backend);
         backends.push_back(fastpath_backend);
+        backends.push_back(host_backend);
         return true;
     }();
     (void)once;
