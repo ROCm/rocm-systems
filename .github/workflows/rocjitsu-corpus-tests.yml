@@ -247,14 +247,15 @@ jobs:
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
             "HsaTranslateTest\.TranslateAndDispatchMfma16x16"
-            # Direct HIP test discovery initializes the instrumented ROCr client,
-            # which reports a ConcurrentAsyncEvents race; vector add also exposes
-            # unsynchronized simulator/client buffer access. The daemon variants
-            # use the separately synchronized RPC path and remain enabled.
+            # HIP test discovery initializes the instrumented ROCr client, which
+            # reports a ConcurrentAsyncEvents race. The device-to-device case also
+            # reaches that ROCr race through the daemon client; vector add exposes
+            # unsynchronized simulator/client buffer access as well.
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
             "HipVectorAddTest\.CorrectResult"
+            "DaemonTest\.HipMemcpyDeviceToDevice"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
