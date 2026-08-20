@@ -234,11 +234,22 @@ async fn run_owned(
     // wrong. Same session, same borrower, opposite treatment, decided by
     // something the borrower has no part in.
     let outcome: anyhow::Result<ExitCode> = async {
+        // `--gdb` / `--gdb-ex` wrap the workload under ROCgdb for
+        // interactive GPU kernel debugging; `--gdb-ex` implies `--gdb`.
+        // Applied here rather than inside `exec_def` because it is a
+        // `run` flag: `mirage exec` reaches an existing job's node and
+        // has no `--gdb` to honour, and wrapping there would put a second
+        // debugger around a workload the run already wrapped.
+        let argv = if a.gdb || !a.gdb_ex.is_empty() {
+            crate::gdb_wrap_argv(&a.argv, &a.gdb_ex)
+        } else {
+            a.argv.clone()
+        };
         // `run` starts the whole job; `exec --node N` is how you reach
         // one node of it, so the node is unset here.
         let def = exec_def(
             session.clone(),
-            &a.argv,
+            &argv,
             &a.envs,
             a.workdir.clone(),
             a.nproc_per_node,

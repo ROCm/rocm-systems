@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include <cstdint>
+#include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -60,6 +61,19 @@ inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 ==
 
 inline uint32_t src_dpp8_fi(uint32_t src0) { return src0 == SRC_DPP8_FI_1 ? 1u : 0u; }
 
+/// @brief Add the lane selectors for a DPP8 instruction.
+inline void append_dpp8_disassembly(std::string &out, uint32_t lane_sel, uint32_t fi) {
+  out += " dpp8:[";
+  for (uint32_t lane = 0; lane < 8; ++lane) {
+    if (lane != 0)
+      out += ',';
+    out += std::to_string((lane_sel >> (lane * 3)) & 0x7);
+  }
+  out += ']';
+  if (fi != 0)
+    out += " fi:1";
+}
+
 } // namespace dpp
 
 namespace sdwa {
@@ -80,6 +94,18 @@ enum SdwaUnused : uint32_t {
   UNUSED_PAD = 0,
   UNUSED_SEXT = 1,
   UNUSED_PRESERVE = 2,
+};
+
+/// @brief Floating-point representation used by SDWA source modifiers.
+///
+/// SDWA selection and sign extension apply to every source. Absolute-value and
+/// negate fields apply only to floating-point sources, and their sign bit
+/// depends on the semantic source type rather than the selector width.
+enum class SourceModifierFormat {
+  NONE,
+  F16,
+  BF16,
+  F32,
 };
 
 } // namespace sdwa

@@ -72,7 +72,7 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("wmma_simd_bench_mem"), l2("wmma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;

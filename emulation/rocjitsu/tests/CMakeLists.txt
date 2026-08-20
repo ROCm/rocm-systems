@@ -319,6 +319,42 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
+target_link_libraries(
+    rj_decode_fuzz_test
+    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+)
+rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
+rj_add_gtest_tests(rj_decode_fuzz_test)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME DecodeDifferentialUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_differential.py -v
+)
+add_test(
+    NAME DecodeSeedExtractorUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_prepare_decode_seeds.py -v
+)
+add_test(
+    NAME DecodeFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_DECODE_FUZZ=$<TARGET_FILE:rj_decode_fuzz>
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
+)
+add_test(
+    NAME PretranslateScriptUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
@@ -354,10 +390,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endfunction()
 
     rj_add_plugin_loader_fixture(good)
-    rj_add_plugin_loader_fixture(
-        badabi
-        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
-    )
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
 endif()
@@ -370,12 +402,21 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
-    gfx1250_sim_test.cpp
+    xcd_distribution_test.cpp
+    cdna5_architecture_test.cpp
+    cdna5_cluster_test.cpp
+    cdna5_dispatch_memory_test.cpp
+    cdna5_execution_test.cpp
+    cdna5_instruction_test.cpp
+    cdna5_sdma_test.cpp
+    cdna5_tensor_dma_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
+    partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    decoder_c_api_test.cpp
     buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -391,25 +432,37 @@ add_executable(
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
+    dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
+    code/kernel_descriptor_scan_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
     dbt/virtual_lds_metadata_test.cpp
+    dbt/encoding_translator_test.cpp
+    dbt/legalization_table_test.cpp
+    dbt/support/translate_test_support.cpp
+    dbt/translate_gfx1250_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     register_access_test.cpp
+    register_file_test.cpp
+    simd_correctness/mfma_lazy_storage_test.cpp
+    vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     isa_target_registry_test.cpp
+    pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
+    wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
@@ -472,7 +525,9 @@ add_executable(
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
-        PRIVATE dbt/multikernel_indirect_branch_test.cpp
+        PRIVATE
+            dbt/device_kernels_translate_tests.cpp
+            dbt/multikernel_indirect_branch_test.cpp
     )
 endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
@@ -513,15 +568,35 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
-        plugin_loader_fixture_badabi
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*').
-rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
+# is registered separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(
+    rocjitsu_tests
+    TEST_FILTER "-*Benchmark*:*RequestExitWakesAllPartitions*"
+)
+
+# RequestExitWakesAllPartitions may require several runs to show regression
+# (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
+# the failures. Usually fails within the first 5 times and 30 passing tests
+# takes about 2.5s in CI.
+rj_add_test(
+    NAME "TerminationTest.RequestExitWakesAllPartitions"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+    TIMEOUT 10
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -534,7 +609,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -573,11 +648,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    # Checked on the translator rather than the hook. The hook used to link the
+    # translator as a static archive and so carried the model code itself; now it
+    # loads a shared object, and the boundary this guards -- model in, execution
+    # out -- belongs to whichever artifact holds that code. Pointed at the hook it
+    # would now pass vacuously, which is the failure mode the required-symbol
+    # check at the end of the script exists to catch.
     add_test(
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -626,7 +707,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_narrow_isa_registry_fixture
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
     )
     rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
@@ -682,6 +763,18 @@ if(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
 endif()
 rj_configure_target(launch_preload_test TEST)
 rj_add_gtest_tests(launch_preload_test)
+
+# --- CLI ROCm visibility tests ---
+# rocm_visibility.cpp ships in the launch-preload library for build convenience,
+# but its tests get their own executable so they mirror the source structure.
+
+add_executable(rocm_visibility_test rocm_visibility_test.cpp)
+target_link_libraries(
+    rocm_visibility_test
+    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
+)
+rj_configure_target(rocm_visibility_test TEST)
+rj_add_gtest_tests(rocm_visibility_test)
 
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
@@ -759,7 +852,7 @@ target_include_directories(
 )
 target_link_libraries(
     rj_dbt_translate_smoke_test
-    PRIVATE rocjitsu_tooling GTest::gtest
+    PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
@@ -792,9 +885,9 @@ rj_configure_target(scaling_test TEST)
 # The CLI handles LD_PRELOAD and config discovery. rj_add_test gives launcher
 # tests isolated runtime directories, so no RESOURCE_LOCK is needed.
 
-set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json")
 set(RJ_CDNA4_KMD_2GPU_CONFIG
-    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
@@ -891,7 +984,7 @@ endif()
 
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
 )
 
 add_executable(guest_kfd_test guest_kfd_test.cpp)
@@ -950,6 +1043,54 @@ rj_add_test(
         "bin/guest_kfd_test"
         "--gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
 )
+rj_add_test(
+    NAME "GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
+)
+rj_add_test(
+    NAME "GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+    COMMAND
+        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    # The test skips when the runtime directory it is handed is already deeper than
+    # the >4095-byte path it needs to build. Without this the skip would be reported
+    # as a pass and the lost coverage would be invisible.
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
+        "--"
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
+)
+# Pure harness logic: no guest device, so no launcher wrapper.
+rj_add_test(
+    NAME "GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+    COMMAND
+        $<TARGET_FILE:guest_kfd_test>
+        --gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "bin/guest_kfd_test"
+        "--gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
+)
 if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
@@ -980,6 +1121,15 @@ if(RJ_HAS_GFX1201_GPU)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
+        NAME "GuestKfdLifecycleTest.ReopensAfterLastClose"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdLifecycleTest.ReopensAfterLastClose
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
         NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         COMMAND
             ${RJ_CLI} --config
@@ -1001,6 +1151,7 @@ if(RJ_HAS_GFX1201_GPU)
         "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
         "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        "GuestKfdLifecycleTest.ReopensAfterLastClose"
         "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
         PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
@@ -1012,6 +1163,7 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
             "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+            "GuestKfdLifecycleTest.ReopensAfterLastClose"
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
             "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
     )
@@ -1046,7 +1198,6 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-        ${CMAKE_SOURCE_DIR}/lib/util/include
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
@@ -1058,7 +1209,9 @@ target_include_directories(
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
-        rocjitsu_hooks
+        # Test-only hook variant: same objects as rocjitsu_hooks plus the
+        # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
+        rocjitsu_hooks_testing
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
@@ -1098,10 +1251,87 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             hsa_hotswap_rocjitsu_unit_test
             probe_relocation_function_table_dispatch_gfx1250
         )
+        # The pre-translated tier is filled by a separate program and read by the
+        # hook. Running the real tool is the only way to test that the two agree
+        # on a key; writing entries through a test seam would exercise the hook's
+        # own derivation twice and prove nothing about the pair.
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE RJ_PRETRANSLATE_TOOL="$<TARGET_FILE:rj_pretranslate>"
+        )
+        add_dependencies(hsa_hotswap_rocjitsu_unit_test rj_pretranslate)
     endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+
+    # Compiles the translation store as a plain DBT component rather than
+    # reaching it through a hook, which is how a second consumer would use it.
+    add_executable(
+        translation_store_test
+        dbt/translation_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/code/dbt/translation_store.cpp
+    )
+    target_include_directories(
+        translation_store_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_compile_definitions(
+        translation_store_test
+        PRIVATE RJ_TRANSLATION_STORE_TEST_HOOKS
+    )
+    # The store keys entries on this note and disables itself without it.
+    target_link_options(translation_store_test PRIVATE "LINKER:--build-id=sha1")
+    target_link_libraries(
+        translation_store_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(translation_store_test TEST)
+    gtest_discover_tests(translation_store_test)
+
+    # One source, two modules differing only in build id -- which is what a
+    # rebuilt translator is. Entries written against one must be invisible to the
+    # other, and no single binary can show that: the store derives identity from
+    # the module containing an address, so two identities need two modules.
+    #
+    # The ids are fixed rather than content-derived so this stays a test of the
+    # store rather than of the linker. Content-derived ids would also differ, but
+    # only incidentally, and would churn whenever either file was touched.
+    foreach(_probe_suffix a b)
+        set(_probe rj_translator_build_probe_${_probe_suffix})
+        add_library(${_probe} MODULE dbt/translator_build_probe.cpp)
+        rj_configure_target(${_probe} TEST)
+        target_compile_definitions(
+            translation_store_test
+            PRIVATE
+                RJ_TRANSLATOR_PROBE_${_probe_suffix}="$<TARGET_FILE:${_probe}>"
+        )
+        add_dependencies(translation_store_test ${_probe})
+    endforeach()
+    target_link_options(
+        rj_translator_build_probe_a
+        PRIVATE "LINKER:--build-id=0xaaaaaaaaaaaaaaaa"
+    )
+    target_link_options(
+        rj_translator_build_probe_b
+        PRIVATE "LINKER:--build-id=0xbbbbbbbbbbbbbbbb"
+    )
 endif()
+
+# A separate loadable module is the only way to observe the force-scalar gate's
+# per-module scope: the gate is an inline variable with hidden visibility, so
+# nothing linked into the test executable can see the boundary. The test dlopens
+# this and compares what it reports against its own copy.
+add_library(util_force_scalar_probe MODULE util_force_scalar_probe.cpp)
+target_link_libraries(util_force_scalar_probe PRIVATE util)
+rj_configure_target(util_force_scalar_probe TEST)
+add_dependencies(rocjitsu_tests util_force_scalar_probe)
+target_compile_definitions(
+    rocjitsu_tests
+    PRIVATE
+        RJ_FORCE_SCALAR_PROBE_MODULE="$<TARGET_FILE:util_force_scalar_probe>"
+)
 
 # --- Interposer loader initialization regression tests ---
 
@@ -1145,77 +1375,112 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
 )
-target_link_libraries(interposer_dup_test PRIVATE GTest::gtest_main)
+target_link_libraries(
+    interposer_dup_test
+    PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+)
 add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
-foreach(
-    _interposer_dup_test
-    IN
-    ITEMS
-        DupKeepsKfdRoutingAfterPrimaryClose
-        FcntlDupfdKeepsKfdRouting
-        Dup2OverPrimaryInvalidatesKfdIdentity
-        Dup2OntoFreshFdRoutesKfd
-        Dup3RoutesKfdAndRejectsSameFd
-        ReopenAfterPrimaryOverwriteKeepsBackend
-        SerializedReopenUnderContentionStaysRoutable
-)
-    rj_add_test(
-        NAME "InterposerDupTest.${_interposer_dup_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-    )
-endforeach()
+function(rj_add_interposer_test_suite _suite)
+    foreach(_case IN LISTS ARGN)
+        rj_add_test(
+            NAME "${_suite}.${_case}"
+            COMMAND
+                ${RJ_CLI}
+                --config
+                ${RJ_CDNA4_KMD_CONFIG}
+                --
+                $<TARGET_FILE:interposer_dup_test>
+                "--gtest_filter=${_suite}.${_case}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                "--config"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "--"
+                "bin/interposer_dup_test"
+                "--gtest_filter=${_suite}.${_case}"
+        )
+    endforeach()
+endfunction()
 
-foreach(
-    _interposer_gem_test
-    IN
-    ITEMS
-        ReusedDmabufFdMintsDistinctHandles
-        UnmapWithWrongHandleFails
-        MapSucceedsAfterExportFdClosed
-        ReplaceEvictsOverlappingDifferentSizeRange
-        ReplaceTransfersOwnershipAcrossOldOwnerClose
-        ClearUpdatesOwnerBookkeeping
+set(_rj_interposer_dup_tests
+    DupKeepsKfdRoutingAfterPrimaryClose
+    FcntlDupfdKeepsKfdRouting
+    Dup2OverPrimaryInvalidatesKfdIdentity
+    Dup2OntoFreshFdRoutesKfd
+    Dup3RoutesKfdAndRejectsSameFd
+    ReopenAfterPrimaryOverwriteKeepsBackend
+    SerializedReopenUnderContentionStaysRoutable
+    FcntlDupfdReplacesStaleDrmTracking
+    NonDrmDuplicatesClearStaleDrmTracking
+    VforkChildCloseKeepsParentKfdRoutable
+    ProcMapsNamesRemoteKfdMarker
 )
-    rj_add_test(
-        NAME "InterposerGemTest.${_interposer_gem_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+# TSan models concurrent close/dup on one descriptor as an application-level fd
+# race even though the interposer deliberately serializes the kernel operation.
+# Keep the lifecycle regression in regular and ASan builds, where it exercises
+# the intended close/reuse schedule without a sanitizer false positive.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_dup_tests
+        DrmCloseReuseRaceNeverMisclassifiesDuplicate
     )
-endforeach()
+endif()
+rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
+
+rj_add_interposer_test_suite(
+    InterposerDrmTest
+    DeviceInfoReportsActiveCuCount
+)
+
+rj_add_interposer_test_suite(
+    InterposerGemTest
+    GemNamespaceIsPrivateButSharedByDuplicates
+    IndependentDrmFilesRejectOverlappingMappings
+    ReusedDmabufFdMintsDistinctHandles
+    UnmapWithWrongHandleFails
+    MapSucceedsAfterExportFdClosed
+    ReplaceEvictsOverlappingDifferentSizeRange
+    ReplaceTransfersOwnershipAcrossOldOwnerClose
+    ClearUpdatesOwnerBookkeeping
+)
+
+set(_rj_interposer_syncobj_tests
+    VmTimelineWaitObservesSynchronousMapAndUnmap
+    VmDelayUpdateSuppressesTimelinePublication
+    GemVaSignalsBinarySyncobjsAtPointZero
+    PointZeroOutputReplacesTimelinePayload
+    DuplicateDrmFdsShareNamespaceAndLifetime
+    IndependentDrmOpensHaveSeparateNamespaces
+    CreateSignaledSeedsOnlyTheInitialPoint
+    WaitValidationMatchesDrm
+    DestroyRejectsInvalidInput
+    TimelineWaitBlocksUntilSignalOrDeadline
+    TimelineWaitReturnsEintrForSignal
+    ConcurrentVmUpdatesShareTimeline
+    OutOfOrderTimelinePointPreservesWatermark
+)
+# TSan cannot start new threads after a multithreaded fork. This regression
+# intentionally exercises inherited interposer state in that unsupported child,
+# so retain it for regular and ASan builds and omit it from TSan configurations.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_syncobj_tests
+        ForkedChildReinitializesTimelineFutexState
+    )
+endif()
+rj_add_interposer_test_suite(
+    InterposerSyncobjTest
+    ${_rj_interposer_syncobj_tests}
+)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
@@ -1278,6 +1543,8 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             DetectsGpuAgent
             ReportsGfx950
             ReportsWavefrontSize
+            ReportsMi350xActiveComputeUnits
+            ReportsMi350xMaxClockFrequency
     )
         rj_add_test(
             NAME "RocminfoTest.${_rocminfo_test}"
@@ -1480,7 +1747,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1512,13 +1778,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_hooks_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1600,7 +1866,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
@@ -1750,13 +2015,13 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_dbi_nop_asm_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -1828,13 +2093,13 @@ if(HSA_RUNTIME64)
                 PRIVATE
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                    ${CMAKE_SOURCE_DIR}/lib/util/include
                     ${RJ_HSA_INCLUDE_DIR}
             )
             target_link_libraries(
                 hsa_dbi_nop_probe_test
                 PRIVATE
                     ${RJ_OBJECT_LIBS}
+                    util
                     ${HSA_RUNTIME64}
                     GTest::gtest
                     GTest::gtest_main
@@ -2226,6 +2491,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
+            DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
@@ -2409,34 +2675,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
 
-        # --- Profiled plugin group end-to-end test ---
-        rj_add_hip_test(
-            hip_profiled_plugin_test
-            ARCH gfx950
-            SOURCE logging/hip_profiled_plugin_test.hip
-        )
-        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-        if(RJ_INSTALL_TESTS)
-            install(
-                FILES
-                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
-                RENAME profiled.json
-            )
-        endif()
-        rj_add_hip_test_case(
-            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
-            TIMEOUT 30
-            ENVIRONMENT
-                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
-        )
-
         add_subdirectory(race-detector)
     else()
         message(
@@ -2457,7 +2695,8 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
             -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
-            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
+            -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
@@ -2481,4 +2720,181 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "--"
             "bin/hip_cvt_narrow_test"
     )
+endif()
+
+# --- rocgdb wave-debugging smoke test (requires rocgdb + hipcc + mirage) ---
+# Drives real ROCgdb through `mirage run` to set a GPU kernel breakpoint, stop,
+# inspect wave registers, and continue to a correct result (see
+# tests/rocgdb/debug_kernel.sh). Gated on the debugger and HIP compiler being
+# present; the harness itself skips (printing "SKIP:") if mirage is not found.
+find_program(
+    ROCGDB_EXECUTABLE
+    NAMES rocgdb
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+find_program(
+    HIPCC_EXECUTABLE
+    NAMES hipcc
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+# NO_DEFAULT_PATH: only an in-tree Mirage qualifies. An unrelated one installed
+# on PATH would be a different build than the librocjitsu.so staged below, and
+# the mismatch surfaces as an opaque "enable_debug failed (STATUS_ERROR)" rather
+# than as a version error.
+#
+# A fresh cache entry name (not MIRAGE_EXECUTABLE) is deliberate: find_program is
+# a no-op when its cache variable is already set, so any build tree configured
+# while this used HINTS -- which does not suppress the default PATH search --
+# would keep an out-of-tree hit forever and NO_DEFAULT_PATH would never apply to
+# the very trees it was added for.
+#
+# build/manylinux/bin is where emulation/mirage/scripts/mirage.sh installs, so it
+# belongs beside the two cargo target dirs; PATH_SUFFIXES covers it without
+# reopening the default search.
+find_program(
+    RJ_MIRAGE_EXECUTABLE
+    NAMES mirage
+    PATHS
+        "${CMAKE_SOURCE_DIR}/../mirage/target/release"
+        "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
+        "${CMAKE_SOURCE_DIR}/../mirage/build/manylinux"
+    PATH_SUFFIXES bin
+    NO_DEFAULT_PATH
+)
+set(MIRAGE_EXECUTABLE "${RJ_MIRAGE_EXECUTABLE}")
+# Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
+# has nothing to run the debuggee under. Registering the test anyway produced a
+# test that could only skip, or -- worse -- one that ran a Mirage which then
+# loaded whatever librocjitsu.so it happened to find, or none at all and exited
+# 127 long before reaching ROCgdb.
+# A Mirage binary older than Mirage's own sources is not usable here: this
+# branch changes the ctl and rocjitsu_sys crates, and a prebuilt binary that
+# predates them fails attachment with an opaque "enable_debug failed
+# (STATUS_ERROR)". CMake deliberately does not drive cargo, so refuse to
+# register rather than test a binary that does not match the tree, and say what
+# to run. Configure-time only, so `cargo build` needs a re-run of cmake -- which
+# the message states.
+#
+# No CONFIGURE_DEPENDS: it re-runs cmake when the *set* of matched files changes,
+# never when an existing file's mtime does, which is the only thing this gate
+# reads -- so it cannot fire for the case that matters and costs a recursive walk
+# of the whole mirage tree on every build.
+set(_rocgdb_mirage_stale FALSE)
+if(MIRAGE_EXECUTABLE)
+    # mirage is a workspace whose root package is the `mirage` binary itself
+    # (src/main.rs, declared by the top-level Cargo.toml), so the per-crate
+    # patterns alone would miss the entry point most likely to change.
+    file(
+        GLOB_RECURSE _rocgdb_mirage_sources
+        "${CMAKE_SOURCE_DIR}/../mirage/*/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/*/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/src/*.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/build.rs"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.lock"
+    )
+    # Phrased as "the binary is not newer than the source" rather than the
+    # reverse: CMake's IS_NEWER_THAN is also true when the two timestamps are
+    # *equal*, so testing the source directly calls a tie stale. Ties are the
+    # common case after a checkout, a container copy, or a CI cache restore, and
+    # calling them stale silently deregisters the test with a message telling the
+    # developer to run a build they already ran.
+    foreach(_src IN LISTS _rocgdb_mirage_sources)
+        if(NOT "${MIRAGE_EXECUTABLE}" IS_NEWER_THAN "${_src}")
+            set(_rocgdb_mirage_stale TRUE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(
+    ROCGDB_EXECUTABLE
+    AND HIPCC_EXECUTABLE
+    AND MIRAGE_EXECUTABLE
+    AND NOT _rocgdb_mirage_stale
+)
+    # Stage the librocjitsu.so this build just produced into a stub ROCm root
+    # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
+    # search locations (emulation/mirage/rocjitsu/src/lib.rs kmd_search_dirs),
+    # and the search is additive, so a stub root cannot shadow anything else.
+    set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
+    # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
+    # kmd_search_dirs (emulation/mirage/rocjitsu/src/lib.rs) probes
+    # <exe_dir>/../..{,/..}/rocjitsu/build first and only then <exe_dir>/../lib,
+    # with $ROCM_HOME/lib after both. Run in place from
+    # emulation/mirage/target/debug, the third of those probes resolves to
+    # emulation/rocjitsu/build -- the developer's own tree -- so ROCM_HOME never
+    # got a look in. Running the staged copy puts none of the rocjitsu/build
+    # probes on a real directory, and <exe_dir>/../lib is this build's staged
+    # librocjitsu.so.
+    add_custom_command(
+        OUTPUT
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/lib
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/bin
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rocjitsu_shared>
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different ${MIRAGE_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/mirage
+        # copy_if_different leaves the destination's mtime alone when the bytes
+        # already match, so without this the outputs stay older than their inputs
+        # and the generator re-issues all four commands -- a byte-compare of a
+        # 69 MB binary and the shared library -- on every incremental build.
+        COMMAND
+            ${CMAKE_COMMAND} -E touch ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+        DEPENDS rocjitsu_shared ${MIRAGE_EXECUTABLE}
+        COMMENT
+            "Staging mirage + librocjitsu.so for the rocgdb debug smoke test"
+        VERBATIM
+    )
+    add_custom_target(
+        rocgdb_demo_rocm_home
+        ALL
+        DEPENDS
+            ${_rocgdb_rocm_home}/lib/librocjitsu.so
+            ${_rocgdb_rocm_home}/bin/mirage
+    )
+
+    rj_add_test(
+        NAME "RocgdbDebug.KernelBreakpoint"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/rocgdb/debug_kernel.sh"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 300
+        ENVIRONMENT
+            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCM_HOME=${_rocgdb_rocm_home}"
+        SKIP_REGULAR_EXPRESSION "SKIP:"
+    )
+    message(
+        STATUS
+        "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
+    )
+else()
+    # One message naming every unmet reason. Reporting only staleness when rocgdb
+    # is also missing sends the developer to `cargo build`, after which the test
+    # still does not register and nothing new is printed to say why.
+    set(_rocgdb_missing "")
+    if(NOT ROCGDB_EXECUTABLE)
+        list(APPEND _rocgdb_missing "rocgdb")
+    endif()
+    if(NOT HIPCC_EXECUTABLE)
+        list(APPEND _rocgdb_missing "hipcc")
+    endif()
+    if(NOT MIRAGE_EXECUTABLE)
+        list(APPEND _rocgdb_missing "mirage")
+    endif()
+    if(_rocgdb_mirage_stale)
+        list(
+            APPEND _rocgdb_missing
+            "a mirage newer than its sources (run `cargo build` in emulation/mirage, then re-run cmake)"
+        )
+    endif()
+    list(JOIN _rocgdb_missing ", " _rocgdb_missing)
+    message(STATUS "rocgdb debug smoke test disabled (need ${_rocgdb_missing})")
 endif()

@@ -5,8 +5,18 @@
 
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
+#include <string>
 
 namespace simdojo {
+
+namespace {
+
+std::string link_endpoints(const Link &link) {
+  return link.src()->full_path() + " -> " + link.dst()->full_path();
+}
+
+} // namespace
 
 void PartitionContext::drain_incoming() {
   for (auto &queue : incoming)
@@ -23,8 +33,16 @@ SimulationEngine::~SimulationEngine() {
 
 void SimulationEngine::create() {
   assert(!created_ && "create() called twice without shutdown()");
-  if (topology_.partitions().empty())
-    topology_.partition(config_.num_threads);
+  if (config_.num_threads == 0)
+    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+
+  if (topology_.partitions().empty()) {
+    if (config_.num_threads > 1) {
+      throw std::invalid_argument(
+          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+    }
+    topology_.partition_balanced(1);
+  }
   setup_partitions();
 
   done_.store(false, std::memory_order_release);
@@ -48,26 +66,45 @@ void SimulationEngine::shutdown() {
 
   // In single-threaded mode, wake idle CV. In multi-threaded mode,
   // threads will see done_ after their current barrier epoch completes.
-  if (config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  wake_partition(0);
 
   workers_.clear();
   barrier_.reset();
   shutdown_components();
 
   running_ = false;
-  contexts_.clear();
-  async_queues_.clear();
+  {
+    // Exclusive: a foreign thread may be mid-wake or mid-async-schedule on these
+    // vectors. Workers are already joined above, so nothing we join can be waiting
+    // on this lock. Taken after shutdown_components() so component teardown, which
+    // may still schedule, is not blocked.
+    std::unique_lock<std::shared_mutex> lock(contexts_mutex_);
+    contexts_.clear();
+    async_queues_.clear();
+  }
   created_ = false;
 }
 
 void SimulationEngine::setup_partitions() {
   const uint32_t num_threads = config_.num_threads;
-  assert(num_threads > 0);
-  assert(topology_.partitions().size() == num_threads);
+  if (topology_.partitions().size() != num_threads) {
+    throw std::invalid_argument(
+        "SimulationEngine topology partition count must match the worker thread count");
+  }
+
+  // Validate cross-partition link constraints.
+  for (auto &link : topology_.links()) {
+    if (link->is_cross_partition()) {
+      if (link->latency() == 0) {
+        throw std::invalid_argument("SimulationEngine cross-partition link " +
+                                    link_endpoints(*link) + " requires positive latency");
+      }
+      if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
+        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
+                                    " must not cross partition boundaries");
+      }
+    }
+  }
 
   contexts_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
@@ -76,15 +113,6 @@ void SimulationEngine::setup_partitions() {
   async_queues_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
     async_queues_.push_back(std::make_unique<AsyncQueue>());
-
-  // Validate cross-partition link constraints.
-  for (auto &link : topology_.links()) {
-    if (link->is_cross_partition()) {
-      assert(link->latency() > 0 && "cross-partition links require positive latency for LBTS");
-      assert(dynamic_cast<QueuedLink *>(link.get()) == nullptr &&
-             "QueuedLinks must not cross partition boundaries (they bypass the LBTS protocol)");
-    }
-  }
 
   // Set engine pointer on all components.
   for (auto &part : topology_.partitions()) {
@@ -124,6 +152,9 @@ ExitStatus SimulationEngine::run() {
   }
 
   running_ = false;
+  // Copy under the lock: a foreign thread can still be inside request_exit()
+  // assigning exit_status_ as run() unwinds, and the copy reads its message string.
+  std::lock_guard<std::mutex> lock(exit_mutex_);
   return exit_status_;
 }
 
@@ -298,8 +329,11 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Phase 4: Barrier (completion function computes new global_lbts).
       barrier_->arrive_and_wait();
       if (done_.load(std::memory_order_acquire)) {
-        // After arrive_and_wait, if done_ was set by the completion function,
-        // ALL threads see it simultaneously and ALL exit.
+        // request_exit() can set done_ while peers released from the same phase
+        // are already entering the next one. Contribute this worker's arrival
+        // instead of abandoning that phase and stranding those peers.
+        ctx.local_next.store(TICK_MAX, std::memory_order_relaxed);
+        barrier_->arrive_and_drop();
         return;
       }
     }
@@ -365,11 +399,8 @@ void SimulationEngine::primary_release() {
   [[maybe_unused]] uint32_t prev = active_primaries_.fetch_sub(1, std::memory_order_release);
   assert(prev > 0 && "primary_release called without matching register_as_primary or retain");
   // Wake idle engine so it can check termination (e.g., doorbell monitor releasing primary).
-  if (prev == 1 && config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  if (prev == 1)
+    wake_partition(0);
 }
 
 void SimulationEngine::primary_retain() {
@@ -433,6 +464,19 @@ bool SimulationEngine::check_termination(Tick lbts) {
   return false;
 }
 
+void SimulationEngine::wake_partition_locked(PartitionID pid) {
+  if (config_.num_threads != 1 || pid >= contexts_.size())
+    return;
+  PartitionContext &ctx = *contexts_[pid];
+  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  ctx.idle_wakeup_.notify_one();
+}
+
+void SimulationEngine::wake_partition(PartitionID pid) {
+  std::shared_lock<std::shared_mutex> lock(contexts_mutex_);
+  wake_partition_locked(pid);
+}
+
 void SimulationEngine::request_exit(std::string reason, int code) {
   Tick tick = current_time_.load(std::memory_order_acquire);
   {
@@ -447,12 +491,9 @@ void SimulationEngine::request_exit(std::string reason, int code) {
     done_.store(true, std::memory_order_release);
   }
 
-  // In single-threaded mode, wake the idle wait.
-  if (config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  // In single-threaded mode, wake the idle wait. Guarded: the engine thread may be
+  // inside shutdown() destroying the contexts while the host thread requests exit.
+  wake_partition(0);
   // In multi-threaded mode, done_ is checked after each barrier epoch.
   // No explicit wake needed since threads will see it at the next barrier.
 }
@@ -462,20 +503,28 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
   Component *target = event->target();
   assert(target != nullptr && "schedule_event_async: event has no target component");
   PartitionID pid = target->partition_id();
-  assert(pid < async_queues_.size() && "schedule_event_async: target partition ID out of range");
+
+  // Shared: keeps async_queues_ and contexts_ alive for the duration. Producers do
+  // not exclude one another, so this stays off the critical path; only shutdown()
+  // blocks here. Held across the wake so the context cannot be freed under us.
+  std::shared_lock<std::shared_mutex> lock(contexts_mutex_);
+  if (pid >= async_queues_.size()) {
+    // shutdown() has cleared the queues, so the event has nowhere left to go. A
+    // non-empty queue vector here instead means an out-of-range partition ID, which
+    // is a caller bug. (Checked against async_queues_ rather than created_: that
+    // flag is written outside the lock, so reading it here would itself race.)
+    assert(async_queues_.empty() && "schedule_event_async: target partition ID out of range");
+    return;
+  }
   auto &aq = *async_queues_[pid];
   {
-    std::lock_guard<std::mutex> lock(aq.mutex);
+    std::lock_guard<std::mutex> qlock(aq.mutex);
     aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message)});
     aq.pending.store(true, std::memory_order_release);
   }
 
   // Wake the target partition so idle workers pick up the new event.
-  if (config_.num_threads == 1 && pid < contexts_.size()) {
-    PartitionContext &pctx = *contexts_[pid];
-    pctx.idle_wakeup_.store(true, std::memory_order_release);
-    pctx.idle_wakeup_.notify_one();
-  }
+  wake_partition_locked(pid);
   // In multi-threaded mode, async events are drained at each barrier epoch.
 }
 

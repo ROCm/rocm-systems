@@ -1,5 +1,35 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.7.0 for ROCm 10.1
+
+## rocSHMEM 3.6.0 for ROCm 10.0
+
+### Added
+* Added new APIs:
+   * `rocshmem_broadcast_wave`
+   * `rocshmem_fcollect_wave`
+   * `rocshmem_alltoall_wave`
+   * `rocshmem_reduce_wave`
+   * `rocshmem_reducescatter_wave`
+* Added support for some tile-granular collectives for the IPC backend:
+   * `rocshmem_tile_broadcast`
+   * `rocshmem_tile_broadcast_wave`
+   * `rocshmem_tile_broadcast_wg`
+   * `rocshmem_ctx_tile_broadcast`
+   * `rocshmem_ctx_tile_broadcast_wave`
+   * `rocshmem_ctx_tile_broadcast_wg`
+   * `rocshmem_tile_allgather`
+   * `rocshmem_tile_allgather_wave`
+   * `rocshmem_tile_allgather_wg`
+   * `rocshmem_ctx_tile_allgather`
+   * `rocshmem_ctx_tile_allgather_wave`
+   * `rocshmem_ctx_tile_allgather_wg`
+* Added single node support for gfx1250 / MI455X
+* Added support for HIP Fabric Handles
+
+### Changed
+* Drop LLC dependency when compiling HSCO objects
+
+
 ## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added

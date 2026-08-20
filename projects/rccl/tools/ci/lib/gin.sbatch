@@ -56,12 +56,13 @@ build_jobs="${RCCL_BUILD_JOBS}"
 # hard `exit` or a set -e abort) is caught below and skips the test phase. ---
 build_rc=0
 (
-# 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
-echo "==> [1/6] use ROCm (provisioned on head node)"
+# 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
+# workspace tree via rocm.env.
+echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
-  echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm'" >&2
-  echo "       (lib/fetch-rocm.sh on the head node) before sbatch." >&2
+  echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm" >&2
+  echo "       from TheRock artifacts' on the head node before sbatch." >&2
   exit 1
 fi
 set -a
@@ -73,16 +74,6 @@ if [[ ! -x "${ROCM_PATH:-}/bin/hipcc" ]]; then
   exit 1
 fi
 echo "    ROCM_PATH=${ROCM_PATH} ROCM_RELEASE=${ROCM_RELEASE:-<unset>}"
-
-rocm_cache="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}/rocm"
-case "${ROCM_PATH}" in
-  "${rocm_cache}"/*) : ;;
-  *)
-    if [[ -z "${ROCM_PATH_OVERRIDE:-}" ]]; then
-      echo "ERROR: ROCM_PATH=${ROCM_PATH} is not under ${rocm_cache}" >&2
-      exit 1
-    fi ;;
-esac
 echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 export HIP_PATH="${ROCM_PATH}"
@@ -90,9 +81,9 @@ export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 
-# 2) OpenMPI: prebuilt by the OpenMPI provision job; this is a cache hit that
-# just writes ompi.env (MPI_HOME). Falls back to building if run standalone.
-echo "==> [2/6] use OpenMPI"
+# 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
+# (no shared cache), then ompi.env (MPI_HOME) is sourced below.
+echo "==> [2/6] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null
@@ -118,59 +109,48 @@ echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rm -rf "${rccl_prefix}"
-wrap="${rccl_src}/src/rccl_wrap.cc"
-if grep -q 'comm->enableRocshmem && comm->nNodes > 1' "${wrap}" 2>/dev/null; then
-  sed -i \
-    's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
-    "${wrap}"
-  echo "    patched rccl_wrap.cc rocSHMEM guard"
-else
-  echo "    (rccl_wrap.cc guard pattern not found; assuming already patched)"
-fi
 (
   cd "${rccl_src}"
   MPI_PATH="${MPI_HOME}" ./install.sh -j "${build_jobs}" \
     --amdgpu_targets="${gpu_targets}" \
     --prefix="${rccl_prefix}" \
-    --no-device-linker --no_clean \
-    --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    --rocshmem-gin --no_clean \
+    --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
 )
-# Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
-rccl_build="${rccl_src}/build/release"
-ln -sf core_tmp.h "${rccl_build}/include/nccl_device/core.h"
-ln -sf ../hipify/src/include/nccl_tuner.h "${rccl_build}/include/nccl_tuner.h"
-cp -r "${rccl_build}/include/." "${rccl_prefix}/include/"
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
   echo "ERROR: no librccl.so under ${rccl_prefix}/lib" >&2
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
 
+# Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
+# otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
+# ${ROCM_PATH} to CMAKE_PREFIX_PATH). Pin RCCL_DIR to force THIS build.
+rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1)"
+if [[ -z "${rccl_cfg}" ]]; then
+  echo "ERROR: no RCCL cmake config under ${rccl_prefix}/lib*/cmake/rccl" >&2
+  ls -laR "${rccl_prefix}"/lib*/cmake 2>/dev/null >&2 || true
+  exit 1
+fi
+rccl_cmake_dir="$(dirname "${rccl_cfg}")"
+echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
+
 # 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
-echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM)"
+echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
-# --whole-archive rocSHMEM into alltoall_perf so -rdynamic exports its host symbols
-# (e.g. rocshmem::envvar::log_flags) for librccl.so, which is built ENABLE_ROCSHMEM_GIN
-# and leaves them undefined. CI-time patch to avoid editing tracked rccl-tests files.
-tlib="${rccl_tests_src}/src/CMakeLists.txt"
-if grep -q 'target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
-  sed -i \
-    's|target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}|target_link_libraries(alltoall_perf PRIVATE -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive|' \
-    "${tlib}"
-  echo "    patched alltoall_perf link: --whole-archive rocSHMEM"
-else
-  echo "    (alltoall_perf whole-archive pattern not found; skipping)"
-fi
-
+# rccl-tests uses find_package(rocshmem) with the roc::rocshmem cmake target,
+# which brings in all transitive dependencies (hip::device, hsakmt, numa, etc.).
+# No manual sed patches or ROCSHMEM_LIBRARY overrides needed.
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
-    -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
+    -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
+    -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
     "${rccl_tests_src}"

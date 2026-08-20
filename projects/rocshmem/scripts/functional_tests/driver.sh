@@ -169,6 +169,9 @@ declare -A TEST_NUMBERS=(
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
   ["teamreducescatterwave"]="154"
+  ["tile_reduce"]="155"
+  ["tile_reduce_wave"]="156"
+  ["tile_reduce_wg"]="157"
 )
 
 # Detect which runtime to use
@@ -585,9 +588,13 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           128       512
   unset LOCALBUFTYPE
 
-  export LOCALBUFTYPE=managed
-  ExecTest  "putnbi"           2       32           128       512
-  unset LOCALBUFTYPE
+  if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  else
+    echo "Skip:   putnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+  fi
 }
 
 TestRMAGet() {
@@ -663,9 +670,13 @@ TestRMAGet() {
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "getnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+    if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+      export LOCALBUFTYPE=managed
+      ExecTest  "getnbi"           2       32           128       512
+      unset LOCALBUFTYPE
+    else
+      echo "Skip:   getnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+    fi
   fi
 }
 
@@ -926,13 +937,12 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  # Temporarily disabled flood_get tests
-  # ExecTest  "flood_get"        2       64           1024
-  # ExecTest  "flood_get"        8       64           1024
-  # ExecTest  "flood_getnbi"     8       64           1024
-  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  # ExecTest  "flood_g"          8       64           1024
-  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  ExecTest  "flood_get"        2       64           1024
+  ExecTest  "flood_get"        8       64           1024
+  ExecTest  "flood_getnbi"     8       64           1024
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  ExecTest  "flood_g"          8       64           1024
+  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024
@@ -1017,6 +1027,12 @@ TestTiles() {
   ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_reduce"               2       1            1
+  ExecTest  "tile_reduce"               4       1            1
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {

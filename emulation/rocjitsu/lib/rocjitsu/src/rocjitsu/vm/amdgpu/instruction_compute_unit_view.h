@@ -20,18 +20,15 @@ class SimulationEngine;
 namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
-namespace gfx1250 {
-class Operand;
-}
-
 namespace amdgpu {
 class ComputeUnitCore;
-class GpuMemory;
 class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
 class Lds;
+class OperandExecutionAccess;
 class RegisterAccess;
+class Wavefront;
 
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
 ///
@@ -42,7 +39,6 @@ class InstructionComputeUnitView {
 public:
   explicit InstructionComputeUnitView(ComputeUnitCore &cu) : cu_(&cu) {}
 
-  GpuMemory *memory() const;
   L1ScalarCache &l1_scalar();
   L1VectorCache &l1_vector();
   L2Cache *l2() const;
@@ -56,6 +52,9 @@ public:
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
   void request_functional_yield();
+  bool handle_sendmsg(Wavefront &wf, uint32_t message);
+  void notify_trap_complete(Wavefront &wf);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
 
 private:
   uint32_t read_sgpr(uint32_t reg_idx) const;
@@ -71,10 +70,10 @@ private:
   // instruction-facing CU view.
   friend class RegisterAccess;
 
-  // The ISA operand backend is the only instruction-side code allowed to reach
-  // private CU register hooks. It remains private behind Operand/RegisterAccess.
+  // The non-split ISA operand fallback and the execution-only access key are
+  // the only instruction-side code allowed to reach private CU register hooks.
   template <typename Isa> friend class ::rocjitsu::AmdgpuIsaOperand;
-  friend class ::rocjitsu::gfx1250::Operand;
+  friend class OperandExecutionAccess;
 };
 
 } // namespace amdgpu

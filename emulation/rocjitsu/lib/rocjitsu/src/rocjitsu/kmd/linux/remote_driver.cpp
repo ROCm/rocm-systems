@@ -7,7 +7,9 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/unique_handle.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -48,6 +50,21 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   default:
     return false;
   }
+}
+
+/// @brief Negative errno for a transport call that failed without putting a
+/// frame on the wire.
+///
+/// @details Every such site used to fall back to a bare -1 when errno was
+/// unset. That collides with -EPERM: EPERM is 1, so the daemon's own -EPERM --
+/// which arrives by exactly the same return path -- became indistinguishable
+/// from "no errno available", and any consumer trying to tell them apart got
+/// one of the two wrong. Substituting EIO keeps every negative return a real
+/// errno, so callers can translate unconditionally and -1 means EPERM and
+/// nothing else.
+int transport_errno() {
+  const int err = errno;
+  return err > 0 ? -err : -EIO;
 }
 
 /// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
@@ -111,6 +128,97 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   return gpu;
 }
 
+/// @brief Ceiling on the entry count a snapshot request may reserve room for.
+///
+/// @details Two orders of magnitude above anything a KFD enumerates (the
+/// driver's own MAX_GPU_INSTANCE and libhsakmt's NUM_OF_SUPPORTED_GPUS are both
+/// 64), so it can never truncate a real answer, while keeping the reserved tail
+/// at half a megabyte instead of the whole payload budget. The same ceiling
+/// bounds the queue snapshot: a process with more than 4096 live queues has
+/// exhausted the driver's own doorbell budget long before it gets here.
+inline constexpr uint32_t kMaxSnapshotEntries = 4096;
+
+/// @brief The request fields shared by the two DBG_TRAP snapshot ops.
+struct SnapshotFields {
+  // __u64/__u32 rather than uint64_t/uint32_t: these alias the uapi struct's
+  // own fields, and __u64 is unsigned long long where uint64_t is unsigned long.
+  __u64 *buf_ptr;
+  __u32 *count;
+  __u32 *entry_size;
+  uint32_t struct_size;
+};
+
+/// @brief Bind the snapshot request fields of @p dbg for its op.
+///
+/// @details GET_DEVICE_SNAPSHOT and GET_QUEUE_SNAPSHOT differ only in which
+/// sub-struct of kfd_ioctl_dbg_trap_args carries the caller's buffer, entry
+/// count and stride, and in the entry struct the driver fills. Binding them in
+/// one place lets the request clamp and the strided copy-back below serve both
+/// ops instead of drifting into two divergent copies of the same reasoning.
+///
+/// @p op is passed separately rather than read from @p dbg because the reply
+/// path runs against an arg struct the daemon echoed back; the op that selects
+/// the union member has to be the one *we* sent, not one a peer could vary.
+///
+/// @pre @p op is GET_DEVICE_SNAPSHOT or GET_QUEUE_SNAPSHOT.
+SnapshotFields snapshot_fields(kfd_ioctl_dbg_trap_args *dbg, uint32_t op) {
+  if (op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+    return {&dbg->device_snapshot.snapshot_buf_ptr, &dbg->device_snapshot.num_devices,
+            &dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)};
+  return {&dbg->queue_snapshot.snapshot_buf_ptr, &dbg->queue_snapshot.num_queues,
+          &dbg->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry)};
+}
+
+/// @brief Clamp a DBG_TRAP device-snapshot request to a transmittable size.
+///
+/// @details The snapshot buffer is pure ioctl output, so the request carries an
+/// inline tail of @p count * @p entry_size zero bytes purely to reserve room
+/// for the daemon's reply. The count is caller-controlled, and callers are
+/// entitled to oversize it: the uapi contract is that KFD fills only the
+/// entries that exist and reports the true total back, so libhsakmt's
+/// hsaKmtDbgGetDeviceDataCtx() just passes UINT32_MAX. Taken literally that
+/// reserves UINT32_MAX * sizeof(kfd_dbg_device_info_entry) bytes (120 B/entry,
+/// so ~480 GiB); the resize throws std::bad_alloc out of an interposed ioctl()
+/// and takes the process down.
+///
+/// Clamping the transmitted count keeps the ioctl's semantics rather than
+/// failing a request the kernel would have served: the daemon still reports the
+/// true total in the count(OUT) field, and the ceiling is far above any device
+/// or queue count a KFD can enumerate, so it cannot drop an entry the daemon
+/// could have returned.
+///
+/// The ceiling is @ref kMaxSnapshotEntries rather than the transport's raw
+/// capacity. Filling the whole payload budget would be correct but ruinous: at
+/// 120 B/entry it reserves ~16 MiB of zeros in the request and makes the daemon
+/// echo ~16 MiB back (rj_daemon replies with the buffer it received), i.e. ~32
+/// MiB moved under rpc_mutex_ on every debugger attach to describe one GPU.
+///
+/// A zero return for a non-zero @p count means not even one entry fits; the
+/// caller must fail the ioctl rather than transmit the count, because
+/// count(IN) == 0 is the count-only probe the daemon answers with success.
+///
+/// @returns the entry count to transmit, whose tail is guaranteed to fit
+/// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
+uint32_t clamp_snapshot_entries(uint32_t count, uint32_t entry_size, size_t arg_size) {
+  // A zero stride reserves nothing whatever the count is, so pass the caller's
+  // count through untouched. The driver does not reject a zero stride: its
+  // per-entry copy_to_user() moves entry_size(OUT) == 0 bytes and succeeds, so
+  // the call reports the device total and writes nothing
+  // (DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins that
+  // locally). count(IN) is still what the driver clamps its fill count against,
+  // and it is echoed back as part of the request, so rewriting it to zero here
+  // would hand the daemon a different request than the caller made.
+  if (entry_size == 0)
+    return count;
+
+  const size_t overhead = sizeof(RpcIoctlRequest) + arg_size;
+  if (overhead >= kMaxPayloadBytes)
+    return 0;
+  const size_t max_entries =
+      std::min<size_t>(kMaxSnapshotEntries, (kMaxPayloadBytes - overhead) / entry_size);
+  return static_cast<uint32_t>(std::min<size_t>(count, max_entries));
+}
+
 } // namespace
 
 RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
@@ -159,10 +267,19 @@ RemoteDriver::~RemoteDriver() {
     if (fd >= 0)
       syscall(SYS_close, fd);
   }
+  if (kfd_marker_ != nullptr)
+    syscall(SYS_munmap, kfd_marker_, kfd_marker_size_);
   if (sock_ >= 0)
     syscall(SYS_close, sock_);
   if (shutdown_efd_ >= 0)
     syscall(SYS_close, shutdown_efd_);
+}
+
+int RemoteDriver::poison_stream() {
+  protocol_failed_.store(true, std::memory_order_release);
+  if (sock_ >= 0)
+    syscall(SYS_shutdown, sock_, SHUT_RDWR);
+  return -EPROTO;
 }
 
 int RemoteDriver::open() {
@@ -184,42 +301,68 @@ int RemoteDriver::open() {
   hdr.request_id = next_id_++;
   hdr.payload_bytes = 0;
 
-  if (!rpc_send_exact(sock_, &hdr, sizeof(hdr)))
+  // The handshake is framed like every other exchange, so it fails the same way:
+  // a request that stopped mid-write, or a reply we abandon part-read or leave
+  // undrained, desyncs the stream for whatever the caller does next. Poison
+  // before returning so a failed handshake cannot be followed by ioctls that
+  // decode their replies out of leftover handshake bytes. The failure code stays
+  // -1 because open() returns an fd, not an errno.
+  size_t handshake_bytes = 0;
+  if (!rpc_send_exact(sock_, &hdr, sizeof(hdr), &handshake_bytes)) {
+    if (handshake_bytes > 0)
+      poison_stream();
     return -1;
+  }
 
   RpcHeader resp = {};
-  if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
+  if (!rpc_recv_exact(sock_, &resp, sizeof(resp))) {
+    poison_stream();
     return -1;
+  }
 
   if (resp.result != 0)
     return resp.result;
 
   RpcHandshakeResponse hs = {};
-  if (!rpc_recv_exact(sock_, &hs, sizeof(hs)))
+  if (!rpc_recv_exact(sock_, &hs, sizeof(hs))) {
+    poison_stream();
     return -1;
+  }
 
-  if (hs.version != kRpcProtocolVersion)
+  // Every rejection from here on abandons path bytes the reply header already
+  // declared, which is the same misalignment as a short read.
+  if (hs.version != kRpcProtocolVersion) {
+    poison_stream();
     return -1;
+  }
 
   has_gpu_info_ = hs.gpu_info.present != 0;
   if (has_gpu_info_)
     gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
-  if (hs.topology_path_len > kMaxPathLen)
+  if (hs.topology_path_len > kMaxPathLen) {
+    poison_stream();
     return -1;
+  }
   if (hs.topology_path_len > 0) {
     topology_path_.resize(hs.topology_path_len);
-    if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len))
+    if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len)) {
+      poison_stream();
       return -1;
+    }
   }
 
-  if (hs.drm_path_len > kMaxPathLen)
+  if (hs.drm_path_len > kMaxPathLen) {
+    poison_stream();
     return -1;
+  }
   if (hs.drm_path_len > 0) {
     drm_path_.resize(hs.drm_path_len);
-    if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len))
+    if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len)) {
+      poison_stream();
       return -1;
+    }
   }
 
   return reissue_synthetic_kfd_fd();
@@ -234,9 +377,29 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
   if (fd_min < 256)
     fd_min = 256;
+  // NOTE: the name here is deliberately NOT "/dev/kfd". Naming it that makes
+  // /proc/<pid>/maps carry a second "/memfd:/dev/kfd (deleted)" line, which
+  // breaks gdb.rocm/core-no-read-special-files.exp -- that test parses
+  // `info proc mappings` for the one real /dev/kfd mapping and finds none once
+  // this decoy is present. InterposerDupTest.ProcMapsNamesRemoteKfdMarker
+  // asserts the opposite (that maps names /dev/kfd and never this marker); the
+  // two expectations are in direct conflict and the upstream ROCgdb test wins,
+  // so that unit test currently only passes on a daemon-backed run and needs a
+  // design decision about what the marker is actually for.
   auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
   if (raw_fd < 0)
     return -1;
+  if (kfd_marker_ == nullptr) {
+    constexpr size_t kMarkerSize = 4096;
+    if (syscall(SYS_ftruncate, raw_fd, kMarkerSize) == 0) {
+      void *marker = reinterpret_cast<void *>(
+          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, raw_fd, 0));
+      if (marker != MAP_FAILED) {
+        kfd_marker_ = marker;
+        kfd_marker_size_ = kMarkerSize;
+      }
+    }
+  }
   // Use the raw syscall, not fcntl(): this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
   // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
@@ -363,6 +526,13 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
 
 int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  // The stream is misaligned past a rejected reply; every later header would be
+  // parsed out of stale bytes. Fail closed instead of returning bogus results.
+  // Tested under rpc_mutex_, not before it: a thread that read the flag first
+  // and then blocked on the lock would go on to drive a full round trip against
+  // a connection another thread poisoned while it waited.
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
 
   size_t arg_size = 0;
   if (!validate_ioctl_arg_size(request, arg, arg_size))
@@ -376,8 +546,22 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_device_ids_ptr = 0;
   uint64_t saved_dbg_rinfo_ptr = 0;
   uint32_t saved_dbg_rinfo_size = 0;
+  uint32_t saved_dbg_op = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
-  size_t saved_dbg_snapshot_cap = 0;
+  // The response overwrites the count/entry_size pair with the daemon's
+  // outputs, so the request's own count and stride have to be kept to reproduce
+  // the driver's strided write on copy-back. Together they are also the
+  // caller's declared buffer capacity.
+  uint32_t saved_dbg_snapshot_count = 0;
+  uint32_t saved_dbg_snapshot_stride = 0;
+  // The stride actually put on the wire, which is the caller's clamped to the
+  // struct the daemon fills. Entries arrive packed at this pitch and are
+  // scattered out at the caller's, so the two cannot be conflated.
+  uint32_t saved_dbg_snapshot_wire_stride = 0;
+  // SUSPEND/RESUME_QUEUES carry an inbound array of queue ids the daemon
+  // rewrites to its own tail, and report per-queue status back through it.
+  uint64_t saved_dbg_queue_array_ptr = 0;
+  uint32_t saved_dbg_queue_count = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -394,15 +578,51 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       break;
     case AMDKFD_IOC_DBG_TRAP: {
       auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+      saved_dbg_op = dbg->op;
       switch (dbg->op) {
       case KFD_IOC_DBG_TRAP_ENABLE:
         saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
         saved_dbg_rinfo_size = dbg->enable.rinfo_size;
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        // Reject a missing output buffer here rather than on the wire. The
+        // driver validates it before writing anything (-EINVAL, outputs
+        // untouched -- kfd_dbg_trap_device_snapshot(), reproduced by
+        // SimulatedKfd::debug_device_snapshot), but the daemon cannot: it
+        // rewrites snapshot_buf_ptr to its own inline tail before replaying the
+        // ioctl (rj_vm.cpp, reconstruct_embedded_pointers), so the driver never
+        // sees the null and answers a malformed request with success and a
+        // device total. Failing client-side is what keeps the two transports
+        // returning the same verdict.
+        if (dbg->device_snapshot.snapshot_buf_ptr == 0)
+          return -EINVAL;
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
-        saved_dbg_snapshot_cap =
-            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+        saved_dbg_snapshot_count = dbg->device_snapshot.num_devices;
+        saved_dbg_snapshot_stride = dbg->device_snapshot.entry_size;
+        break;
+      case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+        // Deliberately no null-buffer rejection here, unlike the device op
+        // above. The local path answers a null buffer with success when the
+        // process has no queues to report and only -EFAULT when it has some
+        // (SimulatedKfd::debug_queue_snapshot), and the client cannot know that
+        // count before it asks. The verdict is reconstructed on copy-back
+        // instead, from the queue total the daemon reports.
+        saved_dbg_snapshot_ptr = dbg->queue_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_count = dbg->queue_snapshot.num_queues;
+        saved_dbg_snapshot_stride = dbg->queue_snapshot.entry_size;
+        break;
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        saved_dbg_snapshot_ptr = dbg->query_exception_info.info_ptr;
+        saved_dbg_snapshot_count = 1;
+        saved_dbg_snapshot_stride = dbg->query_exception_info.info_size;
+        break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->suspend_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->suspend_queues.num_queues;
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->resume_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->resume_queues.num_queues;
         break;
       default:
         break;
@@ -455,14 +675,69 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-        inline_size =
-            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+      case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
+        // Rewrite the transmitted count, not just the tail length: the daemon
+        // recomputes count * entry_size and disconnects any client whose
+        // payload does not match it exactly (validate_ioctl_payload). Only the
+        // serialized copy is edited — the caller's args keep the original
+        // request until the reply overwrites them with the true total.
+        //
+        // Transmit a compact stride rather than the caller's. entry_size(IN) is
+        // documented as the caller's buffer stride and is allowed to exceed the
+        // current struct (kfd_ioctl.h), so a caller with wide padding between
+        // entries would otherwise reserve -- and make the daemon return -- that
+        // padding as wire bytes. Worse, a stride at or above the payload budget
+        // left room for no entries at all, and the count-only request that
+        // produced would come back as success over an untouched buffer. The
+        // daemon fills at this stride; the copy-back scatters each entry into
+        // the caller's own wider slot.
+        const SnapshotFields snap = snapshot_fields(dbg, dbg->op);
+        const uint32_t wire_stride = std::min(*snap.entry_size, snap.struct_size);
+        const uint32_t requested = *snap.count;
+        const uint32_t entries = clamp_snapshot_entries(requested, wire_stride, arg_size);
+        // A single compact entry not fitting would mean kMaxPayloadBytes is
+        // smaller than one struct; fail rather than degrade to the count probe.
+        if (entries == 0 && requested != 0 && wire_stride != 0)
+          return -ENOMEM;
+        *snap.count = entries;
+        *snap.entry_size = wire_stride;
+        saved_dbg_snapshot_wire_stride = wire_stride;
+        inline_size = static_cast<size_t>(entries) * wire_stride;
+        break;
+      }
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        inline_size = dbg->query_exception_info.info_size;
+        break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        inline_size = static_cast<size_t>(dbg->suspend_queues.num_queues) * sizeof(uint32_t);
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        inline_size = static_cast<size_t>(dbg->resume_queues.num_queues) * sizeof(uint32_t);
         break;
       default:
         break;
       }
-      if (inline_size > 0)
+      // QUERY_EXCEPTION_INFO takes info_size straight from the caller, and
+      // SUSPEND/RESUME derive theirs from num_queues; none of the three is
+      // clamped the way snapshot requests are. Bound them by the same protocol
+      // ceiling the daemon enforces, before resize() and the memcpy above run:
+      // UINT32_MAX alone still admits a multi-gigabyte allocation, a
+      // std::bad_alloc, or a huge read from the caller's buffer, all of which
+      // happen before the daemon ever sees the frame and rejects it.
+      //
+      // Fail rather than clamp. The daemon recomputes the expected tail from
+      // the echoed args, so a clamped tail with an unclamped count is a
+      // mismatch and drops the connection.
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far >= kMaxPayloadBytes || inline_size > kMaxPayloadBytes - payload_so_far)
+        return -E2BIG;
+      if (inline_size > 0) {
+        const size_t inline_offset = buf.size();
         buf.resize(buf.size() + inline_size);
+        if (saved_dbg_queue_array_ptr != 0)
+          std::memcpy(buf.data() + inline_offset,
+                      reinterpret_cast<const void *>(saved_dbg_queue_array_ptr), inline_size);
+      }
       break;
     }
     default:
@@ -485,23 +760,62 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
   // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
   // casts to -1 and is not sent.
-  int send_fd = -1;
+  int send_fds[3] = {-1, -1, -1};
+  size_t num_send_fds = 0;
+  // Owned only for the duration of the send: SCM_RIGHTS installs the daemon's
+  // own copies, so ours are released on every path out of here, including the
+  // early returns below.
+  util::UniqueHandle target_mem_fd;
+  util::UniqueHandle target_proc_fd;
   if (request == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
-      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0) {
+      if (::fcntl(static_cast<int>(dbg->enable.dbg_fd), F_GETFD) < 0)
+        return transport_errno();
+      // The daemon cannot reach the debuggee's address space on its own: it is
+      // not the ptrace parent, so process_vm_readv/writev are refused. We are,
+      // so open the target's memory here and transfer the authorization along
+      // with the notifier. The directory fd pins the identity, so the daemon
+      // can tell a target that exited from one whose pid was reused.
+      const std::string proc_path = std::format("/proc/{}", dbg->pid);
+      target_proc_fd =
+          util::UniqueHandle(::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+      if (!target_proc_fd)
+        return transport_errno();
+      target_mem_fd = util::UniqueHandle(::openat(target_proc_fd.get(), "mem", O_RDWR | O_CLOEXEC));
+      if (!target_mem_fd)
+        return transport_errno();
+      send_fds[num_send_fds++] = static_cast<int>(dbg->enable.dbg_fd);
+      send_fds[num_send_fds++] = target_mem_fd.get();
+      send_fds[num_send_fds++] = target_proc_fd.get();
+    }
   }
-  if (send_fd >= 0) {
-    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+  // A send that fails without putting a byte on the wire is recoverable: the
+  // daemon never saw a frame, so the stream is still aligned and the caller just
+  // gets the transport errno. A send that stops part way through is not — the
+  // daemon is left waiting on the rest of a frame that will never arrive, and
+  // will parse our next request as its tail. Those two have to be told apart,
+  // hence the byte counts.
+  if (num_send_fds > 0) {
+    // sendmsg() on a stream socket may accept only part of the buffer; the
+    // ancillary fds ride on the first byte, so a short send is a truncated frame
+    // with the descriptors already handed over.
+    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
+    if (sent > 0 && static_cast<size_t>(sent) != buf.size())
+      return poison_stream();
+    if (sent <= 0) {
       // Preserve the transport errno — e.g. EBADF when the client handed us a
       // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
       // interposer would surface as EPERM (-EPERM == -1).
-      int err = errno;
-      return err > 0 ? -err : -1;
+      return transport_errno();
     }
-  } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
-    int err = errno;
-    return err > 0 ? -err : -1;
+  } else {
+    size_t sent = 0;
+    if (!rpc_send_exact(sock_, buf.data(), buf.size(), &sent)) {
+      if (sent > 0)
+        return poison_stream();
+      return transport_errno();
+    }
   }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
@@ -510,15 +824,46 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   size_t num_fds = 1;
   auto bytes =
       rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+
+  // Every reply byte we decline to read leaves the stream misaligned: the next
+  // call would parse its header out of this one's remains, silently returning a
+  // bogus result and copying stale bytes into caller memory. Kill the connection
+  // instead of returning a recoverable-looking error. Any descriptor that rode
+  // in on the doomed reply is dropped here — nothing downstream runs to adopt
+  // it.
+  auto poison_reply = [&] {
+    if (num_fds > 0 && received_fds[0] >= 0)
+      syscall(SYS_close, received_fds[0]);
+    return poison_stream();
+  };
+
+  // The request is already on the wire, so a reply we cannot take delivery of is
+  // not a clean failure: EINTR aborts the receive with the daemon's answer still
+  // queued, and the next call would read that answer as its own. Terminal, even
+  // though the socket itself may still be healthy.
   if (bytes <= 0)
-    return -1;
+    return poison_reply();
+  // rpc_recv_msg asks for MSG_WAITALL but can still come back short (a signal
+  // interrupts the wait), which would leave the rest of the header in the
+  // socket and decode result/payload_bytes out of uninitialized stack.
+  if (static_cast<size_t>(bytes) != sizeof(RpcHeader))
+    return poison_reply();
 
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
+  // kMaxPayloadBytes bounds both directions of the protocol; the daemon
+  // enforces it on receive. Enforce it here too so a desynced or corrupted
+  // reply header cannot make an interposed ioctl() attempt a multi-GiB
+  // allocation and throw std::bad_alloc out of a C entry point.
+  if (resp->payload_bytes > kMaxPayloadBytes)
+    return poison_reply();
+
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
+    // A partial read consumes part of the declared payload and abandons the
+    // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
-      return -1;
+      return poison_reply();
 
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
@@ -541,12 +886,46 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         break;
       case AMDKFD_IOC_DBG_TRAP: {
         auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-        switch (dbg->op) {
+        switch (saved_dbg_op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
           dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-          dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+        case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
+          const SnapshotFields snap = snapshot_fields(dbg, saved_dbg_op);
+          *snap.buf_ptr = saved_dbg_snapshot_ptr;
+          // The count and entry_size are inputs the request rewrote to the
+          // compact wire values, and the daemon echoes back whatever it was
+          // sent. On success that echo is the answer (the true total and the
+          // bytes filled), but on failure it would hand the caller our internal
+          // values instead of leaving the inputs alone: libhsakmt's UINT32_MAX
+          // probe comes back as the 4096 clamp and its stride as the struct
+          // size. The local path validates before writing any output
+          // (SimulatedKfd::debug_device_snapshot), so a failed op leaves both
+          // fields exactly as the caller set them; match that.
+          if (resp->result != 0) {
+            *snap.count = saved_dbg_snapshot_count;
+            *snap.entry_size = saved_dbg_snapshot_stride;
+            break;
+          }
+          // The queue op does not reject a null output buffer on the request
+          // path, because whether one is required depends on the queue total
+          // only the driver knows. Now that the total is back, apply the local
+          // path's verdict: entries to report and nowhere to put them is
+          // -EFAULT, no entries is success (SimulatedKfd::debug_queue_snapshot).
+          if (saved_dbg_op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT && saved_dbg_snapshot_ptr == 0 &&
+              saved_dbg_snapshot_count > 0 && *snap.count > 0)
+            resp->result = -EFAULT;
+          break;
+        }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+          dbg->query_exception_info.info_ptr = saved_dbg_snapshot_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+          dbg->suspend_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          dbg->resume_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
           break;
         default:
           break;
@@ -579,7 +958,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
         void *dst = nullptr;
         size_t copy_len = 0;
-        switch (dbg->op) {
+        switch (saved_dbg_op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
           // Only propagate runtime-info bytes on success; a failed op (e.g.
           // -EBADF from a rejected notifier fd) must not mutate caller memory
@@ -591,12 +970,82 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           }
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
           // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
           // must not mutate caller memory or dereference the saved output
-          // pointer. Clamp any successful copy to the original buffer capacity.
+          // pointer.
+          if (resp->result != 0)
+            break;
+          // The device op's request path rejects a null output buffer with
+          // -EINVAL, and the queue op's reply path above turns a null with
+          // entries to report into -EFAULT. A null that reaches here is
+          // therefore a queue snapshot with nothing to report, which writes
+          // nothing anyway — but keep the guard so the memcpy below can never
+          // run through a null pointer if either check moves.
+          if (saved_dbg_snapshot_ptr == 0)
+            break;
+          // Replay the driver's write pattern instead of bulk-copying the tail.
+          // amdkfd fills min(count(IN), true total) entries, writing
+          // entry_size(OUT) bytes at entry_size(IN) stride, and leaves the rest
+          // of the caller's buffer alone — both the entries past the total and,
+          // when the caller's stride is wider than the current struct, the
+          // padding inside each entry. A bulk copy of the declared capacity
+          // would instead zero all of that (the request tail is sent empty, so
+          // the daemon fills only what it enumerates), diverging from what
+          // SimulatedKfd writes on the local path. It would also trust
+          // count(IN) as a real allocation size, which callers are entitled to
+          // oversize.
+          //
+          // count(IN) is the caller's declared capacity in entries, so capping
+          // the loop at it is the same bound the driver applies; the per-entry
+          // `extra` test additionally refuses to read past the tail the daemon
+          // actually sent.
+          if (saved_dbg_snapshot_stride == 0 || saved_dbg_snapshot_wire_stride == 0)
+            break;
+          const SnapshotFields snap = snapshot_fields(dbg, saved_dbg_op);
+          const uint32_t entries = std::min(saved_dbg_snapshot_count, *snap.count);
+          // Two pitches: the tail is packed at the stride we transmitted, the
+          // caller's buffer is laid out at the stride it declared.
+          const size_t src_stride = saved_dbg_snapshot_wire_stride;
+          const size_t dst_stride = saved_dbg_snapshot_stride;
+          // entry_size(OUT) is the daemon's word, not ours. The local path
+          // clamps it to the struct it actually fills, so apply the same bound
+          // here: an inflated value would pull the neighbouring entries' bytes
+          // into the padding the caller's wider stride leaves between entries.
+          const size_t written = std::min<size_t>(std::min(*snap.entry_size, snap.struct_size),
+                                                  std::min(src_stride, dst_stride));
+          // A zero-width entry writes nothing, so the loop has nothing to do —
+          // and the `src + written > extra` bound below degenerates into a bare
+          // offset test that lets a daemon-reported entry_size(OUT) of 0 spin
+          // the loop over the whole tail forming out-of-range destination
+          // pointers (UB) for no effect.
+          if (written == 0)
+            break;
+          auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
+          for (uint32_t i = 0; i < entries; ++i) {
+            const size_t src = static_cast<size_t>(i) * src_stride;
+            const size_t dst_offset = static_cast<size_t>(i) * dst_stride;
+            if (src + written > extra)
+              break;
+            std::memcpy(snapshot_out + dst_offset, payload.data() + arg_size + src, written);
+          }
+          break;
+        }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
           if (resp->result == 0) {
             dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
-            copy_len = std::min(saved_dbg_snapshot_cap, extra);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_snapshot_stride), extra);
+          }
+          break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          // KFD returns a non-negative queue count on success and annotates
+          // every requested ID with ERROR/INVALID status bits in the same
+          // caller-owned array.
+          if (resp->result >= 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_queue_array_ptr);
+            copy_len =
+                std::min(static_cast<size_t>(saved_dbg_queue_count) * sizeof(uint32_t), extra);
           }
           break;
         default:
@@ -697,6 +1146,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
 void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  // Same fail-closed contract as send_ioctl(), and for the same reason: a
+  // poisoned stream would hand back some other exchange's result. Answering with
+  // a local anonymous mapping instead would be worse than failing — the daemon
+  // has no matching mapping, so the GPU would fault on memory the client
+  // believes is shared. Tested under rpc_mutex_ so a thread that blocked on the
+  // lock cannot proceed against a connection poisoned while it waited.
+  if (protocol_failed_.load(std::memory_order_acquire)) {
+    errno = EPROTO;
+    return MAP_FAILED;
+  }
 
   // Send the mmap RPC so the daemon creates its own mapping for GPU simulation.
   int memfd = -1;
@@ -704,6 +1163,18 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   if (rc != 0) {
     if (memfd >= 0)
       syscall(SYS_close, memfd);
+    // send_mmap() reports a negative errno, but only its transport failures
+    // leave errno set as a side effect; the poison paths and the daemon's own
+    // result do not, so without this the caller would read whatever errno this
+    // thread last happened to set. The call that TRIPS the poison comes through
+    // here, not through the fail-fast check above, so this is the one that has
+    // to make -EPROTO visible.
+    //
+    // Unconditional, with no sentinel to exempt: transport_errno() guarantees
+    // every negative return is a real errno, so -1 means EPERM and is
+    // translated like any other. A positive rc cannot come from the daemon's
+    // reply (its result is 0 or negative), so treat it as the desync it is.
+    errno = rc < 0 ? -rc : EPROTO;
     return MAP_FAILED;
   }
 
@@ -774,6 +1245,10 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
 
 int RemoteDriver::munmap(void *addr, size_t length) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  // Fail closed on a poisoned stream rather than unmapping on the strength of a
+  // reply that belongs to some other exchange.
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
 
   RpcMunmapRequest req = {};
   req.addr = reinterpret_cast<uint64_t>(addr);
@@ -788,12 +1263,21 @@ int RemoteDriver::munmap(void *addr, size_t length) {
   std::memcpy(send_buffer, &hdr, sizeof(hdr));
   std::memcpy(send_buffer + sizeof(hdr), &req, sizeof(req));
 
-  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer)))
-    return -1;
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer), &sent)) {
+    // A frame the daemon only half received is terminal; a frame that never
+    // started is just a failed call on a still-aligned stream.
+    if (sent > 0)
+      return poison_stream();
+    return transport_errno();
+  }
 
   RpcHeader resp = {};
+  // The request is on the wire, so any reply we do not consume whole — abandoned
+  // outright or read part way — leaves the daemon's answer, or the tail of it,
+  // waiting to be misparsed as the next call's header.
   if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
-    return -1;
+    return poison_stream();
 
   if (resp.result == 0)
     syscall(SYS_munmap, addr, length);
@@ -803,7 +1287,9 @@ int RemoteDriver::munmap(void *addr, size_t length) {
 
 int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_t offset,
                             int *memfd_out) {
-  // rpc_mutex_ is already held by the caller (mmap()).
+  // rpc_mutex_ is already held by the caller (mmap()), which has also already
+  // rejected a poisoned stream.
+  *memfd_out = -1;
   RpcMmapRequest req = {};
   req.addr = reinterpret_cast<uint64_t>(addr);
   req.length = length;
@@ -820,16 +1306,34 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   std::memcpy(send_buffer, &hdr, sizeof(hdr));
   std::memcpy(send_buffer + sizeof(hdr), &req, sizeof(req));
 
-  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer)))
-    return -1;
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, send_buffer, sizeof(send_buffer), &sent)) {
+    if (sent > 0)
+      return poison_stream();
+    return transport_errno();
+  }
 
   uint8_t response_buffer[sizeof(RpcHeader) + sizeof(RpcMmapResponse)];
   int received_fds[1] = {-1};
   size_t num_fds = 1;
   auto bytes_received =
       rpc_recv_msg(sock_, response_buffer, sizeof(response_buffer), received_fds, &num_fds);
+
+  // The daemon frames every mmap reply as header + RpcMmapResponse, so anything
+  // shorter is a desynced stream — and reading result out of it would take the
+  // value from whatever was on the stack, then hand the caller a mapping (or a
+  // failure) decided by uninitialized memory. Any memfd that arrived on the
+  // truncated reply is dropped: the caller sees rc != 0 with *memfd_out still
+  // -1, so nothing downstream would ever close it.
+  auto poison_reply = [&] {
+    if (num_fds > 0 && received_fds[0] >= 0)
+      syscall(SYS_close, received_fds[0]);
+    return poison_stream();
+  };
   if (bytes_received <= 0)
-    return -1;
+    return poison_reply();
+  if (static_cast<size_t>(bytes_received) != sizeof(response_buffer))
+    return poison_reply();
 
   auto *resp = reinterpret_cast<RpcHeader *>(response_buffer);
   *memfd_out = (num_fds > 0) ? received_fds[0] : -1;

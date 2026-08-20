@@ -45,7 +45,9 @@ public:
     // Compute unit organization
     uint32_t simd_count = 0;
     uint32_t max_waves_per_simd = 10;
-    uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
+    uint32_t num_shader_engines = 0; ///< Shader engines per XCC, matching the
+                                     ///< simulated SoC's se[] count. KFD's
+                                     ///< array_count is derived, not this.
     uint32_t num_shader_arrays_per_engine = 1;
     uint32_t num_cu_per_sh = 0;
     uint32_t simd_per_cu = 4;
@@ -71,6 +73,8 @@ public:
     // Engines and queues
     uint32_t num_sdma_engines = 2;
     uint32_t num_sdma_xgmi_engines = 0;
+    // TODO(hanchung): Remove this legacy fallback with the KfdDeviceConfig fallback.
+    uint32_t num_sdma_queues_per_engine = 2;
     uint32_t num_cp_queues = 128;
     uint32_t max_engine_clk_fcompute = 2100; // MHz
 
@@ -82,6 +86,36 @@ public:
     // Firmware
     uint32_t fw_version = 0;
     uint32_t sdma_fw_version = 0;
+
+    /// @brief XCC count with a floor of one, as every KFD consumer needs it.
+    /// @details A node reporting "num_xcc 0" alongside a scaled array_count
+    /// makes rocdbgapi's array_count * num_xcc / simd_arrays_per_engine come out
+    /// zero, so both the sysfs generator and the DBG_TRAP device snapshot
+    /// normalize through here rather than each applying its own floor.
+    uint32_t effective_num_xcc() const { return num_xcc == 0 ? 1u : num_xcc; }
+
+    /// @brief Shader arrays per engine with a floor of one.
+    /// @details This is the divisor libhsakmt and rocdbgapi apply to
+    /// array_count to recover the shader-engine count, so a node that publishes
+    /// a non-zero array_count next to "simd_arrays_per_engine 0" makes them
+    /// divide by zero. array_count_per_xcc() already floors it on the dividend
+    /// side; every publisher of the divisor goes through here so the two halves
+    /// of the quotient cannot be normalized differently.
+    uint32_t effective_arrays_per_engine() const {
+      return num_shader_arrays_per_engine == 0 ? 1u : num_shader_arrays_per_engine;
+    }
+
+    /// @brief Shader arrays per XCC -- KFD's node_props.array_count.
+    ///
+    /// @details The driver reports shader *arrays*, not engines: libhsakmt
+    /// recovers NumShaderBanks as array_count / simd_arrays_per_engine and
+    /// rocdbgapi recovers the engine count as
+    /// array_count * num_xcc / simd_arrays_per_engine, so both invert this
+    /// product to get num_shader_engines back. Deriving the array count from
+    /// the configured geometry keeps these representations consistent.
+    uint32_t array_count_per_xcc() const {
+      return num_shader_engines * effective_arrays_per_engine();
+    }
   };
 
   Sysfs() = default;

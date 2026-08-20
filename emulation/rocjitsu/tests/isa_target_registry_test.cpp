@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/target_provider.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/target_provider.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/target_provider.h"
@@ -23,7 +24,11 @@ namespace {
 
 class FixtureDecoder final : public Decoder {
 public:
-  Instruction *decode(const rj_code_binary_inst_t *) override { return nullptr; }
+  std::size_t max_instruction_words() const override { return 1; }
+
+  DecodeResult decode(const rj_code_binary_inst_t *, const DecodeErrorEmitter &) override {
+    return Result::failure();
+  }
 };
 
 std::unique_ptr<Decoder> create_fixture_decoder() { return std::make_unique<FixtureDecoder>(); }
@@ -326,8 +331,8 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetRegistry &registry = default_isa_target_registry();
   ASSERT_TRUE(registry.ok()) << registry.error();
   const std::vector<std::string> expected = {
-      "cdna1", "cdna2",   "cdna3", "cdna4",   "rdna1",  "rdna2",
-      "rdna3", "rdna3_5", "rdna4", "gfx1250", "risc-v",
+      "cdna1", "cdna2",   "cdna3", "cdna4", "rdna1",  "rdna2",
+      "rdna3", "rdna3_5", "rdna4", "cdna5", "risc-v",
   };
   std::vector<std::string> actual;
   for (const IsaTargetDescriptor &target : registry.targets())
@@ -346,6 +351,9 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetDescriptor *gfx1201_enum = registry.find(ROCJITSU_CODE_TARGET_GFX1201);
   ASSERT_NE(gfx1201_enum, nullptr);
   EXPECT_EQ(gfx1201_enum->id, "rdna4");
+  const IsaTargetDescriptor *gfx1250 = registry.find("gfx1250");
+  ASSERT_NE(gfx1250, nullptr);
+  EXPECT_EQ(gfx1250->id, "cdna5");
   EXPECT_NE(Decoder::create(registry, "gfx942"), nullptr);
   EXPECT_NE(Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA3), nullptr);
   EXPECT_EQ(registry.find("rv32i"), nullptr);
@@ -353,9 +361,15 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   std::unique_ptr<Decoder> risc_v_decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_RV64I);
   ASSERT_NE(risc_v_decoder, nullptr);
   constexpr rj_code_binary_inst_t kAddiX1X0One = 0x00100093;
-  std::unique_ptr<Instruction> risc_v_instruction(risc_v_decoder->decode(&kAddiX1X0One));
+  std::unique_ptr<Instruction> risc_v_instruction(decode_valid(*risc_v_decoder, &kAddiX1X0One));
   ASSERT_NE(risc_v_instruction, nullptr);
   EXPECT_NE(risc_v_instruction->execute, nullptr);
+
+  constexpr rj_code_binary_inst_t kInvalidRiscV = 0xffffffffu;
+  std::vector<std::string> diagnostics;
+  auto collect = [&](std::string_view message) { diagnostics.emplace_back(message); };
+  EXPECT_TRUE(risc_v_decoder->decode(&kInvalidRiscV, DecodeErrorEmitter(collect)).failed());
+  EXPECT_EQ(diagnostics, std::vector<std::string>{"Invalid instruction opcode"});
 }
 
 TEST(IsaTargetRegistryTest, PublicCEntryPointAcceptsCanonicalTargetIds) {

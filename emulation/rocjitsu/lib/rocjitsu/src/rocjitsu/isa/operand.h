@@ -7,14 +7,16 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace simdojo {
 template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
@@ -24,6 +26,8 @@ namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
+class ComputeUnitCore;
+class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
@@ -57,6 +61,8 @@ void amdgpu_isa_write_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, amdgpu::W
                                       uint64_t mask);
 } // namespace detail
 
+class ScopedOperandDelegate;
+
 /// @brief Base class for an instruction operand with value resolution.
 ///
 /// @details Instruction execution code treats Operand as a descriptor: it can
@@ -70,6 +76,7 @@ public:
   // operand value-access backend. Keep these hooks private so generated
   // instruction bodies cannot bypass read observation by calling them directly.
   friend class amdgpu::RegisterAccess;
+  friend class ScopedOperandDelegate;
   template <typename Isa> friend class AmdgpuIsaOperand;
 
   Operand() = default;
@@ -80,6 +87,14 @@ public:
   Operand(int size_bits, int encoding_value)
       : size_bits_(size_bits), encoding_value_(encoding_value) {}
   virtual ~Operand() = default;
+
+  /// Validate encoding constraints deferred until the complete instruction is
+  /// decoded. Literal sentinels may replace their provisional operands first.
+  Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
+    if (encoding_error_ == EncodingError::None) [[likely]]
+      return Result::success();
+    return emit_encoding_error(emit_error);
+  }
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -97,6 +112,18 @@ public:
 
   /// @brief Full 64-bit literal value when this operand came from a literal64 encoding.
   [[nodiscard]] virtual std::optional<uint64_t> literal64_value() const { return std::nullopt; }
+
+  /// @brief Compile-time constant value of this operand, resolved without any
+  /// register/wavefront state, or nullopt for registers and other non-constant
+  /// operands.
+  ///
+  /// @details Unlike `literal64_value()` (which only reports the literal64
+  /// encoding), this also resolves inline constants — small integers and the
+  /// inline float constants whose value is implied by the encoding. The base
+  /// default covers only the literal case; ISA subclasses override it to add
+  /// inline-constant resolution. Useful for static analysis (e.g. detecting
+  /// `s_mov exec, -1`) where no wavefront is available.
+  [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
@@ -174,6 +201,8 @@ public:
   }
 
 private:
+  Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
+
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
 
@@ -225,12 +254,10 @@ private:
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
 public:
-  /// @brief Set a delegate operand that overrides read methods.
+  /// @brief Return the active read delegate, if any.
   ///
-  /// @details Used by DPP/SDWA substitution to redirect reads through a
-  /// DppOperand without changing the member variable's type.
-  void set_delegate(Operand *d) { delegate_ = d; }
-  void clear_delegate() { delegate_ = nullptr; }
+  /// Delegate mutation is restricted to ScopedOperandDelegate so restoration
+  /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
@@ -248,6 +275,8 @@ public:
   }
 
 private:
+  void set_delegate(Operand *delegate) { delegate_ = delegate; }
+
   /// @brief Fill `out[0..count)` with operand values for lanes
   /// `[lane_base, lane_base + count)`.
   ///
@@ -283,6 +312,18 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -297,6 +338,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -312,6 +354,10 @@ private:
     return simd_vgpr_base_impl(wf);
   }
 
+  std::optional<uint32_t> simd_vgpr_base_mut(amdgpu::Wavefront &wf) const {
+    return simd_vgpr_base_mut_impl(wf);
+  }
+
   const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage(wf);
@@ -323,6 +369,10 @@ private:
   }
 
   void simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
+    if (delegate_) {
+      delegate_->simd_notify_read(wf, lane_mask, byte_mask);
+      return;
+    }
     simd_notify_read_impl(wf, lane_mask, byte_mask);
   }
 
@@ -332,6 +382,10 @@ private:
 
   void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
                           uint8_t byte_mask) const {
+    if (delegate_) {
+      delegate_->simd_notify_read64(wf, lane_mask, byte_mask);
+      return;
+    }
     simd_notify_read64_impl(wf, lane_mask, byte_mask);
   }
 
@@ -364,6 +418,15 @@ private:
   /// the full register extent. Internal SIMD fast-path hook, reachable only
   /// through `amdgpu::RegisterAccess`.
   virtual std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
+    (void)wf;
+    return std::nullopt;
+  }
+
+  /// @brief Mutable-destination counterpart of `simd_vgpr_base_impl`.
+  ///
+  /// Write-side resolution is separate because GPR indexing can select a
+  /// different physical register for destination operands than for sources.
+  virtual std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
     (void)wf;
     return std::nullopt;
   }
@@ -465,9 +528,10 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// TODO: this AMDGPU-specific operand machinery could move under the
-/// `isa/arch/amdgpu/shared` directory alongside the other per-arch shared
-/// code; left here for now to keep the SIMD change self-contained.
+/// This remains as the generator fallback for AMDGPU profiles that opt out of
+/// split execution sources. Built-in AMDGPU targets use `IsaOperand` plus a
+/// per-target execution table instead. Execution-only fallback definitions live
+/// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.
 template <typename Isa> class AmdgpuIsaOperand : public IsaOperand<Isa> {
@@ -494,6 +558,7 @@ private:
                         const uint32_t *vals, uint64_t mask) const override;
 
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
+  std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;
   const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64
@@ -513,65 +578,85 @@ private:
                                     uint8_t byte_mask) const override;
 };
 
-/// @brief DPP-aware operand proxy that applies lane permutation on read.
+/// @brief Temporarily redirect operand reads through another operand.
 ///
-/// Wraps a regular VGPR operand and overrides read_lane() to return
-/// pre-permuted values. Constructed by the VOP1/VOP2 encoding base when
-/// DPP is detected (src0 == 250). The pre-permuted values are computed
-/// once at construction time.
-class DppOperand : public Operand {
+/// Restores the previous delegate on scope exit, including exception and early
+/// return paths. A null delegate leaves the operand unchanged.
+class ScopedOperandDelegate {
+public:
+  ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
+    if (!delegate)
+      return;
+    operand_ = &operand;
+    previous_ = operand.delegate();
+    operand.set_delegate(delegate);
+  }
+
+  ~ScopedOperandDelegate() noexcept { restore(); }
+
+  ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate(ScopedOperandDelegate &&) = delete;
+  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&) = delete;
+
+private:
+  void restore() noexcept {
+    if (!operand_)
+      return;
+    operand_->set_delegate(previous_);
+    operand_ = nullptr;
+  }
+
+  Operand *operand_ = nullptr;
+  Operand *previous_ = nullptr;
+};
+
+/// @brief Operand backed by instruction-scoped staged lane values.
+///
+/// Holds source values prepared before semantic execution, including lane
+/// permutations and sub-dword selection.
+class StagedOperand : public Operand {
 public:
   static constexpr int MAX_LANES = 64;
 
-  DppOperand() = default;
+  StagedOperand();
+  ~StagedOperand() override;
 
-  /// @brief Construct from a source operand + pre-permuted data.
+  /// @brief Construct from 32-bit staged lane values.
   /// @param base The underlying operand (for name/size/scalar reads).
-  /// @param data Pre-permuted lane values (one per lane).
+  /// @param data Staged values (one per lane).
   /// @param lane_count Number of valid lanes.
-  DppOperand(const Operand &base, const uint32_t *data, int lane_count)
-      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
-    for (int i = 0; i < lane_count && i < MAX_LANES; ++i)
-      data_[i] = data[i];
-  }
+  StagedOperand(const Operand &base, const uint32_t *data, int lane_count);
 
-  std::string name() const override { return "dpp_src"; }
+  /// @brief Construct from 64-bit staged lane values.
+  StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
+
+  std::string name() const override { return "staged_src"; }
 
   bool simd_capable() const override { return true; }
 
 private:
-  uint32_t read_lane(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
-    return (lane < static_cast<uint32_t>(lane_count_)) ? data_[lane] : 0;
-  }
+  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
+  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
+  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override;
 
-  uint32_t read_scalar(const amdgpu::Wavefront & /*wf*/) const override { return data_[0]; }
+  /// @brief Expose staged low dwords as read-only SIMD storage.
+  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
 
-  void read_lane_chunk(const amdgpu::Wavefront & /*wf*/, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override {
-    uint32_t lanes = static_cast<uint32_t>(lane_count_);
-    for (uint32_t i = 0; i < count; ++i) {
-      uint32_t l = lane_base + i;
-      out[i] = (l < lanes) ? data_[l] : 0u;
-    }
-  }
+  amdgpu::ConstVgprStoragePair64
+  simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
 
-  /// The pre-permuted lane data is held in a `MAX_LANES`-wide `uint32_t` array
-  /// that is bit-layout-identical to `VgprStorage` (`simdojo::VectorReg<64,
-  /// uint32_t>` — a `std::array<uint32_t,64>` with the layout `static_assert`
-  /// enforced in `ComputeUnitCore::raw_vgpr_reg`). Unused lanes are zero (the
-  /// EXEC mask gates them off in the glue), so the whole array is a valid
-  /// read-only register view. The cast targets the forward-declared
-  /// `VgprStorage`; the glue dereferences it where the full type is visible.
-  const amdgpu::VgprStorage *
-  simd_vgpr_storage_impl(const amdgpu::Wavefront & /*wf*/) const override {
-    static_assert(sizeof(data_) == MAX_LANES * sizeof(uint32_t),
-                  "DppOperand data_ must be layout-compatible with VgprStorage");
-    return reinterpret_cast<const amdgpu::VgprStorage *>(&data_);
-  }
-
-  uint32_t data_[MAX_LANES]{};
+  // Keep the execution-only storage type out of the model-facing include graph.
+  struct Storage;
+  std::unique_ptr<Storage> storage_;
   int lane_count_ = 0;
 };
+
+// Compatibility name for generated output predating StagedOperand.
+using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
 

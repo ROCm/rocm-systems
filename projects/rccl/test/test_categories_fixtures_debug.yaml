@@ -24,11 +24,17 @@ test_categories:
       - "DdaAlltoAllThreshold.*"
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
+      - "CeAllReduceEligibilityTest.*"
+      - "RcclCeAllReduceEligibility.*"
+      - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
+      - "NetBootstrapInterfaceTest.*"
+      - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
+      - "TopoNicFusionTests.*"
     exclude_windows:
       - "*"
     labels:

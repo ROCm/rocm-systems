@@ -49,6 +49,8 @@ pub const ROCJITSU_STATUS_OUT_OF_RESOURCES: RjStatus = 3;
 pub const ROCJITSU_STATUS_INVALID_CODE_OBJECT: RjStatus = 4;
 /// A required file could not be opened or read.
 pub const ROCJITSU_STATUS_INVALID_FILE: RjStatus = 5;
+/// The requested operation is not supported by this configuration.
+pub const ROCJITSU_STATUS_UNSUPPORTED: RjStatus = 6;
 
 /// Platform-specific handle type (`rj_handle_t`); an fd on Linux.
 pub type RjHandle = c_int;
@@ -130,6 +132,10 @@ pub struct RjVmCmd {
     /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
     /// adoption, clears it to -1 so the caller does not close it.
     pub in_handle: RjHandle,
+    /// `[in/out]` Debugger-authorized target `/proc/pid/mem` fd, or -1.
+    pub in_mem_handle: RjHandle,
+    /// `[in]` Pinned target `/proc/pid` directory fd, or -1.
+    pub in_proc_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -247,8 +253,8 @@ impl RjVmGpuInfo {
 //
 // The numbers below were read off
 // `rocjitsu/lib/rocjitsu/include/rocjitsu/vm/rj_vm.h` (`rj_vm_cmd_t` at
-// line 56, `rj_vm_map_t` at 66, `rj_vm_unmap_t` at 77, `rj_vm_gpu_info_t`
-// at 83) and `rocjitsu/daemon/rj_daemon.h` (`rj_daemon_status_t` at 26),
+// line 56, `rj_vm_map_t` at 68, `rj_vm_unmap_t` at 79, `rj_vm_gpu_info_t`
+// at 85) and `rocjitsu/daemon/rj_daemon.h` (`rj_daemon_status_t` at 26),
 // as a 64-bit LP64 target sees them, and confirmed against a `sizeof` /
 // `offsetof` probe compiled from those headers.
 //
@@ -267,15 +273,18 @@ impl RjVmGpuInfo {
 // and fix the struct rather than the assertion.
 
 const _: () = {
-    // rj_vm_cmd_t — 40 bytes; `cmd` is followed by 4 bytes of padding so
-    // the `buf` pointer lands on an 8-byte boundary.
-    assert!(size_of::<RjVmCmd>() == 40);
+    // rj_vm_cmd_t — 48 bytes; `cmd` is followed by 4 bytes of padding so
+    // the `buf` pointer lands on an 8-byte boundary, and the three
+    // trailing handles are padded out to a multiple of 8.
+    assert!(size_of::<RjVmCmd>() == 48);
     assert!(offset_of!(RjVmCmd, cmd) == 0);
     assert!(offset_of!(RjVmCmd, buf) == 8);
     assert!(offset_of!(RjVmCmd, buf_size) == 16);
     assert!(offset_of!(RjVmCmd, result) == 24);
     assert!(offset_of!(RjVmCmd, shared_handle) == 28);
     assert!(offset_of!(RjVmCmd, in_handle) == 32);
+    assert!(offset_of!(RjVmCmd, in_mem_handle) == 36);
+    assert!(offset_of!(RjVmCmd, in_proc_handle) == 40);
 
     // rj_vm_map_t — 48 bytes. `prot`/`flags` pair up into one 8-byte
     // slot, and the trailing `map_errno` is padded out to 48.
@@ -508,7 +517,7 @@ impl Lib {
     }
 
     /// Load and attach the execution plugins declared in `config_json`
-    /// (its `plugins` / `sinks` / `profiled` sections) to `vm`.
+    /// (its `plugins` / `sinks` sections) to `vm`.
     ///
     /// `plugin_dir`, when non-empty, is a trusted directory the plugin
     /// shared objects are loaded from by explicit path — required in
@@ -740,6 +749,31 @@ mod tests {
     // layout assertions" block above. A `#[test]` for them was strictly
     // weaker: it only ran when someone ran the suite, and it could not
     // express a field offset without duplicating the struct.
+
+    #[test]
+    fn status_codes_match_c_api() {
+        const C_STATUS_HEADER: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../rocjitsu/lib/rocjitsu/include/rocjitsu/base/rj_status.h"
+        ));
+        let c_statuses: Vec<String> = C_STATUS_HEADER
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("ROCJITSU_STATUS_"))
+            .map(|line| line.trim_end_matches(',').to_owned())
+            .collect();
+        let rust_statuses = vec![
+            format!("ROCJITSU_STATUS_SUCCESS = {ROCJITSU_STATUS_SUCCESS}"),
+            format!("ROCJITSU_STATUS_ERROR = {ROCJITSU_STATUS_ERROR}"),
+            format!("ROCJITSU_STATUS_INVALID_ARGUMENT = {ROCJITSU_STATUS_INVALID_ARGUMENT}"),
+            format!("ROCJITSU_STATUS_OUT_OF_RESOURCES = {ROCJITSU_STATUS_OUT_OF_RESOURCES}"),
+            format!("ROCJITSU_STATUS_INVALID_CODE_OBJECT = {ROCJITSU_STATUS_INVALID_CODE_OBJECT}"),
+            format!("ROCJITSU_STATUS_INVALID_FILE = {ROCJITSU_STATUS_INVALID_FILE}"),
+            format!("ROCJITSU_STATUS_UNSUPPORTED = {ROCJITSU_STATUS_UNSUPPORTED}"),
+        ];
+
+        assert_eq!(c_statuses, rust_statuses);
+    }
 
     #[test]
     fn daemon_status_rejects_unknown_discriminants() {

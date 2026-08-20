@@ -352,13 +352,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
-    # S_BARRIER_WAIT uses the existing whole-workgroup barrier model for the
-    # common split form where S_BARRIER_SIGNAL is immediately followed by
-    # S_BARRIER_WAIT. Arrival accounting and named-barrier ids are not modeled
-    # yet: signal stays a no-op, wait parks the wavefront, and CU release logic
-    # keys only on all non-halted sibling waves in the same workgroup.
-    if name in ('S_BARRIER', 'S_BARRIER_WAIT'):
+    if name == 'S_BARRIER':
         return InstructionSemantics(name, 'barrier')
+    if name == 'S_BARRIER_WAIT':
+        return InstructionSemantics(name, 'scalar_barrier_wait')
+    if name == 'S_BARRIER_LEAVE':
+        return InstructionSemantics(name, 'scalar_barrier_leave', sets_scc='nonzero')
 
     if name == 'S_SET_GPR_IDX_OFF':
         return InstructionSemantics(name, 'gpr_idx', operation='off')
@@ -419,11 +418,11 @@ _SOP1_SPECIAL = {
     'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD_2_B32': ('scalar_movrel', 'srcdst2'),
     'S_SENDMSG_RTN': ('scalar_sendmsg_rtn', None),
-    'S_BARRIER_SIGNAL': ('true_nop', None),
-    'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', None),
+    'S_BARRIER_SIGNAL_ISFIRST': ('scalar_barrier_signal', 'signal_isfirst'),
+    'S_BARRIER_SIGNAL': ('scalar_barrier_signal', 'signal'),
     'S_GET_BARRIER_STATE': ('scalar_barrier_state', None, 'b32'),
-    'S_BARRIER_INIT': ('true_nop', None),
-    'S_BARRIER_JOIN': ('true_nop', None),
+    'S_BARRIER_INIT': ('scalar_barrier_init', None),
+    'S_BARRIER_JOIN': ('scalar_barrier_join', None),
     'S_WAKEUP_BARRIER': ('true_nop', None),
     'S_ALLOC_VGPR': ('true_nop', None),
     'S_SLEEP_VAR': ('true_nop', None),
@@ -523,6 +522,8 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
                 scc = 'none'
             else:
                 scc = 'nonzero'
+        elif cls == 'scalar_barrier_signal' and op == 'signal_isfirst':
+            scc = 'nonzero'
         return InstructionSemantics(
             name, cls, operation=op, data_type=dtype, sets_scc=scc
         )
@@ -766,11 +767,11 @@ _VOP1_OP_MAP = {
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
     'V_SWAPREL': ('nop', None),
-    'V_S_EXP': ('vector_unary', 'exp2'),
-    'V_S_LOG': ('vector_unary', 'log2'),
-    'V_S_RCP': ('vector_unary', 'rcp'),
-    'V_S_RSQ': ('vector_unary', 'rsq'),
-    'V_S_SQRT': ('vector_unary', 'sqrt'),
+    'V_S_EXP': ('pseudo_scalar_unary', 'exp2'),
+    'V_S_LOG': ('pseudo_scalar_unary', 'log2'),
+    'V_S_RCP': ('pseudo_scalar_unary', 'rcp'),
+    'V_S_RSQ': ('pseudo_scalar_unary', 'rsq'),
+    'V_S_SQRT': ('pseudo_scalar_unary', 'sqrt'),
     'V_FREXP_EXP_I32': ('vector_unary', 'frexp_exp_f32'),
     'V_FREXP_EXP_I16': ('vector_unary', 'frexp_exp_f16'),
     'V_FREXP_MANT': ('vector_unary', 'frexp_mant_f32'),
@@ -1132,6 +1133,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # MQSAD (complex, rarely used) → nop
     if name in ('V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8', 'V_QSAD_PK_U16_U8'):
         return InstructionSemantics(name, 'nop')
+
+    # Bit count with accumulate: D.u32 = CountOneBits(S0.u32) + S1.u32. The MR
+    # ISA gives no pseudocode, so the generic stem table below would derive this
+    # as a plain unary popcount and silently drop S1 -- the same shape as the
+    # V_MBCNT_* pair right underneath, which is why it is classified the same
+    # way rather than as a 'vector_unary'.
+    if name == 'V_BCNT_U32_B32':
+        return InstructionSemantics(name, 'vector_bcnt', data_type='u32')
 
     # Masked bit count
     if name == 'V_MBCNT_LO_U32_B32':
@@ -1788,10 +1797,13 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
+    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3,
+    # TR16_B128=4 (grouped 16-bit B128 layout), B64_TR_B16=5 (CDNA4 4x16-lane
+    # ds_read_b64_tr_b16 layout).
     'B64_TR_B4': ('b4', 4, 2, 1),
     'B96_TR_B6': ('b6', 4, 3, 2),
     'B64_TR_B8': ('b8', 4, 2, 3),
-    'B64_TR_B16': ('b16', 4, 2, 4),
+    'B64_TR_B16': ('b16', 4, 2, 5),
     'TR4_B64': ('b4', 4, 2, 1),
     'TR6_B96': ('b6', 4, 3, 2),
     'TR8_B64': ('b8', 4, 2, 3),
@@ -2028,16 +2040,80 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     return InstructionSemantics(name, 'nop')
 
 
-_BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
-    'FORMAT_X': (4, 1),
-    'FORMAT_XY': (4, 2),
-    'FORMAT_XYZ': (4, 3),
-    'FORMAT_XYZW': (4, 4),
-    'FORMAT_D16_X': (2, 1),
-    'FORMAT_D16_XY': (2, 2),
-    'FORMAT_D16_XYZ': (2, 3),
-    'FORMAT_D16_XYZW': (2, 4),
+_BUFFER_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
+    'FORMAT_X': (4, 1, False),
+    'FORMAT_XY': (4, 2, False),
+    'FORMAT_XYZ': (4, 3, False),
+    'FORMAT_XYZW': (4, 4, False),
+    'FORMAT_D16_X': (2, 1, False),
+    'FORMAT_D16_XY': (2, 2, False),
+    'FORMAT_D16_XYZ': (2, 3, False),
+    'FORMAT_D16_XYZW': (2, 4, False),
+    'FORMAT_D16_HI_X': (2, 1, False),
 }
+
+
+def _normalize_buffer_format_suffix(suffix: str) -> str:
+    """Map RDNA3+ ``D16[_HI]_FORMAT_*`` ordering back to legacy ``FORMAT_D16[_HI]_*``."""
+    if suffix.startswith('D16_HI_FORMAT'):
+        return 'FORMAT_D16_HI' + suffix[len('D16_HI_FORMAT') :]
+    if suffix.startswith('D16_FORMAT'):
+        return 'FORMAT_D16' + suffix[len('D16_FORMAT') :]
+    return suffix
+
+
+def _derive_buffer_data(
+    name: str,
+    suffix: str,
+    is_store: bool,
+    typed: bool,
+    typed_format_executable: bool = True,
+) -> InstructionSemantics | None:
+    """Classify a buffer/typed-buffer LOAD/STORE data suffix.
+
+    Untyped (MUBUF) and typed (MTBUF) buffers -- and both under the unified RDNA4
+    ``ENC_VBUFFER`` -- share identical data-layout logic; only the executable
+    class prefix differs (``buffer_*`` vs ``tbuffer_*``).
+
+    D16 FORMAT loads/stores pack two 16-bit components per VGPR. That packed
+    layout is not modeled by the memory pipeline, so they are given dedicated
+    non-executable classes (``buffer_{load,store}_format_d16``) that carry the
+    partial-def metadata (num_elems/elem_size/d16 flags) for liveness without
+    activating incorrect execution. Non-D16 FORMAT (one dword per component) and
+    byte/short/dword data execute correctly and keep their normal classes; the
+    FORMAT variants are modeled as raw dword moves without DFMT/NFMT
+    (data/numeric format) conversion.
+
+    ``typed_format_executable`` gates the executable ``tbuffer_*`` class for
+    non-D16 typed FORMAT ops. Real MTBUF encodings supply mtbuf-style addressing
+    and keep it enabled; RDNA4 folds typed buffers into VBUFFER (mubuf-style
+    addressing, no ``mtbuf_calculate_addresses``), so it is disabled there,
+    leaving non-D16 typed ops unclassified (``nop``) as before -- only the D16
+    typed loads need the partial-def metadata.
+    """
+    normalized = _normalize_buffer_format_suffix(suffix)
+    flat_info = _FLAT_DATA_MAP.get(normalized)
+    fmt_info = None if flat_info else _BUFFER_FORMAT_MAP.get(normalized)
+    info = flat_info or fmt_info
+    if not info:
+        return None
+    esz, ne, se = info
+    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed, metadata-only
+        cls = 'buffer_store_format_d16' if is_store else 'buffer_load_format_d16'
+    elif typed and not typed_format_executable:
+        return None  # non-D16 typed FORMAT under VBUFFER: leave as nop
+    else:
+        base = 'tbuffer' if typed else 'buffer'
+        cls = f'{base}_store' if is_store else f'{base}_load'
+    return InstructionSemantics(
+        name,
+        cls,
+        elem_size=esz,
+        num_elems=ne,
+        sign_extend=se,
+        d16_hi='D16_HI' in normalized,
+        d16_lo='D16' in normalized and 'D16_HI' not in normalized,
+    )
 
 
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
@@ -2074,35 +2150,20 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'buffer_atomic')
 
     is_store = '_STORE_' in upper
-    for prefix in ('BUFFER_LOAD_', 'BUFFER_STORE_'):
+    # RDNA4 folds typed buffers into ENC_VBUFFER, which routes here, so accept
+    # TBUFFER_* as well; harmless for pre-RDNA4 MUBUF, which has no such names.
+    for prefix in ('BUFFER_LOAD_', 'BUFFER_STORE_', 'TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = upper[len(prefix) :]
-            info = _FLAT_DATA_MAP.get(suffix)
-            if info:
-                esz, ne, se = info
-                cls = 'buffer_store' if is_store else 'buffer_load'
-                return InstructionSemantics(
-                    name,
-                    cls,
-                    elem_size=esz,
-                    num_elems=ne,
-                    sign_extend=se,
-                    d16_hi='D16_HI' in suffix,
-                    d16_lo='D16' in suffix and 'D16_HI' not in suffix,
-                )
+            sem = _derive_buffer_data(
+                name,
+                upper[len(prefix) :],
+                is_store,
+                typed=prefix.startswith('TBUFFER'),
+                typed_format_executable=False,
+            )
+            if sem:
+                return sem
     return InstructionSemantics(name, 'nop')
-
-
-_MTBUF_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
-    'FORMAT_X': (4, 1, False),
-    'FORMAT_XY': (4, 2, False),
-    'FORMAT_XYZ': (4, 3, False),
-    'FORMAT_XYZW': (4, 4, False),
-    'FORMAT_D16_X': (2, 1, False),
-    'FORMAT_D16_XY': (2, 2, False),
-    'FORMAT_D16_XYZ': (2, 3, False),
-    'FORMAT_D16_XYZW': (2, 4, False),
-}
 
 
 def _derive_mtbuf(name: str) -> InstructionSemantics | None:
@@ -2111,20 +2172,9 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     is_store = '_STORE_' in upper
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = upper[len(prefix) :]
-            info = _FLAT_DATA_MAP.get(suffix) or _MTBUF_FORMAT_MAP.get(suffix)
-            if info:
-                esz, ne, se = info
-                cls = 'tbuffer_store' if is_store else 'tbuffer_load'
-                return InstructionSemantics(
-                    name,
-                    cls,
-                    elem_size=esz,
-                    num_elems=ne,
-                    sign_extend=se,
-                    d16_hi='D16_HI' in suffix,
-                    d16_lo='D16' in suffix and 'D16_HI' not in suffix,
-                )
+            sem = _derive_buffer_data(name, upper[len(prefix) :], is_store, typed=True)
+            if sem:
+                return sem
     return InstructionSemantics(name, 'nop')
 
 
