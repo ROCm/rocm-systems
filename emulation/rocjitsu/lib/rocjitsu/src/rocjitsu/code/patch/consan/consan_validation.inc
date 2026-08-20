@@ -313,8 +313,21 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
            ((next.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
              next.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
             existing->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata));
+      const auto &existing_patch = result.patches[existing->patch_index];
+      const auto &next_patch = result.patches[next.patch_index];
+      const bool nested_composed_entry_prefix =
+          !existing->is_trampoline && !next.is_trampoline &&
+          ((existing->kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+            existing_patch.entry_prologue_chained_trampoline_offset ==
+                next_patch.trampoline_offset &&
+            next.bytes.begin < existing->bytes.end) ||
+           (next.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+            next_patch.entry_prologue_chained_trampoline_offset ==
+                existing_patch.trampoline_offset &&
+            existing->bytes.begin < next.bytes.end));
       if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
-          !nested_composed_access_atomic && !nested_composed_sampled_access_atomic) {
+          !nested_composed_access_atomic && !nested_composed_sampled_access_atomic &&
+          !nested_composed_entry_prefix) {
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -708,7 +721,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
       const auto prologue =
           std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
             return candidate.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-                   candidate.anchor_offset == patch.anchor_offset &&
+                   candidate.anchor_offset <= patch.anchor_offset &&
+                   patch.anchor_offset < candidate.anchor_offset + candidate.original_size &&
                    candidate.trampoline_offset == *patch.branch_only_entry_prologue_offset &&
                    candidate.entry_prologue_chained_trampoline_offset == patch.trampoline_offset;
           });

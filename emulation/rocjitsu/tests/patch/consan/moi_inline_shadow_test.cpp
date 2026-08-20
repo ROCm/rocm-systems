@@ -6351,6 +6351,60 @@ TEST(ConSanMoi, Rdna4FarAccessAndAdjacentBarrierUseIndependentDenseRoutes) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kLargeTextWords = 33'000u;
+  constexpr size_t kAccessWord = 6u;
+  constexpr uint32_t kAccessCount = 136u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2u, /*vdata=*/3u, (index % 64u) * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    std::ranges::copy(*access, text_words.begin() + kAccessWord + 2u * index);
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "cdna4_far_entry_prefix_access");
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto access_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_EQ(access_patch->anchor_offset, kAccessWord * sizeof(uint32_t));
+  EXPECT_FALSE(access_patch->branch_only_continuation);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->anchor_offset, 0u);
+  EXPECT_EQ(prologue->original_size, 7u * sizeof(uint32_t));
+  EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, access_patch->trampoline_offset);
+
+  ConSanResult missing_composition = result;
+  const auto missing_prologue =
+      std::ranges::find(missing_composition.patches,
+                        ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(missing_prologue, missing_composition.patches.end());
+  missing_prologue->entry_prologue_chained_trampoline_offset.reset();
+  const std::vector<std::string> validation_errors =
+      validate_consan_modified_elf(bytes, missing_composition);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("partially overlapping patch ranges") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
+}
+
 TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kBarrierWord = 32u;

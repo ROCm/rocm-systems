@@ -428,6 +428,7 @@ function(rj_add_consan_device_conformance_cases)
             APPEND
             _device_workloads
             "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
+            "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
     endif()
     if(NOT _device_TARGET STREQUAL "gfx1250")
@@ -574,6 +575,29 @@ function(rj_add_consan_device_conformance_cases)
                 endif()
             endif()
 
+            if(
+                _workload_name STREQUAL "Gfx950LargeLdsPipeline"
+                AND _mode_value STREQUAL "record-replay"
+            )
+                # This workload deliberately carries hundreds of static LDS
+                # sites. A static site/address-group table reserves hundreds
+                # of MiB and makes report validation dominate the test. The
+                # dynamic log retains every executed access for this bounded
+                # fixture while keeping the checked-in device test cheap.
+                list(
+                    APPEND
+                    _correct_environment
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+                    "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                )
+                list(
+                    APPEND
+                    _incorrect_environment
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+                    "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                )
+            endif()
+
             set(
                 _correct_test_name
                 "${_device_PREFIX}.${_mode_name}${_workload_name}.Correct"
@@ -672,6 +696,7 @@ function(rj_add_consan_device_fixture_targets target)
             APPEND
             _device_workload_sources
             "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
+            "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
     endif()
     if(NOT target STREQUAL "gfx1250")

@@ -108,7 +108,8 @@ regressions cover each placement, scalar-state, token-namespace, and wait-policy
 failure on every supported architecture.  The checked-in tree atomic-OR
 correct/incorrect device pair now runs three producer releases concurrently;
 all 60 instances pass across the five emulated targets, all engines, and
-physical gfx950.  The full checked-in device suite passes all 1,285 instances.
+physical gfx950.  The current full checked-in device suite passes all 1,355
+instances in 839.76 seconds wall time at `ctest -j64`.
 Paired-overhead and reviewed-fault acceptance remain before this cell can
 become green.  The loaded hook SHA-256 is
 `eadc8a11a7ad3cfd89d934467f2073e0b8b9ad062b5316c3ae7261d6661108c4`.
@@ -622,8 +623,9 @@ are useful planned rows, not runnable evidence.
 | Tracking unit | Current gfx950 availability | Exact source/build contract |
 |---|---|---|
 | `hip_matmul_matmul::m128_n128_k128` | **Runnable and smoke-passed** | `corpus/kernels/cases/hip-matmul/matmul/case.json`; executable `rocjitsu-test-corpus-build/kernels-gfx950-hip-matmul/cases/hip-matmul/hip_matmul_matmul`; `-m 128 -n 128 -k 128`, `FIXED_ITERATIONS=1`.  All three selected MFMA/shared-memory kernels pass correctness on the physical gfx950. |
-| `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | **Environment-blocked before compilation** | A fresh gfx950-only configure reaches the case but fails `find_package(OpenMP REQUIRED)`: the host Clang probe cannot find `omp.h`, and no Clang OpenMP development package is installed.  No source compilation or ConSan run has occurred. |
-| FP8/MXFP8 four-wave HipKittens rows | **Compile-disabled** | Both exact case JSON files exist, but `corpus/kernels/configs/gfx950.json` lists them in `skip_compile_tests`. |
+| `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | **Runnable and baseline-passed** | A clean gfx950-only build uses GCC 13's OpenMP host runtime with TheRock's `amdclang++` HIP compiler. The physical-gfx950 exact oracle passes with zero maximum absolute error. |
+| `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | **Runnable and baseline-passed** | The same clean build compiles the four-wave MXFP8 case despite the portable corpus skip and its physical-gfx950 exact oracle passes all 65,536 outputs. |
+| `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | **Compile-failed** | The clean build reaches source compilation, then `4_wave.cu:861` rejects `constexpr int block_count = ROTATING_BUFFER_COUNT` because `ROTATING_BUFFER_COUNT` is not constant. This is a source/toolchain compatibility failure, not a ConSan result. |
 | `hip_streamk_simple::m256_n256_k256` and `hip_streamk_two_tile::m256_n256_k256` | **Runnable and simulator-baseline-passed** | Corpus revision `61b5af0b5ee9` first enables HIP Stream-K in `corpus/kernels/configs/gfx950.json` and declares gfx950 in `corpus/kernels/cases/hip-stream-k/{simple_streamk,two_tile_streamk}/case.json`.  At current local revision `0db836e7bd8c`, each exact oracle uses one run, `--grid 8`, and `--validate`, and separate `nan_results_rejected` cases reject non-finite results.  The current workspace TheRock SDK supplies rocThrust; both cases build and pass their exact oracles through the gfx950 RocJITsu simulator under a 120-second per-case bound. |
 | `rocblas_sgemm` exact cases | **Runnable and baseline-passed** | A dedicated gfx950 build now provides `rocjitsu-test-corpus-build/kernels-gfx950-rocblas/cases/rocblas/rocblas_sgemm`.  `RocblasGemmTest.Square_64x64` passes its physical-device baseline in 183 ms; the bounded strict Record/Replay assessment below records the current instrumentation frontier. |
 
@@ -635,12 +637,89 @@ The HipKittens rows remain explicit enablement work.
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
 | P0 | `hip_matmul_matmul::m128_n128_k128` | 🟨 Current physical clean run passes all three exact numerical checks with complete 739/739 supported LDS-access coverage, complete static and dynamic verdicts, and zero mismatches; paired overhead and reviewed-fault acceptance remain | 🟨 All three one-repetition numerical oracles pass in the unrestricted run after fixing scalar-epoch barrier SCC preservation; 709/739 accesses and all 109/109 barriers patch.  The remaining 30 typed resource failures belong to an unexecuted dynamic-stack HybridStreamKTree kernel packaged in the same code object, so static completeness is still false | 🟨 Final candidate-tree physical run at the standard stride 256 and workload-qualified residue 244 passes all three exact numerical oracles in 22.53 seconds, publishes 112 visible samples and 2 synchronization records with zero diagnostics or malformed/incomplete state, patches all 739/739 accesses and 109/109 barriers, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Final candidate-tree physical run passes all three exact numerical oracles in 18.57 seconds with 188,416 visible evidence events, zero diagnostics, overflow, or dynamic-incomplete state, complete 739/739 access and 109/109 barrier coverage, and complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Native gfx950 MFMA kernels use shared-memory tiling, repeated workgroup barriers, and a double-buffered LDS path.  Sampled and Inline Shadow now cover the packaged dynamic-stack HybridStreamKTree sites by combining owner-private and owner-local persistent-VGPR state.  Paired-overhead and reviewed-fault evidence remain for green acceptance. |
-| P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | 🩶 Environment-blocked before compilation | Explicit gfx950 case with dynamic LDS, wide DS reads/writes, direct global-to-LDS traffic, a deep barrier schedule, and MFMA.  Fresh configure evidence in `rocjitsu-test-corpus-build/kernels-gfx950-hipkittens-reassess-20260722` stops at missing Clang OpenMP headers/runtime (`omp.h`); no baseline or ConSan profile has run. |
-| P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave FP8 case; currently listed in `skip_compile_tests`.  Remove that corpus-level blocker only after recording the compiler failure or confirming a current toolchain build, then inventory its LDS/barrier shapes. |
-| P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | 🩶 Compile assessment pending | Explicit gfx950 four-wave microscaling GEMM; also currently compile-skipped.  It is the closest packaged low-precision companion to the BF16 row. |
+| P0 | `hipkittens_gemm_bf16fp32_16x32::m256_n256_k256` | 🟨 Physical strict clean run preserves the exact zero-error oracle with complete 96/96 access coverage and complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Physical strict clean stride-1 run preserves the zero-error oracle with complete 96/96 accesses and 32/32 barriers, 49,400 visible records, zero diagnostics, and complete static/dynamic verdicts; standard-cadence, paired-overhead, and reviewed-fault evidence remain | 🟨 Physical strict stride-1 run preserves the zero-error oracle with complete 96/96 accesses and 29/29 applicable barriers, 768 samples, zero diagnostics, and complete static/dynamic verdicts; the standard offset-0 cadence selects no workgroup, and paired-overhead/reviewed-fault evidence remain | 🟨 Current physical strict run preserves the exact zero-error oracle in 22 seconds, patches all 96/96 accesses and 32/32 barriers, publishes 229,376 clean evidence events, and has complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Explicit gfx950 case with dynamic LDS, wide DS reads, direct global-to-LDS traffic, a deep 32-barrier schedule, and MFMA. A current clean build uses GCC 13's OpenMP runtime for host code and TheRock's gfx950 HIP compiler; the baseline reports zero maximum absolute error. |
+| P1 | `hipkittens_gemm_fp8fp32_4wave::m256_n256_k256` | 🟥 Compile fails before ConSan | 🟥 Compile fails before ConSan | 🟥 Compile fails before ConSan | 🟥 Compile fails before ConSan | Explicit gfx950 four-wave FP8 case. A current clean compile fails because upstream `4_wave.cu` initializes a `constexpr` local from the non-constant `ROTATING_BUFFER_COUNT`; no profile inference is made. |
+| P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🩶 Physical exact baseline passes; profile unassessed | 🩶 Physical exact baseline passes; profile unassessed | 🩶 Physical exact baseline passes; profile unassessed | 🩶 Physical exact baseline passes; profile unassessed | Explicit gfx950 four-wave microscaling GEMM. A current clean build succeeds despite the portable corpus skip, and the physical exact oracle passes all 65,536 outputs. |
 | P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The compiler lowers `local_write_cooperative` and `local_read` shared-memory operations to provenance-unknown FLAT instructions in non-kernel functions.  The exact baseline and every standard profile are retained under the `consan-gfx950-streamk-*-provenance-20260724` artifact roots; `bd-1w9.9.10` tracks typed group provenance and function synchronization placement. |
 | P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🟧 Exact simulator oracle passes, but the profile is inapplicable: zero supported LDS sites, zero patches, and `applicable_code_objects=0` | 🟥 Strict exit 92: helper-function barriers and atomics have no usable resource plan, and no LDS access is admitted | 🟥 Strict exit 92: all 4 discovered barriers fail placement/lowering, and no LDS access is admitted | 🟥 Strict exit 92: the inline barrier cannot publish visible evidence, and no LDS access is admitted | The two-tile ownership path reproduces the same provenance-unknown FLAT instructions in non-kernel functions and the same function-level synchronization boundary as the simple case.  It remains a separate exact-oracle denominator under the same retained artifact roots and `bd-1w9.9.10`. |
 | P2 | `rocblas_sgemm` compact exact cases | 🩶 Baseline exact; profile unassessed | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifacts `consan-gfx950-rocblas-sgemm-rr-assessment-20260722/run.log` and `run-verbose.log`; preflight finds 49,435 access ranges and 2,558,464 barrier records before strict policy terminates with exit code 92.  Per-owner persistent tuples are a medium-sized gap, so this bounded red row is not an easy-cell candidate. |
+
+### 2026-08-20 current HipKittens compile and baseline assessment
+
+Clean build directory
+`rocjitsu-test-corpus-build/kernels-gfx950-hipkittens-gcc-20260820`
+uses `/usr/bin/gcc` and `/usr/bin/g++` for OpenMP host code and the workspace
+TheRock `amdclang++` for gfx950 device code. This removes the prior missing-Clang-
+OpenMP environment blocker without changing the corpus or the checked-in build
+contract.
+
+`hipkittens_gemm_bf16fp32_16x32` compiles and its physical-gfx950 exact oracle
+passes in 0.13 seconds with `max_abs_diff=0`. `hipkittens_gemm_mxfp8_4wave`
+also compiles and passes all 65,536 results in 0.24 seconds. The FP8 companion
+does not compile: `4_wave.cu:861` declares `block_count` as `constexpr` while
+initializing it from the non-constant `ROTATING_BUFFER_COUNT`. The FP8 cells are
+therefore red source/toolchain failures; the two passing baselines remain gray
+only until each ConSan profile is assessed.
+
+Artifact
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-supercollider-cMKIkA`
+records the first strict BF16 SuperCollider run with hook SHA-256
+`dc7d952995dfbcb0cf8601c10b0b546fefd95f69f055bc08d62e4e2ec5664b2a`.
+The physical run passes the exact zero-error oracle in 0.17 seconds, patches
+all 96/96 supported LDS reads, reports no check mismatch, and has complete
+static and dynamic verdicts. The cell is yellow pending paired overhead and a
+reviewed fault run.
+
+Artifact
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-record-replay-u02Uq3`
+records a strict stride-1 Record/Replay clean run. It preserves the exact
+zero-error result in 340.17 seconds, patches all 96/96 accesses and 32/32
+barriers, processes 49,152 access plus 248 barrier records without drops,
+diagnostics, conflict, saturation, invalid tokens, or metadata exhaustion, and
+reports complete static and dynamic verdicts. This intentionally dense run is
+structural and correctness evidence; a standard-cadence run, paired overhead,
+and reviewed-fault evidence still remain for green acceptance.
+
+Artifacts
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-sampled-0cQbvf`
+and
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-sampled-stride1-18FHRB`
+separate Sampled's cadence policy from its instrumentation path. The standard
+stride-256/offset-0 run patches all 96/96 accesses and 29/29 applicable
+barriers but correctly exits 86 because its one dispatch selects no workgroup.
+At stride 1, the physical exact oracle passes in 12.61 seconds with 768 visible
+samples, 13 synchronization records, zero diagnostics or malformed/incomplete
+state, and complete static and dynamic verdicts. A workload-qualified standard
+residue is not claimed because this kernel lacks a stable ABI dispatch-ID
+source; stride 1 is the deterministic bounded clean contract.
+
+Artifact
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-inline-JPQw8z`
+records the first physical Inline Shadow assessment. Static instrumentation is
+complete at 96/96 accesses and 32/32 barriers, and the report reaches 196,608
+events with zero diagnostics, malformed state, or overflow. The workload does
+not complete, however: after more than five minutes its main thread remains
+blocked in `kfd_wait_on_events` and the run is interrupted. The red cell is a
+runtime hang, not a static-coverage rejection.
+
+Current artifact
+`consan-validation/rebase-20260820-gfx950-hipkittens-bf16-inline-entry-prefix-fix-5CvZuY`
+supersedes that interrupted assessment. The physical workload exits normally
+in 22 seconds and preserves the exact zero-error oracle. Inline Shadow patches
+all 96/96 accesses and 32/32 barriers, publishes 229,376 visible evidence
+events, and reports zero diagnostics, malformed/incomplete state, or overflow,
+with complete analysis, static, and dynamic verdicts. The loaded hook SHA-256
+is `587f327b6c269414c61a79c8915867fdb68fc2a434cc8586ffe41e19e11cfbbc`.
+
+The same change set adds a checked-in gfx950 large-LDS pipeline distilled from
+the HipKittens shape: 160 KiB LDS, eight waves, wide DS stores, repeated scalar
+reads, 32 publication stages, and a correct/incorrect missing-barrier pair. Its
+20 baseline/profile cases pass in gfx950 RocJitsu simulation and on the
+physical gfx950 in 131.17 seconds wall time. A focused host regression covers
+the independently exposed planner case where a seven-word far entry relay
+reaches into an already instrumented LDS access and must chain into that access
+body rather than overlap or bypass it. Paired overhead and reviewed-fault
+acceptance remain before the E2E cell can become green.
 
 ### 2026-08-20 HIP matmul Inline Shadow mixed-owner closure
 

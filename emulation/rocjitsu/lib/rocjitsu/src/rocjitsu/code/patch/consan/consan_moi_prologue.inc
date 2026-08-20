@@ -2563,7 +2563,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     uint64_t prologue_return_target = kernel.entry_text_offset;
     const auto original_kernel =
         std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
-    const auto composed_entry_patch =
+    auto composed_entry_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
           const bool chainable_instrumentation =
               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
@@ -2577,15 +2577,19 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                  original_kernel != result.kernels.end() &&
                  kernel_owns_patch(*original_kernel, patch);
         });
-    const bool chains_existing_entry_trampoline =
+    bool chains_existing_entry_trampoline =
         instrument_entry_in_place && composed_entry_patch != result.patches.end();
-    const uint32_t composed_entry_original_size =
+    uint32_t composed_entry_original_size =
         chains_existing_entry_trampoline ? composed_entry_patch->original_size : 0u;
-    const std::optional<uint64_t> composed_branch_only_trampoline_offset =
+    std::optional<uint64_t> composed_entry_trampoline_offset =
+        chains_existing_entry_trampoline
+            ? std::optional<uint64_t>(composed_entry_patch->trampoline_offset)
+            : std::nullopt;
+    std::optional<uint64_t> composed_branch_only_trampoline_offset =
         chains_existing_entry_trampoline && composed_entry_patch->branch_only_continuation
             ? std::optional<uint64_t>(composed_entry_patch->trampoline_offset)
             : std::nullopt;
-    const std::vector<uint64_t> composed_branch_only_entry_relays =
+    std::vector<uint64_t> composed_branch_only_entry_relays =
         composed_branch_only_trampoline_offset
             ? composed_entry_patch->branch_only_entry_relay_offsets
             : std::vector<uint64_t>{};
@@ -2643,11 +2647,44 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           }
           constexpr size_t kDirectEntryRelayWords = 7u;
           while (displaced_entry_words.size() < kDirectEntryRelayWords) {
+            const uint64_t displaced_offset =
+                kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
+            const auto prefix_patch =
+                std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+                  const bool chainable_instrumentation =
+                      patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
+                  return chainable_instrumentation && patch.anchor_offset == displaced_offset &&
+                         patch.original_size != 0u && patch.trampoline_size != 0u &&
+                         original_kernel != result.kernels.end() &&
+                         kernel_owns_patch(*original_kernel, patch);
+                });
+            if (prefix_patch != result.patches.end()) {
+              // The direct entry relay reaches one word into this already
+              // instrumented instruction. Preserve the earlier guest prefix
+              // in the prologue and chain directly into the access body. The
+              // access body retains its own continuation after the complete
+              // instruction, so no guest instruction is lost or observed
+              // without instrumentation.
+              composed_entry_patch = prefix_patch;
+              chains_existing_entry_trampoline = true;
+              composed_entry_original_size =
+                  static_cast<uint32_t>(kDirectEntryRelayWords * sizeof(uint32_t));
+              composed_entry_trampoline_offset = prefix_patch->trampoline_offset;
+              if (prefix_patch->branch_only_continuation) {
+                composed_branch_only_trampoline_offset = prefix_patch->trampoline_offset;
+                composed_branch_only_entry_relays = prefix_patch->branch_only_entry_relay_offsets;
+              }
+              prologue_return_target = prefix_patch->trampoline_offset;
+              break;
+            }
             std::vector<std::string> relocation_errors;
             auto decoded = decode_relocatable_entry_instruction(
-                old_text,
-                kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t), arch,
-                relocation_errors, relocation_decoder.get());
+                old_text, displaced_offset, arch, relocation_errors, relocation_decoder.get());
             if (!decoded) {
               if (requires_in_place_entry) {
                 result.errors.insert(result.errors.end(), relocation_errors.begin(),
@@ -2667,8 +2704,10 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           }
           if (instrument_entry_in_place) {
             indirect_at_entry = true;
-            prologue_return_target =
-                kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
+            if (!chains_existing_entry_trampoline) {
+              prologue_return_target =
+                  kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
+            }
           }
         }
       }
@@ -2867,7 +2906,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                                 : displaced_entry_words.size() * sizeof(uint32_t))
             : 0u;
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
-    info.entry_prologue_chained_trampoline_offset = composed_branch_only_trampoline_offset;
+    info.entry_prologue_chained_trampoline_offset = composed_entry_trampoline_offset;
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
     info.persistent_owner_vgpr = kernel_options.moi_owner_vgpr;
