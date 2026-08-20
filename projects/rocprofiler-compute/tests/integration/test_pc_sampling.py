@@ -194,8 +194,6 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     options = [
         "--experimental",
         "--pc-sampling",
-        "--block",
-        "21",
         "--pc-sampling-method",
         sampling_method,
     ]
@@ -227,8 +225,6 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
         "analyze",
         "--path",
         str(workload_path),
-        "--block",
-        "21",
         "--output-format",
         "db",
         "--output-name",
