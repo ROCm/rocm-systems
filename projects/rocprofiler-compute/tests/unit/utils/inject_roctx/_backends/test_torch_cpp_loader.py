@@ -649,7 +649,7 @@ def test_runtime_build_returns_none_and_classifies_a_cmake_failure(
         "_runtime_build_path",
         lambda _p, diagnostics=None: tmp_path / "_build",
     )
-    _patch_finder(
+    instances = _patch_finder(
         monkeypatch,
         error=RuntimeError(
             "Failed to execute command: cmake\n"
@@ -661,10 +661,56 @@ def test_runtime_build_returns_none_and_classifies_a_cmake_failure(
     result = inject_roctx_loader._try_runtime_build(_FAKE_TAG, diagnostics=diagnostics)
 
     assert result is None
+    assert len(instances) == 1, f"expected one finder, saw {len(instances)}"
     joined = " ".join(msg for _, msg in diagnostics).lower()
     assert "libtorch" in joined, (
         f"the cmake failure was not reported to the user: {diagnostics!r}"
     )
+
+
+def test_runtime_build_retries_once_on_import_failure(monkeypatch, tmp_path):
+    """Import failure unlinks a file under the build directory, retries once,
+    and does not unlink a file outside it.
+    """
+    _set_so_inputs_present(monkeypatch, tmp_path)
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
+    build_path = tmp_path / "_build"
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_runtime_build_path",
+        lambda _p, diagnostics=None: build_path,
+    )
+    so_path = build_path / "lib" / f"torch_trace_collector-{_FAKE_TAG}.so"
+    so_path.parent.mkdir(parents=True)
+    so_path.write_bytes(b"stub-so")
+    so_path_outside_build = (
+        tmp_path / "install" / f"torch_trace_collector-{_FAKE_TAG}.so"
+    )
+    so_path_outside_build.parent.mkdir(parents=True)
+    so_path_outside_build.write_bytes(b"stub-so")
+    instances = _patch_finder(monkeypatch, artifact_path=so_path)
+    import_count = 0
+    sentinel = object()
+
+    def import_module(_name, _path):
+        nonlocal import_count
+        import_count += 1
+        if import_count == 1:
+            raise ImportError("failed")
+        return sentinel
+
+    monkeypatch.setattr(inject_roctx_loader, "_import_module_from_path", import_module)
+
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is sentinel
+    assert not so_path.exists()
+    inject_roctx_loader._unlink_runtime_build_artifact(
+        so_path_outside_build, build_path
+    )
+    assert so_path_outside_build.is_file()
+    assert import_count == 2
+    assert len(instances) == 2, f"expected two finders, saw {len(instances)}"
+    assert instances[1].search_installed is False
+    assert instances[1].reuse_built_artifact is False
 
 
 # ---------------------------------------------------------------------------
