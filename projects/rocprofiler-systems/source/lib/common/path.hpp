@@ -361,7 +361,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         // if include_self is false, start at next library
-        struct link_map* _next = (_include_self) ? _link_map : _link_map->l_next;
+        const struct link_map* _next = (_include_self) ? _link_map : _link_map->l_next;
         while(_next)
         {
             if(_next->l_name != nullptr && !std::string_view{ _next->l_name }.empty())
