@@ -290,7 +290,9 @@
           "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
           "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache",
           "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1"
+            "RCCL_CE_ALLREDUCE": "1",
+            "RCCL_FORCE_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
           }
         },
         {
@@ -313,7 +315,8 @@
           "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
           "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1"
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
           }
         },
         {
@@ -334,6 +337,8 @@
       "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",

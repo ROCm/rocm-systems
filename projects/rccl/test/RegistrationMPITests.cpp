@@ -86,6 +86,12 @@ public:
         return std::regex_search(m_content, re);
     }
 
+    bool hasRegisteredDmaBufMrs(int n) const
+    {
+        const std::regex re("as\\s+" + std::to_string(n) + "\\s+DMA-BUF MRs\\b");
+        return std::regex_search(m_content, re);
+    }
+
     bool hasSymSysmemHandleReuse() const
     {
         return hasPattern("Symmetric window reusing system-memory handle");
@@ -1140,8 +1146,9 @@ protected:
  *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
- * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
- *   "... numSegments 4"
+ * The collective operates on four segments per half, while ncclCommRegister
+ * covers the complete eight-segment allocation. NET registration must retain
+ * all eight segments so the receive half has valid per-segment MRs/rkeys.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1201,21 +1208,25 @@ TEST_F(UBR_MultiSegment, Generic)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
-        << "Expected 'numSegments " << (kNumSegments / 2)
-        << "' in log - the multi-segment registration branch did not fire";
+    ASSERT_TRUE(checker.hasRegisteredDmaBufMrs(kNumSegments) ||
+                checker.hasNumSegments(kNumSegments / 2))
+        << "Expected NET to register " << kNumSegments
+        << " DMA-BUF MRs for the complete ncclCommRegister range, or IPC to "
+           "register the four-segment operation range";
 }
 
 /**
  * @brief BEFORE control for the registration-reuse regression.
  *
  * The original test repeated an identical AllReduce while the CE fast path was
- * enabled. CE retained and reused its collective plan, so the second call never
- * re-entered the transport registration cache. This control intentionally
- * recreates that setup and passes only when no IPC/NET reuse lookup is logged.
+ * enabled. Forced CE handles the registered buffer directly, so neither call
+ * enters the IPC/NET transport registration cache. This control intentionally
+ * recreates that setup and passes only when no transport registration or reuse
+ * lookup is logged.
  *
- * Run this test in its own process with RCCL_CE_ALLREDUCE=1. The corresponding
- * AFTER test is Generic_Reuse, run with RCCL_CE_ALLREDUCE=0.
+ * Run this test in its own process with RCCL_CE_ALLREDUCE=1,
+ * RCCL_FORCE_CE_ALLREDUCE=1, and NCCL_CTA_POLICY=2. The corresponding AFTER
+ * test is Generic_Reuse, run with RCCL_CE_ALLREDUCE=0.
  */
 TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
 {
@@ -1225,6 +1236,14 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
         GTEST_SKIP() << "BEFORE control requires RCCL_CE_ALLREDUCE=1";
+    }
+    const char* forceCeAllReduce = std::getenv("RCCL_FORCE_CE_ALLREDUCE");
+    if (forceCeAllReduce == nullptr || std::atoi(forceCeAllReduce) != 1) {
+        GTEST_SKIP() << "BEFORE control requires RCCL_FORCE_CE_ALLREDUCE=1";
+    }
+    const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
+    if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
+        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 (ZERO)";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -1280,11 +1299,10 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("RegisterReuse_BEFORE_CePlan: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasIPCRegistration() || checker.hasNETRegistration())
-        << "Expected the first AllReduce to register the buffer";
+    EXPECT_FALSE(checker.hasIPCRegistration() || checker.hasNETRegistration())
+        << "Forced CE unexpectedly entered the transport registration cache";
     EXPECT_FALSE(checker.hasIPCReuse() || checker.hasNETReuse())
-        << "BEFORE control did not reproduce the CE plan-cache bypass; "
-           "the transport registration cache was unexpectedly revisited";
+        << "Forced CE unexpectedly revisited the transport registration cache";
 }
 
 /**
@@ -1462,6 +1480,10 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
         GTEST_SKIP() << "BEFORE control requires RCCL_CE_ALLREDUCE=1";
+    }
+    const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
+    if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
+        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 (ZERO)";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
