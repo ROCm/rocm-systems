@@ -17,8 +17,7 @@
 // per-iteration device latency in microseconds. This is the pure device-function
 // execution time -- it excludes host launch, stream/graph, and teardown overhead.
 //
-// The reported span is driven by BenchTime (see common.cu) via
-// NCCL_GIN_ANVIL_DEVICE_TIMING (legacy NCCL_GIN_ANVIL_A2A_DEVICE_TIMING):
+// The reported span is driven by BenchTime (see common.cu) via --device_timing:
 // 1=augment (each hook prints its own extra "#[*-devtime]" line next to the graph
 // numbers), 2=device-time-only (the hook returns per-iteration seconds via
 // outDeltaSec and BenchTime reports it AS the out-of-place metric).
@@ -30,21 +29,15 @@
 
 namespace gin_devtime {
 
-// Parse a positive int env var, else the default.
-static inline int envInt(const char* name, int def) {
-  const char* e = getenv(name);
-  return (e && *e) ? atoi(e) : def;
-}
-
 // GPU fixed-frequency wall-clock rate (kHz) for a specific device ordinal. Sampled
 // per-GPU (rather than once from the current device) so each GPU's cycle delta is
-// converted with its own rate on mixed-clock nodes. Falls back to 1 kHz if the query
-// fails, which yields a harmless raw-cycle magnitude instead of a divide-by-zero.
-static inline int wallClockRateKhz(int dev) {
+// converted with its own rate on mixed-clock nodes.
+static inline bool wallClockRateKhz(int dev, int* outKhz) {
   int khz = 0;
   if (hipDeviceGetAttribute(&khz, hipDeviceAttributeWallClockRate, dev) != hipSuccess || khz <= 0)
-    khz = 1;
-  return khz;
+    return false;
+  *outKhz = khz;
+  return true;
 }
 
 // Run the device-timing measurement. `launch` is a callable
@@ -89,7 +82,22 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
 
     // Sample THIS GPU's wall-clock rate to convert its own cycle delta; on a
     // mixed-clock node a single reference rate would skew the non-reference GPUs.
-    const int rate = wallClockRateKhz(args->gpus[i]);
+    int rate = 0;
+    if (!wallClockRateKhz(args->gpus[i], &rate)) {
+      CUDACHECK(cudaFree(d_start[i]));
+      CUDACHECK(cudaFree(d_end[i]));
+      d_start[i] = d_end[i] = nullptr;
+      for (int j = i + 1; j < args->nGpus; j++) {
+        if (d_start[j]) CUDACHECK(cudaFree(d_start[j]));
+        if (d_end[j]) CUDACHECK(cudaFree(d_end[j]));
+        d_start[j] = d_end[j] = nullptr;
+      }
+      if (args->proc == 0 && args->thread == 0) {
+        fprintf(stderr, "ERROR: hipDeviceAttributeWallClockRate query failed for GPU %d\n",
+                args->gpus[i]);
+      }
+      return testInternalError;
+    }
 
     std::vector<long long> h_start(gridCtas), h_end(gridCtas);
     CUDACHECK(cudaMemcpy(h_start.data(), d_start[i], (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
