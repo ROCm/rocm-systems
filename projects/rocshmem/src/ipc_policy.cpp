@@ -39,6 +39,7 @@ namespace rocshmem {
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      MPI_Comm thread_comm) {
+  /* Dummy comment for a PR */
   MPI_Comm shmcomm;
   std::vector<int> ipc_ranks;
 
