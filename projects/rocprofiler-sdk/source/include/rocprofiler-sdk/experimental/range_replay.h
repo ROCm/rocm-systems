@@ -102,7 +102,7 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * from pass 0. Host state is not rewound at all: a range whose kernels consume values the host
  * recomputed inside the range is not a candidate for replay.
  *
- * @see `docs/conceptual/range_replay/range_replay.md`
+ * @see `source/docs/conceptual/range_replay/index.md`
  */
 typedef struct rocprofiler_callback_tracing_range_replay_data_t
 {
