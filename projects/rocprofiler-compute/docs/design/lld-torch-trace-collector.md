@@ -404,22 +404,19 @@ must tolerate the missing field: `_parse_function_backend` in
   why it is skipped otherwise; `ON` makes an absent torch a configure error;
   `OFF` skips the directory. Any other value stops the configure.
   `TORCH_TRACE_PYTHON` selects the interpreter, defaulting to the one CMake finds.
+  `TORCH_TRACE_SOURCE_FINGERPRINT` is required.
 - CMake locates the interpreter with `find_package(Python3)` and the wheel with
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
-  are resolved under `${TORCH_INSTALL_PREFIX}/lib`. The imported `torch` target is
-  not linked.
+  are resolved under `${TORCH_INSTALL_PREFIX}/lib`.
 - The artifact tag is `py{major}.{minor}_torch{Torch_VERSION}_src{fingerprint}`.
   Python major and minor come from `find_package(Python3)`. The fingerprint is
-  computed by `print_fingerprint.py`, or taken from
-  `TORCH_TRACE_SOURCE_FINGERPRINT` on a runtime configure. `_GLIBCXX_USE_CXX11_ABI`
-  is `int(torch.compiled_with_cxx11_abi())`.
+  `TORCH_TRACE_SOURCE_FINGERPRINT`.
 - A static core library carries the shared source and its usage requirements —
   the torch and roctx includes and libraries, `synchronized`, `gsl_assert`, the
-  debug-info flag and `_GLIBCXX_USE_CXX11_ABI` — and both the pybind11 `MODULE`
-  and the gtest binary link it and inherit them. `_GLIBCXX_USE_CXX11_ABI` matches
-  the wheel already loaded by the interpreter, so the two agree on the layout of
-  every standard-library type crossing the boundary.
+  debug-info flag, and `_GLIBCXX_USE_CXX11_ABI` set to
+  `int(torch.compiled_with_cxx11_abi())` — and both the pybind11 `MODULE`
+  and the gtest binary link it and inherit them.
 - `torch_python` is resolved separately and linked only into the pybind module. It
   leaves Python symbols undefined and names no `libpython` of its own, so only a
   consumer already loaded by an interpreter can resolve them.
