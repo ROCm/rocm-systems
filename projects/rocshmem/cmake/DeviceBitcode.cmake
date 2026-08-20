@@ -208,8 +208,28 @@ endif()
 # all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
+  # Resolve the full arch string (with feature suffixes) for this base arch, so
+  # the compile step below embeds the correct amdhsa.target metadata. Mirrors
+  # the lookup in tests/functional_tests/CMakeDeviceBitcodeTester.cmake.
+  set(_FULL_ARCH "${gpu_arch}")
+  set(_FULL_ARCH_MATCHES "")
+  foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
+    string(REGEX REPLACE ":.*" "" _candidate_base "${_candidate}")
+    if("${_candidate_base}" STREQUAL "${gpu_arch}")
+      list(APPEND _FULL_ARCH_MATCHES "${_candidate}")
+    endif()
+  endforeach()
+  list(LENGTH _FULL_ARCH_MATCHES _n_full_arch_matches)
+  if(_n_full_arch_matches GREATER 0)
+    list(GET _FULL_ARCH_MATCHES 0 _FULL_ARCH)
+    if(_n_full_arch_matches GREATER 1)
+      message(STATUS "Multiple feature variants requested for ${gpu_arch} "
+        "(${_FULL_ARCH_MATCHES}); device bitcode will embed ${_FULL_ARCH}")
+    endif()
+  endif()
+
   # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
-  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch}
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH}
                      -Xclang -disable-llvm-passes)
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})
