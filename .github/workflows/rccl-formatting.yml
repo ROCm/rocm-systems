@@ -17,7 +17,6 @@ on:
     paths:
       - "projects/rccl/**"
       - ".github/workflows/rccl-formatting.yml"
-      - ".pre-commit-config.yaml"
 
 permissions:
   contents: read
@@ -67,4 +66,4 @@ jobs:
 
           echo "Checking files:"
           echo "$FILES"
-          pre-commit run --files $FILES
+          pre-commit run -c projects/rccl/.pre-commit-config.yaml --files $FILES

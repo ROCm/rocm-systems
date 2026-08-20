@@ -1,0 +1,21 @@
+# Pre-commit formatting for projects/rccl/ (excluded from the repo-root config).
+# Local: pip install pre-commit && pre-commit run -c projects/rccl/.pre-commit-config.yaml --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^projects/rccl/
+      - id: end-of-file-fixer
+        files: ^projects/rccl/
+      - id: check-yaml
+        files: ^projects/rccl/
+
+  # clang-format pinned to >=22 to match maint/run-clang-format.sh (from NCCL);
+  # both use projects/rccl/.clang-format + .clang-format-ignore, so results match.
+  # gersemi (CMake) omitted for now to avoid mass churn; adopt in a follow-up.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: ^projects/rccl/src/.*\.(h|cc|cu|cuh)$
