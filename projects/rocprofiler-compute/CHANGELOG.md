@@ -20,6 +20,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * Profile mode no longer converts rocpd databases to CSV or merges counter lanes during collection.
+* Profile compacts per-process rocpd databases at end of each pass when native counter CSVs exist, dropping unused PMC catalog tables.
 
 ### Resolved issues
 

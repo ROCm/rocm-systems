@@ -11,8 +11,11 @@ import pandas as pd
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
+    compact_pass_rocpd_dbs,
+    compact_rocpd_db,
     convert_dbs_to_marker_csv,
     iter_counter_rows,
+    native_counters_csv,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -478,3 +481,55 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     )
     assert backend_by_operator.get("torch.mm") == "triton"
     assert backend_by_operator.get("nn.Module.Linear.forward") == "torch"
+
+
+# ---- rocpd compaction after native counter collection ----
+
+
+def _write_pass_db(pass_path: Path, pid: str) -> Path:
+    host_dir = pass_path / "testhost"
+    host_dir.mkdir(parents=True)
+    db_path = host_dir / f"{pid}_results.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE rocpd_kernel_dispatch (dispatch_id INTEGER)")
+    conn.execute("INSERT INTO rocpd_kernel_dispatch VALUES (1)")
+    conn.execute("CREATE TABLE rocpd_info_pmc_catalog (payload BLOB)")
+    conn.executemany(
+        "INSERT INTO rocpd_info_pmc_catalog VALUES (?)",
+        [(b"x" * 65536,) for _ in range(64)],
+    )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def test_compact_rocpd_db_drops_pmc_catalog_tables(tmp_path):
+    db_path = _write_pass_db(tmp_path, "12345")
+    before = db_path.stat().st_size
+    removed = compact_rocpd_db(db_path)
+    assert removed > 0
+    assert db_path.stat().st_size < before
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM rocpd_kernel_dispatch").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM rocpd_info_pmc_catalog").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_compact_pass_rocpd_dbs_requires_native_counter_csv(tmp_path):
+    pass_path = tmp_path / "run0"
+    db_path = _write_pass_db(pass_path, "12345")
+    before = db_path.stat().st_size
+
+    assert compact_pass_rocpd_dbs(pass_path) == 0
+    assert db_path.stat().st_size == before
+
+    native_csv = pass_path / "12345_native_counter_collection.csv.gz"
+    native_csv.write_bytes(b"\x1f\x8b\x08\x00" + b"\x00" * 8)
+
+    assert native_counters_csv(pass_path, db_path) == native_csv
+    removed = compact_pass_rocpd_dbs(pass_path)
+    assert removed > 0
+    assert db_path.stat().st_size < before

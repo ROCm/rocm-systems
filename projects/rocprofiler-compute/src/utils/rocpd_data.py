@@ -3,6 +3,7 @@
 
 import csv
 import sqlite3
+import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import closing
 from pathlib import Path
@@ -128,6 +129,65 @@ def db_paths(path: PathLike) -> list[Path]:
     return sorted(Path(path).glob("*/*.db"))
 
 
+def _process_id(db_path: Path) -> str:
+    return db_path.stem.split("_")[0]
+
+
+def native_counters_csv(pass_path: Path, db_path: Path) -> Path | None:
+    """Return the native counter CSV for a process when the native lane collected it."""
+    path = compressed_name(pass_path / f"{_process_id(db_path)}{NATIVE_COUNTERS_SUFFIX}")
+    return path if path.is_file() else None
+
+
+def compact_rocpd_db(db_path: Path) -> int:
+    """Drop PMC catalog tables from a rocpd database and vacuum.
+
+    When counters live in the native CSV lane, the SDK's ``rocpd_info_pmc`` catalog
+    is unused by analyze. Compacting keeps kernel-lane tables only.
+    """
+    before = db_path.stat().st_size
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as handle:
+        temp_path = Path(handle.name)
+
+    source = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    dest = sqlite3.connect(temp_path)
+    try:
+        source.backup(dest)
+    finally:
+        source.close()
+        dest.close()
+
+    conn = sqlite3.connect(temp_path)
+    try:
+        for (table_name,) in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ):
+            if "info_pmc" in table_name or "pmc_event" in table_name:
+                conn.execute(f'DELETE FROM "{table_name}"')
+        conn.commit()
+        conn.execute("VACUUM")
+        conn.commit()
+    finally:
+        conn.close()
+
+    temp_path.replace(db_path)
+    try:
+        db_path.chmod(0o644)
+    except OSError:
+        pass
+    return before - db_path.stat().st_size
+
+
+def compact_pass_rocpd_dbs(pass_path: Path) -> int:
+    """Compact rocpd databases that have a native counter CSV in the same pass."""
+    bytes_removed = 0
+    for db_path in db_paths(pass_path):
+        if native_counters_csv(pass_path, db_path) is None:
+            continue
+        bytes_removed += compact_rocpd_db(db_path)
+    return bytes_removed
+
+
 def iter_counter_rows(db_path: str) -> Iterator[dict]:
     """Yield the long-form counter rows of a database, in dispatch order."""
     return _iter_query_rows(db_path, COUNTERS_COLLECTION_QUERY)
@@ -210,9 +270,8 @@ def write_pmc_rows(rows: Iterable[dict], output: IO[str]) -> int:
 
 def _iter_process_rows(pass_path: Path, db_path: Path) -> Iterator[dict]:
     """Yield counter rows for one process from whichever tool collected them."""
-    pid = db_path.stem.split("_")[0]
-    counters_csv = compressed_name(pass_path / f"{pid}{NATIVE_COUNTERS_SUFFIX}")
-    if not counters_csv.is_file():
+    counters_csv = native_counters_csv(pass_path, db_path)
+    if counters_csv is None:
         yield from iter_counter_rows(str(db_path))
         return
 
