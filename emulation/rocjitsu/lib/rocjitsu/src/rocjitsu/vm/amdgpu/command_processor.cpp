@@ -1318,6 +1318,25 @@ void CommandProcessor::drain_pending_wg_completions() {
   pending_wg_completions_.clear();
 }
 
+void CommandProcessor::drain_pending_cluster_barrier_completions() {
+  std::vector<PendingClusterBarrierCompletion> completions;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    completions.swap(pending_cluster_barrier_completions_);
+  }
+
+  for (auto &completion : completions) {
+    std::vector<Wavefront *> members;
+    for (auto [cu, peer_wg_id] : completion.peers) {
+      auto peer_members =
+          cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
+      members.insert(members.end(), peer_members.begin(), peer_members.end());
+    }
+    if (!members.empty())
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  }
+}
+
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                                   uint32_t global_wg_id, ComputeUnitCore *cu,
                                                   uint32_t lds_base) {
@@ -1404,7 +1423,6 @@ uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t ba
 
 bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
   bool is_first = false;
-  std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
   const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
@@ -1422,21 +1440,22 @@ bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id)
       return is_first;
 
     barriers->signaled_workgroups[index].clear();
+    PendingClusterBarrierCompletion completion{wf.dispatch_id(), completion_bit, {}};
+    auto &peers = completion.peers;
     peers.reserve(placement->peer_wg_ids.size());
     for (uint32_t peer_wg_id : placement->peer_wg_ids) {
       auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
       if (peer != cluster_wg_placements_.end() && peer->second.cu)
         peers.emplace_back(peer->second.cu, peer_wg_id);
     }
+    pending_cluster_barrier_completions_.push_back(std::move(completion));
   }
 
-  std::vector<Wavefront *> members;
-  for (auto [cu, peer_wg_id] : peers) {
-    auto peer_members = cu->complete_barrier(wf.dispatch_id(), peer_wg_id, completion_bit);
-    members.insert(members.end(), peer_members.begin(), peer_members.end());
-  }
-  if (!members.empty())
-    plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  // In serial mode this instruction already runs on the CP/engine thread, so
+  // preserve immediate barrier resolution. Pool workers leave the compact
+  // record queued until the fan-out rejoins below.
+  if (dispatch_threads_ <= 1)
+    drain_pending_cluster_barrier_completions();
   return is_first;
 }
 
@@ -1838,6 +1857,7 @@ void CommandProcessor::on_cu_idle() {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
 
+  drain_pending_cluster_barrier_completions();
   drain_pending_wg_completions();
   if (completion_)
     completion_->drain_completions(new_queue_states_);
@@ -2774,6 +2794,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     // batch instead of retaining a separate pool for every SPI.
     FunctionalQuantumResult result = run_active_cus_once(now);
     lock.lock();
+    drain_pending_cluster_barrier_completions();
     drain_pending_wg_completions();
     if (completion_)
       completion_->drain_completions(new_queue_states_);
@@ -2876,6 +2897,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 
     // Final drain: catch any entries that became fully_completed during the
     // last worker batch.
+    drain_pending_cluster_barrier_completions();
     drain_pending_wg_completions();
     if (completion_)
       completion_->drain_completions(new_queue_states_);

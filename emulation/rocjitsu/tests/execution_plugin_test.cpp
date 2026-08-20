@@ -236,6 +236,7 @@ struct HookEvent {
   uint64_t lane_mask = 0;
   uint8_t byte_mask = 0;
   uint64_t pc = 0;
+  std::thread::id callback_thread;
   std::string mnemonic;
   std::string kernel_name;
   std::string kernel_symbol;
@@ -427,6 +428,56 @@ class ParallelSafePlugin final : public ExecutionPlugin {
 public:
   ParallelSafePlugin() : ExecutionPlugin("parallel_safe") {}
   bool requires_serial_hot_hooks() const override { return false; }
+};
+
+class ParallelColdHookRecorder final : public ExecutionPlugin {
+public:
+  ParallelColdHookRecorder() : ExecutionPlugin("parallel_cold_hook_recorder"), startup_(2) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      hot_hook_threads_.insert(std::this_thread::get_id());
+    }
+    if (startup_arrivals_.fetch_add(1, std::memory_order_relaxed) < 2)
+      startup_.arrive_and_wait();
+  }
+
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *>) override {
+    record(HookEvent::WORKGROUP_DISPATCHED, dispatch_id, wg_id);
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override {
+    record(HookEvent::WORKGROUP_COMPLETED, dispatch_id, wg_id);
+  }
+
+  std::vector<HookEvent> events() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return events_;
+  }
+
+  std::set<std::thread::id> hot_hook_threads() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return hot_hook_threads_;
+  }
+
+private:
+  void record(HookEvent::Kind kind, uint32_t dispatch_id, uint32_t wg_id) {
+    HookEvent event{kind};
+    event.dispatch_id = dispatch_id;
+    event.wg_id = wg_id;
+    event.callback_thread = std::this_thread::get_id();
+    std::lock_guard<std::mutex> lock(mutex_);
+    events_.push_back(std::move(event));
+  }
+
+  std::barrier<> startup_;
+  std::atomic<uint32_t> startup_arrivals_{0};
+  mutable std::mutex mutex_;
+  std::vector<HookEvent> events_;
+  std::set<std::thread::id> hot_hook_threads_;
 };
 
 class SerialHotHookPlugin final : public ExecutionPlugin {
@@ -827,7 +878,7 @@ private:
   const std::vector<HookEvent> &events_;
 };
 
-/// Minimal SoC fixture: 1 XCD, 1 SE, 1 CU.
+/// Minimal SoC fixture: 1 XCD, 1 SE, and a configurable CU count.
 struct PluginFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc = nullptr;
@@ -835,7 +886,17 @@ struct PluginFixture {
 
   explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
                          uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
-                         uint32_t vgprs_per_wf = 256) {
+                         uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1) {
+    std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
+    std::string links;
+    for (uint32_t i = 0; i < num_cus; ++i) {
+      if (!links.empty())
+        links += ',';
+      links += R"({"src":"xcd0.cp.req_)" + std::to_string(i) + R"(","dst":"xcd0.se0.cu)" +
+               std::to_string(i) + R"(.cpl","latency":1,"weight":2})";
+      links += R"(,{"src":"xcd0.se0.cu)" + std::to_string(i) + R"(.req","dst":"xcd0.l2.cpl_)" +
+               std::to_string(i) + R"(","latency":1,"weight":10})";
+    }
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
       "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{},
@@ -846,7 +907,7 @@ struct PluginFixture {
           {{"name":"l2","type":"l2_cache"}},
           {{"name":"cp","type":"command_processor"}},
           {{"name":"se0","type":"shader_engine","children":[
-            {{"name":"cu[0:1]","type":"compute_unit","config":[
+            {{"name":"{}","type":"compute_unit","config":[
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
@@ -854,12 +915,10 @@ struct PluginFixture {
             ]}}
           ]}}
         ]}}
-      ]}},"links":[
-        {{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2}},
-        {{"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}}
-      ]}}}}
+      ]}},"links":[{}]}}}}
     )",
-                                   arch, wavefront_size, num_wf_slots, sgprs_per_wf, vgprs_per_wf);
+                                   arch, wavefront_size, cu_range, num_wf_slots, sgprs_per_wf,
+                                   vgprs_per_wf, links);
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
@@ -869,7 +928,9 @@ struct PluginFixture {
     engine->create();
   }
 
-  amdgpu::ComputeUnitCore *cu() { return soc->xcd(0)->shader_engine(0)->compute_unit(0); }
+  amdgpu::ComputeUnitCore *cu(uint32_t idx = 0) {
+    return soc->xcd(0)->shader_engine(0)->compute_unit(idx);
+  }
   amdgpu::CommandProcessor *cp() { return soc->xcd(0)->command_processor(); }
 
   uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words,
@@ -3790,6 +3851,52 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
   for (size_t i = 0; i + 1 < N; ++i) {
     log.assertLastBeforeFirst(HookEvent::DISPATCH_EXECUTION_END, dispatches[i],
                               HookEvent::DISPATCH_EXECUTION_BEGIN, dispatches[i + 1]);
+  }
+}
+
+TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWorkersRejoin) {
+  PluginFixture f(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
+                  /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/2);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<ParallelColdHookRecorder>();
+  auto *recorder = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  f.soc->set_plugin_group(group);
+  f.cp()->set_dispatch_threads(2);
+  ASSERT_EQ(f.cp()->dispatch_threads(), 2u);
+
+  const uint32_t kernel_a[] = {S_NOP, S_ENDPGM};
+  const uint32_t kernel_b[] = {S_NOP, S_NOP, S_ENDPGM};
+  const uint64_t ko_a = f.write_kernel(0x1000, kernel_a, std::size(kernel_a));
+  const uint64_t ko_b = f.write_kernel(0x2000, kernel_b, std::size(kernel_b));
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(ko_a, /*grid_size=*/128, /*workgroup_size=*/64);
+  queue.dispatch(ko_b, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  const auto cp_thread = std::this_thread::get_id();
+  f.run_until_idle();
+
+  const auto events = recorder->events();
+  const auto hot_hook_threads = recorder->hot_hook_threads();
+  ASSERT_EQ(hot_hook_threads.size(), 2u);
+  EXPECT_TRUE(hot_hook_threads.contains(cp_thread));
+
+  EventLog log(events);
+  std::set<uint32_t> dispatch_ids;
+  for (const auto &event : events) {
+    if (event.kind == HookEvent::WORKGROUP_DISPATCHED)
+      dispatch_ids.insert(event.dispatch_id);
+    EXPECT_EQ(event.callback_thread, cp_thread);
+  }
+
+  ASSERT_EQ(dispatch_ids.size(), 2u);
+  EXPECT_EQ(log.count(HookEvent::WORKGROUP_DISPATCHED), 4u);
+  EXPECT_EQ(log.count(HookEvent::WORKGROUP_COMPLETED), 4u);
+  for (uint32_t dispatch_id : dispatch_ids) {
+    EXPECT_EQ(log.count(HookEvent::WORKGROUP_DISPATCHED, dispatch_id), 2u);
+    EXPECT_EQ(log.count(HookEvent::WORKGROUP_COMPLETED, dispatch_id), 2u);
+    log.assertPairedByWg(HookEvent::WORKGROUP_DISPATCHED, HookEvent::WORKGROUP_COMPLETED,
+                         dispatch_id);
   }
 }
 

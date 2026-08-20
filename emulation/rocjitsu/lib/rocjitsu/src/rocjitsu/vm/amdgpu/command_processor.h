@@ -525,6 +525,7 @@ private:
   bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
                                          const ClusterWorkgroupPlacement *&placement,
                                          const ClusterBarrierState *&barriers) const;
+  void drain_pending_cluster_barrier_completions();
   void drain_pending_wg_completions();
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
@@ -658,6 +659,13 @@ private:
     uint32_t wg_id = 0;
   };
   std::vector<PendingWorkgroupCompletion> pending_wg_completions_;
+
+  struct PendingClusterBarrierCompletion {
+    uint32_t dispatch_id = 0;
+    uint8_t completion_bit = 0;
+    std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
+  };
+  std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;

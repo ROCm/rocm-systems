@@ -4469,7 +4469,8 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerQueueSatisfyPollingWave) {
                                 test::AqlQueue::DEFAULT_RING_SIZE,
                                 /*read_ptr_addr=*/0xE0010000,
                                 /*write_ptr_addr=*/0xE0010008,
-                                /*doorbell_addr=*/0xE0010010);
+                                /*doorbell_addr=*/0xE0010010,
+                                /*xcd_fanout=*/false, /*queue_id=*/2);
   auto waiter_packet = make_dispatch_packet(waiter, waiter_signal);
   waiter_packet.kernarg_address = reinterpret_cast<void *>(producer_signal);
   waiter_queue.submit(waiter_packet);
