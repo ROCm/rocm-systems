@@ -4118,6 +4118,36 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                                 this_func,
                                 signo);
 
+    // A fatal signal raised while this thread is still inside the handler, e.g. an abort
+    // from within finalization below, must not re-enter: recursing into an in-flight
+    // std::call_once deadlocks and the process can no longer be terminated.
+    static thread_local bool _handling = false;
+    if(_handling)
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {} while already handling a "
+            "signal... terminating",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            signo);
+
+        // rocprofv3 interposes signal()/sigaction() to keep this handler installed, so the
+        // default disposition has to be restored through the real symbol before re-raising.
+        auto _default_action       = sigaction_t{};
+        _default_action.sa_handler = SIG_DFL;
+        if(auto* _real_sigaction = get_sigaction_function();
+           _real_sigaction != nullptr && _real_sigaction(signo, &_default_action, nullptr) == 0)
+        {
+            ::raise(signo);
+        }
+
+        // only reached if the signal was not fatal by default or could not be restored
+        ::_exit(128 + signo);
+    }
+    _handling = true;
+
     static auto _once = std::once_flag{};
     std::call_once(_once, [&]() {
         auto get_children = [&this_pid]() {
