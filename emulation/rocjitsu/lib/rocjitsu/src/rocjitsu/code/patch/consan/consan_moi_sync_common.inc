@@ -1612,8 +1612,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     std::vector<uint32_t> &words, const ConSanOptions &options, uint16_t atomic_address_vgpr,
     uint16_t workgroup_key_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_table_capacity, rj_code_arch_t arch) {
-  const bool has_dispatch_id =
-      options.moi_dispatch_id_sgpr.has_value() || consan_arch_uses_literal_dispatch_identity(arch);
+  const bool has_dispatch_id = moi_has_runtime_hardware_dispatch_id(options) ||
+                               consan_arch_uses_literal_dispatch_identity(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !has_dispatch_id ||
       !options.moi_owner_vgpr || token_table_capacity == 0 ||
       token_table_capacity > kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity ||
@@ -2101,13 +2101,34 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint32_t token_capacity, bool emit_guest_instruction, bool import_claimed_predecessor,
     bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors) {
-  const bool has_dispatch_id =
-      options.moi_dispatch_id_sgpr.has_value() || consan_arch_uses_literal_dispatch_identity(arch);
+  struct FailureStage {
+    std::vector<std::string> &errors;
+    std::string_view stage = "preflight";
+    bool succeeded = false;
+    ~FailureStage() {
+      if (!succeeded)
+        errors.emplace_back("ConSan MOI inline versioned release transaction failed during " +
+                            std::string(stage));
+    }
+  } failure{errors};
+  const bool has_dispatch_id = moi_has_runtime_hardware_dispatch_id(options) ||
+                               consan_arch_uses_literal_dispatch_identity(arch);
   const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !has_dispatch_id ||
-      address_plan.scratch_vgpr_count < required_scratch_count)
+      address_plan.scratch_vgpr_count < required_scratch_count) {
+    errors.emplace_back(
+        "ConSan MOI inline versioned release preflight requires scratch, EXEC-save, owner, epoch, "
+        "dispatch ID, and the full atomic scratch window: scratch=" +
+        std::to_string(options.scratch_vgpr.has_value()) +
+        " exec=" + std::to_string(options.moi_exec_save_sgpr.has_value()) +
+        " owner=" + std::to_string(options.moi_owner_vgpr.has_value()) +
+        " epoch=" + std::to_string(options.moi_epoch_vgpr.has_value()) +
+        " dispatch=" + std::to_string(has_dispatch_id) +
+        " scratch_count=" + std::to_string(address_plan.scratch_vgpr_count) +
+        " required=" + std::to_string(required_scratch_count));
     return false;
+  }
   const uint16_t base = *options.scratch_vgpr;
   const uint16_t slot_address = base;
   const uint16_t prior_version = static_cast<uint16_t>(base + 2u);
@@ -2191,6 +2212,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return narrow_vcc();
   };
 
+  failure.stage = "guest-address preservation";
   if (stable_guest_address != guest_address) {
     // Copy high first only when the destination begins at the source high
     // word; otherwise the ordinary low/high order is alias-safe.
@@ -2209,6 +2231,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     }
   }
 
+  failure.stage = "transaction initialization";
   if (!append_save_moi_special_state(words, options, arch) ||
       !append_inline_workgroup_key(words, workgroup_sources, options, workgroup_key,
                                    static_cast<uint16_t>(base + 6u), temporary,
@@ -2216,6 +2239,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     errors.emplace_back("ConSan MOI inline release could not initialize its EXEC transaction");
     return false;
   }
+  failure.stage = "guest CAS qualification";
   if (predicate_on_compare_exchange_success) {
     if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
@@ -2234,6 +2258,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
     }
   }
+  failure.stage = "release-slot addressing";
   if (!save_exec(eligible_exec) ||
       !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
                                          stable_guest_address, slot_address, arch)) {
@@ -2250,6 +2275,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // Coherent version polls plus a short yield let a resident publisher
   // complete, while the finite bound still terminates on a permanently stuck
   // odd slot.
+  failure.stage = "release-slot reservation";
   constexpr uint16_t kScalarLiteralSource = 255u;
   words.push_back(build_s_mov_b32(retry_count_sgpr, kScalarLiteralSource, arch));
   words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
@@ -2362,6 +2388,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   words[claimed_exit_branch] = *claimed_exit;
 
+  failure.stage = "reservation outcome journaling";
   if (import_claimed_predecessor) {
     if (!restore_exec(claimed_exec) || !save_exec(failed_exec))
       return false;
@@ -2375,6 +2402,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
   }
 
+  failure.stage = "claimed predecessor import";
   if (import_claimed_predecessor) {
     const uint16_t source_version = static_cast<uint16_t>(base + 20u);
     // The successful claim returns the authoritative prior even version in
@@ -2433,12 +2461,14 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
         prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
   }
 
+  failure.stage = "causal snapshot capture";
   if (!restore_exec(claimed_exec) ||
       !append_inline_release_causal_snapshot_capture(
           words, options, stable_guest_address, workgroup_key, token_table_base, token_capacity,
           snapshot_table_base, snapshot_capacity, arch))
     return false;
 
+  failure.stage = "release metadata publication";
   const auto epoch_mask = instrumentation::build_v_and_b32_literal(
       temporary, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr, arch);
   const auto epoch_increment =
@@ -2497,6 +2527,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // dispatch/workgroup/address identity. Preserve fail-closed accounting for
   // actual direct-map collisions instead of treating benign same-object
   // coalescing as detector undercoverage.
+  failure.stage = "same-object collision classification";
   if (!restore_exec(failed_exec) ||
       !require_dispatch_field(offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
                               /*high_word=*/false) ||
@@ -2524,6 +2555,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!restore_exec(original_exec) || !append_restore_moi_special_state(words, options, arch))
     return false;
 
+  failure.stage = "guest completion";
   if (emit_guest_instruction && !import_claimed_predecessor) {
     guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
@@ -2539,6 +2571,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   words.push_back(*guest_store_drain);
 
+  failure.stage = "release commit";
   if (!append_save_moi_special_state(words, options, arch) || !restore_exec(claimed_exec))
     return false;
   const auto commit_new =
@@ -2577,6 +2610,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                        temporary, cas_new, arch) ||
       !restore_exec(original_exec) || !append_restore_moi_special_state(words, options, arch))
     return false;
+  failure.succeeded = true;
   return true;
 }
 

@@ -355,6 +355,63 @@ TEST(ConSanMoi, CdnaInlineShadowMovesOnlyAnEmptyAccumulatorBoundaryForScratchGro
   }
 }
 
+TEST(ConSanMoi, CdnaInlineShadowGrowsUnifiedAllocationInsideEmptyAccumulatorGap) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    std::vector<uint32_t> text_words(1200u, build_s_nop(0u, arch));
+    const auto store = arch == ROCJITSU_CODE_ARCH_CDNA3
+                           ? build_cdna3_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                      /*byte_offset=*/0u, arch)
+                           : build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                      /*byte_offset=*/0u, arch);
+    ASSERT_TRUE(store);
+    std::ranges::copy(*store, text_words.begin());
+    text_words.back() = build_s_endpgm(arch);
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "empty_accumulator_gap",
+                                         /*vgpr_granulated=*/0u)
+            : make_cdna4_lds_code_object(text_words, "empty_accumulator_gap",
+                                         /*vgpr_granulated=*/0u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      // Only v0:v7 are allocated, while the empty accumulator boundary is
+      // already encoded at v24. Instrumentation may grow the unified ordinary
+      // bank through that gap without moving ACCUM_OFFSET.
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 5u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_track_atomics = false;
+    options.moi_track_barriers = false;
+    options.moi_report_buffer_address = 0x100000000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.resource_plans.size(), 1u);
+    EXPECT_EQ(result.resource_plans.front().source,
+              ConSanRegisterAllocationSource::DescriptorGrowth);
+    EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 8u);
+    EXPECT_EQ(result.resource_plans.front().required_vgpr_count, 24u);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.kernels().size(), 1u);
+    KD descriptor{};
+    std::memcpy(&descriptor,
+                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                sizeof(descriptor));
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+              2u);
+    EXPECT_EQ(
+        AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+        5u);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
 TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulatorTail) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const uint8_t agpr_count : {0u, 1u}) {
@@ -1041,7 +1098,6 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   ASSERT_NE(original_full_kernel, original.kernels().end());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
   options.force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
   options.moi_inline_indirect_pc_sgpr = 48u;
@@ -1115,7 +1171,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
         return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue &&
                owns(patch, full_kernel->descriptor_file_offset);
       });
-  ASSERT_NE(full_prologue, result.patches.end());
+  ASSERT_NE(full_prologue, result.patches.end())
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " patches=" << testing::PrintToString(result.patches);
   ASSERT_EQ(full_prologue->persistent_dispatch_id_private_offset,
             full_access->persistent_dispatch_id_private_offset);
   ASSERT_TRUE(full_prologue->dispatch_id_capture_vgpr);
@@ -1165,6 +1224,125 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
     return error.find("private dispatch identity outside persistent state") != std::string::npos;
   })) << testing::PrintToString(validation_errors);
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store = build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u,
+                                              /*byte_offset=*/0u, kArch);
+  const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+  const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+  const auto wait = build_cdna4_s_wait_flat0(kArch);
+  const auto atomic = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
+      /*scope=*/2u, kArch);
+  ASSERT_TRUE(store && wait && atomic);
+
+  std::vector<uint32_t> text_words(1000u, build_s_nop(0u, kArch));
+  size_t cursor = 0u;
+  // Keep every ordinary SGPR pair globally referenced so dispatch identity
+  // cannot persist in scalar state. The dynamic-stack owner cannot use the
+  // address-free private fallback, but it still has room for entry-captured
+  // persistent VGPR state below its accumulator boundary.
+  for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 50u)
+      continue;
+    text_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(0u), kArch);
+  }
+  std::copy(store->begin(), store->end(), text_words.begin() + cursor);
+  cursor += store->size();
+  std::copy(release.begin(), release.end(), text_words.begin() + cursor);
+  cursor += release.size();
+  text_words[cursor++] = *wait;
+  std::copy(atomic->begin(), atomic->end(), text_words.begin() + cursor);
+  cursor += atomic->size();
+  text_words[cursor++] = *wait;
+  std::copy(acquire.begin(), acquire.end(), text_words.begin() + cursor);
+  cursor += acquire.size();
+  for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 50u)
+      continue;
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  }
+  for (uint16_t sgpr = 48u; sgpr <= 50u; ++sgpr) {
+    text_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(0u), kArch);
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  }
+  text_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(63u), kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "dynamic_stack_vgpr_dispatch", /*vgpr_granulated=*/7u,
+                                 /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  append_kernel_metadata_note(bytes, "dynamic_stack_vgpr_dispatch",
+                              /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/106u, /*private_segment_fixed_size=*/0u,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/64u);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 1u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_exec_save_sgpr = 4u;
+  options.moi_inline_indirect_pc_sgpr = 48u;
+  options.moi_inline_indirect_scc_sgpr = 50u;
+  options.moi_inline_dispatch_key_sgpr = 50u;
+  options.moi_inline_call_return_sgpr = 48u;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_partial_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_transient_sgpr_assignments.push_back(
+      {.descriptor_file_offset = original.kernels().front().descriptor_file_offset,
+       .exec_save_sgpr = 4u,
+       .owner_sgpr = 4u,
+       .dispatch_id_sgpr = std::nullopt,
+       .spill_backed = true,
+       .indirect_pc_sgpr = 48u,
+       .indirect_scc_sgpr = 50u,
+       .dispatch_key_sgpr = 50u,
+       .call_return_sgpr = 48u,
+       .visible_evidence_sgpr = std::nullopt,
+       .branch_only_scalar_spill = false,
+       .dynamic_stack_borrowed_sgpr = std::nullopt});
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
+  EXPECT_TRUE(result.moi_dispatch_id_vgprs_automatic);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+
+  const auto atomic_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(atomic_patch, result.patches.end());
+  EXPECT_FALSE(atomic_patch->persistent_dispatch_id_private_offset);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->dispatch_id_capture_vgpr, result.resolved_moi_dispatch_id_vgpr);
 }
 
 TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {

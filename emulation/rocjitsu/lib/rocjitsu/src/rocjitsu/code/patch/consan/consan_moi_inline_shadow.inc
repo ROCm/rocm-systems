@@ -690,7 +690,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       // reload it into the access router's dead PC pair after the router has
       // entered its body.
       const bool persist_dispatch_id =
-          !candidate_options.moi_dispatch_id_sgpr &&
+          !moi_has_runtime_hardware_dispatch_id(candidate_options) &&
           (options.moi_dispatch_id_sgpr || options.automatic_moi_private_dispatch_id);
       if (direct_descriptor) {
         auto [cached, inserted] =

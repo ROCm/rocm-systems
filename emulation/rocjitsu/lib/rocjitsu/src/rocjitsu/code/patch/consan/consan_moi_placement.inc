@@ -813,18 +813,28 @@ struct MoiSgprRange {
     if (encoded_accum_offset != 0u) {
       constexpr uint32_t kAccvgprOffsetGranularity = 4u;
       const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
-      if (required_count <= accvgpr_base)
-        return true;
-
       const uint32_t unified_count = moi_descriptor_unified_vgpr_allocation_count(desc, arch);
+      if (required_count <= unified_count)
+        return true;
+      const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
+      const uint32_t rounded_required = util::align_up(required_count, granularity);
+      if (rounded_required <= accvgpr_base) {
+        // ACCUM_OFFSET can name an empty ordinary/accumulator boundary above
+        // the currently allocated unified bank. Growing within that gap does
+        // not move or reinterpret any accumulator register, but the unified
+        // allocation field still has to be updated.
+        AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                        ((rounded_required / granularity) - 1u));
+        return true;
+      }
+
       // Instrumentation may move only an empty accumulator boundary. Moving
       // live accumulator storage would require relocating guest register
       // contents and rewriting every accumulator operand.
       if (unified_count > accvgpr_base && !proven_empty_accumulator_bank)
         return false;
-      const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
-      const uint32_t new_unified_count =
-          std::max(unified_count, util::align_up(required_count, granularity));
+      const uint32_t new_unified_count = std::max(unified_count, rounded_required);
       const uint32_t new_accvgpr_base = new_unified_count;
       if (new_accvgpr_base > kMaxVgprs || new_accvgpr_base % kAccvgprOffsetGranularity != 0u ||
           new_unified_count / granularity > 64u)
@@ -4888,14 +4898,35 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       })) {
-    // The access prologue can capture the hardware dispatch preload directly
-    // into owner-private state before restoring the full-pressure guest entry
-    // ABI. Each access reloads that identity into its owner-local indirect-PC
-    // pair, so no code-object-wide guest SGPR reservation is needed.
+    const bool has_dynamic_stack_access_owner =
+        std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+          return kernel.uses_dynamic_stack.value_or(false) &&
+                 std::ranges::any_of(
+                     result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+                       return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                              plan.site_kind == ConSanResourceSiteKind::Access &&
+                              std::ranges::find(plan.owner_descriptor_file_offsets,
+                                                kernel.descriptor_file_offset) !=
+                                  plan.owner_descriptor_file_offsets.end();
+                     });
+        });
+    // A non-dynamic owner can capture the hardware dispatch preload directly
+    // in the same address-free private entry state as owner/epoch. A dynamic
+    // stack cannot compose with that representation; leave the dispatch marker
+    // set so persistent-state placement includes an entry-captured VGPR pair.
     options.automatic_moi_private_dispatch_id = true;
-    result.warnings.emplace_back(
-        "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
-        "SGPR pair fits");
+    if (!has_dynamic_stack_access_owner) {
+      options.moi_init_owner_epoch = true;
+      options.automatic_moi_private_epoch = true;
+      result.moi_private_epoch_automatic = true;
+      result.warnings.emplace_back(
+          "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
+          "SGPR pair fits");
+    } else {
+      result.warnings.emplace_back(
+          "ConSan MOI deferred hardware dispatch-ID state to persistent VGPR placement because "
+          "owner-private state is incompatible with a dynamic stack");
+    }
     return true;
   }
   result.outcome = ConSanTransformOutcome::Unsupported;
@@ -5203,10 +5234,24 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       });
   const bool is_rdna_dispatch_vgpr_arch =
       arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch);
+  const bool private_inline_dispatch_incompatible_with_dynamic_stack =
+      options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      options.automatic_moi_private_dispatch_id &&
+      std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+        return kernel.uses_dynamic_stack.value_or(false) &&
+               std::ranges::any_of(
+                   result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+                     return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+                            std::ranges::find(plan.owner_descriptor_file_offsets,
+                                              kernel.descriptor_file_offset) !=
+                                plan.owner_descriptor_file_offsets.end();
+                   });
+      });
   const bool needs_persistent_dispatch_vgprs =
-      is_rdna_dispatch_vgpr_arch && has_supported_record_replay_access &&
-      record_replay_uses_automatic_banked_capture(options) &&
-      !moi_has_runtime_hardware_dispatch_id(options);
+      (is_rdna_dispatch_vgpr_arch && has_supported_record_replay_access &&
+       record_replay_uses_automatic_banked_capture(options) &&
+       !moi_has_runtime_hardware_dispatch_id(options)) ||
+      private_inline_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = needs_inline_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_vgpr && options.moi_epoch_vgpr;
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
@@ -5356,6 +5401,13 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
     // gfx950 workloads. Until persistent tuples are selected per owning kernel,
     // reject a code object whose one global tuple would cross any such boundary.
     const bool has_dynamic_stack_owner = has_dynamic_stack_resource_owner();
+    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+        options.automatic_moi_private_epoch && !has_dynamic_stack_owner) {
+      result.warnings.emplace_back(
+          "ConSan MOI retained owner/epoch and dispatch identity in entry-captured private state "
+          "below a CDNA AccVGPR boundary");
+      return true;
+    }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.force_private_epoch &&
         !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
@@ -5902,11 +5954,20 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                                           : std::nullopt,
           };
         }
+        if (needs_persistent_dispatch_vgprs) {
+          assignment.dispatch_id_vgpr = next;
+          next = static_cast<uint16_t>(next + 2u);
+        }
         options.moi_persistent_vgpr_assignments.push_back(assignment);
       }
     }
     options.moi_init_owner_epoch = true;
     options.automatic_moi_persistent_vgprs = true;
+    if (needs_persistent_dispatch_vgprs) {
+      options.automatic_moi_private_dispatch_id = false;
+      options.automatic_moi_dispatch_id_vgprs = true;
+      result.moi_dispatch_id_vgprs_automatic = true;
+    }
     result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
     result.moi_persistent_vgprs_automatic = true;
     result.warnings.emplace_back(
@@ -6128,8 +6189,9 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         consan_moi_engine_name(options.moi_engine) +
         " owner; retaining the existing private-state fallback");
   }
-  const bool needs_private_epoch =
-      options.force_private_epoch || persistent_end > kMaxVgprs || prefer_private_epoch;
+  const bool needs_private_epoch = options.automatic_moi_private_epoch ||
+                                   options.force_private_epoch || persistent_end > kMaxVgprs ||
+                                   prefer_private_epoch;
   if (needs_private_epoch && !has_dynamic_stack_owner) {
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
@@ -6168,6 +6230,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   if (needs_persistent_dispatch_vgprs) {
     options.moi_dispatch_id_vgpr = next_persistent_vgpr;
     next_persistent_vgpr = static_cast<uint16_t>(next_persistent_vgpr + 2u);
+    options.automatic_moi_private_dispatch_id = false;
     options.automatic_moi_dispatch_id_vgprs = true;
   }
   options.moi_init_owner_epoch = true;
