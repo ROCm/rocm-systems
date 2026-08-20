@@ -31,9 +31,9 @@
 #include <limits>
 #include <type_traits>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 struct Isa;
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -47,6 +47,23 @@ using float32_t = float;
 /// RJ_FORCE_SCALAR); returned by value, so there is no mutable global to
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
+
+/// True when a source-selector field names one of the nine inline float
+/// constants (0.5 .. 1/(2*pi)). A 32-bit literal is selector 255, so it never
+/// matches here even when its value lands in the same range.
+inline bool is_inline_float_src(uint32_t selector) { return selector >= 240u && selector <= 248u; }
+
+/// True when a packed 16-bit body has to re-narrow this source itself. An
+/// inline float constant reaches a 32-bit source in single precision, so the
+/// packed halves would take the low half of e.g. 0x3F800000. A source declared
+/// 16 bits wide was already resolved through the half-precision inline table --
+/// Operand::read_lane branches on the same `size_bits_ == 16` -- and narrowing
+/// that again would read the 16-bit pattern as an f32 denormal and flush it to
+/// zero. CDNA2 builds every packed f16 source 16 bits wide, CDNA3 does for
+/// v_pk_min_f16 / v_pk_max_f16.
+inline bool pk16_src_needs_narrowing(uint32_t selector, int src_size_bits) {
+  return is_inline_float_src(selector) && src_size_bits != 16;
+}
 
 inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {
   assert(bits >= 1 && bits <= 32 && "sign_extend_u32 requires a 1..32 bit width");
@@ -259,7 +276,7 @@ inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t sr
 
 template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
   if constexpr (requires { typename Inst::IsaType; }) {
-    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::cdna5::Isa> &&
                   requires { inst.inst_.clamp; })
       return inst.inst_.clamp;
   }
@@ -628,7 +645,7 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  wf.set_vcc(vcc_out);
+  wf.set_vcc_mask(vcc_out);
   return true;
 }
 
@@ -1182,7 +1199,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1218,7 +1235,7 @@ template <typename T, typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1259,7 +1276,7 @@ template <typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -2912,11 +2929,6 @@ inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<f
   return a * b + c;
 }
 
-inline bool fma_mix_src_is_float_inline(uint32_t src_selector) {
-  // Standard AMDGPU floating inline constants in the shared OPR_SRC encoding.
-  return src_selector >= 240u && src_selector <= 248u;
-}
-
 /// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
 /// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
 /// f16-lo/f16-hi/f32 narrowing shape on the destination. The generated scalar
@@ -2978,9 +2990,8 @@ template <FmaMixDst DstMode, typename Inst>
     F v;
     if (sel_hi_bit) {
       U raw = op.template load_native<uint32_t>(base);
-      U halves = fma_mix_src_is_float_inline(src_selector)
-                     ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
-                     : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
+      U halves = is_inline_float_src(src_selector) ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
+                                                   : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
       v = util::f16_to_f32_simd(halves);
     } else {
       v = op.template load_native<float>(base);
@@ -3144,6 +3155,12 @@ template <typename Inst, typename Op>
     return false;
   if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
     return false;
+  // Decline exactly the sources the scalar body re-narrows -- an inline float
+  // constant on a 32-bit source -- so the two paths cannot disagree. Keyed on
+  // the source-selector field, so a 32-bit literal (255) still runs here.
+  if (pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()) ||
+      pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+    return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3205,6 +3222,13 @@ template <typename Inst, typename Op>
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+    return false;
+  // Decline exactly the sources the scalar body re-narrows -- an inline float
+  // constant on a 32-bit source -- so the two paths cannot disagree. Keyed on
+  // the source-selector field, so a 32-bit literal (255) still runs here.
+  if (pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()) ||
+      pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()) ||
+      pk16_src_needs_narrowing(inst.inst_.src2, inst.src2.size_bits()))
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3274,11 +3298,13 @@ template <typename Inst, typename Op>
 /// scalar body. Non-VGPR sources splat the 32-bit operand into both halves.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf,
+                                                               uint32_t op_sel, uint32_t op_sel_hi,
+                                                               Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+  if (op_sel != 0u || op_sel_hi != 3u)
     return false;
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3305,6 +3331,19 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
+[[nodiscard]] bool try_execute_vop3p_pk_binary_f32_simd(Inst &, Wavefront &, uint32_t, uint32_t,
+                                                        Op) {
+  return false;
+}
+
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+  return try_execute_vop3p_pk_binary_f32_simd(inst, wf, inst.inst_.op_sel, inst.inst_.op_sel_hi,
+                                              op);
+}
+
+template <typename Inst, typename Op>
 [[nodiscard]] bool try_execute_vop3p_pk_binary_f32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
@@ -3317,11 +3356,13 @@ template <typename Inst, typename Op>
 /// / fma_mix slices).
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf,
+                                                                uint32_t op_sel, uint32_t op_sel_hi,
+                                                                uint32_t op_sel_hi_2, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+  if (op_sel != 0u || op_sel_hi != 3u || op_sel_hi_2 != 1u)
     return false;
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3351,6 +3392,19 @@ template <typename Inst, typename Op>
     dst.template store_native_pair<float>(base, r_lo, r_hi, chunk);
   }
   return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_f32_simd(Inst &, Wavefront &, uint32_t, uint32_t,
+                                                         uint32_t, Op) {
+  return false;
+}
+
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
+  return try_execute_vop3p_pk_ternary_f32_simd(inst, wf, inst.inst_.op_sel, inst.inst_.op_sel_hi,
+                                               inst.inst_.op_sel_hi_2, op);
 }
 
 template <typename Inst, typename Op>
@@ -3503,6 +3557,12 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+    return false;
+  // Decline exactly the sources the scalar body re-narrows, so the two paths
+  // cannot disagree. src2 is a genuine f32 accumulator, so an inline constant
+  // there is already correct.
+  if (pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()) ||
+      pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -4231,10 +4291,25 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_f32_simd(inst, wf, __VA_ARGS__))             \
   return
 
+/// Profile-aware form for ISA-local VOP3P bodies whose selector fields do not
+/// use the canonical op_sel/op_sel_hi member names.
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS(OpSel, OpSelHi, ...)                       \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_f32_simd(                                    \
+          inst, wf, static_cast<uint32_t>(OpSel), static_cast<uint32_t>(OpSelHi), __VA_ARGS__))    \
+  return
+
 /// VOP3P packed-f32 ternary probe (v_pk_fma_f32). Functor takes (a, b, c) as
 /// narrow32<float>; default-packing gate adds op_sel_hi_2 == 1.
 #define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(...)                                                \
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_f32_simd(inst, wf, __VA_ARGS__))            \
+  return
+
+/// Profile-aware form for ISA-local ternary VOP3P bodies whose selector fields
+/// do not use the canonical op_sel/op_sel_hi/op_sel_hi_2 member names.
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS(OpSel, OpSelHi, OpSelHi2, ...)            \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_f32_simd(                                   \
+          inst, wf, static_cast<uint32_t>(OpSel), static_cast<uint32_t>(OpSelHi),                  \
+          static_cast<uint32_t>(OpSelHi2), __VA_ARGS__))                                           \
   return
 
 /// VOP3P v_pk_mov_b32 probe. Functorless / fixed-op.

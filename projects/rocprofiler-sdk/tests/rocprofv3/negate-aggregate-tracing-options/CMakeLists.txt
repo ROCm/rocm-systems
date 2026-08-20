@@ -82,3 +82,28 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     WILL_FAIL)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-deprecated-direct-output-formats-warning
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --output-format csv pftrace otf2
+            --hipfile-trace --rocshmem-trace --echo -- ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "direct rocprofv3 output format.*deprecated: CSV, PFTrace \\(Perfetto\\), OTF2.*hipFILE and rocSHMEM"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-deprecated-direct-output-format-env-warning
+    COMMAND
+        ${CMAKE_COMMAND} -E env ROCPROF_OUTPUT_FORMAT=csv
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hipfile-trace --echo --
+        ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "direct rocprofv3 output format.*deprecated: CSV.*hipFILE and rocSHMEM")

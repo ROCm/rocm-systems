@@ -10,6 +10,7 @@
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>  // hsa_amd_portable_export_dmabuf (DMA-BUF export)
+#include <unistd.h>
 #include "checks.h"
 
 #ifndef CU_STREAM_WRITE_VALUE_DEFAULT
@@ -52,16 +53,23 @@
 #define NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// === Capability gates: prefer the CMake symbol probe, fall back to version ==
-// Method 1 (preferred): CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
-//   check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds.
-// Method 2 (fallback): the version predicate above, for builds where the probe
-//   did not run / was not wired in.
+// === Capability gate: both the symbol probe and the version must agree =====
+// CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
+// check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds. The symbol
+// is declared in headers on backport builds outside the supported window too,
+// so it cannot gate the feature on its own: the version predicate has to agree.
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 1
 #else
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 0
 #endif
+
+// Both gate inputs are parameters so every (probe, version) combination can be
+// asserted in unit tests; the gate itself is this build's instantiation.
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE \
+  NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
@@ -162,6 +170,32 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #define DECLARE_ROCM_PFN_EXTERN(symbol) extern PFN_##symbol pfn_##symbol
 
 DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF feature gate
+
+// Export `buffer` through the HSA portable DMA-BUF exporter and register the resulting fd
+// with a net plugin's regMrDmaBuf (identical signature for ncclNet_t and ncclCollNet_t).
+// The fd is closed on every path, so it can neither leak nor be clobbered by a later
+// export into a caller-owned variable. Returns false when either step fails, so the caller
+// can fall back to a plain regMr; callers must still gate on
+// pfn_hsa_amd_portable_export_dmabuf being non-NULL.
+static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, size_t, int, uint64_t, int, void**),
+                                      void* comm, void* buffer, size_t size, int type, void** mhandle) {
+  int fd = -1;
+  uint64_t offset = 0;
+  hsa_status_t status = pfn_hsa_amd_portable_export_dmabuf(buffer, size, &fd, &offset);
+  if (status != HSA_STATUS_SUCCESS) {
+    const char* errStr;
+    hsa_status_string(status, &errStr);
+    WARN("hsa_amd_portable_export_dmabuf failed for %p (size %zu): '%s'", buffer, size, errStr);
+    return false;
+  }
+  ncclResult_t res = regMrDmaBuf(comm, buffer, size, type, offset, fd, mhandle);
+  (void)close(fd);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "DMA-BUF registration of %p (size %zu) failed with %d", buffer, size, res);
+    return false;
+  }
+  return true;
+}
 
 extern int ncclCuMemEnable();
 extern int ncclCuMemHostEnable();

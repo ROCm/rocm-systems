@@ -15,6 +15,7 @@
 ### Added
 
 * A KFD-based alternative check for P2P DMA support was added to `ais-check`. This inspects the `capability` property under `/sys/class/kfd/kfd/topology/nodes/*/properties`.
+* Added support for Logical Volume Manager (LVM) volumes with a maximum of 16 extents
 * Added guides for setting up storage targets to the documentation
 
 ### Changed

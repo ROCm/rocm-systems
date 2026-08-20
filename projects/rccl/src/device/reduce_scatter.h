@@ -17,70 +17,77 @@ __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #endif
     // Step 0: Setup
-  size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
-  if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
-    const int nRanks = ncclShmem.comm.nRanks;
-    const ssize_t numElements = work->count;
+  // Direct reduce scatter only supports the Simple protocol.
+  // Compile this block only for Simple (LL and LL128 share
+  // runRing but never run this path). For FP8 at unroll 32 the generated
+  // reduceCopy is large enough to overflow the GPU stack and fault.
+  if constexpr (Proto::Id == NCCL_PROTO_SIMPLE) {
+    size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
+    if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
+      const int nRanks = ncclShmem.comm.nRanks;
+      const ssize_t numElements = work->count;
 
-      // Calculate Offset to utilize multiple channels
-    ssize_t elementsPerBlock = numElements / gridDim.x;
-    ssize_t remainderElements = numElements % gridDim.x;
-      // Calculate the number of elements per block for each block
-      // The first n blocks get 1 extra element to account for the remainder (n = remainderElements)
-    ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
-    ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
+        // Calculate Offset to utilize multiple channels
+      ssize_t elementsPerBlock = numElements / gridDim.x;
+      ssize_t remainderElements = numElements % gridDim.x;
+        // Calculate the number of elements per block for each block
+        // The first n blocks get 1 extra element to account for the remainder (n = remainderElements)
+      ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
+      ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
-    T* recvbuff = (T*)work->recvbuff;
-    T* dst = recvbuff + channelOffset;
-    constexpr int MaxSrcs = 64;
+      T* recvbuff = (T*)work->recvbuff;
+      T* dst = recvbuff + channelOffset;
+      constexpr int MaxSrcs = 64;
 
-    void** srcPtrs = (void**)ncclScratchForWarp(0);
+      void** srcPtrs = (void**)ncclScratchForWarp(0);
 
-      // Step 1: Reduce first MaxSrcs ranks directly into recvbuff
-    if (tid == 0) {
-      int srcIdx = 0;
-      for (int r = 0; r < min(nRanks, MaxSrcs); r++) {
-        srcPtrs[srcIdx++] = (void*)((T*)work->tempBuff + r * numElements + channelOffset);
-      }
-    }
-    __syncthreads();
-
-    void* dstPtrs[1] = {(void*)dst};
-    if (tid < nthreads) {
-      reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, MaxSrcs, 0, 1, 1, 0>(tid, nthreads,
-                                                                            ncclShmem.groups[0].redOpArgs, false,
-                                                                            min(nRanks, MaxSrcs), srcPtrs, 1, dstPtrs,
-                                                                            numElementsPerBlock);
-    }
-    __syncthreads();
-
-      // Step 2: For remaining ranks, reduce in batches accumulating into recvbuff
-    int firstBatch = min(nRanks, MaxSrcs);
-    int remaining = nRanks - firstBatch;
-    int startRank = firstBatch;
-    while (remaining > 0) {
-      int ranksThisPass = min(remaining, MaxSrcs - 1);
+        // Step 1: Reduce first MaxSrcs ranks directly into recvbuff
       if (tid == 0) {
         int srcIdx = 0;
-        srcPtrs[srcIdx++] = (void*)dst; // carry forward previous sum from recvbuff
-        for (int r = startRank; r < startRank + ranksThisPass; r++) {
+        for (int r = 0; r < min(nRanks, MaxSrcs); r++) {
           srcPtrs[srcIdx++] = (void*)((T*)work->tempBuff + r * numElements + channelOffset);
         }
       }
       __syncthreads();
 
-      int nSrcs = ranksThisPass + 1;
-      dstPtrs[0] = (void*)dst;
+      void* dstPtrs[1] = {(void*)dst};
       if (tid < nthreads) {
-        reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, MaxSrcs, 0, 1, 1, 0>(
-          tid, nthreads, ncclShmem.groups[0].redOpArgs, false, nSrcs, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+        reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, MaxSrcs, 0, 1, 1, 0>(tid, nthreads,
+                                                                              ncclShmem.groups[0].redOpArgs, false,
+                                                                              min(nRanks, MaxSrcs), srcPtrs, 1, dstPtrs,
+                                                                              numElementsPerBlock);
       }
       __syncthreads();
 
-      remaining -= ranksThisPass;
-      startRank += ranksThisPass;
+        // Step 2: For remaining ranks, reduce in batches accumulating into recvbuff
+      int firstBatch = min(nRanks, MaxSrcs);
+      int remaining = nRanks - firstBatch;
+      int startRank = firstBatch;
+      while (remaining > 0) {
+        int ranksThisPass = min(remaining, MaxSrcs - 1);
+        if (tid == 0) {
+          int srcIdx = 0;
+          srcPtrs[srcIdx++] = (void*)dst; // carry forward previous sum from recvbuff
+          for (int r = startRank; r < startRank + ranksThisPass; r++) {
+            srcPtrs[srcIdx++] = (void*)((T*)work->tempBuff + r * numElements + channelOffset);
+          }
+        }
+        __syncthreads();
+
+        int nSrcs = ranksThisPass + 1;
+        dstPtrs[0] = (void*)dst;
+        if (tid < nthreads) {
+          reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, MaxSrcs, 0, 1, 1, 0>(
+            tid, nthreads, ncclShmem.groups[0].redOpArgs, false, nSrcs, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+        }
+        __syncthreads();
+
+        remaining -= ranksThisPass;
+        startRank += ranksThisPass;
+      }
+      return;
     }
-  } else {
+  }
 #ifdef ENABLE_WARP_SPEED
     int warp = threadIdx.x / WARP_SIZE;
     ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
@@ -133,7 +140,6 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       offset = dataOffset + rankDest * count;
       prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
     }
-  }
 }
 } // namespace
 

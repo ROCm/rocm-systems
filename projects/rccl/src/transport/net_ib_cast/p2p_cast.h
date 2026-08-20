@@ -44,4 +44,55 @@ static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uin
   return ncclSuccess;
 }
 
+// CTS FIFO element and stride helpers.
+// The CTS FIFO buffers are declared as 2D array elements of
+// ncclIbSendFifo (64B), but when IbCastAinicCtsInlineData
+// is true, then the CTS FIFO buffer for each slot (which holds
+// CTS messages upto MAX_RECV requests) is used as a contiguous
+// buffer of the 32-byte of ncclIbSendFifoCtsInline type.
+//
+// Callers resolve the correct row pointer (slots) accessing the
+// base address of CTS fifo for a given slot as
+//   slot_base = comm->ctsFifo[slot];
+// The accessors below take that pre-resolved row pointer (volatile void*)
+// and only index by rxReqId within the row using the correct element type.
+
+// --- Field accessors (layout-aware, row-based) ---
+static inline uint32_t ctsFifoNreqs(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nreqs;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].nreqs;
+}
+static inline uint64_t ctsFifoAddr(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].addr;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].addr;
+}
+static inline uint16_t ctsFifoRxReqIndex(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return (uint16_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].rxReqIndex;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].rxReqIndex;
+}
+static inline uint32_t ctsFifoRkey(volatile void* slotBase, uint32_t rxReqId, int devIdx) {
+  if (IbCastAinicCtsInlineData)
+    // in SendFifoCtsInline only 1 key stored
+    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].rkeys[0];
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].rkeys[devIdx];
+}
+static inline uint32_t ctsFifoIdx(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].idx;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].idx;
+}
+static inline size_t ctsFifoSize(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return (size_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].size;
+  return (size_t)((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].size;
+}
+static inline uint32_t ctsFifoTag(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData)
+    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].tag;
+}
+
 #endif // NET_IB_P2P_H_

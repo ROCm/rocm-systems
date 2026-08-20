@@ -16,10 +16,11 @@
 /// from the comparison so both runs skip the same lanes. In-process inactive
 /// lanes must stay preserved.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -165,7 +166,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;

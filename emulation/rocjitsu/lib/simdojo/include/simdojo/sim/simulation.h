@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -357,11 +358,32 @@ private:
   /// @brief Set up partition contexts, async queues, and engine pointers.
   void setup_partitions();
 
+  /// @brief Wake an idle single-threaded worker so it re-checks its exit and event state.
+  ///
+  /// @details No-op outside single-threaded mode, or once the partition is gone.
+  /// The caller must already hold @ref contexts_mutex_ (shared or exclusive).
+  /// @param pid The partition to wake.
+  void wake_partition_locked(PartitionID pid);
+
+  /// @brief Wake an idle single-threaded worker, guarding against concurrent teardown.
+  ///
+  /// @details Takes a shared lock on @ref contexts_mutex_ so the context cannot be
+  /// destroyed by shutdown() between the bounds check and the notify.
+  /// @param pid The partition to wake.
+  void wake_partition(PartitionID pid);
+
   Topology topology_; ///< The simulation topology.
   Config config_;     ///< Engine configuration.
   /// @brief Reusable event for the max-ticks exit sentinel.
   /// @details Scheduled at config_.max_ticks during init. When processed, triggers sim exit.
   Event max_ticks_event_{nullptr, EventType::SIM_EXIT};
+  /// @brief Guards destruction of contexts_ and async_queues_ against foreign threads.
+  ///
+  /// @details The wake and async-scheduling paths run on threads the engine does not
+  /// own (the host thread calling request_exit(), the doorbell monitor releasing a
+  /// primary) and can overlap shutdown() clearing these vectors. Those readers take a
+  /// shared lock; shutdown() takes it exclusively around the clear.
+  std::shared_mutex contexts_mutex_;
   std::vector<std::unique_ptr<PartitionContext>>
       contexts_;                      ///< Per-partition state (one per thread).
   std::vector<std::jthread> workers_; ///< Worker threads (multi-threaded mode).

@@ -925,6 +925,9 @@ typedef cudaSurfaceObject_t hipSurfaceObject_t;
 #define hipDeviceScheduleMask cudaDeviceScheduleMask
 #define hipDeviceMapHost cudaDeviceMapHost
 #define hipDeviceLmemResizeToMax cudaDeviceLmemResizeToMax
+#if CUDA_VERSION >= CUDA_12000
+#define hipInitDeviceFlagsAreValid cudaInitDeviceFlagsAreValid
+#endif
 
 #define hipCpuDeviceId cudaCpuDeviceId
 #define hipInvalidDeviceId cudaInvalidDeviceId
@@ -2045,6 +2048,12 @@ inline static hipError_t hipInit(unsigned int flags) {
   return hipCUResultTohipError(cuInit(flags));
 }
 
+#if CUDA_VERSION >= CUDA_12000
+inline static hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaInitDevice(device, deviceFlags, flags));
+}
+#endif
+
 inline static hipError_t hipDeviceReset() { return hipCUDAErrorTohipError(cudaDeviceReset()); }
 
 inline static hipError_t hipGetLastError() { return hipCUDAErrorTohipError(cudaGetLastError()); }
@@ -3099,6 +3108,11 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_13000
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_HOST_ALLOC_DMA_BUF_SUPPORTED, device));
+#endif
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
@@ -3790,6 +3804,16 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   }
   return err;
 }
+
+#if CUDA_VERSION >= CUDA_10000
+inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask,
+                                          hipDevice_t device) {
+  if (luid == NULL || deviceNodeMask == NULL) {
+    return hipErrorInvalidValue;
+  }
+  return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
+}
+#endif
 
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {

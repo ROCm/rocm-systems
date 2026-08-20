@@ -272,12 +272,12 @@ def _vcc_write_stmt(ctx: LoweringContext) -> str:
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
         return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
-        return 'wf.set_vcc(vcc);'
+        return 'wf.set_vcc_mask(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
             return _write_vcc_mask_to_explicit_dst(dst.name)
-    return 'wf.set_vcc(vcc);'
+    return 'wf.set_vcc_mask(vcc);'
 
 
 def _indent(ctx: LoweringContext) -> str:

@@ -88,7 +88,8 @@ struct connectMap {
   int sameProcess;
   int shared;
   int cudaDev;
-  // First 3 bits of offsets determine the mem bank. 001 is host mem, 011 is dev mem, 101 is shared host mem and 111 is shared dev mem.
+  // First 3 bits of offsets determine the mem bank. 001 is host mem, 011 is dev mem, 101 is shared host mem and 111
+  // is shared dev mem.
   struct connectMapMem mems[NCCL_NET_MAP_MEMS];
   // Offsets. 3 MSBs indicate mem bank, 111 indicates NULL.
   struct {
@@ -1128,8 +1129,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       }
       struct ncclSharedNetComms* comms = progressState->netComms[resources->netDev] + resources->tpRemoteRank;
       // let only one localrank connect to a tpRemoteRank to avoid duplicate connections
-      if (comms->activeConnect[resources->channelId] == 0)
+      if (comms->activeConnect[resources->channelId] == 0) {
         comms->activeConnect[resources->channelId] = (resources->tpLocalRank + 1);
+      }
       if (comms->sendComm[resources->channelId] == NULL &&
           comms->activeConnect[resources->channelId] == (resources->tpLocalRank + 1)) {
         if (rcclAinicRoce) {
@@ -1210,6 +1212,12 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*p == NCCL_PROTO_LL*/, proxyState->buffSizes[NCCL_PROTO_LL],
                                buffs[NCCL_PROTO_LL]);
       resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+      // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+      // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+      // and the proxy's LL128 fast-path (ready = useGdr).
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                               proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+      resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
     }
 
     NCCL_NET_MAP_ADD_POINTER(map, 1, resources->useGdr ? 1 : 0, mapMem->size, buffs[NCCL_PROTO_SIMPLE]);
@@ -1220,7 +1228,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // Ring/tree (shared==0) always need dedicated device buffers. Shared p2p connections
+    // normally have no dedicated device memory, but when NCCL_ALLOC_P2P_NET_LL_BUFFERS is on
+    // the LL128 staging buffer lives here (device memory + GDR, like the collective net path),
+    // so the bank must be backed for shared connections too.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
@@ -1291,9 +1303,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1311,10 +1323,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+      } else // FALL-THROUGH to the HSA DMA-BUF export path
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
           pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1336,9 +1347,10 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       }
 
       // Copy the mhandle dptr, if implemented
-      if (resources->netDeviceHandle && proxyState->ncclNet->getDeviceMr)
+      if (resources->netDeviceHandle && proxyState->ncclNet->getDeviceMr) {
         NCCLCHECK(proxyState->ncclNet->getDeviceMr(resources->netSendComm, resources->mhandles[p],
                                                    &connection->mhandles[p]));
+      }
     }
   }
 
@@ -1382,8 +1394,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       }
       struct ncclSharedNetComms* comms = progressState->netComms[resources->netDev] + resources->tpRemoteProxyRank;
       // reuse handle to for netdev/remote rank to avoid duplicate connections
-      if (comms->activeAccept[resources->channelId] == 0)
+      if (comms->activeAccept[resources->channelId] == 0) {
         comms->activeAccept[resources->channelId] = (resources->tpLocalRank + 1);
+      }
       // try connecting while comm is null
       if (comms->recvComm[resources->channelId] == NULL &&
           comms->activeAccept[resources->channelId] == (resources->tpLocalRank + 1)) {
@@ -1461,14 +1474,26 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclSendMem), sendMem);
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclRecvMem), recvMem);
 
-  if (proxyState->allocP2pNetLLBuffers) {
+  // Only P2P (shared) net connections need the LL/LL128 staging buffers. Guarding on
+  // resources->shared != 0 keeps ring/tree (shared==0) collective connections from
+  // allocating an unused GDR-resident LL128 buffer, which otherwise enlarges their DEVMEM
+  // bank and degrades collective GDR performance (e.g. all_reduce). Mirrors the send side.
+  if (resources->shared != 0 && proxyState->allocP2pNetLLBuffers) {
     NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*devMem*/, proxyState->buffSizes[NCCL_PROTO_LL], buffs[NCCL_PROTO_LL]);
     resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+    // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+    // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+    // and the proxy's LL128 fast-path (ready = useGdr).
+    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                             proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+    resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
   }
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // See sendProxyConnect: shared p2p connections need the dedicated device bank backed when
+    // NCCL_ALLOC_P2P_NET_LL_BUFFERS is on so the LL128 staging buffer is valid.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
           map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
@@ -1530,9 +1555,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1550,10 +1575,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+      } else // FALL-THROUGH to the HSA DMA-BUF export path
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
           pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1575,9 +1599,10 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       }
 
       // Copy the mhandle dptr
-      if (resources->netDeviceType != NCCL_NET_DEVICE_HOST && proxyState->ncclNet->getDeviceMr)
+      if (resources->netDeviceType != NCCL_NET_DEVICE_HOST && proxyState->ncclNet->getDeviceMr) {
         NCCLCHECK(proxyState->ncclNet->getDeviceMr(resources->netRecvComm, resources->mhandles[p],
                                                    &connection->mhandles[p]));
+      }
     }
   }
 
@@ -1589,7 +1614,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 
 static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 0, connection));
     return ncclSuccess;
   }
@@ -1631,8 +1657,9 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
         struct ncclSharedNetComms* comms =
           proxyState->progressState.netComms[resources->netDev] + resources->tpRemoteRank;
         comms->sendRefCount[resources->channelId]--;
-        if (comms->sendRefCount[resources->channelId] == 0)
+        if (comms->sendRefCount[resources->channelId] == 0) {
           NCCLCHECK(proxyState->ncclNet->closeSend(comms->sendComm[resources->channelId]));
+        }
       } else {
         NCCLCHECK(proxyState->ncclNet->closeSend(resources->netSendComm));
       }
@@ -1647,7 +1674,8 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
 
 static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct recvNetResources* resources = (struct recvNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 1, connection));
     return ncclSuccess;
   }
@@ -1685,8 +1713,9 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
         struct ncclSharedNetComms* comms =
           proxyState->progressState.netComms[resources->netDev] + resources->tpRemoteProxyRank;
         comms->recvRefCount[resources->channelId]--;
-        if (comms->recvRefCount[resources->channelId] == 0)
+        if (comms->recvRefCount[resources->channelId] == 0) {
           NCCLCHECK(proxyState->ncclNet->closeRecv(comms->recvComm[resources->channelId]));
+        }
       } else {
         NCCLCHECK(proxyState->ncclNet->closeRecv(resources->netRecvComm));
       }
@@ -1912,9 +1941,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             (struct recvNetResources*)(args->subs[next].connection->transportResources);
           if (nextRes->netRecvComm == recvComm) break;
         }
-        if (next == args->nsubs) { // Not found
+        if (next == args->nsubs) {
+          // Not found
           groupSize = 0;
-        } else if (s != next) { // We found a sub later with the same recvComm ; swap subs
+        } else if (s != next) {
+          // We found a sub later with the same recvComm ; swap subs
           struct ncclProxySubArgs temp;
           memcpy(&temp, sub, sizeof(struct ncclProxySubArgs));
           memcpy(sub, args->subs + next, sizeof(struct ncclProxySubArgs));
@@ -2088,8 +2119,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                 INFO(NCCL_INIT, "%s: issued GDC flush", __func__);
               }
 #else
-              WARN("NET: GDR Flush only supported on x86_64");
-              return ncclInternalError;
+              // Portable equivalent. seq_cst fence keeps the load inside
+              // ncclGdrCudaRead from being reordered ahead of the CQE poll.
+              std::atomic_thread_fence(std::memory_order_seq_cst);
+              uint64_t dummy;
+              NCCLCHECK(ncclGdrCudaRead(resources->gdrDesc, &dummy, resources->gdcFlush, sizeof(dummy)));
 #endif
             } else {
               int subCount = 0;
@@ -2185,9 +2219,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             sub->transmitted > sub->done) {
             if (subGroup->recvRequestsCache[sub->done % NCCL_STEPS]) {
               // the multirecv requests are only cached in the first sub.
-              if (proxyState->ncclNet->irecvConsumed)
+              if (proxyState->ncclNet->irecvConsumed) {
                 NCCLCHECK(proxyState->ncclNet->irecvConsumed(resources->netRecvComm, subGroup->recvRequestsSubCount,
                                                              subGroup->recvRequestsCache[sub->done % NCCL_STEPS]));
+              }
               subGroup->recvRequestsCache[sub->done % NCCL_STEPS] = NULL;
             }
             int doneStepId = sub->done;
@@ -2383,9 +2418,9 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2394,22 +2429,24 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
     (void)close(dmabuf_fd);
-    needReg = false;
+    dmabuf_fd = -1;
   }
-peermem:
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
+  }
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
@@ -2455,9 +2492,9 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
-    int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2466,22 +2503,24 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
                                                    NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
                   ret, peermem);
     (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
-    int dmabuf_fd;
-    uint64_t offset;
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
-                 peermem);
-    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size,
-                                                   NCCL_PTR_CUDA, offset, dmabuf_fd, &handle),
-                  ret, peermem);
+  // A failed cuMem attempt is recoverable here: the fallbacks below register the same
+  // buffer, so close the fd it may have left open before they run.
+  if (dmabuf_fd != -1) {
     (void)close(dmabuf_fd);
-    needReg = false;
+    dmabuf_fd = -1;
   }
-peermem:
+#endif
+#if defined(__HIP_PLATFORM_AMD__)
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
+                           NCCL_PTR_CUDA, &handle)) {
+      needReg = false;
+    }
+  }
 #endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments

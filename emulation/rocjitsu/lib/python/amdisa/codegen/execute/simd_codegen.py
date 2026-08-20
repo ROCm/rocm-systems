@@ -1747,6 +1747,13 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
 # signed-vs-unsigned wraps the same way.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
+    # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). D = CountOneBits(S0) + S1 -- the
+    # second source is an accumulator, so this is binary, not unary. Keep the
+    # functor in step with the scalar body in vector_alu.py.
+    'v_bcnt_u32_b32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) { return util::popcount_u32_simd(a) + b; }',
+    ),
     # Pack two clamped 32-bit ints into the hi/lo 16-bit halves of the dst.
     # v_cvt_pk_i16_i32: signed-clamp each source to [-32768, 32767]; u16_u32:
     # unsigned-saturate each to 0xFFFF. Pure element-wise, no modifiers.
@@ -1938,14 +1945,6 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         'uint32_t',
         '[](auto a) { return (~a) & 0xFFFFu; }',
-    ),
-    # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). The scalar body is a plain
-    # std::popcount(src0) -> vdst (src1 is read but unused by this codebase's
-    # body), so the unary src0->vdst glue is bit-exact.
-    'v_bcnt_u32_b32_vop3': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) { return util::popcount_u32_simd(a); }',
     ),
 }
 
@@ -2988,6 +2987,37 @@ def simd_probe_line(template_name: str, *, true16_vop3: bool = False) -> str | N
     return None
 
 
+def vop3p_local_simd_probe_line(
+    template_name: str,
+    vop3p_opsel_fields: tuple[str, str],
+    op_sel_hi_2_expr: str = 'inst_.op_sel_hi_2',
+) -> str | None:
+    """Return a profile-aware SIMD probe for an ISA-local VOP3P body.
+
+    Shared VOP3P templates use the canonical ``op_sel`` field spelling.  Some
+    profiles keep equivalent semantics under renamed fields, so their inline
+    scalar bodies need a probe that passes the normalized selector values to
+    SIMD glue instead of delegating to the canonical shared template.
+    """
+    if vop3p_opsel_fields == ('op_sel', 'op_sel_hi'):
+        return None
+    op_sel, op_sel_hi = vop3p_opsel_fields
+    specpkf32 = SIMD_VOP3P_PK_BINARY_F32.get(template_name)
+    if specpkf32 is not None:
+        return (
+            '  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS('
+            f'inst_.{op_sel}, inst_.{op_sel_hi}, {specpkf32});'
+        )
+    specpkf32_ternary = SIMD_VOP3P_PK_TERNARY_F32.get(template_name)
+    if specpkf32_ternary is not None:
+        return (
+            '  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS('
+            f'inst_.{op_sel}, inst_.{op_sel_hi}, {op_sel_hi_2_expr}, '
+            f'{specpkf32_ternary});'
+        )
+    return None
+
+
 def simd_probe_arch_portable(
     template_name: str,
     vop3p_opsel_fields: tuple[str, str] = ('op_sel', 'op_sel_hi'),
@@ -3012,8 +3042,9 @@ def simd_probe_arch_portable(
     their ``Vop3pMachineInst`` struct.  An ISA that renames the field cannot
     compile against the canonical-named shared body, so it must NOT be
     force-routed through it — it falls back to an inline body generated with
-    its own (renamed) field accessors.  ``vop3p_opsel_fields`` carries the
-    calling ISA's profile field names; when they differ from the canonical
+    its own (renamed) field accessors. Supported families may add a
+    profile-aware local SIMD probe to that body. ``vop3p_opsel_fields`` carries
+    the calling ISA's profile field names; when they differ from the canonical
     pair, VOP3P probes are not portable for that ISA.
     """
     if simd_probe_line(template_name) is None:

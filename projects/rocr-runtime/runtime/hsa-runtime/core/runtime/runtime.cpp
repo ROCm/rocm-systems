@@ -82,7 +82,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
-#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -90,6 +89,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
+#include "core/util/poll_backoff.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 
 #ifndef HSA_VERSION_MAJOR
@@ -1773,11 +1773,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       mem_flags.Value = 0;
       mem_flags.ui32.CoarseGrain = 1;
       mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
         mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -1790,7 +1790,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
   if ((importHandle.handle[6] & 0x80000000) != 0) {
     isFragment = true;
-    fragOffset = (importHandle.handle[6] & 0x1FF) * 4096;
+    fragOffset = (importHandle.handle[6] & 0x1FF) * os::PageSize();
     importHandle.handle[6] &= ~(0x80000000 | 0x1FF);
   }
 
@@ -2018,6 +2018,23 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
+      // Nap duration for the no-interrupt polling mode below (see
+      // core/util/poll_backoff.h). poll_nap_us is re-initialized here, i.e.
+      // once per outer-loop iteration (one per new wait batch), so the backoff
+      // only compounds within a single idle wait and every new wait starts
+      // again at the floor -- the escalated value cannot carry across waits.
+      // The ceiling depends on why we would be polling: with interrupts
+      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
+      // every signal is polling-only and a long nap costs only the napping
+      // wait's own observation latency. With interrupts available, polling can
+      // still be forced by a single EopEvent-less signal in the batch (an IPC
+      // signal or an internal DefaultSignal such as gang-copy signals); the
+      // nap then delays unrelated interrupt-backed handlers on this shared
+      // thread, so it is capped at the interrupt path's 200us active-poll
+      // window instead.
+      const int poll_nap_ceiling_us =
+          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
+      int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -2107,6 +2124,25 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for at least one pending
+          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
+          // that is every signal, since it implements no KFD events at all.
+          // Without a sleep this loop monopolizes a CPU core re-scanning the
+          // signal values for the whole lifetime of the async-events thread,
+          // idle or not; the two async-events threads cost ~2 cores in every
+          // process that has merely touched the GPU
+          // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
+          // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
+          // runtime is polling-only, 200us when a mixed batch also carries
+          // interrupt-backed handlers this nap would delay -- see the ceiling
+          // selection above), so a wait that completes quickly keeps low
+          // observation latency while a long-lived idle wait costs almost no
+          // CPU. The nap is re-initialized at the outer-loop boundary (see
+          // poll_nap_us above), so the escalation only compounds within a
+          // single idle wait batch.
+          os::uSleep(poll_nap_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
         }
       }
     }
@@ -2597,7 +2633,6 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
-  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -3062,11 +3097,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
-// its handle in tool_libs_ gives it the normal reverse-order OnUnload and
-// CloseTools handling without dedicated runtime state.
+// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
+// and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
@@ -4072,6 +4107,19 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
+Agent* Runtime::LowestDrmMinorGpu() {
+  auto drm_minor = [](const core::Agent* a) {
+    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+  };
+  core::Agent* selected = nullptr;
+  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
+    for (auto* candidate : *pool) {
+      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
+    }
+  }
+  return selected;
+}
+
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4096,12 +4144,11 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
+      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
       drm_owner = agent_for_drm;
     }
 
@@ -4308,9 +4355,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (drm_agent != nullptr) {
+        agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {

@@ -1,0 +1,117 @@
+# ---------------------------------------------------------------------------
+# AMD SMI SLES / openSUSE packaging check.
+#
+# The RPM the packaging rework builds declares a versioned interpreter
+# dependency that differs by distro family: `python(abi) = X.Y` on RHEL, but
+# `pythonXY` (no dot, e.g. python311) on SLES/openSUSE. That SLES form is not
+# exercised by the GPU build matrix (which runs on self-hosted runners), so a
+# broken dependency token could ship unnoticed. This job builds the RPM in an
+# openSUSE Leap container and asserts the pythonXY requirement resolves to a
+# real package, without needing a GPU.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI SLES Packaging
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/RPM/**'
+      - '.github/workflows/amdsmi-sles-packaging.yml'
+      - 'projects/amdsmi/cmake_modules/**'
+      - 'projects/amdsmi/tests/run_amdsmi_cpack_path_test.py'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/RPM/**'
+      - '.github/workflows/amdsmi-sles-packaging.yml'
+      - 'projects/amdsmi/cmake_modules/**'
+      - 'projects/amdsmi/tests/run_amdsmi_cpack_path_test.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sles-packaging:
+    name: SLES RPM packaging (openSUSE Leap 15.6)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    container:
+      image: opensuse/leap:15.6@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421 # Leap 15.6 GA, 2026-07-29
+
+    steps:
+      - name: Install build prerequisites
+        run: |
+          set -euo pipefail
+          zypper --non-interactive refresh
+          # Leap 15.6's default gcc is 7.5, below the project's required 9.0;
+          # install gcc12 explicitly and select it for the build below.
+          zypper --non-interactive install -y \
+            git gcc12 gcc12-c++ cmake make rpm-build \
+            libdrm-devel libnl3-devel libmnl-devel \
+            python3 python3-devel
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # rocm-systems is a large monorepo; only the amdsmi project is needed.
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure and build the RPM
+        working-directory: projects/amdsmi
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_ESMI_LIB=ON \
+            -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          cmake --build build -j"$(nproc)"
+          cd build && cpack -G RPM
+
+      - name: Assert the pythonXY dependency resolves
+        working-directory: projects/amdsmi/build
+        run: |
+          set -euo pipefail
+          RPM=$(ls amd-smi-lib-*.rpm | grep -v tests | head -1 || true)
+          if [ -z "$RPM" ]; then
+            echo "ERROR: no RPM found"
+            exit 1
+          fi
+          echo "Inspecting: $RPM"
+          # Match only the SLES pythonXY form (two or more digits, e.g.
+          # python311). The plain `python3` fallback is emitted when the SLES
+          # branch does not fire, so matching it would let a broken detection
+          # pass this check without validating the token it exists to verify.
+          REQ=$(rpm -qp --requires "$RPM" | grep -E '^python[0-9]{2,}$' || true)
+          echo "python requirement: '$REQ'"
+          if [ -z "$REQ" ]; then
+            echo "ERROR: no pythonXY requirement found in the SLES RPM"
+            exit 1
+          fi
+          # The required token is a virtual capability (e.g. python311 is
+          # provided by the python3 package), so search providers, not package
+          # names -- a plain name search wrongly reports it as missing.
+          PKG=$(echo "$REQ" | head -1 | awk '{print $1}')
+          if ! zypper --non-interactive search --provides --match-exact "$PKG" >/dev/null; then
+            echo "ERROR: nothing provides '$PKG' in zypper"
+            exit 1
+          fi
+          echo "PASS: $PKG is provided by an installable package"
+
+      - name: Assert the module ships on an import path
+        working-directory: projects/amdsmi
+        run: |
+          set -euo pipefail
+          RPM=$(ls build/amd-smi-lib-*.rpm | grep -v tests | head -1 || true)
+          if [ -z "$RPM" ]; then
+            echo "ERROR: no RPM found"
+            exit 1
+          fi
+          python3 tests/run_amdsmi_cpack_path_test.py "$RPM"
