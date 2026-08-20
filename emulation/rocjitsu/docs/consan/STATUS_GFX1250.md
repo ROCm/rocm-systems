@@ -48,7 +48,7 @@ preserve an earlier green claim.
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator reports the same 17 generated long-return targets; no accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
-| **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
+| **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟨 Fresh exact decode/combined oracles pass with complete 704/704 accesses plus 74/74 barriers and zero diagnostics; current paired overhead and fault acceptance remain to be refreshed |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
 | **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current accepted bundle: all four exact clean oracles; 24/24 accesses and 8/8 barriers; paired 1.33x; reviewed exact-one first barrier drop fails the oracle and emits attributable diagnostics; containment, health, cleanup, and provenance pass | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current strict clean row: all four exact host-reference oracles in 117.90 seconds; 24/24 accesses and 4/4 barriers; prior paired 1.29x retained |
@@ -64,6 +64,25 @@ inference, and a single-executor baseline reaches inference but remains too
 slow for useful iteration.  Existing static gfx1250 qualification evidence is
 not sufficient for promotion; CLIP remains outside the matrix denominator
 until baseline execution becomes suitable for end-to-end validation.
+
+### 2026-08-20 TP1 decode/combined Inline refresh
+
+A fresh native gfx1250 B0 simulator run replaces the stale 600-second
+no-verdict boundary.  Both exact oracles pass: decode takes 15.153 seconds and
+combined takes 21.393 seconds for their timed iterations.  The aggregate is
+analysis-, static-, and dynamic-complete at 704/704 accesses plus 74/74
+barriers, with zero diagnostics or incomplete encounters.
+
+The two modes construct independent IREE models in one Python process.  Their
+`SystemContext`/`BoundModule` reference cycles previously retained the first
+model's executable and ConSan report allocation until process exit.  The
+validation wrapper now explicitly collects each model before constructing the
+next independent oracle.  A CPU-only regression disables automatic cyclic GC
+and proves that the second model cannot be constructed while the first remains
+live.  In the end-to-end run this reduces peak live ConSan report memory from
+85,731,696 to 42,865,848 bytes while preserving the exact workload and coverage
+contracts.  The cell is yellow pending a current paired-overhead and reviewed
+fault refresh.
 
 ### 2026-08-20 tree atomic-OR clean revalidation
 

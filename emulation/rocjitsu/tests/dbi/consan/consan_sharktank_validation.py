@@ -7,6 +7,7 @@ timing policy without depending on a timestamped local artifact directory.
 """
 
 import argparse
+import gc
 import importlib.util
 import json
 import math
@@ -113,13 +114,21 @@ def run_llama(args):
         else:
             invoke = lambda: module.prefill_decode_cross_entropy(model, TOKEN_IDS)
             expected, tolerance = 0.589, 0.1
-        results[mode] = measure_scalar(
-            invoke,
-            expected,
-            tolerance,
-            args.repetitions,
-            args.allow_oracle_failure,
-        )
+        try:
+            results[mode] = measure_scalar(
+                invoke,
+                expected,
+                tolerance,
+                args.repetitions,
+                args.allow_oracle_failure,
+            )
+        finally:
+            # IREE's Python SystemContext and BoundModule objects form a
+            # reference cycle.  Release it before constructing the next mode
+            # so the prior executable, ConSan report buffer, and simulator
+            # dispatch state do not remain live across independent oracles.
+            del model
+            gc.collect()
     return results
 
 

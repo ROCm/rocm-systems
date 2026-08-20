@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass, replace
+import gc
 import io
 import json
 import os
@@ -15,12 +16,14 @@ import signal
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 import consan_validation as validation
 import consan_llama_validation as llama_validation
 import consan_rdna4_matmul_validation as rdna4_matmul_validation
+import consan_sharktank_validation as sharktank_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import (
     RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
@@ -6452,6 +6455,59 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(provenance["rocm_sdk_version"], "7.15.0a20260720")
         self.assertIn(" inventory", provenance["inventory_command"])
         self.assertIn("v54", provenance["replacement_vgpr_basis"])
+
+
+class SharktankValidationLifecycleTests(unittest.TestCase):
+    def test_multi_mode_run_releases_each_model_before_constructing_next(self) -> None:
+        class FakeToyLlama:
+            live = 0
+
+            def __init__(self, **_kwargs):
+                if type(self).live:
+                    raise RuntimeError("prior model is still live")
+                type(self).live += 1
+                # Model the SystemContext/BoundModule reference cycle that
+                # keeps the real IREE executable alive until cyclic GC runs.
+                self.cycle = self
+
+            def __del__(self):
+                type(self).live -= 1
+
+        fake_module = SimpleNamespace(
+            llama_mlir="toy.mlir",
+            llama_irpa=["toy.irpa"],
+            llama_tp2_mlir="toy-tp2.mlir",
+            llama_tp2_irpa=["toy-tp2.irpa"],
+            iree=SimpleNamespace(
+                compiler=SimpleNamespace(compile_file=lambda *_args, **_kwargs: b"vmfb")
+            ),
+            hip_flags=lambda _sharding: [],
+            ToyLlama=FakeToyLlama,
+            decode_cross_entropy=lambda _model, _tokens: 0.582,
+            prefill_decode_cross_entropy=lambda _model, _tokens: 0.589,
+        )
+        args = SimpleNamespace(
+            suite_root=Path("/unused"),
+            workload="tp1",
+            mode="decode-combined",
+            repetitions=1,
+            allow_oracle_failure=False,
+        )
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with mock.patch.object(
+                sharktank_validation, "load_module", return_value=fake_module
+            ):
+                result = sharktank_validation.run_llama(args)
+        finally:
+            gc.collect()
+            if gc_was_enabled:
+                gc.enable()
+
+        self.assertEqual(set(result), {"decode", "combined"})
+        self.assertEqual(FakeToyLlama.live, 0)
 
 
 if __name__ == "__main__":
