@@ -290,16 +290,23 @@ def print_kernel_block(r, sort_by, sort_label):
 
 def print_report(ordered, sort_by, top_n, match_re=None):
     sort_label = RESOURCE_LABELS.get(sort_by, OCC_LABEL)
-    changed = [
+    resource_changed = [
+        r
+        for r in ordered
+        if r["status"] == "common" and r[f"{sort_by}_delta"] != 0
+    ]
+    dynamic_stack_only = [
         r
         for r in ordered
         if r["status"] == "common"
-        and (r[f"{sort_by}_delta"] != 0 or r.get("DynamicStack_changed"))
+        and r[f"{sort_by}_delta"] == 0
+        and r.get("DynamicStack_changed")
     ]
     added = [r for r in ordered if r["status"] == "added"]
     removed = [r for r in ordered if r["status"] == "removed"]
     print(
-        f"{len(changed)} kernels changed {sort_label} or dynamic-stack usage, "
+        f"{len(resource_changed)} kernels changed {sort_label}, "
+        f"{len(dynamic_stack_only)} only flipped dynamic-stack usage, "
         f"{len(added)} added, {len(removed)} removed\n"
     )
 
@@ -320,13 +327,23 @@ def print_report(ordered, sort_by, top_n, match_re=None):
             print_kernel_block(r, sort_by, sort_label)
         print()
 
-    remaining = [r for r in changed if row_key(r) not in pinned_keys]
-    print(
-        f"Top {min(top_n, len(remaining))} kernels ranked by |{sort_label} delta| "
-        f"(baseline -> branch, all non-zero deltas shown):"
-    )
-    for r in remaining[:top_n]:
-        print_kernel_block(r, sort_by, sort_label)
+    remaining = [r for r in resource_changed if row_key(r) not in pinned_keys]
+    if remaining:
+        print(
+            f"Top {min(top_n, len(remaining))} kernels ranked by |{sort_label} delta| "
+            f"(baseline -> branch, all non-zero deltas shown):"
+        )
+        for r in remaining[:top_n]:
+            print_kernel_block(r, sort_by, sort_label)
+    else:
+        print(
+            f"No non-zero {sort_label} deltas found in common kernels; see dynamic-stack summary above if applicable."
+        )
+
+    if dynamic_stack_only:
+        print(
+            f"\n{len(dynamic_stack_only)} kernel(s) only flipped dynamic-stack state without a {sort_label} delta."
+        )
 
 
 def wrap_label(row, width=42, pinned=False):
@@ -361,8 +378,7 @@ def make_chart(
     remaining = [
         r
         for r in common
-        if (r[f"{sort_by}_delta"] != 0 or r.get("DynamicStack_changed"))
-        and row_key(r) not in pinned_keys
+        if r[f"{sort_by}_delta"] != 0 and row_key(r) not in pinned_keys
     ]
     changed = pinned + remaining[:top_n]
     if not changed:
@@ -382,9 +398,10 @@ def make_chart(
     labels = [wrap_label(r, pinned=row_key(r) in pinned_keys) for r in changed]
 
     # Only render panels for resource types that actually changed among the displayed
-    # kernels, plus occupancy always last. A pinned kernel with a non-zero baseline/branch
-    # value also activates its column even with zero delta, since pinning means "I want to
-    # study this kernel" -- an unchanged-but-nonzero resource is still worth showing for it.
+    # kernels, plus occupancy always last (unless it's the sort column -- see below).
+    # A pinned kernel with a non-zero baseline/branch value also activates its column
+    # even with zero delta, since pinning means "I want to study this kernel" -- an
+    # unchanged-but-nonzero resource is still worth showing for it.
     def col_active(c):
         for r in changed:
             if r[f"{c}_delta"] != 0:
@@ -402,8 +419,16 @@ def make_chart(
     active_cols = [c for c in REPORT_COLS if col_active(c) or c == sort_by]
     if sort_by in active_cols:
         active_cols.remove(sort_by)
-        active_cols.insert(0, sort_by)
-    panels = active_cols + [OCC_COL]
+    # OCC_COL isn't in REPORT_COLS (it's handled separately, see above), so when
+    # sort_by is OccupancyWavesPerSIMD the "c == sort_by" check above never fires
+    # and active_cols is just the other active REPORT_COLS -- appending OCC_COL
+    # unconditionally here would then both duplicate it and, worse, leave it
+    # stranded as the last panel even though it's the very column the chart is
+    # ranked by (every other --sort-by choice gets promoted to the first/leftmost
+    # panel below; occupancy deserves the same treatment instead of a silent
+    # exception).
+    panels = active_cols + ([OCC_COL] if sort_by != OCC_COL else [])
+    panels.insert(0, sort_by)
 
     fig_height = max(3.7, 0.5 * n + 2.0)
     fig, axes = plt.subplots(
