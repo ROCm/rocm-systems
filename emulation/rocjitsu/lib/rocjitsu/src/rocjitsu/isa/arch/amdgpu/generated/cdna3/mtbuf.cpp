@@ -320,12 +320,6 @@ DecodeResult decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode,
 }
 } // namespace detail
 
-void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
-  Mtbuf::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
-    uses.expand(*r);
-}
-
 TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XyMtbuf)),
@@ -393,12 +387,6 @@ DecodeResult decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode,
   return std::make_unique<TbufferLoadFormatD16XyzMtbuf>(opcode);
 }
 } // namespace detail
-
-void TbufferLoadFormatD16XyzMtbuf::implicit_uses(RegisterSet &uses) const {
-  Mtbuf::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
-    uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
-}
 
 TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),

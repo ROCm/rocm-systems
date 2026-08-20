@@ -688,6 +688,33 @@ TEST(TerminationTest, RequestExitWakesAllPartitions) {
   EXPECT_EQ(exit_status.reason, ExitReason::EXIT_REQUEST);
 }
 
+// Regression: the host thread calling request_exit() must not touch the partition
+// contexts while the engine thread is destroying them in shutdown(). The daemon does
+// exactly this - teardown() requests exit while the VM thread may already be shutting
+// down after the guest exited - which TSan caught as a data race and a use-after-free
+// on the partition's idle_wakeup_ flag.
+TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
+  // Single-threaded mode is what arms the wake path that dereferences contexts_[0].
+  // Iterate: the two threads must interleave inside the narrow shutdown window.
+  for (int iter = 0; iter < 200; ++iter) {
+    SimulationEngine engine({.num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    root->add_child(std::make_unique<CounterComponent>("c0", 4));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+
+    // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
+    std::thread runner([&engine]() {
+      engine.run();
+      engine.shutdown();
+    });
+
+    // Mirrors the daemon teardown path landing concurrently with that shutdown.
+    engine.request_exit("test stop");
+    runner.join();
+  }
+}
+
 TEST(TerminationTest, StepModeConsistency) {
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");

@@ -729,7 +729,7 @@ _VOP1_OP_MAP = {
     'V_READFIRSTLANE': ('vector_readfirstlane', None),
     'V_NOP': ('true_nop', None),
     'V_CLREXCP': ('true_nop', None),
-    'V_SAT_PK_U8_I16': ('nop', None),
+    'V_SAT_PK_U8_I16': ('vector_sat_pack', 'u8_i16'),
     'V_SCREEN_PARTITION_4SE': ('nop', None),
     'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
@@ -766,7 +766,7 @@ _VOP1_OP_MAP = {
     'V_PRNG': ('true_nop', None),  # PRNG not simulated
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
-    'V_SWAPREL': ('nop', None),
+    'V_SWAPREL': ('vector_swaprel', None),
     'V_S_EXP': ('pseudo_scalar_unary', 'exp2'),
     'V_S_LOG': ('pseudo_scalar_unary', 'log2'),
     'V_S_RCP': ('pseudo_scalar_unary', 'rcp'),
@@ -794,12 +794,12 @@ _VOP1_OP_MAP = {
     # Relative addressing through M0.
     'V_MOVRELD': ('vector_movrel', 'dst'),
     'V_MOVRELS': ('vector_movrel', 'src'),
-    'V_MOVRELSD': ('nop', None),
-    'V_MOVRELSD2': ('nop', None),
-    'V_MOVRELSD2_B32': ('nop', None),
-    'V_MOVRELSD_2': ('nop', None),
-    'V_MOVRELSD_2_B32': ('nop', None),
-    'V_SWAP_REL': ('nop', None),
+    'V_MOVRELSD': ('vector_movrel', 'srcdst'),
+    'V_MOVRELSD2': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD2_B32': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD_2': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD_2_B32': ('vector_movrel', 'srcdst2'),
+    'V_SWAP_REL': ('vector_swaprel', None),
     'V_PERMLANE64': ('vector_permlane64', None),
 }
 
@@ -820,6 +820,12 @@ def _derive_vop1(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_unary', operation=bf16_transcendentals[name], data_type='bf16'
         )
+    sat_pack = {
+        'V_SAT_PK4_I4_I8': 'i4_i8',
+        'V_SAT_PK4_U4_U8': 'u4_u8',
+    }
+    if name in sat_pack:
+        return InstructionSemantics(name, 'vector_sat_pack', operation=sat_pack[name])
     packed_fp8_bf8_conversions = {
         'V_CVT_PK_F32_FP8': 'f32_fp8',
         'V_CVT_PK_F32_BF8': 'f32_bf8',
@@ -941,10 +947,10 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
         )
 
     # FMAMK / FMAAK / MADMK / MADAK - FMA/MAD with inline constant
-    if name == 'V_FMAMK_F32':
-        return InstructionSemantics(name, 'vector_fmamk', data_type='f32')
-    if name == 'V_FMAAK_F32':
-        return InstructionSemantics(name, 'vector_fmaak', data_type='f32')
+    if name in ('V_FMAMK_F32', 'V_FMAMK_F64'):
+        return InstructionSemantics(name, 'vector_fmamk', data_type=name[-3:].lower())
+    if name in ('V_FMAAK_F32', 'V_FMAAK_F64'):
+        return InstructionSemantics(name, 'vector_fmaak', data_type=name[-3:].lower())
     if name in ('V_MADMK_F16', 'V_FMAMK_F16'):
         return InstructionSemantics(name, 'vector_fmamk', data_type='f16')
     if name in ('V_MADAK_F16', 'V_FMAAK_F16'):
@@ -968,9 +974,9 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
             name, 'vector_binop', operation='mul', data_type='u16'
         )
 
-    # Packed FP16 FMA VOP2 form (the VOP3P form is functional).
+    # Packed FP16 fused multiply-accumulate VOP2 form.
     if name == 'V_PK_FMAC_F16':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'pk_fmac_vop2', data_type='f16')
 
     # DOT product instructions
     if name == 'V_DOT2ACC_F32_F16':
@@ -1130,9 +1136,29 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
             name, 'vector_ternary', operation=_SAD_MAP[name], data_type='u32'
         )
 
-    # MQSAD (complex, rarely used) → nop
-    if name in ('V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8', 'V_QSAD_PK_U16_U8'):
-        return InstructionSemantics(name, 'nop')
+    qsad = {
+        'V_QSAD_PK_U16_U8': 'sad_pk_u16',
+        'V_MQSAD_PK_U16_U8': 'msad_pk_u16',
+        'V_MQSAD_U32_U8': 'msad_u32',
+    }
+    if name in qsad:
+        return InstructionSemantics(name, 'vector_qsad', operation=qsad[name])
+
+    perm_pk16 = {
+        'V_PERM_PK16_B4_U4': 'b4',
+        'V_PERM_PK16_B6_U4': 'b6',
+        'V_PERM_PK16_B8_U4': 'b8',
+    }
+    if name in perm_pk16:
+        return InstructionSemantics(name, 'vector_perm_pk16', operation=perm_pk16[name])
+
+    # Bit count with accumulate: D.u32 = CountOneBits(S0.u32) + S1.u32. The MR
+    # ISA gives no pseudocode, so the generic stem table below would derive this
+    # as a plain unary popcount and silently drop S1 -- the same shape as the
+    # V_MBCNT_* pair right underneath, which is why it is classified the same
+    # way rather than as a 'vector_unary'.
+    if name == 'V_BCNT_U32_B32':
+        return InstructionSemantics(name, 'vector_bcnt', data_type='u32')
 
     # Masked bit count
     if name == 'V_MBCNT_LO_U32_B32':
@@ -1176,9 +1202,8 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name == 'V_CVT_PK_I16_I32':
         return InstructionSemantics(name, 'vector_cvt_pk', operation='i16_i32')
 
-    # Trig preop → nop (internal microcode helper)
     if name == 'V_TRIG_PREOP_F64':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'vector_trig_preop', data_type='f64')
 
     # ── CDNA4 / RDNA4 new conversions ─────────────────────────────────
     if name == 'V_CVT_F32_BF16':
@@ -1230,7 +1255,9 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
             name, 'vector_ternary', operation='fma', data_type='f32'
         )
     if name == 'V_MULLIT_F32':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(
+            name, 'vector_mullit', operation='mul_legacy', data_type='f32'
+        )
 
     # MAXMIN/MINMAX/MINIMUMMAXIMUM/MAXIMUMMINIMUM variants (all types)
     _CLAMP_TERNARY = {
@@ -1438,7 +1465,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
 
     # V_PK_FMAC_F16 VOP2 form — the VOP3P form is handled via _VOP3P_PK16_MAP.
     if name == 'V_PK_FMAC_F16':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'pk_fmac_vop2', data_type='f16')
 
     # Legacy interpolation (CDNA1, RDNA1/2) — niche, not simulated
     if name.startswith('V_INTERP_P1') or name.startswith('V_INTERP_P2'):
@@ -1528,6 +1555,10 @@ _VOP3P_PK16_MAP = {
     'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
     'V_PK_FMAC_F16': ('pk_ternary', 'fmac', 'f16'),
+    'V_PK_ADD_MAX_I16': ('pk_ternary', 'add_max_sat', 'i16'),
+    'V_PK_ADD_MAX_U16': ('pk_ternary', 'add_max_sat', 'u16'),
+    'V_PK_ADD_MIN_I16': ('pk_ternary', 'add_min_sat', 'i16'),
+    'V_PK_ADD_MIN_U16': ('pk_ternary', 'add_min_sat', 'u16'),
     'V_PK_FMA_BF16': ('pk_ternary', 'fma', 'bf16'),
     'V_PK_ADD_BF16': ('pk_binop', 'add', 'bf16'),
     'V_PK_MUL_BF16': ('pk_binop', 'mul', 'bf16'),
@@ -1789,18 +1820,18 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
-    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3,
-    # TR16_B128=4 (grouped 16-bit B128 layout), B64_TR_B16=5 (CDNA4 4x16-lane
-    # ds_read_b64_tr_b16 layout).
+    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
+    # B64_TR_B8=3 (CDNA4 MFMA layout), TR16_B128=4, B64_TR_B16=5,
+    # WMMA_TR_B8=6 (CDNA5/RDNA4 16x16 matrix layout).
     'B64_TR_B4': ('b4', 4, 2, 1),
     'B96_TR_B6': ('b6', 4, 3, 2),
     'B64_TR_B8': ('b8', 4, 2, 3),
     'B64_TR_B16': ('b16', 4, 2, 5),
     'TR4_B64': ('b4', 4, 2, 1),
     'TR6_B96': ('b6', 4, 3, 2),
-    'TR8_B64': ('b8', 4, 2, 3),
+    'TR8_B64': ('b8', 4, 2, 6),
     'TR16_B128': ('b16', 4, 4, 4),
-    'TR_B64': ('b8', 4, 2, 3),
+    'TR_B64': ('b8', 4, 2, 6),
     'TR_B128': ('b16', 4, 4, 4),
 }
 
