@@ -1,0 +1,5 @@
+outs:
+- md5: 6f58fd02a6aff3fb8742aef23374d67a
+  size: 17740696
+  hash: md5
+  path: amdhip64_6.dll

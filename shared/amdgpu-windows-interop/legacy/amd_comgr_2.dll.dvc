@@ -1,0 +1,5 @@
+outs:
+- md5: 6b03e0c82aaeb2a2249c1eda5c264fd8
+  size: 121159576
+  hash: md5
+  path: amd_comgr_2.dll
