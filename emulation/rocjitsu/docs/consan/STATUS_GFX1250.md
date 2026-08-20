@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟧 Current full-object run transforms 1402/1402 accesses into a 394,104-byte object; standalone B0-to-A0 translation succeeds, but end-to-end execution has no oracle or teardown verdict within 600 seconds, so there is no accepted overhead | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 104/104 barriers and emits a 4,043,640-byte object; the end-to-end run has no verdict within 600 seconds after replacement, while the newer standalone translator diagnoses 17 unrecovered generated long-return targets. The older paired 5.33x result covered only 1000/1000 accesses and 46/46 barriers and is not current acceptance evidence | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Current instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator diagnoses the same 17 generated long-return targets; no accepted overhead |
+| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator reports the same 17 generated long-return targets; no accepted overhead |
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -221,6 +221,23 @@ This row is the target-native cooperative LDS/WMMA qualification role, not an
 inherited instruction-site denominator. gfx1250 evidence comes only from the
 gfx1250 binary and its own oracle, inventory, fault campaign, and timings; the
 larger RDNA4 schedule retains its separate target ledger.
+
+### 2026-08-20 Qwen current-workspace refresh
+
+Fresh runs at source revision `4d209ed968` and hook SHA-256
+`7b7b5fc01a9874b05d058492bd79231bbddba597196a258802cb7433ff3eb60f`
+use the checked-out Qwen VMFB and RocJITsu's native gfx1250 B0 simulator.
+SuperCollider transforms all 1000 discovered accesses, installs a 365,536-byte
+replacement, and reaches execution, but produces no oracle or unload verdict
+within 90 seconds. Record/Replay transforms all 1000 accesses and all 92
+barriers, installs a 4,039,648-byte replacement, and likewise reaches execution
+without a verdict inside 60 seconds. A retained copy of that exact
+Record/Replay replacement remains CPU-bound in the standalone B0-to-A0
+translator without emitting a diagnostic after five minutes. The run was
+bounded at that point, so this is neither a successful translation verdict nor
+a reproduction of the older 17-target failure. These results leave both cells
+orange and identify translation plus simulated execution latency as the current
+first boundary in this workspace.
 
 ### Current large Qwen translation boundary
 
