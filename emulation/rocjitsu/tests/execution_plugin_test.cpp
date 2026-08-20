@@ -2458,7 +2458,7 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32));
 }
 
-TEST(ExecutionPluginTest, F64SimdSourceReadObservationReportsBothHalves) {
+TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;

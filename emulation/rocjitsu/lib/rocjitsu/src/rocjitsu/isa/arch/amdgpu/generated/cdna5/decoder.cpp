@@ -1959,6 +1959,8 @@ DecodeResult decodeVPermlane16SwapB32Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlane16VarB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPermlane64B32Vop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlaneBcastB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlaneDownB32Vop3(const MachineInst *opcode,
@@ -2961,7 +2963,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_vop1 = {
     &detail::decodeVCvtNormU16F16Vop1,
     &detail::decodeVSwapB32Vop1,
     &detail::decodeVSwapB16Vop1,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVPermlane64B32Vop1,
     &detail::decodeVSwaprelB32Vop1,
     &detail::decodeVNotB16Vop1,
     &detail::decodeVCvtI32I16Vop1,

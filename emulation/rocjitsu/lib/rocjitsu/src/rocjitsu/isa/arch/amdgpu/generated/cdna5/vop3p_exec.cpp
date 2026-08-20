@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -433,36 +434,22 @@ void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
     bool sel1_hi = (inst_.opsel_hi >> 1) & 1;
     bool sel2_hi = inst_.pad_14;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));
-    if (inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst_.neg & 4) {
-      c_lo = -c_lo;
-    }
-    if (inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    if (inst_.neg_hi & 4) {
-      c_hi = -c_hi;
-    }
-    float rlo = std::fma(a_lo, b_lo, c_lo);
-    float rhi = std::fma(a_hi, b_hi, c_hi);
-    amdgpu::sdwa::write_lane<true>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    uint16_t c_lo = static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2);
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    uint16_t c_hi = static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2);
+    uint16_t rlo = amdgpu::fp_mode::fma_f16(
+        a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u,
+        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    uint16_t rhi = amdgpu::fp_mode::fma_f16(
+        a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u,
+        inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp,
+        wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane,
+                                   static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
 }
 
@@ -599,13 +586,67 @@ void VPkFmaBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkAddMaxI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    bool sel0_lo = (inst_.opsel >> 0) & 1;
+    bool sel1_lo = (inst_.opsel >> 1) & 1;
+    bool sel2_lo = (inst_.opsel >> 2) & 1;
+    bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.opsel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    int16_t a_lo = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    int16_t c_lo = static_cast<int16_t>(sel2_lo ? (raw2 >> 16) : raw2);
+    int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    int16_t c_hi = static_cast<int16_t>(sel2_hi ? (raw2 >> 16) : raw2);
+    int16_t sum_lo =
+        static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767));
+    int16_t sum_hi =
+        static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_hi) + b_hi, -32768, 32767));
+    uint16_t rlo = static_cast<uint16_t>(std::max(sum_lo, c_lo));
+    uint16_t rhi = static_cast<uint16_t>(std::max(sum_hi, c_hi));
+    if (inst_.clamp) {
+      rlo = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rlo), 0));
+      rhi = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rhi), 0));
+    }
+    amdgpu::sdwa::write_lane<false>(
+        *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
+  }
 }
 
 void VPkAddMaxU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    bool sel0_lo = (inst_.opsel >> 0) & 1;
+    bool sel1_lo = (inst_.opsel >> 1) & 1;
+    bool sel2_lo = (inst_.opsel >> 2) & 1;
+    bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.opsel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    uint16_t c_lo = static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2);
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    uint16_t c_hi = static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2);
+    uint16_t sum_lo = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u));
+    uint16_t sum_hi = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_hi) + b_hi, 65535u));
+    uint16_t rlo = std::max(sum_lo, c_lo);
+    uint16_t rhi = std::max(sum_hi, c_hi);
+    amdgpu::sdwa::write_lane<false>(
+        *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
+  }
 }
 
 void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -615,7 +656,8 @@ void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    int64_t sum = static_cast<int64_t>(
+        static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
@@ -625,14 +667,13 @@ void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
                               : static_cast<int32_t>(raw_b);
-      sum += static_cast<uint32_t>(a * b);
+      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
     }
-    if (inst_.clamp) {
-      int32_t signed_sum = static_cast<int32_t>(sum);
-      if (signed_sum < 0)
-        sum = 0u;
+    if (inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
+      sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
+                       static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, sum);
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, static_cast<uint32_t>(sum));
   }
 }
 
@@ -643,14 +684,15 @@ void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    uint32_t sum = acc;
+    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 4; ++i) {
       uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
       uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
       sum += static_cast<uint32_t>(a) * b;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, sum);
+    if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))
+      sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, static_cast<uint32_t>(sum));
   }
 }
 
@@ -661,7 +703,8 @@ void VDot8I32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    int64_t sum = static_cast<int64_t>(
+        static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
@@ -671,14 +714,13 @@ void VDot8I32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
                               : static_cast<int32_t>(raw_b);
-      sum += static_cast<uint32_t>(a * b);
+      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
     }
     if (inst_.clamp) {
-      int32_t signed_sum = static_cast<int32_t>(sum);
-      if (signed_sum < 0)
-        sum = 0u;
+      sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
+                       static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, sum);
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, static_cast<uint32_t>(sum));
   }
 }
 
@@ -689,14 +731,15 @@ void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    uint32_t sum = acc;
+    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 8; ++i) {
       uint32_t a = (raw0 >> (i * 4)) & 0xF;
       uint32_t b = (raw1 >> (i * 4)) & 0xF;
       sum += a * b;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, sum);
+    if (inst_.clamp)
+      sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, static_cast<uint32_t>(sum));
   }
 }
 
@@ -934,7 +977,7 @@ void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
   }
 }
@@ -970,7 +1013,7 @@ void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
@@ -1007,7 +1050,7 @@ void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
@@ -1236,13 +1279,67 @@ void VPkMaxNumBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkAddMinI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    bool sel0_lo = (inst_.opsel >> 0) & 1;
+    bool sel1_lo = (inst_.opsel >> 1) & 1;
+    bool sel2_lo = (inst_.opsel >> 2) & 1;
+    bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.opsel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    int16_t a_lo = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    int16_t c_lo = static_cast<int16_t>(sel2_lo ? (raw2 >> 16) : raw2);
+    int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    int16_t c_hi = static_cast<int16_t>(sel2_hi ? (raw2 >> 16) : raw2);
+    int16_t sum_lo =
+        static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767));
+    int16_t sum_hi =
+        static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_hi) + b_hi, -32768, 32767));
+    uint16_t rlo = static_cast<uint16_t>(std::min(sum_lo, c_lo));
+    uint16_t rhi = static_cast<uint16_t>(std::min(sum_hi, c_hi));
+    if (inst_.clamp) {
+      rlo = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rlo), 0));
+      rhi = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rhi), 0));
+    }
+    amdgpu::sdwa::write_lane<false>(
+        *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
+  }
 }
 
 void VPkAddMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    bool sel0_lo = (inst_.opsel >> 0) & 1;
+    bool sel1_lo = (inst_.opsel >> 1) & 1;
+    bool sel2_lo = (inst_.opsel >> 2) & 1;
+    bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.opsel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    uint16_t c_lo = static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2);
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    uint16_t c_hi = static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2);
+    uint16_t sum_lo = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u));
+    uint16_t sum_hi = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_hi) + b_hi, 65535u));
+    uint16_t rlo = std::min(sum_lo, c_lo);
+    uint16_t rhi = std::min(sum_hi, c_hi);
+    amdgpu::sdwa::write_lane<false>(
+        *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
+  }
 }
 
 void VPkMax3I16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1643,7 +1740,7 @@ void VFmaMixF32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
   }
 }
@@ -1680,7 +1777,7 @@ void VFmaMixloBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     uint16_t h = util::f32_to_bf16(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
@@ -1718,7 +1815,7 @@ void VFmaMixhiBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c = -c;
     float result = std::fma(a, b, c);
     if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = amdgpu::clamp_floating_result(result, wf);
     uint16_t h = util::f32_to_bf16(result);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
@@ -1876,7 +1973,7 @@ void VSwmmacF3216x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
                           index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc);
 }
@@ -1897,7 +1994,7 @@ void VSwmmacF3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
 }
@@ -1918,7 +2015,7 @@ void VSwmmacF1616x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
                           index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc);
 }
@@ -1939,7 +2036,7 @@ void VSwmmacBf1616x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_bf16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
                            index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
 }
@@ -1960,7 +2057,7 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
 }
@@ -2193,7 +2290,7 @@ void VSwmmacF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc);
 }
@@ -2214,7 +2311,7 @@ void VSwmmacF3216x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc);
 }
@@ -2235,7 +2332,7 @@ void VSwmmacF3216x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc);
 }
@@ -2256,7 +2353,7 @@ void VSwmmacF3216x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc);
 }
@@ -2277,7 +2374,7 @@ void VSwmmacF1616x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc);
 }
@@ -2298,7 +2395,7 @@ void VSwmmacF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc);
 }
@@ -2319,7 +2416,7 @@ void VSwmmacF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc);
 }
@@ -2340,7 +2437,7 @@ void VSwmmacF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
                           index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc);
 }
@@ -2361,7 +2458,7 @@ void VSwmmacI3216x16x128Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   if (!index_off)
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
-  uint32_t index_key = inst_.opsel & 0x1u;
+  uint32_t index_key = 0u;
   auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
     return (inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)
                               : amdgpu::extract_u8(cu, base, loc);

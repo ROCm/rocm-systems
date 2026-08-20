@@ -197,7 +197,7 @@ public:
 
   /// @brief Number of consecutive VGPRs this operand spans.
   [[nodiscard]] uint16_t vgpr_count() const {
-    return static_cast<uint16_t>(std::max(1, size_bits_ / 32));
+    return static_cast<uint16_t>(std::max(1, (size_bits_ + 31) / 32));
   }
 
 private:
