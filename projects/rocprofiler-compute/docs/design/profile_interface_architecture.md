@@ -342,8 +342,8 @@ Phase B does not change the profile/analyze contract shape. Python and the nativ
 tool each compress at CSV read/write over a shared format contract. Compressed
 artifacts are gzip-only: `csv_compression` opens nothing plain, and analyze
 discovers them by their `.csv.gz` name rather than sniffing file contents.
-`sysinfo.csv` and the `pmc_perf.csv` analyze intermediate stay plain and are
-opened by their callers with the builtin `open`.
+The `pmc_perf.csv.gz` analyze intermediate goes through the same interface.
+`sysinfo.csv` stays plain and is opened by its callers with the builtin `open`.
 
 ```mermaid
 sequenceDiagram

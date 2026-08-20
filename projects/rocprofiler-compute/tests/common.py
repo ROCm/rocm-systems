@@ -57,7 +57,7 @@ def check_file_pattern(pattern, file_path):
     """Check if the given pattern exists in the file.
 
     Callers pass compressed counter artifacts as well as plain files such as
-    pmc_perf.csv and profiling_config.yaml, so the reader follows the name.
+    sysinfo.csv and profiling_config.yaml, so the reader follows the name.
     """
     if str(file_path).endswith(".gz"):
         opener = gzip.open(file_path, "rt", encoding="utf-8")

@@ -22,7 +22,7 @@ def _write_results_gz(path: Path, content: str) -> None:
 
 
 def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
-    """Concatenates rocpd long-form results_*.csv.gz into one pmc_perf.csv."""
+    """Concatenates rocpd long-form results_*.csv.gz into one pmc_perf.csv.gz."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
 
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
@@ -37,9 +37,9 @@ def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) ->
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv"
+        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv.gz"
     )
-    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
+    merged = pd.read_csv(tmp_path / "pmc_perf.csv.gz")
 
     assert list(merged.columns) == [
         "GPU_ID",
@@ -63,10 +63,10 @@ def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
             sorted(tmp_path.glob("results_*.csv.gz")),
-            tmp_path / "pmc_perf.csv",
+            tmp_path / "pmc_perf.csv.gz",
         )
 
-    assert not (tmp_path / "pmc_perf.csv").exists()
+    assert not (tmp_path / "pmc_perf.csv.gz").exists()
     skipped = [
         call.args[0]
         for call in mocks["warning"].call_args_list
@@ -88,10 +88,10 @@ def test_concat_result_csvs_skips_zero_byte_compressed_pass(
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv"
+        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv.gz"
     )
 
-    assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
+    assert pd.read_csv(tmp_path / "pmc_perf.csv.gz")["Counter_Value"].tolist() == [10]
 
 
 def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> None:
@@ -107,13 +107,13 @@ def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> N
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.join_workload_csvs(tmp_path)
 
-    assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
+    assert pd.read_csv(tmp_path / "pmc_perf.csv.gz")["Counter_Value"].tolist() == [10]
 
 
 def test_concat_result_csvs_errors_on_truncated_compressed_results(
     tmp_path, monkeypatch
 ) -> None:
-    """Partial .csv.gz from a killed profile run must not leave pmc_perf.csv behind."""
+    """Partial .csv.gz from a killed profile run must not leave output behind."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
     rows = "".join(f"0,kernel_a,SQ_WAVES,{i}\n" for i in range(2000))
@@ -124,14 +124,14 @@ def test_concat_result_csvs_errors_on_truncated_compressed_results(
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
             sorted(tmp_path.glob("results_*.csv.gz")),
-            tmp_path / "pmc_perf.csv",
+            tmp_path / "pmc_perf.csv.gz",
         )
 
-    assert not (tmp_path / "pmc_perf.csv").exists()
+    assert not (tmp_path / "pmc_perf.csv.gz").exists()
 
 
 def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> None:
-    """Header-only results files must not leave a reusable pmc_perf.csv behind."""
+    """Header-only results files must not leave a reusable output behind."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
     _write_results_gz(tmp_path / "results_pmc_perf_0.csv.gz", header)
@@ -141,10 +141,10 @@ def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> N
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
             sorted(tmp_path.glob("results_*.csv.gz")),
-            tmp_path / "pmc_perf.csv",
+            tmp_path / "pmc_perf.csv.gz",
         )
 
-    assert not (tmp_path / "pmc_perf.csv").exists()
+    assert not (tmp_path / "pmc_perf.csv.gz").exists()
 
 
 def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -> None:
@@ -159,10 +159,10 @@ def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
             sorted(tmp_path.glob("results_*.csv.gz")),
-            tmp_path / "pmc_perf.csv",
+            tmp_path / "pmc_perf.csv.gz",
         )
 
-    assert not (tmp_path / "pmc_perf.csv").exists()
+    assert not (tmp_path / "pmc_perf.csv.gz").exists()
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
