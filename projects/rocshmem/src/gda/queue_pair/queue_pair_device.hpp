@@ -45,7 +45,6 @@
 #include "constants.hpp"
 #include "containers/free_list.hpp"
 #include "gda/endian.hpp"
-#include "gda/gda_symm_table.hpp"
 #include "log.hpp"
 #include "util.hpp"
 
@@ -113,7 +112,7 @@ protected:
    * This lets the (common) heap translation run as pure register arithmetic
    * with no additional indirection or memory load (besides *this).
    */
-  QpSymmEntry heap;
+  SymmBufferInfo heap;
 
   // Used in most WQEs
   uint32_t qp_num;
@@ -133,7 +132,7 @@ protected:
 
 private:
   // Used by get_laddr
-  BufferInfo* buffer_info;
+  const BufferInfo* local_buffers;
   size_t num_user_buffers;
 
   /**
@@ -144,7 +143,7 @@ private:
    * specialized to this QP, so a match yields the remote address and keys with
    * no further dereference. Null when symmetric registration is unavailable.
    */
-  const QpSymmEntry *symm_entries;
+  const SymmBufferInfo *symm_buffers;
 
   /**
    * @brief Shared registration count (number of live entries per slice).
@@ -212,9 +211,9 @@ protected:
    * @param[in] nonfetching_atomic Single location used for the return values of nonfetching AMOs.
    * @param[in] nonfetching_atomic_lkey LKey for nonfetching_atomic.
    * @param[in] fetching_atomic_freelist Pointer to freelist for fetching_atomic.
-   * @param[in] buffer_info Array of BufferInfo used for user-registered local buffers.
+   * @param[in] local_buffers Array of BufferInfo used for user-registered local buffers.
    * @param[in] num_user_buffers Maximum number of user-registered local buffers.
-   * @param[in] symm_entries Array of QpSymmEntry used for user-registered symmetric buffers.
+   * @param[in] symm_buffers Array of SymmBufferInfo used for user-registered symmetric buffers.
    * @param[in] symm_count Pointer to number of symmetric buffers that are currently registered.
    */
   __host__ explicit QueuePairDevice(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
@@ -222,8 +221,8 @@ protected:
                                     uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
                                     uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
                                     FreeList<uint64_t*> *fetching_atomic_freelist,
-                                    BufferInfo *buffer_info, size_t num_user_buffers,
-                                    const QpSymmEntry *symm_entries, const int *symm_count)
+                                    const BufferInfo *local_buffers, size_t num_user_buffers,
+                                    const SymmBufferInfo *symm_buffers, const int *symm_count)
     : heap{.local_base  = heap_laddr,
            .remote_base = heap_raddr,
            .length      = heap_size,
@@ -235,9 +234,9 @@ protected:
       fetching_atomic_lkey{to_provider_endianness(fetching_atomic_lkey)},
       nonfetching_atomic_lkey{to_provider_endianness(nonfetching_atomic_lkey)},
       fetching_atomic_freelist{fetching_atomic_freelist},
-      buffer_info{buffer_info},
+      local_buffers{local_buffers},
       num_user_buffers{num_user_buffers},
-      symm_entries{symm_entries},
+      symm_buffers{symm_buffers},
       symm_count{symm_count} { }
 
   /**
@@ -259,8 +258,8 @@ protected:
                       /* fetching_atomic */ nullptr, /* fetching_atomic_lkey */ 0,
                       nonfetching_atomic, nonfetching_atomic_lkey,
                       /* fetching_atomic_freelist */ nullptr,
-                      /* buffer_info */ nullptr, /* num_user_buffers */ 0,
-                      /* symm_entries */ nullptr, /* symm_count */ nullptr} { }
+                      /* local_buffers */ nullptr, /* num_user_buffers */ 0,
+                      /* symm_buffers */ nullptr, /* symm_count */ nullptr} { }
 
   __host__ QueuePairDevice(const QueuePairDevice& other)            = delete;
   __host__ QueuePairDevice& operator=(const QueuePairDevice& other) = delete;
@@ -358,16 +357,16 @@ QueuePairDevice<Provider>::get_laddr_info(const void *addr, bool inlined) const 
 
   /* Check user-registered local buffers */
   for (size_t i = 0; i < num_user_buffers; i++) {
-    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, laddr)) {
-      return {laddr, buffer_info[i].lkey};
+    if (is_ptr_in_range(local_buffers[i].addr, local_buffers[i].length, laddr)) {
+      return {laddr, local_buffers[i].lkey};
     }
   }
 
   /* Check user-registered symmetric buffers */
   if (symm_count) {
     for (int i = 0; i < *symm_count; i++) {
-      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length, laddr)) {
-        return {laddr, symm_entries[i].lkey};
+      if (is_ptr_in_range(symm_buffers[i].local_base, symm_buffers[i].length, laddr)) {
+        return {laddr, symm_buffers[i].lkey};
       }
     }
   }
@@ -389,9 +388,9 @@ std::tuple<uintptr_t, uint32_t> QueuePairDevice<Provider>::get_raddr_info(const 
   /* Check user-registered symmetric buffers */
   if (symm_count) {
     for (int i = 0; i < *symm_count; i++) {
-      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length, laddr)) {
-        uintptr_t raddr = symm_entries[i].remote_base + (laddr - symm_entries[i].local_base);
-        return {raddr, symm_entries[i].rkey};
+      if (is_ptr_in_range(symm_buffers[i].local_base, symm_buffers[i].length, laddr)) {
+        uintptr_t raddr = symm_buffers[i].remote_base + (laddr - symm_buffers[i].local_base);
+        return {raddr, symm_buffers[i].rkey};
       }
     }
   }

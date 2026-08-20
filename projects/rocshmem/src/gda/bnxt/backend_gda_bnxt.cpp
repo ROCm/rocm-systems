@@ -84,11 +84,11 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
   uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
   FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
-  BufferInfo*          buffer_info              = host_qp.buffer_info;
+  const BufferInfo*    local_buffers            = host_qp.buffer_info;
   size_t               num_user_buffers         = host_qp.num_user_buffers;
 
-  const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
-  const int         *symm_count   = symm_count_;
+  const SymmBufferInfo *symm_buffers = get_symm_buffers_slice(pe, nic_idx);
+  const int            *symm_count   = symm_count_;
 
   uint64_t* dbr = reinterpret_cast<uint64_t*>(gpu_dbr_ptr);
 
@@ -114,8 +114,8 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
                                        fetching_atomic, fetching_atomic_lkey,
                                        nonfetching_atomic, nonfetching_atomic_lkey,
                                        fetching_atomic_freelist,
-                                       buffer_info, num_user_buffers,
-                                       symm_entries, symm_count, dbr,
+                                       local_buffers, num_user_buffers,
+                                       symm_buffers, symm_count, dbr,
                                        bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
                                                       psn_sz_log2, mtu},
                                        bnxt_device_cq{cq_buf, cq_depth}}};

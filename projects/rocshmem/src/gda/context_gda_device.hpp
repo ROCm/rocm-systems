@@ -29,7 +29,6 @@
 #include "team.hpp"
 #include "queue_pair_provider.hpp"
 #include "constmem.hpp"
-#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
 

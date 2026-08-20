@@ -33,7 +33,6 @@
 
 #include "backend_bc.hpp"
 #include "gda_enums.hpp"
-#include "gda/gda_symm_table.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp" //TODO useless?
 #include "memory/hip_allocator.hpp"
@@ -41,6 +40,7 @@
 #include "gda_context_proxy.hpp"
 #include "queue_pair_provider.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "gda/queue_pair/queue_pair_common.hpp"
 #include "gda/queue_pair/queue_pair_device.hpp"
 #include "gda/queue_pair/queue_pair_host.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
@@ -93,13 +93,13 @@ class GDABackend : public Backend {
   /**
    * @brief Device-visible flat table of symmetric user-buffer registrations.
    *
-   * Sized num_pes * num_nics_ * symm_capacity_ QpSymmEntry records, allocated
+   * Sized num_pes * num_nics_ * symm_capacity_ SymmBufferInfo records, allocated
    * in setup_gpu_qps() so QPs capture stable slice pointers. Layout: the slice
    * for (pe, nic) starts at (pe * num_nics_ + nic) * symm_capacity_ and holds
    * one entry per registration slot, pre-specialized to that (pe, nic). Each QP
    * points at the slice for its own (dest_pe, nic_idx). Null pre-ROCm-7.0.
    */
-  QpSymmEntry *symm_entries_{nullptr};
+  SymmBufferInfo *symm_buffers_{nullptr};
 
   /**
    * @brief Device-resident shared registration count (live slots per slice).
@@ -111,12 +111,12 @@ class GDABackend : public Backend {
   int *symm_count_{nullptr};
 
   /**
-   * @brief Host mirror of symm_entries_ and its capacity/count.
+   * @brief Host mirror of symm_buffers_ and its capacity/count.
    *
    * The mirror is updated on the host at register/unregister and (re-)uploaded
-   * to symm_entries_; symm_count_host_ mirrors *symm_count_.
+   * to symm_buffers_; symm_count_host_ mirrors *symm_count_.
    */
-  std::vector<QpSymmEntry> host_symm_entries_{};
+  std::vector<SymmBufferInfo> host_symm_buffers_{};
   int symm_capacity_{0};
   int symm_count_host_{0};
 
@@ -213,11 +213,11 @@ class GDABackend : public Backend {
     return static_cast<size_t>(pe) * static_cast<size_t>(num_nics_) + static_cast<size_t>(nic_idx);
   }
 
-  const QpSymmEntry * get_symm_entries_slice(int pe, int nic_idx) const {
-    if (!symm_entries_) {
+  const SymmBufferInfo * get_symm_buffers_slice(int pe, int nic_idx) const {
+    if (!symm_buffers_) {
       return nullptr;
     }
-    return &symm_entries_[flat_pe_nic_idx(pe, nic_idx) * symm_capacity_];
+    return &symm_buffers_[flat_pe_nic_idx(pe, nic_idx) * symm_capacity_];
   }
 
   /**

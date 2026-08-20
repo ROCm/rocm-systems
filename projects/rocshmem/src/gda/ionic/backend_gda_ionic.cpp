@@ -115,11 +115,11 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
   uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
   FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
-  BufferInfo*          buffer_info              = host_qp.buffer_info;
+  const BufferInfo*    local_buffers            = host_qp.buffer_info;
   size_t               num_user_buffers         = host_qp.num_user_buffers;
 
-  const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
-  const int         *symm_count   = symm_count_;
+  const SymmBufferInfo *symm_buffers = get_symm_buffers_slice(pe, nic_idx);
+  const int            *symm_count   = symm_count_;
 
   ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
   uint64_t*     sq_dbreg = gpu_db_sq;
@@ -138,8 +138,8 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
                                         fetching_atomic, fetching_atomic_lkey,
                                         nonfetching_atomic, nonfetching_atomic_lkey,
                                         fetching_atomic_freelist,
-                                        buffer_info, num_user_buffers,
-                                        symm_entries, symm_count,
+                                        local_buffers, num_user_buffers,
+                                        symm_buffers, symm_count,
                                         ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
                                         ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
 }

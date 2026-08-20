@@ -748,7 +748,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
                                           [[maybe_unused]] size_t length,
                                           [[maybe_unused]] void **registered_addr) {
 #if HIP_VERSION >= 70200000
-  if (registered_addr == nullptr || symm_entries_ == nullptr) {
+  if (registered_addr == nullptr || symm_buffers_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -872,7 +872,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 
   for (int pe = 0; pe < num_pes; pe++) {
     for (int n = 0; n < num_nics_; n++) {
-      QpSymmEntry &e = host_symm_entries_[flat_pe_nic_idx(pe, n) * symm_capacity_ + slot];
+      SymmBufferInfo &e = host_symm_buffers_[flat_pe_nic_idx(pe, n) * symm_capacity_ + slot];
       e.local_base = key;
       e.remote_base = bases[pe];
       e.length = length;
@@ -886,8 +886,8 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
    * for simplicity, then publish by bumping the shared count last so a device
    * reader never observes count > populated entries.
    */
-  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
-                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
                       hipMemcpyHostToDevice));
   symm_count_host_ = slot + 1;
   CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
@@ -963,7 +963,7 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
     for (int pe = 0; pe < num_pes; pe++) {
       for (int n = 0; n < num_nics_; n++) {
         size_t base = flat_pe_nic_idx(pe, n) * symm_capacity_;
-        host_symm_entries_[base + slot] = host_symm_entries_[base + last];
+        host_symm_buffers_[base + slot] = host_symm_buffers_[base + last];
       }
     }
     for (auto &kv : gda_symm_records_) {
@@ -973,8 +973,8 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
       }
     }
   }
-  CHECK_HIP(hipMemcpy(symm_entries_, host_symm_entries_.data(),
-                      host_symm_entries_.size() * sizeof(QpSymmEntry),
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
                       hipMemcpyHostToDevice));
   symm_count_host_ = (last >= 0) ? last : 0;
   CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
@@ -1057,7 +1057,7 @@ void GDABackend::symmetric_buffer_unregister_all() {
 
 int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
 #if HIP_VERSION >= 70200000
-  if (addr == nullptr || symm_entries_ == nullptr) {
+  if (addr == nullptr || symm_buffers_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
 
@@ -1727,13 +1727,13 @@ void GDABackend::setup_gpu_qps() {
     symm_capacity = 1;
   }
   symm_capacity_ = symm_capacity;
-  size_t num_entries = static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_entries_),
-                      num_entries * sizeof(QpSymmEntry)));
-  CHECK_HIP(hipMemset(symm_entries_, 0, num_entries * sizeof(QpSymmEntry)));
+  size_t num_symm_buffers = static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_buffers_),
+                      num_symm_buffers * sizeof(SymmBufferInfo)));
+  CHECK_HIP(hipMemset(symm_buffers_, 0, num_symm_buffers * sizeof(SymmBufferInfo)));
   CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_count_), sizeof(int)));
   CHECK_HIP(hipMemset(symm_count_, 0, sizeof(int)));
-  host_symm_entries_.assign(num_entries, QpSymmEntry{});
+  host_symm_buffers_.assign(num_symm_buffers, SymmBufferInfo{});
   symm_count_host_ = 0;
 #endif
 
@@ -1754,15 +1754,15 @@ void GDABackend::cleanup_gpu_qps() {
   gpu_qps = nullptr;
 
 #if HIP_VERSION >= 70200000
-  if (symm_entries_ != nullptr) {
-    CHECK_HIP(hipFree(symm_entries_));
-    symm_entries_ = nullptr;
+  if (symm_buffers_ != nullptr) {
+    CHECK_HIP(hipFree(symm_buffers_));
+    symm_buffers_ = nullptr;
   }
   if (symm_count_ != nullptr) {
     CHECK_HIP(hipFree(symm_count_));
     symm_count_ = nullptr;
   }
-  host_symm_entries_.clear();
+  host_symm_buffers_.clear();
   symm_capacity_ = 0;
   symm_count_host_ = 0;
 #endif

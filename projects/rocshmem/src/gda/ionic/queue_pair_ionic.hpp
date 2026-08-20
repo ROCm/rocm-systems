@@ -75,15 +75,15 @@ public:
                                    uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
                                    uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
                                    FreeList<uint64_t*> *fetching_atomic_freelist,
-                                   BufferInfo *buffer_info, size_t num_user_buffers,
-                                   const QpSymmEntry *symm_entries, const int *symm_count,
+                                   const BufferInfo *local_buffers, size_t num_user_buffers,
+                                   const SymmBufferInfo *symm_buffers, const int *symm_count,
                                    ionic_device_sq&& sq, ionic_device_cq&& cq)
     : QueuePairDevice{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
                       fetching_atomic, fetching_atomic_lkey,
                       nonfetching_atomic, nonfetching_atomic_lkey,
                       fetching_atomic_freelist,
-                      buffer_info, num_user_buffers,
-                      symm_entries, symm_count},
+                      local_buffers, num_user_buffers,
+                      symm_buffers, symm_count},
       sq{std::move(sq)}, cq{std::move(cq)} { }
 
   __host__ explicit QueuePairIONIC(uint32_t qpn,

@@ -122,11 +122,11 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
   uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
   FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
-  BufferInfo*          buffer_info              = host_qp.buffer_info;
+  const BufferInfo*    local_buffers            = host_qp.buffer_info;
   size_t               num_user_buffers         = host_qp.num_user_buffers;
 
-  const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
-  const int         *symm_count   = symm_count_;
+  const SymmBufferInfo *symm_buffers = get_symm_buffers_slice(pe, nic_idx);
+  const int            *symm_count   = symm_count_;
 
   gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
@@ -144,8 +144,8 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
                                        fetching_atomic, fetching_atomic_lkey,
                                        nonfetching_atomic, nonfetching_atomic_lkey,
                                        fetching_atomic_freelist,
-                                       buffer_info, num_user_buffers,
-                                       symm_entries, symm_count,
+                                       local_buffers, num_user_buffers,
+                                       symm_buffers, symm_count,
                                        gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
                                        gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
 }
