@@ -22,12 +22,14 @@ from amdisa.isa_profile import (
     Cdna2Profile,
     CdnaProfile,
     Cdna5Profile,
+    MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
     Rdna3Profile,
     Rdna3_5Profile,
     Rdna4Profile,
+    SwmmacLayout,
 )
 
 
@@ -440,8 +442,8 @@ class TestCdnaProfile:
     def test_has_wmma_false(self):
         assert self.p.has_wmma is False
 
-    def test_has_swmmac_false(self):
-        assert self.p.has_swmmac is False
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
 
     def test_has_vopd_false(self):
         assert self.p.has_vopd is False
@@ -554,8 +556,8 @@ class TestRdna3Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
-    def test_has_swmmac_false(self):
-        assert self.p.has_swmmac is False
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
 
     def test_has_vopd(self):
         assert self.p.has_vopd is True
@@ -611,8 +613,8 @@ class TestRdna4Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
-    def test_has_swmmac(self):
-        assert self.p.has_swmmac is True
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.RUNTIME_WAVE
 
     def test_has_vopd(self):
         assert self.p.has_vopd is True
@@ -630,6 +632,12 @@ class TestCdna5Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.FIXED_WAVE
+
+    def test_matrix_layout(self):
+        assert self.p.matrix_layout is MatrixLayout.WMMA_SPLIT_K
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True

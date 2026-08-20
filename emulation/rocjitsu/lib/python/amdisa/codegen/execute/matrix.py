@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
     from amdisa.codegen.execute import ExecuteContext
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 # Input families that have specialized (compile-time M/N/K) MFMA kernels in the
 # hand-maintained mma_exec.h. CDNA MFMA and RDNA WMMA both flow through the
 # GFX9 MFMA-layout helpers (exec_f32/exec_i32_i8), so the same spec templates
-# apply to both; gfx1250 WMMA uses its own wave32 spec helpers (handled below).
+# apply to both; fixed Wave32 WMMA uses its own spec helpers (handled below).
 # The spec templates fall back to the generic runtime path for unsupported
 # shapes / when stdx::simd is unavailable, so emitting them is always safe.
 _MFMA_F32_SPEC = {'F32': 'f32', 'XF32': 'f32', 'F16': 'f16', 'BF16': 'bf16'}
@@ -42,10 +43,10 @@ def _f8_bools(input_type: str) -> tuple[str, str]:
     )
 
 
-def _cdna5_wmma_spec(
+def _fixed_wave32_wmma_spec(
     result_type: str, input_type: str, M: int, N: int, K: int
 ) -> str | None:
-    """Specialized gfx1250 (wave32) dense-WMMA kernel name for a given shape,
+    """Specialized fixed Wave32 dense-WMMA kernel name for a given shape,
     or None to use the generic runtime path. Returns the full callee including
     template args; the call site supplies (cu, dst, s0, s1, s2, const_acc)."""
     if input_type in _F8_FIXED:
@@ -284,10 +285,15 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
     arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
-    uses_supported_swmmac_layout = is_swmmac and ctx.profile.has_swmmac
-    uses_runtime_wave_swmmac_layout = (
-        uses_supported_swmmac_layout
-        and ctx.profile.wave_size != ctx.profile.wave_size_max
+    swmmac_layout = ctx.profile.swmmac_layout if is_swmmac else SwmmacLayout.NONE
+    uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
+    uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
+    uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
+    uses_fixed_wave32_split_k_dense_layout = (
+        ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size == 32
+        and ctx.profile.wave_size_max == 32
+        and is_dense_wmma
     )
     uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
         is_dense_wmma or uses_runtime_wave_swmmac_layout
@@ -392,23 +398,23 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append(f'  }};')
 
-        if arch == 'cdna5':
-            # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
+        if uses_fixed_wave_swmmac_layout:
+            if input_type in ('IU4', 'IU8'):
+                suffix = '4' if input_type == 'IU4' else '8'
+                append_signed_extractors(suffix)
+            else:
+                L.append(f'  auto extract_a = amdgpu::extract_i8;')
+                L.append(f'  auto extract_b = amdgpu::extract_i8;')
+            L.append(
+                f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
+                f' {swmmac_index_entries}, {index_key_expr},'
+                f' extract_a, extract_b, inst_.clamp, const_acc);'
+            )
+            return '\n'.join(L)
+        if uses_fixed_wave32_split_k_dense_layout:
+            # Fixed Wave32 split-K IU WMMA overloads neg_lo: bit set means
             # signed extension, bit clear means unsigned.
-            if is_swmmac:
-                if input_type in ('IU4', 'IU8'):
-                    suffix = '4' if input_type == 'IU4' else '8'
-                    append_signed_extractors(suffix)
-                else:
-                    L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                    L.append(f'  auto extract_b = amdgpu::extract_i8;')
-                L.append(
-                    f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                    f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
-                    f' {swmmac_index_entries}, {index_key_expr},'
-                    f' extract_a, extract_b, inst_.clamp, const_acc);'
-                )
-                return '\n'.join(L)
             # The iu8 16x16x64 WMMA has a specialized kernel taking the
             # per-operand signedness directly.
             if input_type == 'IU8' and (M, N, K) == (16, 16, 64):
@@ -496,9 +502,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'                     s2, const_acc,')
                 L.append(f'                     inst_.cbsz, inst_.abid, inst_.blgp);')
     else:
-        # F32, F16, and BF16 matrix results accumulate in f32. gfx1250 WMMA
-        # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
-        if arch == 'cdna5' and input_type in ('F8_F6_F4', 'F8F6F4'):
+        # F32, F16, and BF16 matrix results accumulate in f32. Fixed Wave32 WMMA
+        # uses a Wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
+        if uses_fixed_wave32_split_k_dense_layout and input_type in (
+            'F8_F6_F4',
+            'F8F6F4',
+        ):
             L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
             L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
             L.append(
@@ -527,60 +536,59 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
-        if arch == 'cdna5':
-            if is_swmmac:
-                if result_type == 'F16':
-                    exec_fn = 'exec_swmmac_f16'
-                elif result_type == 'BF16':
-                    exec_fn = 'exec_swmmac_bf16'
-                else:
-                    exec_fn = 'exec_swmmac_f32'
-                L.append(
-                    f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                    f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
-                    f' {swmmac_index_entries}, {index_key_expr},'
-                    f' {ea}, {eb}, const_acc);'
-                )
+        if uses_fixed_wave_swmmac_layout:
+            if result_type == 'F16':
+                exec_fn = 'exec_swmmac_f16'
+            elif result_type == 'BF16':
+                exec_fn = 'exec_swmmac_bf16'
             else:
-                # Dense WMMA: a specialized wave32 kernel where one exists, else
-                # the generic exec_wmma_* runtime path.
-                spec = _cdna5_wmma_spec(result_type, input_type, M, N, K)
-                if spec is not None:
-                    if result_type in ('F32', 'BF16F32'):
-                        L.append(
-                            f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
-                            f' s2, const_acc,'
-                            f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
-                        )
-                    elif spec.startswith('exec_wmma_f16_f8_spec'):
-                        L.append(
-                            f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
-                            f' s2, const_acc,'
-                            f' wf.fp16_ovfl());'
-                        )
-                    else:
-                        L.append(
-                            f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
-                            f' s2, const_acc);'
-                        )
+                exec_fn = 'exec_swmmac_f32'
+            L.append(
+                f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
+                f' {swmmac_index_entries}, {index_key_expr},'
+                f' {ea}, {eb}, const_acc);'
+            )
+        elif uses_fixed_wave32_split_k_dense_layout:
+            # Dense WMMA: a specialized Wave32 kernel where one exists, else
+            # the generic exec_wmma_* runtime path.
+            spec = _fixed_wave32_wmma_spec(result_type, input_type, M, N, K)
+            if spec is not None:
+                if result_type in ('F32', 'BF16F32'):
+                    L.append(
+                        f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
+                        f' s2, const_acc,'
+                        f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+                    )
+                elif spec.startswith('exec_wmma_f16_f8_spec'):
+                    L.append(
+                        f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
+                        f' s2, const_acc,'
+                        f' wf.fp16_ovfl());'
+                    )
                 else:
-                    if result_type == 'F16':
-                        exec_fn = 'exec_wmma_f16'
-                    elif result_type == 'BF16':
-                        exec_fn = 'exec_wmma_bf16'
-                    else:
-                        exec_fn = 'exec_wmma_f32'
-                    if exec_fn == 'exec_wmma_f32':
-                        L.append(
-                            f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                            f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
-                            f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
-                        )
-                    else:
-                        L.append(
-                            f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                            f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
-                        )
+                    L.append(
+                        f'  amdgpu::{spec}(cu, dst, {src0_base_expr}, {src1_base_expr},'
+                        f' s2, const_acc);'
+                    )
+            else:
+                if result_type == 'F16':
+                    exec_fn = 'exec_wmma_f16'
+                elif result_type == 'BF16':
+                    exec_fn = 'exec_wmma_bf16'
+                else:
+                    exec_fn = 'exec_wmma_f32'
+                if exec_fn == 'exec_wmma_f32':
+                    L.append(
+                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
+                        f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+                    )
+                else:
+                    L.append(
+                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
+                    )
         elif uses_runtime_wave_swmmac_layout:
             if result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'

@@ -54,6 +54,22 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
+class SwmmacLayout(Enum):
+    """Executor calling convention used by sparse WMMA instructions."""
+
+    NONE = auto()
+    FIXED_WAVE = auto()
+    RUNTIME_WAVE = auto()
+
+
+class MatrixLayout(Enum):
+    """Register/lane layout used by matrix instruction executors."""
+
+    MFMA_ACCUMULATOR = auto()
+    WMMA_REPLICATED_HALFWAVE = auto()
+    WMMA_SPLIT_K = auto()
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -929,9 +945,14 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
-    def has_swmmac(self) -> bool:
-        """True if this ISA has sparse WMMA matrix instructions."""
-        return False
+    def swmmac_layout(self) -> SwmmacLayout:
+        """Sparse WMMA executor layout supported by this ISA."""
+        return SwmmacLayout.NONE
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        """Register/lane mapping used by matrix instructions."""
+        return MatrixLayout.MFMA_ACCUMULATOR
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1478,6 +1499,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_REPLICATED_HALFWAVE
+
+    @property
     def has_vopd(self) -> bool:
         return True
 
@@ -1635,8 +1660,12 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def has_swmmac(self) -> bool:
-        return True
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_SPLIT_K
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.RUNTIME_WAVE
 
     @property
     def has_vopd(self) -> bool:
@@ -1806,6 +1835,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.FIXED_WAVE
 
     @property
     def vop3_cmp_sdst_size_bits(self) -> int | None:
