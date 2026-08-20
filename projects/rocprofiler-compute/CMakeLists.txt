@@ -1378,8 +1378,15 @@ if(INSTALL_TESTS)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
-        PATTERN "*.hsaco"
         PATTERN "__pycache__" EXCLUDE
+    )
+    # The conjugate_gradient driver resolves its kernel libraries relative to
+    # its own path, so the whole directory installs as a unit.
+    install(
+        DIRECTORY tests/conjugate_gradient
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        COMPONENT tests
+        USE_SOURCE_PERMISSIONS
     )
     install(
         PROGRAMS therock_test_runner.py
@@ -1402,7 +1409,6 @@ if(INSTALL_TESTS)
             tests/hip_dynamic_shared
             tests/laplace_eqn
             tests/mat_mul_max
-            tests/conjugate_gradient
             tests/rocflop
             tests/memcopy
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests

@@ -55,25 +55,7 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
-add_subdirectory(
-    "${CMAKE_SOURCE_DIR}/sample/conjugate_gradient"
-    "${CMAKE_CURRENT_BINARY_DIR}/conjugate_gradient"
-)
-
-add_custom_target(
-    conjugate_gradient
-    ALL
-    COMMAND
-        ${CMAKE_COMMAND} -E copy $<TARGET_FILE:conjugate_gradient_executable>
-        ${CONJUGATE_GRADIENT_MODULES} ${CMAKE_SOURCE_DIR}/tests
-    COMMENT "Copying conjugate_gradient files to tests directory"
-    VERBATIM
-)
-add_dependencies(
-    conjugate_gradient
-    conjugate_gradient_executable
-    conjugate_gradient_modules
-)
+add_subdirectory(../sample/conjugate_gradient conjugate_gradient)
 
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
 set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)

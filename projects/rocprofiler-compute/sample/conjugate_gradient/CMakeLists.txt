@@ -1,37 +1,35 @@
-set(CONJUGATE_GRADIENT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/conjugate_gradient.cpp)
-set_source_files_properties(${CONJUGATE_GRADIENT_SOURCES} PROPERTIES LANGUAGE HIP)
-add_executable(conjugate_gradient_executable ${CONJUGATE_GRADIENT_SOURCES})
-set_target_properties(
-    conjugate_gradient_executable
-    PROPERTIES OUTPUT_NAME conjugate_gradient
-)
+# The executable and its two kernel libraries are colocated in one directory so
+# the driver can resolve the libraries relative to its own path.
+set(CG_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests/conjugate_gradient)
 
-set(CG_KERNEL_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/cg_kernels.hip)
-set(CG_KERNEL_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/cg_args.hpp)
-
-set(CONJUGATE_GRADIENT_MODULES
-    ${CMAKE_CURRENT_BINARY_DIR}/cg_module_a.hsaco
-    ${CMAKE_CURRENT_BINARY_DIR}/cg_module_b.hsaco
-)
-
-set(CG_HSACO_ARCH_FLAGS)
-foreach(HIP_ARCHITECTURE IN LISTS CMAKE_HIP_ARCHITECTURES)
-    list(APPEND CG_HSACO_ARCH_FLAGS "--offload-arch=${HIP_ARCHITECTURE}")
-endforeach()
-list(REMOVE_DUPLICATES CG_HSACO_ARCH_FLAGS)
-
-foreach(CG_MODULE_OUTPUT IN LISTS CONJUGATE_GRADIENT_MODULES)
-    add_custom_command(
-        OUTPUT ${CG_MODULE_OUTPUT}
-        COMMAND
-            ${CMAKE_HIP_COMPILER} -std=c++17 -g -O2 -x hip --offload-device-only
-            ${CG_HSACO_ARCH_FLAGS} ${CG_KERNEL_SOURCE} -o ${CG_MODULE_OUTPUT}
-        DEPENDS ${CG_KERNEL_SOURCE} ${CG_KERNEL_HEADER}
-        COMMENT "Building ${CG_MODULE_OUTPUT}"
-        VERBATIM
+# Each kernel is its own shared library: kernels compiled into a single binary
+# share one fat binary, and so one code object, which is exactly what this
+# sample needs to avoid.
+foreach(CG_KERNEL_LIBRARY IN ITEMS cg_spmv cg_update)
+    set_source_files_properties(${CG_KERNEL_LIBRARY}.hip PROPERTIES LANGUAGE HIP)
+    add_library(${CG_KERNEL_LIBRARY} SHARED ${CG_KERNEL_LIBRARY}.hip)
+    target_include_directories(${CG_KERNEL_LIBRARY} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    set_target_properties(
+        ${CG_KERNEL_LIBRARY}
+        PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CG_OUTPUT_DIRECTORY}
     )
 endforeach()
 
-add_custom_target(conjugate_gradient_modules DEPENDS ${CONJUGATE_GRADIENT_MODULES})
+set_source_files_properties(conjugate_gradient.cpp PROPERTIES LANGUAGE HIP)
+add_executable(conjugate_gradient conjugate_gradient.cpp)
+target_include_directories(conjugate_gradient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(conjugate_gradient PRIVATE ${CMAKE_DL_LIBS})
+set_target_properties(
+    conjugate_gradient
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CG_OUTPUT_DIRECTORY}
+)
 
-set(CONJUGATE_GRADIENT_MODULES ${CONJUGATE_GRADIENT_MODULES} PARENT_SCOPE)
+# The libraries are opened by name at runtime, not linked, so CMake supplies the
+# file names and a target rename cannot desync them from the source.
+target_compile_definitions(
+    conjugate_gradient
+    PRIVATE
+        CG_SPMV_LIBRARY="$<TARGET_FILE_NAME:cg_spmv>"
+        CG_UPDATE_LIBRARY="$<TARGET_FILE_NAME:cg_update>"
+)
+add_dependencies(conjugate_gradient cg_spmv cg_update)

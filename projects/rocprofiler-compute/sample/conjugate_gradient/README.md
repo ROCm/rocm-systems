@@ -1,16 +1,28 @@
 # Multiprocess Conjugate-Gradient Sample
 
-This profiling workload assigns two conjugate-gradient-inspired kernels to
-independent GPU child processes:
+A PC sampling workload in which the same kernel carries a different
+process-local code-object ID in each of two processes.
+
+Two conjugate-gradient-inspired kernels are built into separate shared
+libraries:
 
 - `kernel_spmv_csr` performs sparse matrix-vector multiplication over a CSR
   matrix with power-law row lengths.
 - `kernel_cg_update_reduce` updates `x` and `r`, then performs a block-local
   residual reduction.
 
-Each child uses private data and performs all rounds in one kernel launch. This
-is not a convergent CG solver or correctness benchmark: children do not exchange
-results, and kernel outputs are not copied back or verified.
+The driver forks once, and both processes run both kernels in opposite order.
+HIP defers loading a code object until the first launch out of it, so the
+process that runs SpMV first gives it the lower ID and the other process gives
+it the higher one. That divergence is what makes the pair useful for checking
+that sample attribution keys on the process as well as the code object.
+
+The kernels live in separate libraries rather than in the driver because
+kernels compiled into one binary share a single fat binary, which the runtime
+loads as one code object holding both symbols.
+
+This is not a convergent CG solver or a correctness benchmark: the processes do
+not exchange results, and kernel outputs are neither copied back nor verified.
 
 ## Build
 
@@ -21,37 +33,17 @@ cmake -S . -B build -DENABLE_TESTS=ON
 cmake --build build --target conjugate_gradient --parallel
 ```
 
-The target creates three colocated files in `tests/`:
-
-```text
-tests/conjugate_gradient
-tests/cg_module_a.hsaco
-tests/cg_module_b.hsaco
-```
-
-The HSACO modules must target the runtime GPU. CMake detects the local
-architecture when possible; when cross-compiling or building without a GPU,
-set it explicitly, for example with `-DCMAKE_HIP_ARCHITECTURES=gfx942`.
+The build populates `tests/conjugate_gradient/` with the driver and the two
+kernel libraries. CMake selects the GPU architecture; when cross-compiling or
+building without a GPU, set it explicitly with
+`-DCMAKE_HIP_ARCHITECTURES=gfx942` or similar.
 
 ## Run
 
-Run the intended three-process workload:
+The workload takes no arguments:
 
 ```bash
-./tests/conjugate_gradient \
-  --processes 3 \
-  --kernels spmv,spmv,update \
-  --rotate-code-objects
+./tests/conjugate_gradient/conjugate_gradient
 ```
 
-This runs SpMV in children 0 and 1 and update/reduction in child 2. Children 0
-and 2 load module A before module B, while child 1 reverses that order. Every
-child launches its selected kernel from module A. The reversed order gives
-module A a different process-local code-object ID in the two SpMV processes,
-exercising PID-aware sample correlation.
-
-List all options with:
-
-```bash
-./tests/conjugate_gradient --help
-```
+Each process prints its PID, its role, and the order it launched the kernels in.
