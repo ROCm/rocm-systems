@@ -4328,7 +4328,7 @@ def test_generated_rdna4_rejects_opcode_illegal_dpp(
 
 @pytest.mark.parametrize(
     ('arch', 'opsel_hi_2_field'),
-    [('rdna4', 'opsel_hi_2'), ('gfx1250', 'pad_14')],
+    [('rdna4', 'opsel_hi_2'), ('gfx1250', 'opsel_hi_2')],
 )
 def test_generated_modern_rdna_validates_dpp_opsel_alignment(
     amdgpu_generated_root: Path,
@@ -4864,6 +4864,8 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'isGfx1250WmmaScaleSource' in helpers
     assert 'isGfx1250WmmaScaleFormatPairLegal' in helpers
     assert 'isGfx1250WmmaScalePairValid' in helpers
+    assert 'matrix->opsel_hi_2' in helpers
+    assert 'matrix->pad_14' not in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
 
     execution_impl = impls.execution[0]

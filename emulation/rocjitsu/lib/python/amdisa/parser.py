@@ -486,8 +486,7 @@ class Parser:
                 (
                     ptr
                     for ptr in enc.primary_dt_ptrs
-                    if ptr != -1
-                    and self.isa_spec.primary_decode_table[ptr].enc is enc
+                    if ptr != -1 and self.isa_spec.primary_decode_table[ptr].enc is enc
                 ),
                 -1,
             )
