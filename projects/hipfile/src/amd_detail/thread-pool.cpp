@@ -44,7 +44,9 @@ namespace {
 
             try {
                 executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
-                    Completion completion{task_state};
+                    Completion            completion{task_state};
+                    std::function<void()> local_work;
+                    local_work.swap(work);
 
                     {
                         std::lock_guard<std::mutex> lock{task_state->mutex};
@@ -53,7 +55,7 @@ namespace {
                         }
                     }
 
-                    work();
+                    local_work();
                 });
             }
             catch (...) {
