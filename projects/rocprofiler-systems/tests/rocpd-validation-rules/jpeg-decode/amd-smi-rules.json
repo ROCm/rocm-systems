@@ -88,6 +88,14 @@
                     "expected_result": 10,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_mem_clock'",
                     "requires": "mem_clock"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi monitoring JPEG busy activity (gfx1250/VCN)",
+                    "error_message": "Less than expected activity in amd-smi jpeg-busy samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_busy%' and event.value > 0",
+                    "requires": "jpeg_busy"
                 }
             ]
         }

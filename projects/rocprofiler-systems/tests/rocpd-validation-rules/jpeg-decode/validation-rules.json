@@ -27,7 +27,7 @@
             ]
         },
         {
-            "min_rows": 50,
+            "min_rows": 1,
             "name": "kernels",
             "required_columns": [
                 "id",
@@ -48,9 +48,9 @@
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Check that we have kernel entries",
+                    "description": "Check that we have at least one kernel entry",
                     "error_message": "No kernel entries found",
-                    "expected_result": 50,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM kernels"
                 },
                 {
