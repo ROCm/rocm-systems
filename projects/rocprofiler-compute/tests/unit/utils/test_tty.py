@@ -10,7 +10,10 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from membw.models import MemBwAnalysisResult
+from utils.mem_chart_common import strip_ansi
 from utils.tty import (
+    _render_membw_guidance,
     build_continuation_indent,
     convert_time_columns,
     format_args_variant_lines,
@@ -804,3 +807,63 @@ def test_print_operator_node_drops_own_pipe_for_last_child(capsys) -> None:
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("   |  └─ ")
     assert lines[1].startswith("   |     ")
+
+
+# ---------------------------------------------------------------------------
+# _render_membw_guidance
+# ---------------------------------------------------------------------------
+
+
+def _make_membw_result(
+    availability: str = "full",
+    availability_reason: str = None,
+    guidance_blocks: tuple = (),
+) -> MemBwAnalysisResult:
+    return MemBwAnalysisResult(
+        arch="gfx950",
+        availability=availability,
+        availability_reason=availability_reason,
+        nodes=(),
+        guidance_blocks=guidance_blocks,
+    )
+
+
+class TestRenderMembwGuidance:
+    def test_no_bottlenecks_shows_status_line(self):
+        result = _make_membw_result()
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected (GL1 / GL2 / EA)" in output
+
+    def test_active_bottleneck_shows_guidance_panel(self):
+        result = _make_membw_result(
+            guidance_blocks=(
+                "[GL1] TCP stalled by UTCL1\n"
+                "  Condition : >= 10%\n"
+                "  Measured  : 18.7%\n"
+                "  Impact    : Address translation pressure",
+            ),
+        )
+        output = _render_membw_guidance(result)
+        plain = strip_ansi(output)
+        assert "Memory Bandwidth Guided Analysis" in plain
+        assert "TCP stalled by UTCL1" in plain
+        assert "18.7%" in plain
+        assert "╭" in output or "│" in output
+
+    def test_unavailable_shows_unavailable_message(self):
+        result = _make_membw_result(
+            availability="unavailable",
+            availability_reason="no data",
+        )
+        output = _render_membw_guidance(result)
+        assert "Unavailable" in output
+        assert "no data" in output
+
+    def test_partial_shows_partial_message(self):
+        result = _make_membw_result(
+            availability="partial",
+            availability_reason="missing: key1, key2",
+        )
+        output = _render_membw_guidance(result)
+        assert "Partial data" in output
+        assert "missing: key1, key2" in output
