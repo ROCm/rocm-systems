@@ -935,8 +935,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && msgBytes <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);

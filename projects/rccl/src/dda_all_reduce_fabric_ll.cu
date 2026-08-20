@@ -63,7 +63,7 @@ static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts / 2,
 static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, size_t count, int typeSize) {
   const size_t nPk = ((size_t)count * (size_t)typeSize) >> 3; // 8 payload bytes per packet
   const unsigned threads = 256;
-  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
