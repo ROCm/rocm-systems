@@ -31,7 +31,11 @@ import time
 
 import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
 from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
-from consan_tensile_support import resolve_tensile_validation_paths
+from consan_tensile_support import (
+    TensileValidationPaths,
+    resolve_tensile_validation_paths,
+    tensile_python_environment,
+)
 from consan_validation_support import (
     FAULT_RESERVATION_QUALIFIED,
     SITE_KINDS,
@@ -1763,6 +1767,35 @@ def _tensile_python() -> Path:
     )
 
 
+def _tensile_runtime_probe(
+    python: Path, paths: TensileValidationPaths
+) -> dict:
+    """Proves that the selected interpreter can import the Tensile driver."""
+    environment = tensile_python_environment(paths)
+    try:
+        probe = subprocess.run(
+            [str(python), "-P", "-c", "from Tensile import Tensile"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"ok": False, "python": str(python), "detail": str(error)}
+    detail = (probe.stderr or probe.stdout).strip()
+    return {
+        "ok": probe.returncode == 0,
+        "python": str(python),
+        "detail": detail,
+        "reasons": (
+            []
+            if probe.returncode == 0
+            else [f"Tensile import exited with status {probe.returncode}"]
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class LlamaRuntime:
     build_root: Path
@@ -1960,6 +1993,7 @@ def _doctor(
     for workload in workloads:
         for label, path in _input_files(workspace, target, workload).items():
             executable = workload.kind == "tensile" and label in {
+                "python",
                 "client",
                 "wrapper",
                 "rocjitsu",
@@ -1991,6 +2025,24 @@ def _doctor(
                 "ok": False,
                 "python": str(python),
                 "detail": "interpreter is missing",
+            }
+    tensile_workloads = tuple(
+        workload for workload in workloads if workload.kind == "tensile"
+    )
+    if tensile_workloads:
+        python = _tensile_python()
+        tensile_paths = resolve_tensile_validation_paths(workspace, target)
+        if (
+            python.is_file()
+            and os.access(python, os.X_OK)
+            and tensile_paths.tensilelite.is_dir()
+        ):
+            runtimes["tensile"] = _tensile_runtime_probe(python, tensile_paths)
+        else:
+            runtimes["tensile"] = {
+                "ok": False,
+                "python": str(python),
+                "detail": "interpreter or TensileLite package is missing",
             }
     ok = (
         all(item["present"] for item in path_checks.values())

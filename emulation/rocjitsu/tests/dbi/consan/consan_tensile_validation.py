@@ -20,6 +20,7 @@ from consan_tensile_support import (
     DEFAULT_TARGET,
     TensileValidationPaths,
     resolve_tensile_validation_paths,
+    tensile_python_environment,
 )
 
 DEFAULT_TIMEOUT_SECONDS = 55
@@ -31,11 +32,6 @@ from Tensile import Tensile as tensile
 import sys
 tensile.Tensile(sys.argv[1:])
 """
-
-
-def _prepend(environment: dict[str, str], name: str, value: Path) -> None:
-    previous = environment.get(name)
-    environment[name] = f"{value}{os.pathsep}{previous}" if previous else str(value)
 
 
 def _oracle_payload(outcome: str, detail: object) -> dict[str, object]:
@@ -452,7 +448,7 @@ def main() -> int:
     transcript = work_dir / "validation.log"
     oracle_artifact = work_dir / "oracle.json"
 
-    environment = os.environ.copy()
+    environment = tensile_python_environment(paths)
     environment.update(
         {
             "ROCM_PATH": str(paths.rocm),
@@ -464,10 +460,6 @@ def main() -> int:
     )
     if args.streamk_fixed_grid is not None:
         environment["TENSILE_STREAMK_FIXED_GRID"] = str(args.streamk_fixed_grid)
-    _prepend(environment, "PATH", paths.rocm / "bin")
-    _prepend(environment, "LD_LIBRARY_PATH", paths.rocm / "lib")
-    _prepend(environment, "PYTHONPATH", paths.tensilelite)
-
     command = [
         sys.executable,
         "-P",

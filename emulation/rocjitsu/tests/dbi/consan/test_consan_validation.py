@@ -4456,6 +4456,19 @@ class ConSanValidationTest(unittest.TestCase):
             with (
                 mock.patch.object(validation, "_required_paths", return_value={}),
                 mock.patch.object(validation, "_input_files", return_value=inputs),
+                mock.patch.object(
+                    validation,
+                    "_tensile_runtime_probe",
+                    return_value={"ok": True},
+                ),
+                mock.patch.object(
+                    validation,
+                    "resolve_tensile_validation_paths",
+                    return_value=mock.Mock(tensilelite=root, rocm=root),
+                ),
+                mock.patch.object(
+                    validation, "_tensile_python", return_value=inputs["python"]
+                ),
                 mock.patch.object(validation.shutil, "which", return_value="/tool"),
             ):
                 rejected = validation._doctor(root, "gfx1250", (workload.id,))
@@ -4465,6 +4478,23 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(
             rejected["paths"][f"workload:{workload.id}:wrapper"]["present"]
         )
+        self.assertTrue(accepted["ok"], accepted)
+
+    def test_tensile_runtime_probe_imports_driver_dependencies(self) -> None:
+        with temporary_root() as root:
+            package = root / "Tensile"
+            package.mkdir()
+            paths = mock.Mock(tensilelite=root, rocm=root)
+            init = package / "__init__.py"
+            init.write_text(
+                "import consan_missing_tensile_dependency\n",
+                encoding="utf-8",
+            )
+            rejected = validation._tensile_runtime_probe(Path(sys.executable), paths)
+            init.write_text("Tensile = object()\n", encoding="utf-8")
+            accepted = validation._tensile_runtime_probe(Path(sys.executable), paths)
+        self.assertFalse(rejected["ok"], rejected)
+        self.assertIn("consan_missing_tensile_dependency", rejected["detail"])
         self.assertTrue(accepted["ok"], accepted)
 
     def test_pytorch_json_reports_independent_variant_medians(self) -> None:

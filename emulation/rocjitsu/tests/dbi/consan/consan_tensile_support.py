@@ -38,6 +38,29 @@ class TensileValidationPaths:
     llvm_readelf: Path
 
 
+def tensile_python_environment(
+    paths: TensileValidationPaths,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Returns the environment needed to import and execute TensileLite."""
+    environment = os.environ.copy() if base is None else base.copy()
+    additions = {
+        "PATH": (paths.rocm / "bin",),
+        "LD_LIBRARY_PATH": (paths.rocm / "lib",),
+        "PYTHONPATH": (
+            paths.tensilelite,
+            paths.tensilelite / "build_tmp" / "tensilelite" / "rocisa",
+        ),
+    }
+    for name, values in additions.items():
+        previous = environment.get(name)
+        entries = tuple(str(value) for value in values)
+        environment[name] = os.pathsep.join(
+            entries + ((previous,) if previous else ())
+        )
+    return environment
+
+
 def _configured_path(name: str) -> Path | None:
     value = os.environ.get(name)
     if value is None:

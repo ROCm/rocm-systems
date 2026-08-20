@@ -240,7 +240,10 @@ workload families are selected.
 
 The gfx1250 Tensile runner resolves the TensileLite checkout, packaged ROCm
 SDK, prebuilt client, RocJITsu launcher/config, checked-in launcher wrapper,
-and `llvm-readelf` as one toolchain. `doctor --workload
+and `llvm-readelf` as one toolchain.  The doctor also imports the Tensile
+driver with the selected interpreter, so missing Python dependencies fail
+readiness instead of failing a validation row after artifact creation.
+`doctor --workload
 tensile-sk-sgemm-runtime-smoke` prints every resolved path. Nonstandard layouts
 can override individual components with
 `CONSAN_VALIDATION_TENSILELITE_ROOT`, `CONSAN_VALIDATION_ROCM_ROOT`,

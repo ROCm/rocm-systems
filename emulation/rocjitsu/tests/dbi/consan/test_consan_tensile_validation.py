@@ -575,6 +575,34 @@ class TensileValidationTest(unittest.TestCase):
         self.assertEqual(paths.rocjitsu_config, root / "gfx1250.json")
         self.assertEqual(paths.llvm_readelf, root / "llvm-readelf")
 
+    def test_python_environment_uses_matching_rocm_and_built_rocisa(self) -> None:
+        with temporary_root() as root:
+            paths = self._make_fake_paths(root)
+            environment = tensile_support.tensile_python_environment(
+                paths,
+                {
+                    "PATH": "/old/bin",
+                    "LD_LIBRARY_PATH": "/old/lib",
+                    "PYTHONPATH": "/old/python",
+                },
+            )
+        self.assertEqual(
+            environment["PATH"].split(os.pathsep),
+            [str(paths.rocm / "bin"), "/old/bin"],
+        )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [str(paths.rocm / "lib"), "/old/lib"],
+        )
+        self.assertEqual(
+            environment["PYTHONPATH"].split(os.pathsep),
+            [
+                str(paths.tensilelite),
+                str(paths.tensilelite / "build_tmp" / "tensilelite" / "rocisa"),
+                "/old/python",
+            ],
+        )
+
     def test_target_selects_matching_default_rocjitsu_config(self) -> None:
         with temporary_root() as root:
             overrides = {
