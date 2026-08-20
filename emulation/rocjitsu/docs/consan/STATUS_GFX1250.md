@@ -55,7 +55,7 @@ preserve an earlier green claim.
 | **P4 hip-moi WMMA attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 15.46 seconds with complete 18/18 access coverage; prior paired 1.78x retained | 🟩 Current clean-revision row passes both exact oracles in 16.91 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.17x retained | 🟩 Current clean-revision row passes both exact oracles in 15.22 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.15x retained | 🟩 Current clean-revision row passes both exact oracles in 19.91 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.17x retained |
 | **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
-| **P4 Jakub cooperative matmul** | 🟩 Current four-oracle clean row; 70/70 accesses; reviewed exact-one drop breaks the skewed oracle; paired 1.139x; detector gap tracked by `bd-2sjm.1` | 🟩 Current four-oracle clean row; 70/70 accesses + 8/8 barriers and zero diagnostics; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 2.579x | 🟩 Current four-oracle clean row; 70/70 accesses + 8/8 applicable barrier members; stride-1/offset-0 fault qualification emits a diagnostic and breaks the skewed oracle; paired 1.174x | 🟩 Current four-oracle clean row; 70/70 accesses + 4/4 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 1.145x |
+| **P4 Jakub cooperative matmul** | 🟩 Current clean-revision four-oracle row in 7.50 seconds with complete 70/70 access coverage; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 10.18 seconds with complete 70/70 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 7.15 seconds with complete 70/70 accesses plus 8/8 applicable barriers and a complete dynamic verdict; the code-object-wide cluster-tuple gate reservation regression is fixed; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 7.37 seconds with complete 70/70 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired and reviewed-fault evidence retained |
 
 ### 2026-08-20 D128-block clean refresh
 
@@ -194,16 +194,26 @@ new runtime evidence rather than reinterpreting the earlier accepted bundle.
 ### 2026-08-20 current Jakub clean refresh
 
 Artifact
-`rebase-20260820-gfx1250-jakub-clean-all-646711b` runs the baseline and all
-four strict clean profiles through RocJitsu at source revision `646711ba1a` and
-hook SHA-256
-`2d5e0333992d414d479cc20419e59c390f503eb7a7eabe375be12a858d13d256`.
-All five rows pass all four current exact arithmetic oracles.  The rebuilt
-object has complete 70/70 access coverage in every engine, plus 8/8 barriers
-in Record/Replay and Sampled and 4/4 barriers in Inline Shadow.  Record/Replay
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-jakub-all-47771b9`
+runs the baseline and all four strict clean profiles through RocJitsu at source
+revision `47771b901b`.  All five rows pass all four exact arithmetic oracles.
+Baseline, SuperCollider, Record/Replay, Sampled, and Inline Shadow take 5.95,
+7.50, 10.18, 7.15, and 7.37 seconds respectively.  The rebuilt object has
+complete 70/70 access coverage in every engine, plus 8/8 barriers in
+Record/Replay and Sampled and 4/4 barriers in Inline Shadow.  Record/Replay
 emits zero diagnostics, and every instrumented row is analysis-, static-, and
-dynamic-complete.  The current clean evidence preserves the prior accepted
-paired-overhead and reviewed-fault qualifications.
+dynamic-complete.
+
+The first current-tip run exposed a Sampled transform rejection after the
+cluster-identity persistence change: access-local analysis saw an ordinary
+three-coordinate owner, while code-object-wide persistent placement included
+a fourth cluster coordinate for a sibling.  Commit `47771b901b` sizes the
+dense gate from the persistent tuple it actually consumes and adds a focused
+mixed-owner regression.  All 1,229 runnable ConSan-family host tests pass; the
+only skip is the opt-in live-object benchmark.  The accepted hook SHA-256 is
+`e90e75343df20766f5b5b6eca2c936965df1eddc17087cd96a150bb8f9f3806c`.
+This clean evidence preserves the prior accepted paired-overhead and
+reviewed-fault qualifications.
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
