@@ -1243,6 +1243,7 @@ class _NativeGtestTarget:
     d128_block_fault_uses_oracle: bool = False
     d128_block_run_timeout_seconds: int | None = None
     d128_pressure_run_timeout_seconds: int | None = None
+    matrix_run_timeout_seconds: int | None = None
 
 
 def _cdna_gtest_target(
@@ -1250,6 +1251,7 @@ def _cdna_gtest_target(
     *,
     suite_family: str,
     matrix_suite_family: str,
+    matrix_run_timeout_seconds: int | None = None,
 ) -> _NativeGtestTarget:
     target = cdna_hip_moi_registry.TARGETS[target_id]
     return _NativeGtestTarget(
@@ -1261,6 +1263,7 @@ def _cdna_gtest_target(
         matrix_suite_family=matrix_suite_family,
         matrix_operation="Mfma",
         d128_block_oracle="SampledFastContextMatchesHostReference",
+        matrix_run_timeout_seconds=matrix_run_timeout_seconds,
     )
 
 
@@ -1284,6 +1287,10 @@ NATIVE_GTEST_TARGETS = {
         "gfx950",
         suite_family="Cdna4",
         matrix_suite_family="Cdna4Mfma",
+        # Complete Record/Replay coverage scans a large fixed report reservoir
+        # after the compact workload finishes. On the physical target that
+        # analysis takes about 160 seconds, despite subsecond device execution.
+        matrix_run_timeout_seconds=300,
     ),
     "gfx1250": _NativeGtestTarget(
         id="gfx1250",
@@ -1473,6 +1480,7 @@ def _native_gtest_overrides(
             ),
             f"HipMoi{matrix_suite}AttentionBlock",
             "ExactContextMatchesHostReference",
+            run_timeout_seconds=target.matrix_run_timeout_seconds,
         ),
         **streamk,
         "jakub-attention": _jakub_override(target),

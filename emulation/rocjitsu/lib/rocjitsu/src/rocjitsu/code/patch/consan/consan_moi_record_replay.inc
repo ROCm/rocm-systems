@@ -114,6 +114,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t guest_instruction_word_count = 0;
     bool spill_overlaps_guest_operands = false;
     bool wrap_embedded_guest_vgpr_bank = false;
+    bool branch_only_scalar_spill = false;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
@@ -280,6 +281,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
+      if (group_resource != nullptr &&
+          moi_transient_sgpr_assignment_is_branch_only(
+              options, group_resource->owner_descriptor_file_offsets)) {
+        continue;
+      }
       const uint32_t group_entry_island_words = moi_record_replay_entry_island_words(
           group_options.automatic_moi_record_replay_sgpr_spill);
       bool has_dense_neighbors = false;
@@ -489,6 +495,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           "ConSan MOI first-light probe found no common transient SGPR assignment");
       continue;
     }
+    const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
+        options, resources->owner_descriptor_file_offsets);
     if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
                                                         resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -606,7 +614,30 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<uint64_t> entry_island_offset;
     bool uses_reserved_entry_relay = false;
     if (use_indirect_appended) {
-      if (use_dense_call) {
+      if (branch_only_scalar_spill) {
+        const uint64_t patch_bytes =
+            static_cast<uint64_t>((words->size() + displaced_tail_words.size()) *
+                                  sizeof(uint32_t)) +
+            spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
+        const uint64_t return_source = indirect_body_cursor + patch_bytes;
+        if (candidate.size < sizeof(uint32_t) ||
+            !compute_sopp_branch_simm16(candidate.text_offset, indirect_body_cursor) ||
+            !compute_sopp_branch_simm16(return_source, candidate.text_offset + candidate.size)) {
+          result.warnings.emplace_back(
+              "ConSan MOI first-light branch-only scalar-spill body is out of direct reach");
+          continue;
+        }
+        placement = DbiPatchPlacement{
+            .kind = DbiPatchPlacementKind::AppendedCave,
+            .anchor_offset = candidate.text_offset,
+            .original_size = candidate.size,
+            .body_offset = indirect_body_cursor,
+            .body_size = patch_bytes,
+            .return_branch_offset = return_source,
+            .return_target = candidate.text_offset + candidate.size,
+        };
+        indirect_body_cursor += patch_bytes + sizeof(uint32_t);
+      } else if (use_dense_call) {
         entry_island_offset = dense_entry_islands.at(candidate_ptr);
       } else {
         const size_t candidate_index = candidate_indices.at(candidate_ptr);
@@ -614,7 +645,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             access_island_begin + candidate_index * access_relay_words * sizeof(uint32_t);
         uses_reserved_entry_relay = true;
       }
-      if (!use_dense_call &&
+      if (!branch_only_scalar_spill && !use_dense_call &&
           (candidate.size < sizeof(uint32_t) ||
            !compute_sopp_branch_simm16(candidate.text_offset, *entry_island_offset))) {
         entry_island_offset =
@@ -623,7 +654,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                 : std::nullopt;
         uses_reserved_entry_relay = false;
       }
-      if (!use_dense_call && !entry_island_offset && !original_text.empty()) {
+      if (!branch_only_scalar_spill && !use_dense_call && !entry_island_offset &&
+          !original_text.empty()) {
         std::vector<uint32_t> displaced_words;
         while (displaced_words.size() < candidate_entry_island_words) {
           auto decoded = decode_relocatable_entry_instruction(
@@ -649,7 +681,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           }
         }
       }
-      if (candidate.size < sizeof(uint32_t) || !entry_island_offset) {
+      if (!branch_only_scalar_spill &&
+          (candidate.size < sizeof(uint32_t) || !entry_island_offset)) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe skipped load/store site: entry island is unreachable");
         continue;
@@ -662,22 +695,24 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
           spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
           (dense_runtime_workgroup_gate ? runtime_gate_island_words * sizeof(uint32_t) : 0u);
-      placement = DbiPatchPlacement{
-          .kind = DbiPatchPlacementKind::AppendedCave,
-          .anchor_offset = candidate.text_offset,
-          .original_size = displaced_original_size,
-          .body_offset = indirect_body_cursor,
-          .body_size = patch_bytes,
-          .return_branch_offset = 0,
-          .return_target = candidate.text_offset + displaced_original_size,
-      };
-      const uint64_t return_words =
-          use_dense_call ? (arch != ROCJITSU_CODE_ARCH_GFX1250 ||
-                                    candidate_options.automatic_moi_record_replay_sgpr_spill
-                                ? 7u
-                                : 1u)
-                         : 6u;
-      indirect_body_cursor += patch_bytes + return_words * sizeof(uint32_t);
+      if (!branch_only_scalar_spill) {
+        placement = DbiPatchPlacement{
+            .kind = DbiPatchPlacementKind::AppendedCave,
+            .anchor_offset = candidate.text_offset,
+            .original_size = displaced_original_size,
+            .body_offset = indirect_body_cursor,
+            .body_size = patch_bytes,
+            .return_branch_offset = 0,
+            .return_target = candidate.text_offset + displaced_original_size,
+        };
+        const uint64_t return_words =
+            use_dense_call ? (arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+                                      candidate_options.automatic_moi_record_replay_sgpr_spill
+                                  ? 7u
+                                  : 1u)
+                           : 6u;
+        indirect_body_cursor += patch_bytes + return_words * sizeof(uint32_t);
+      }
     } else {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
@@ -736,6 +771,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.required_private_bytes = required_private_bytes;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
+    planned.branch_only_scalar_spill = branch_only_scalar_spill;
     planned_patches.push_back(std::move(planned));
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
@@ -1144,14 +1180,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         const uint64_t entry_target =
             planned_patch.entry_island_offset.value_or(planned_patch.placement.body_offset);
         const auto ret =
-            planned_patch.entry_island_offset
+            planned_patch.entry_island_offset || planned_patch.branch_only_scalar_spill
                 ? std::optional<int16_t>()
                 : compute_sopp_branch_simm16(planned_patch.placement.return_branch_offset,
                                              planned_patch.placement.return_target);
         if ((!planned_patch.dense_call_anchor &&
              !write_moi_appended_anchor(new_text, planned_patch, entry_target, arch,
                                         "first-light probe", result.errors)) ||
-            (!planned_patch.entry_island_offset && !ret)) {
+            (!planned_patch.entry_island_offset && !planned_patch.branch_only_scalar_spill &&
+             !ret)) {
           result.errors.emplace_back(
               "ConSan MOI first-light probe appended cave branch is out of range");
           return;
@@ -1259,6 +1296,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 "ConSan MOI first-light probe could not encode its long return");
             return;
           }
+        } else if (planned_patch.branch_only_scalar_spill) {
+          const auto direct_return =
+              compute_sopp_branch_simm16(cave_text_offset + cave_words->size() * sizeof(uint32_t),
+                                         planned_patch.placement.return_target);
+          if (!direct_return) {
+            result.errors.emplace_back(
+                "ConSan MOI first-light branch-only scalar-spill return is unreachable");
+            return;
+          }
+          cave_words->push_back(build_s_branch(*direct_return, arch));
         } else {
           cave_words->push_back(build_s_branch(*ret, arch));
         }

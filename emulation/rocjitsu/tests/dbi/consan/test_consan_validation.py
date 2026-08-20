@@ -1823,6 +1823,7 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["wmma-attention"]["clean_filter"],
             "HipMoiCdna4MfmaAttentionBlock.*",
         )
+        self.assertEqual(workloads["wmma-attention"]["run_timeout_seconds"], 300)
         self.assertEqual(
             workloads["d128-block"]["overhead_filter"],
             ("HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"),

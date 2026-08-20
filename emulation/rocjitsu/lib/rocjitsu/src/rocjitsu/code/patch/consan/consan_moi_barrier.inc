@@ -2331,11 +2331,34 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           "ConSan MOI barrier record patch lost its entry workgroup assignment");
       return;
     }
+    const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
+        options, planned.resources.owner_descriptor_file_offsets);
+    const bool direct_entry =
+        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
+    uint64_t entry_island = 0;
+    bool has_entry_island = false;
+    if (branch_only_scalar_spill || !direct_entry) {
+      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
+      if (!claimed_island) {
+        result.warnings.emplace_back(
+            branch_only_scalar_spill
+                ? "ConSan MOI barrier record patch found no reachable register-free round-trip "
+                  "island in " +
+                      candidate.container_name
+                : "ConSan MOI barrier record patch found no reachable indirect entry island in " +
+                      candidate.container_name);
+        continue;
+      }
+      entry_island = *claimed_island;
+      has_entry_island = true;
+    }
+    const uint64_t cave_return_target =
+        branch_only_scalar_spill ? entry_island + sizeof(uint32_t) : return_text_offset;
     auto cave_words = build_barrier_record_cave_words(
         active_bytes, candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, original_barrier_word,
-        cave_text_offset, return_text_offset,
+        cave_text_offset, cave_return_target,
         planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
                               : std::nullopt,
         planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
@@ -2343,21 +2366,18 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         result.errors);
     if (!cave_words)
       return;
-
-    const bool direct_entry =
-        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
-    uint64_t indirect_entry_island = 0;
-    bool has_indirect_entry_island = false;
-    if (!direct_entry) {
-      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
-      if (!claimed_island) {
+    if (branch_only_scalar_spill) {
+      const uint64_t return_branch_offset =
+          cave_text_offset + (cave_words->size() - 1u) * sizeof(uint32_t);
+      const auto direct_return =
+          compute_sopp_branch_simm16(return_branch_offset, cave_return_target);
+      if (!compute_sopp_branch_simm16(entry_island, cave_text_offset) || !direct_return ||
+          cave_words->back() != build_s_branch(*direct_return, arch)) {
         result.warnings.emplace_back(
-            "ConSan MOI barrier record patch found no reachable indirect entry island in " +
+            "ConSan MOI barrier record patch could not route a register-free round trip in " +
             candidate.container_name);
         continue;
       }
-      indirect_entry_island = *claimed_island;
-      has_indirect_entry_island = true;
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
@@ -2371,8 +2391,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       return;
     }
 
-    const uint64_t entry_target =
-        has_indirect_entry_island ? indirect_entry_island : placement->body_offset;
+    const uint64_t entry_target = has_entry_island ? entry_island : placement->body_offset;
     const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI barrier record forward branch is out of range");
@@ -2382,12 +2401,19 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       result.errors.emplace_back("ConSan MOI barrier record patch could not rewrite barrier slot");
       return;
     }
-    if (has_indirect_entry_island &&
-        !emit_moi_local_indirect_entry_island(
-            new_text, indirect_entry_island, placement->body_offset, site.text_offset, options,
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI barrier record patch")) {
-      return;
+    if (has_entry_island) {
+      const bool emitted =
+          branch_only_scalar_spill
+              ? emit_moi_local_direct_round_trip_island(
+                    new_text, entry_island, placement->body_offset, return_text_offset,
+                    site.text_offset, planned.resources.owner_descriptor_file_offsets, arch,
+                    patches, result.errors, "ConSan MOI barrier record patch")
+              : emit_moi_local_indirect_entry_island(
+                    new_text, entry_island, placement->body_offset, site.text_offset,
+                    candidate_options, planned.resources.owner_descriptor_file_offsets, arch,
+                    patches, result.errors, "ConSan MOI barrier record patch");
+      if (!emitted)
+        return;
     }
     append_words_bytes(new_text, *cave_words);
 

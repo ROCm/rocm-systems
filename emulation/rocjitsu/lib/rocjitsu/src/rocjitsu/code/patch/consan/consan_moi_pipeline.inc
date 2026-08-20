@@ -1099,8 +1099,19 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
       if (plan.owner_descriptor_file_offsets.empty())
         continue;
-      if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && !owner_options.moi_dispatch_id_sgpr)
+      // A component-local transient assignment may deliberately omit an
+      // overlapping persistent dispatch pair. Its established fallback ABI
+      // records generation zero; rejecting the resource plan here would make
+      // that safe fallback gfx1250-only even though the report contract is
+      // target-neutral.
+      if (!owner_options.moi_dispatch_id_sgpr &&
+          std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+            const ConSanMoiTransientSgprAssignment *assignment =
+                find_moi_transient_sgpr_assignment(options, descriptor_offset);
+            return assignment != nullptr && !assignment->dispatch_id_sgpr;
+          })) {
         continue;
+      }
       const auto owner_contexts =
           resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;

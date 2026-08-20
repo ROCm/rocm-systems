@@ -484,6 +484,42 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return true;
 }
 
+[[nodiscard]] bool emit_moi_local_direct_round_trip_island(
+    std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
+    uint64_t return_text_offset, uint64_t anchor_text_offset,
+    std::span<const uint64_t> owner_descriptor_file_offsets, rj_code_arch_t arch,
+    std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors,
+    std::string_view context) {
+  const auto entry = compute_sopp_branch_simm16(island_text_offset, cave_text_offset);
+  const auto return_to_guest =
+      compute_sopp_branch_simm16(island_text_offset + sizeof(uint32_t), return_text_offset);
+  if (!entry || !return_to_guest) {
+    errors.emplace_back(std::string(context) +
+                        " could not encode its register-free round-trip island");
+    return false;
+  }
+
+  std::vector<uint32_t> words(kMoiLocalIndirectIslandWords, build_s_nop(0, arch));
+  words[0] = build_s_branch(*entry, arch);
+  words[1] = build_s_branch(*return_to_guest, arch);
+  if (island_text_offset > text.size() ||
+      words.size() * sizeof(uint32_t) > text.size() - island_text_offset) {
+    errors.emplace_back(std::string(context) + " has an invalid register-free round-trip island");
+    return false;
+  }
+  std::memcpy(text.data() + island_text_offset, words.data(), words.size() * sizeof(uint32_t));
+
+  ConSanPatchInfo island_info;
+  island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  island_info.anchor_offset = anchor_text_offset;
+  island_info.trampoline_offset = island_text_offset;
+  island_info.trampoline_size = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+  island_info.owner_descriptor_file_offsets.assign(owner_descriptor_file_offsets.begin(),
+                                                   owner_descriptor_file_offsets.end());
+  patches.push_back(std::move(island_info));
+  return true;
+}
+
 [[nodiscard]] bool emit_moi_local_indirect_kernel_entry_island(
     std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
     uint64_t anchor_text_offset, std::span<const uint64_t> owner_descriptor_file_offsets,

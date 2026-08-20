@@ -5572,7 +5572,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   }
   EXPECT_TRUE(result.final_validation_passed);
 
-  constexpr uint32_t kDenseBarrierCount = 33u;
+  constexpr uint32_t kDenseBarrierCount = 80u;
   std::vector<uint32_t> dense_words;
   for (uint32_t index = 0u; index < kDenseBarrierCount; ++index) {
     dense_words.insert(dense_words.end(), access->begin(), access->end());
@@ -5600,7 +5600,9 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   ASSERT_TRUE(dense_result.modified) << testing::PrintToString(dense_result.warnings);
   EXPECT_TRUE(dense_result.final_validation_passed);
   ASSERT_EQ(dense_result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(dense_result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const ConSanMoiTransientSgprAssignment &dense_assignment =
+      dense_result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(dense_assignment.spill_backed);
   for (ConSanPatchKind kind : {ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                ConSanPatchKind::TrampolineMoiBarrierRecord}) {
     const auto patch = std::ranges::find(dense_result.patches, kind, &ConSanPatchInfo::kind);
@@ -5613,6 +5615,30 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
     EXPECT_FALSE(patch->persistent_private_state_end);
     EXPECT_EQ(patch->required_private_segment_size, kTransientScalarBytes);
   }
+  ASSERT_TRUE(dense_assignment.indirect_pc_sgpr);
+  const auto indirect_barrier = std::ranges::find_if(dense_result.patches, [&](const auto &patch) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord)
+      return false;
+    return std::ranges::any_of(dense_result.patches, [&](const auto &island) {
+      return island.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+             island.anchor_offset == patch.anchor_offset;
+    });
+  });
+  ASSERT_NE(indirect_barrier, dense_result.patches.end());
+  const auto barrier_island =
+      std::ranges::find_if(dense_result.patches, [&](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+               patch.anchor_offset == indirect_barrier->anchor_offset;
+      });
+  ASSERT_NE(barrier_island, dense_result.patches.end());
+  AmdGpuCodeObject dense_patched(dense_result.elf_bytes.data(), dense_result.elf_bytes.size());
+  ASSERT_TRUE(dense_patched.is_valid());
+  const std::vector<uint32_t> island_words = text_words_at_offset(
+      dense_patched, barrier_island->trampoline_offset, barrier_island->trampoline_size);
+  ASSERT_GE(island_words.size(), 2u);
+  // The local relay runs before the scalar spill body. It must use the
+  // descriptor-local dead PC pair, not the unrelated root fallback.
+  EXPECT_EQ(island_words[1], build_s_getpc_b64(*dense_assignment.indirect_pc_sgpr, kArch));
 }
 
 TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
@@ -7746,6 +7772,136 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
   EXPECT_TRUE(std::ranges::none_of(colliding.warnings, [](const std::string &warning) {
     return warning.find("hybrid persistent vector owner/epoch") != std::string::npos;
   })) << testing::PrintToString(colliding.warnings);
+}
+
+TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+
+  // Keep every allocated ordinary scalar register live across the access.
+  // This matches compiler-generated full-pressure MFMA kernels: a spill-backed
+  // instrumentation window exists, but there is no liveness-dead PC/SCC pair
+  // with which to reach an appended body.
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  size_t cursor = 1u + guest->size();
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "record_replay_no_dead_transient_sgprs", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.dispatch_id_sgpr);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
+TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegisters) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 39u;
+  constexpr size_t kBarrierWord = 1024u;
+  constexpr size_t kTextWords = 11'200u;
+  constexpr uint32_t kRoundTripIslandWords = 8u;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(guest && barrier);
+
+  std::vector<uint32_t> text_words(kTextWords, build_s_nop(0u, kArch));
+  size_t cursor = 0u;
+  for (uint32_t access = 0u; access < kAccessCount; ++access) {
+    std::copy(guest->begin(), guest->end(), text_words.begin() + cursor);
+    cursor += guest->size();
+  }
+  ASSERT_LT(cursor, kBarrierWord);
+  text_words[kBarrierWord] = *barrier;
+  cursor = kBarrierWord + 1u;
+  // Keep every allocated ordinary scalar register live across both the
+  // accesses and barrier. The access bodies push the barrier cave beyond a
+  // direct SOPP branch, while their pre-reserved local island remains close.
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "record_replay_no_dead_transient_barrier", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u, 1u);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+
+  const auto barrier_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  const auto relay = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == barrier_patch->anchor_offset &&
+           patch.trampoline_size == kRoundTripIslandWords * sizeof(uint32_t);
+  });
+  ASSERT_NE(relay, result.patches.end()) << testing::PrintToString(result.patches);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> relay_words =
+      text_words_at_offset(patched, relay->trampoline_offset, relay->trampoline_size);
+  ASSERT_EQ(relay_words.size(), kRoundTripIslandWords);
+  constexpr uint32_t kSoppOpcodeMask = 0xFFFF0000u;
+  constexpr uint32_t kSBranchOpcode = 0xBF820000u;
+  EXPECT_EQ(relay_words[0] & kSoppOpcodeMask, kSBranchOpcode);
+  EXPECT_EQ(relay_words[1] & kSoppOpcodeMask, kSBranchOpcode);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, Cdna4ScalarHoleUsesCompleteTextCoverageForUnresolvedBranch) {
