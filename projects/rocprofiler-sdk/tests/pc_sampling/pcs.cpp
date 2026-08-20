@@ -415,6 +415,9 @@ process_sample(const PcSamplingRecordT*                      pc_sample,
 
     // Decoding the PC
     auto inst = translator.get(pc_sample->pc.code_object_id, pc_sample->pc.code_object_offset);
+    // Decoder is unaware of the insturction (e.g., code object rewrite might have happened and
+    // decoder is unaware of all segments).
+    if (inst == nullptr) return;
     flat_profile.add_sample(std::move(inst), pc_sample->exec_mask);
 
     // TODO: introduce checks specific to stochastic sampling

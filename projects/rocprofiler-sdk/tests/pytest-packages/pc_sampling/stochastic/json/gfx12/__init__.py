@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,9 @@ from collections import defaultdict
 from .arbiter_state import validate_arbiter_state
 from .other_instructions import (
     validate_valu_instructions,
+    validate_vmem_instructions,
+    validate_matrix_instructions,
+    validate_dual_valu_instructions,
     validate_flat_instructions,
     validate_lds_instructions,
 )
@@ -38,10 +41,16 @@ from .s_instructions import (
     validate_waitcnt,
     validate_branch_instructions,
     validate_scalar_instructions,
+    validate_jump_instructions,
+    validate_message_instructions,
+    validate_other_s_instructions,
+    validate_s_wakeup,
+    validate_delay_alu_instructions,
+    validate_clause_instructions,
 )
 
 # Using Prefix Tree to classify the instruction type
-# I did this instead of the regex because I wanted to try if we could
+# I did this instead of the regex becuase I wanted to try if we could
 # generalize this approach for other types of instructions.
 # The dream scenario: We have a giant list of all instructions and their
 # types. Then we parse the list and dynamically determine the checks
@@ -91,22 +100,26 @@ class PrefixTree:
 
 instructions_with_types = [
     ("s_", "SCALAR"),  # Scalar instructions (general category)
-    ("s_waitcnt", "WAITCNT"),  # WAITCNT (specific)
+    (
+        "s_wait",
+        "WAITCNT",
+    ),  # WAITCNT (specific) - GFX12 uses s_wait_loadcnt, s_wait_storecnt, etc.
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
     ("s_barrier", "BARRIER"),  # BARRIER (specific)
-    ("s_swappc", "JUMP"),  # JUMP (specific)
-    ("s_setpc", "JUMP"),  # JUMP
-    ("s_setpc", "JUMP"),  # JUMP
-    ("s_sleep", "JUMP"),  # JUMP
+    ("s_swap_pc", "JUMP"),  # JUMP (specific)
+    ("s_set_pc", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
-    ("s_wakeup", "OTHER"),  # OTHER
+    ("s_wakeup", "S_WAKEUP"),  # NO_INST type, but goes through the brmsg arbiter.
     ("s_nop", "INTERNAL"),  # INTERNAL
     ("s_sleep", "INTERNAL"),  # INTERNAL
+    ("s_clause", "CLAUSE"),  # CLAUSE (specific)
+    ("s_delay_alu", "DELAY_ALU"),  # DELAY_ALU (specific)
     ("v_", "VALU"),  # VALU
-    ("v_mfma", "MATRIX"),  # MATRIX
+    ("v_wmma", "MATRIX"),  # MATRIX (GFX12 uses v_wmma)
+    ("v_dual_", "DUAL_VALU"),  # DUAL_VALU (GFX12 specific)
     ("flat_", "FLAT"),  # FLAT
-    ("global_", "FLAT"),  # FLAT
+    ("global_", "TEX"),  # TEX / VMEM
     ("ds_", "LDS"),  # LDS
     ("buffer_", "TEX"),  # TEX
 ]
@@ -115,13 +128,19 @@ instructions_with_types = [
 inst_type_verify_functions = {
     "BRANCH": validate_branch_instructions,
     "WAITCNT": validate_waitcnt,
-    # "OTHER": validate_other_instructions,
+    "OTHER": validate_other_s_instructions,
+    "S_WAKEUP": validate_s_wakeup,
     "SCALAR": validate_scalar_instructions,
     "INTERNAL": validate_internal_instructions,
-    # "JUMP": validate_jump_instructions,
-    # "MESSAGE": validate_message_instructions,
+    "JUMP": validate_jump_instructions,
+    "MESSAGE": validate_message_instructions,
     "BARRIER": validate_barrier_instructions,
+    "CLAUSE": validate_clause_instructions,
+    "DELAY_ALU": validate_delay_alu_instructions,
     "VALU": validate_valu_instructions,
+    "MATRIX": validate_matrix_instructions,
+    "DUAL_VALU": validate_dual_valu_instructions,
+    "TEX": validate_vmem_instructions,
     "FLAT": validate_flat_instructions,
     "LDS": validate_lds_instructions,
 }
@@ -137,6 +156,8 @@ def validate_stochastic_samples_json(data_json):
     comments = data_json["strings"]["pc_sample_comments"]
 
     insts_per_prefix_type = defaultdict(list)
+    lck_err_count = 0
+    total_count = 0
 
     for sample in data_json["buffer_records"]["pc_sample_stochastic"]:
         inst_index = sample["inst_index"]
@@ -157,19 +178,29 @@ def validate_stochastic_samples_json(data_json):
 
         # For each sample, we need to validate wave_cnt and arbiter state
         wave_cnt = record["wave_cnt"]
-        assert wave_cnt >= 0 and wave_cnt <= 32, "Invalid wave count"
+        assert wave_cnt >= 0 and wave_cnt <= 16, "Invalid wave count"
 
         # arbiter state check
         snapshot = record["snapshot"]
         validate_arbiter_state(snapshot)
 
-        # memory counters are not present on GFX9
+        # memory counters must always be present on GFX1250
         assert (
-            record["flags"]["has_mem_cnt"] == 0
-        ), "memory_counters must not be present on GFX9"
+            record["flags"]["has_mem_cnt"] == 1
+        ), "memory_counters must always be present on GFX1250"
 
-        # sampling_lock_error is not supported on GFX9
-        assert snapshot["lck_err"] == 0, "sampling_lock_error must be 0 on GFX9"
+        # sampling_lock_error: GFX12 hardware may set this when sampling frequency is too high
+        # (hardware generates samples faster than trap handler reads them).
+        # We expect the rate to stay below 30% across all samples.
+        total_count += 1
+        lck_err_count += snapshot["lck_err"]
+
+    if total_count > 0:
+        lck_err_rate = lck_err_count / total_count
+        assert lck_err_rate <= 0.30, (
+            f"sampling_lock_error rate {lck_err_rate:.1%} exceeds 30% "
+            f"({lck_err_count}/{total_count} samples) — sampling frequency is too high"
+        )
 
     # Check now the instruction type and arb state correlation.
     # We do that for all samples of a single instruction type all at once

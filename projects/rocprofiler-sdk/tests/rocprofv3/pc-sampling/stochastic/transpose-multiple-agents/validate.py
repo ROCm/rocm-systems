@@ -50,12 +50,18 @@ def test_multi_agent_support(
 def test_validate_pc_sampling_stochastic_specific_csv(
     input_samples_csv: pd.DataFrame, input_agent_info_csv: pd.DataFrame
 ):
-    if tmp_disable_for_gfx12(input_agent_info_csv):
-        pytest.skip("Stochastic sampling specific checks are not implemented for GFX12")
-
-    from rocprofiler_sdk.pc_sampling.stochastic.csv.gfx9 import (
-        validate_stochastic_samples_csv,
-    )
+    if is_gfx12(input_agent_info_csv):
+        from rocprofiler_sdk.pc_sampling.stochastic.csv.gfx12 import (
+            validate_stochastic_samples_csv,
+        )
+    elif is_gfx9(input_agent_info_csv):
+        from rocprofiler_sdk.pc_sampling.stochastic.csv.gfx9 import (
+            validate_stochastic_samples_csv,
+        )
+    else:
+        pytest.skip(
+            "Stochastic sampling specific CSV checks are not implemented for this architecture"
+        )
 
     validate_stochastic_samples_csv(input_samples_csv)
 
@@ -63,22 +69,28 @@ def test_validate_pc_sampling_stochastic_specific_csv(
 def test_validate_pc_sampling_stochastic_specific_json(
     input_samples_json, input_agent_info_csv: pd.DataFrame
 ):
-    if tmp_disable_for_gfx12(input_agent_info_csv):
-        pytest.skip("Stochastic sampling specific checks are not implemented for GFX12")
-
-    from rocprofiler_sdk.pc_sampling.stochastic.json.gfx9 import (
-        validate_stochastic_samples_json,
-    )
+    if is_gfx12(input_agent_info_csv):
+        from rocprofiler_sdk.pc_sampling.stochastic.json.gfx12 import (
+            validate_stochastic_samples_json,
+        )
+    elif is_gfx9(input_agent_info_csv):
+        from rocprofiler_sdk.pc_sampling.stochastic.json.gfx9 import (
+            validate_stochastic_samples_json,
+        )
+    else:
+        pytest.skip(
+            "Stochastic sampling specific JSON checks are not implemented for this architecture"
+        )
 
     validate_stochastic_samples_json(input_samples_json["rocprofiler-sdk-tool"])
 
 
-def tmp_disable_for_gfx12(input_agent_info_csv: pd.DataFrame):
-    """
-    If any of the agents are from GFX12 family, we temporarily disable
-    stochastic sampling specific checks, because they're not fully implemented.
-    """
+def is_gfx12(input_agent_info_csv: pd.DataFrame) -> bool:
     return input_agent_info_csv["Name"].str.contains("gfx12").any()
+
+
+def is_gfx9(input_agent_info_csv: pd.DataFrame) -> bool:
+    return input_agent_info_csv["Name"].str.contains(r"gfx9\d", regex=True).any()
 
 
 if __name__ == "__main__":

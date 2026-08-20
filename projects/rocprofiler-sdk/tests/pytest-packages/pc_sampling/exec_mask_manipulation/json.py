@@ -190,11 +190,12 @@ def validate_json_exec_mask_manipulation(
                 # However, compiler-generated control-flow instructions
                 # (e.g., s_andn2_saveexec, s_or_b64, s_cbranch_execz,
                 # s_branch, v_mov_b32) used for SIMD divergence may have
-                # DWARF line number 0, rendered as "?". These instructions
-                # are not v_rcp_f64/v_rcp_f32 and have no meaningful source
-                # line or exec mask to validate — skip them.
+                # DWARF line number 0, rendered as "?". Code object rewrite (trampolines)
+                # might happen on some architectures leading to some other instructions
+                # with missing comments. None of these instructions are v_rcp_f64/v_rcp_f32
+                # and have no meaningful source line or exec mask to validate — skip them
                 line_num_str = comm.split(":")[-1]
-                if line_num_str == "?":
+                if line_num_str == "?" or comm == "":
                     assert not inst.startswith("v_rcp_f64") and not inst.startswith(
                         "v_rcp_f32"
                     ), f"v_rcp instruction unexpectedly has unknown source line: {inst}"

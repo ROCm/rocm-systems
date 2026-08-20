@@ -34,3 +34,4 @@ foreach(_FILE ${PC_SAMPLING_PYTHON_SOURCES})
 endforeach()
 
 add_subdirectory(gfx9)
+add_subdirectory(gfx12)
