@@ -274,18 +274,6 @@ get_perfetto_backend();
 std::string
 get_perfetto_output_filename();
 
-double
-get_trace_delay();
-
-double
-get_trace_duration();
-
-std::string
-get_trace_periods();
-
-std::string
-get_trace_period_clock();
-
 std::string
 get_trace_region();
 

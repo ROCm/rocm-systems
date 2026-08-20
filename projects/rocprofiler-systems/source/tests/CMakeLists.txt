@@ -8,7 +8,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:sdk-tracing-config-tests>
     $<TARGET_OBJECTS:control-posix-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
-    $<TARGET_OBJECTS:constraint-tests>
+    $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
