@@ -3,11 +3,7 @@
 
 set(target test-torch-trace-collector)
 
-add_executable(
-    ${target}
-    test_torch_trace_collector.cpp
-    roctx_range_intercept.cpp
-)
+add_executable(${target} test_torch_trace_collector.cpp roctx_range_intercept.cpp)
 
 # Includes, torch libraries, and the DebugInfoKind flag are inherited from
 # torch-trace-collector. Only the runtime search paths below are test-specific.
