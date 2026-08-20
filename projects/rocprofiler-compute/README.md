@@ -74,6 +74,7 @@ Common CMake options:
 - `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
 - `-D BUILD_TORCH_TRACE_COLLECTOR=AUTO|ON|OFF` - Build the `torch_trace_collector` extension; `AUTO` (default) builds it when PyTorch is importable and skips it otherwise, `ON` stops the configure when PyTorch is unavailable
 - `-D TORCH_TRACE_PYTHON=/path/to/python3` - Select the Python interpreter that the `torch_trace_collector` extension is built against
+- `-D TORCH_TRACE_SOURCE_FINGERPRINT=<fingerprint>` - Required when building the `torch_trace_collector` extension
 - `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF)
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
