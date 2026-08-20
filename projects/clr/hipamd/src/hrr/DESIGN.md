@@ -704,8 +704,9 @@ HRR could not see*:
 - **The allocation is lost entirely.** Memory that reaches the device without a
   HIP call — `hsa_amd_memory_pool_allocate` called directly, a framework's own
   VMM pool, imported external memory — produces kernel-argument pointers that
-  resolve in no map at all and reach the GPU as addresses belonging to a process
-  that has exited.
+  resolve in no map at all. Those reach the GPU as null, so the kernel faults on
+  first use rather than reading whatever the replay process happens to have at
+  the recorded address.
 
 One record type covers both. `--warn-untranslated-args` is the measurement that
 says which one a given capture is suffering from.

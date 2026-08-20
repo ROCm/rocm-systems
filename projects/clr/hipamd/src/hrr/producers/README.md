@@ -68,6 +68,11 @@ batch, repeated:
 - `kind` — `0` BLOCK, a sub-range of memory the runtime already knows about;
   `1` SEGMENT, a whole allocator segment.
 - `base`, `size` — the device VA range, as the recorded process sees it.
+- `device` — the ordinal the memory lives on. Fill it even on a single-GPU run:
+  when the replayer has to back a segment that bypassed HIP, this is what puts
+  the buffer on the right GPU, and a wrong ordinal silently places it on
+  another one. It is not part of the lookup key — a VA identifies its
+  allocation on its own within a process — so it matters only for placement.
 - `mono_ns` — when the change happened, on `CLOCK_MONOTONIC`. **Zero means "live
   since before this stream began"**, which is how you declare state that already
   existed when your producer started observing. Baseline is therefore just a run

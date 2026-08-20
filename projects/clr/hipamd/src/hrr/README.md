@@ -101,7 +101,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
-| `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region — the measurement that says a capture lost allocations below the HIP API |
+| `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
 | `--no-regions` | Ignore any external region annotations in the archive |
 | `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
 | `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |

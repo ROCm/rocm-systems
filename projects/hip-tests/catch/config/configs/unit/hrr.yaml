@@ -54,6 +54,9 @@ hrr:
   Unit_HRR_Recovery_TornPayload:
     <<: *level_2
     tags: [format, recovery, cpu]
+  Unit_HRR_Recovery_ImplausiblePayloadLength:
+    <<: *level_2
+    tags: [format, recovery, cpu]
   Unit_HRR_Recovery_NoTrailer:
     <<: *level_2
     tags: [format, recovery, cpu]

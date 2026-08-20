@@ -1209,9 +1209,9 @@ static void print_usage(const char* argv0) {
     "  --warn-untranslated-args\n"
     "                        Report kernel-argument pointers that resolve in no\n"
     "                        allocation, VMM reservation or annotated region.\n"
-    "                        Those reach the GPU as capture-time addresses, so a\n"
-    "                        non-zero count means the capture lost allocations\n"
-    "                        below the HIP API — see regions below.\n"
+    "                        Those reach the GPU as null, so a non-zero count\n"
+    "                        means the capture lost allocations below the HIP\n"
+    "                        API — see regions below.\n"
     "\n"
     "External region annotations (regions/*.hrrr in the archive; see hrr_regions.h):\n"
     "  What a producer outside the HIP runtime knew and the dispatch table could\n"
@@ -1665,8 +1665,7 @@ int main(int argc, char** argv) {
       printf("[HRR]   Untranslated   : %llu kernel-arg pointer(s) resolved in no "
              "allocation, VMM reservation or region%s\n",
              (unsigned long long)untranslated,
-             untranslated > 0 ? " — they reached the GPU as capture-time addresses"
-                              : "");
+             untranslated > 0 ? " — they reached the GPU as null" : "");
   }
 
   // --continue-on-error turns what would have been a hard stop into a count.

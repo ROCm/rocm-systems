@@ -8,11 +8,11 @@
 /*
  * hrr_region_map.h — replay-side consumer of external region annotations.
  *
- * Loads every regions/*.hrrr sidecar in an archive (format in hrr_regions.h),
- * merges them into one timestamp-ordered stream, and replays that stream in
- * lockstep with the captured events so that at any point during playback the
- * map holds the set of regions that were live at the corresponding instant of
- * the original run.
+ * Loads every .hrrr sidecar in an archive's regions/ directory (format in
+ * hrr_regions.h), merges them into one timestamp-ordered stream, and replays
+ * that stream in lockstep with the captured events so that at any point during
+ * playback the map holds the set of regions that were live at the corresponding
+ * instant of the original run.
  *
  * Two things come out of that:
  *
@@ -24,7 +24,7 @@
  *   - Reachability. A segment the producer declared but that HRR never observed
  *     (HIP bypassed: direct HSA allocation, a foreign VMM pool, imported
  *     memory) is materialised, so pointers into it translate instead of
- *     reaching a kernel as a capture-time address.
+ *     reaching a kernel as null.
  *
  * Ordering assumes a totally ordered replay stream, so the map is used only in
  * single-threaded replay (the default). It is inert under --multi-thread.
@@ -108,10 +108,24 @@ class RegionMap {
     size_t  cursor_   = 0;
     int64_t last_ts_  = INT64_MIN;
 
+    // What a live region is, beyond the base it is keyed on.
+    struct Extent {
+        uint64_t size;
+        uint8_t  device;  // ordinal the producer recorded the region on
+    };
+
     // Live sets, keyed by recorded base. std::map so classify() can find the
     // tightest enclosing entry with upper_bound instead of a linear scan.
-    std::map<uint64_t, uint64_t> blocks_;    // base -> size
-    std::map<uint64_t, uint64_t> segments_;  // base -> size
+    //
+    // Keyed by base alone, not by (device, base). Sidecars are read from one
+    // archive's regions/ directory, so every record in the map comes from a
+    // single recorded process, and within a process a device VA identifies its
+    // allocation regardless of which GPU it lives on — two devices are never
+    // handed the same address. The ordinal therefore cannot disambiguate a
+    // lookup; what it does decide is where a materialised segment is placed,
+    // which is where materialize_for uses it.
+    std::map<uint64_t, Extent> blocks_;
+    std::map<uint64_t, Extent> segments_;
 
     // Segments this map allocated because HRR never saw them. Recorded base ->
     // live pointer; the entry is also registered in PlaybackContext::alloc_map
