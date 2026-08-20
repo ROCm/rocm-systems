@@ -4635,6 +4635,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_cpu_xgmi_width = _libraries['libamd_smi.so'].amdsmi_get_cpu_xgmi_width
+    amdsmi_get_cpu_xgmi_width.restype = amdsmi_status_t
+    amdsmi_get_cpu_xgmi_width.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
+except AttributeError:
+    pass
+try:
     amdsmi_set_cpu_gmi3_link_width_range = _libraries['libamd_smi.so'].amdsmi_set_cpu_gmi3_link_width_range
     amdsmi_set_cpu_gmi3_link_width_range.restype = amdsmi_status_t
     amdsmi_set_cpu_gmi3_link_width_range.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
@@ -4650,6 +4656,12 @@ try:
     amdsmi_cpu_apb_disable = _libraries['libamd_smi.so'].amdsmi_cpu_apb_disable
     amdsmi_cpu_apb_disable.restype = amdsmi_status_t
     amdsmi_cpu_apb_disable.argtypes = [amdsmi_processor_handle, uint8_t]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_cpu_apb_status = _libraries['libamd_smi.so'].amdsmi_get_cpu_apb_status
+    amdsmi_get_cpu_apb_status.restype = amdsmi_status_t
+    amdsmi_get_cpu_apb_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError:
     pass
 try:
@@ -4674,6 +4686,12 @@ try:
     amdsmi_set_cpu_df_pstate_range = _libraries['libamd_smi.so'].amdsmi_set_cpu_df_pstate_range
     amdsmi_set_cpu_df_pstate_range.restype = amdsmi_status_t
     amdsmi_set_cpu_df_pstate_range.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_cpu_df_pstate_range = _libraries['libamd_smi.so'].amdsmi_get_cpu_df_pstate_range
+    amdsmi_get_cpu_df_pstate_range.restype = amdsmi_status_t
+    amdsmi_get_cpu_df_pstate_range.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError:
     pass
 try:
@@ -5315,6 +5333,8 @@ __all__ = \
     'amdsmi_get_cpu_hsmp_proto_ver', 'amdsmi_get_cpu_model',
     'amdsmi_get_cpu_model_name', 'amdsmi_get_cpu_pc6_enable',
     'amdsmi_get_cpu_prochot_status',
+    'amdsmi_get_cpu_xgmi_width',
+    'amdsmi_get_cpu_apb_status',
     'amdsmi_get_cpu_pwr_efficiency_mode',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
     'amdsmi_get_cpu_rail_isofreq_policy', 'amdsmi_get_cpu_sdps_limit',
@@ -5329,7 +5349,7 @@ __all__ = \
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature',
     'amdsmi_get_cpu_svi3_vr_controller_temp', 'amdsmi_get_cpu_tdelta',
-    'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpucore_handles',
+    'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpu_df_pstate_range', 'amdsmi_get_cpucore_handles',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fabric_telemetry_data', 'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_mem_alloc_mode',

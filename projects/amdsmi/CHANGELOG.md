@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**.  
+  - New C APIs: `amdsmi_get_cpu_apb_status()`, `amdsmi_get_cpu_xgmi_width()`, and `amdsmi_get_cpu_df_pstate_range()`.
+  - New Python APIs: `amdsmi_get_cpu_apb_status()`, `amdsmi_get_cpu_xgmi_width()`, and `amdsmi_get_cpu_df_pstate_range()`.
+  - `amd-smi metric` adds `--cpu-apb-status`, `--cpu-xgmi-link-width`, and `--cpu-df-pstate-range` for AMD EPYC CPUs.
+
 - **Added accelerator partition memory allocation mode API**.  
   - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
