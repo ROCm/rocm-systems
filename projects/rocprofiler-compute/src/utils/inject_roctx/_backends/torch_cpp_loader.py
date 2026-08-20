@@ -98,7 +98,7 @@ def compute_tag() -> Optional[str]:
 
     py_major = sys.version_info.major
     py_minor = sys.version_info.minor
-    torch_version = torch.__version__
+    torch_version = torch.__version__.split("+", 1)[0]
     fingerprint = _source_fingerprint()
     return f"py{py_major}.{py_minor}_torch{torch_version}_src{fingerprint}"
 
@@ -297,6 +297,7 @@ def _try_runtime_build(
         build_path=build_path,
         configure_options=(
             f"-DTORCH_TRACE_PYTHON={sys.executable}",
+            f"-DTORCH_TRACE_SOURCE_FINGERPRINT={_source_fingerprint()}",
             "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
             "-DCMAKE_BUILD_TYPE=Release",
         ),

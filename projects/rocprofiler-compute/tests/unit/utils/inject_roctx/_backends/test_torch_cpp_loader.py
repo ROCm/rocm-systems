@@ -41,6 +41,13 @@ def test_compute_tag_returns_well_formed_string():
     assert src_value == "missing" or (
         len(src_value) == 12 and all(c in "0123456789abcdef" for c in src_value)
     ), f"unexpected src component {src_value!r} in tag {tag!r}"
+    import torch
+
+    torch_components = [p for p in parts if p.startswith("torch")]
+    assert len(torch_components) == 1, (
+        f"expected exactly one '_torch...' component in tag {tag!r}"
+    )
+    assert torch_components[0] == "torch" + torch.__version__.split("+", 1)[0]
 
 
 def test_compute_tag_is_stable_across_calls():
@@ -112,29 +119,21 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
     assert fp1 != fp2, "fingerprint collided across an input boundary"
 
 
-def test_probe_output_matches_cmake_field_order():
-    """The probe prints the five fields CMake reads by index."""
+def test_print_fingerprint_matches_source_fingerprint():
+    """print_fingerprint.py writes the same fingerprint CMake would use."""
     import subprocess
 
-    probe = inject_roctx_loader._SO_SOURCE_DIR / "cmake" / "probe_torch.py"
-    assert probe.is_file(), f"missing probe at {probe}"
+    script = inject_roctx_loader._SO_SOURCE_DIR / "cmake" / "print_fingerprint.py"
+    assert script.is_file(), f"missing {script}"
 
     result = subprocess.run(
-        [sys.executable, str(probe)],
+        [sys.executable, str(script)],
         capture_output=True,
         text=True,
     )
-    if result.returncode == 3:
-        pytest.skip("torch not importable")
     assert result.returncode == 0, result.stderr
-
     lines = result.stdout.splitlines()
-    assert len(lines) == 5, f"probe printed {len(lines)} lines, CMake reads 5"
-    assert lines[0] == str(sys.version_info.major)
-    assert lines[1] == str(sys.version_info.minor)
-    assert lines[2], "torch version (index 2) is empty"
-    assert lines[3] == inject_roctx_loader._source_fingerprint()
-    assert lines[4] in ("0", "1"), f"unexpected C++11 ABI flag {lines[4]!r}"
+    assert lines == [inject_roctx_loader._source_fingerprint()]
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +197,6 @@ def test_fingerprint_inputs_cover_every_build_input():
     # The module includes synchronized.hpp and gsl_assert.h from the shared utils.
     for required in (
         "CMakeLists.txt",
-        "probe_torch.py",
         "print_fingerprint.py",
         "synchronized.hpp",
         "gsl_assert.h",
@@ -491,7 +489,7 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
     monkeypatch, tmp_path
 ):
     """The finder is asked for the tagged artifact and target, and cmake is told
-    which interpreter to build against.
+    which interpreter and source fingerprint to build against.
     """
     _set_so_inputs_present(monkeypatch, tmp_path)
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
@@ -519,6 +517,13 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
     )
     assert f"-DTORCH_TRACE_PYTHON={sys.executable}" in finder.configure_options, (
         f"-DTORCH_TRACE_PYTHON must equal sys.executable; "
+        f"saw {finder.configure_options!r}"
+    )
+    assert (
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={inject_roctx_loader._source_fingerprint()}"
+        in finder.configure_options
+    ), (
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT must match the source fingerprint; "
         f"saw {finder.configure_options!r}"
     )
     assert "-DBUILD_TORCH_TRACE_COLLECTOR=ON" in finder.configure_options, (

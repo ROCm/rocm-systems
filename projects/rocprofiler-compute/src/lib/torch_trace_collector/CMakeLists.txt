@@ -28,7 +28,8 @@ else()
     set(_ttc_unavailable_severity STATUS)
 endif()
 
-# Interpreter used to locate Torch and to run the probe.
+# Interpreter used to locate Torch and to read the CXX11 ABI and the source
+# fingerprint.
 if(TORCH_TRACE_PYTHON)
     set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
@@ -42,6 +43,8 @@ if(NOT Python3_FOUND)
     return()
 endif()
 set(_ttc_python "${Python3_EXECUTABLE}")
+set(_py_major "${Python3_VERSION_MAJOR}")
+set(_py_minor "${Python3_VERSION_MINOR}")
 
 set(_ttc_torch_dir "")
 foreach(_ttc_site IN LISTS Python3_SITEARCH Python3_SITELIB)
@@ -67,37 +70,52 @@ message(
     STATUS
     "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}"
 )
+set(_torch_version "${Torch_VERSION}")
 
-# Probe Python version, torch version, source fingerprint, and CXX11 ABI.
-# Exit code 3 means torch is not importable.
 execute_process(
-    COMMAND "${_ttc_python}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/probe_torch.py"
-    OUTPUT_VARIABLE _ttc_probe
+    COMMAND
+        "${_ttc_python}"
+        -c
+        "import sys\ntry:\n    import torch\n    print(int(torch.compiled_with_cxx11_abi()))\nexcept Exception as exc:\n    sys.stderr.write('torch_trace_collector: torch not importable: ' + str(exc) + '\\n')\n    sys.exit(3)\n"
+    OUTPUT_VARIABLE _torch_cxx11_abi
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_VARIABLE _ttc_probe_err
-    RESULT_VARIABLE _ttc_probe_rc
+    ERROR_VARIABLE _ttc_torch_cxx11_abi_err
+    RESULT_VARIABLE _ttc_torch_cxx11_abi_rc
 )
-if(_ttc_probe_rc EQUAL 3)
+if(_ttc_torch_cxx11_abi_rc EQUAL 3)
     message(
         ${_ttc_unavailable_severity}
         "torch_trace_collector: torch is not importable in ${_ttc_python}; the "
-        "extension is not built.\n${_ttc_probe_err}"
+        "extension is not built.\n${_ttc_torch_cxx11_abi_err}"
     )
     return()
-elseif(NOT _ttc_probe_rc EQUAL 0)
+elseif(NOT _ttc_torch_cxx11_abi_rc EQUAL 0)
     message(
         FATAL_ERROR
-        "torch_trace_collector: torch probe failed via ${_ttc_python}:\n${_ttc_probe_err}"
+        "torch_trace_collector: failed to read the CXX11 ABI via "
+        "${_ttc_python}:\n${_ttc_torch_cxx11_abi_err}"
     )
 endif()
 
-string(REPLACE ";" "\\;" _ttc_probe_escaped "${_ttc_probe}")
-string(REPLACE "\n" ";" _ttc_probe_lines "${_ttc_probe_escaped}")
-list(GET _ttc_probe_lines 0 _py_major)
-list(GET _ttc_probe_lines 1 _py_minor)
-list(GET _ttc_probe_lines 2 _torch_version)
-list(GET _ttc_probe_lines 3 _src_fingerprint)
-list(GET _ttc_probe_lines 4 _torch_cxx11_abi)
+if(TORCH_TRACE_SOURCE_FINGERPRINT)
+    set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
+else()
+    execute_process(
+        COMMAND
+            "${_ttc_python}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_fingerprint.py"
+        OUTPUT_VARIABLE _src_fingerprint
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_VARIABLE _ttc_fingerprint_err
+        RESULT_VARIABLE _ttc_fingerprint_rc
+    )
+    if(NOT _ttc_fingerprint_rc EQUAL 0)
+        message(
+            FATAL_ERROR
+            "torch_trace_collector: failed to compute the source fingerprint:\n${_ttc_fingerprint_err}"
+        )
+    endif()
+endif()
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
@@ -106,7 +124,7 @@ set(_so_name "torch_trace_collector-${_tag}")
 
 message(STATUS "torch_trace_collector: building against ${_ttc_python} (tag ${_tag})")
 
-# Pin Python3 to the probed interpreter for this directory only. FindPython3
+# Pin Python3 to this interpreter for this directory only. FindPython3
 # records its result in private _Python3_* cache entries that outlive this
 # directory, so they are saved here and restored after the call below.
 set(_ttc_saved_python_vars "")
