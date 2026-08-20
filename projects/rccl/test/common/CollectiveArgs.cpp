@@ -158,7 +158,10 @@ namespace RcclUnitTesting
                                          this->expectedGpu.ptr,
                                          mismatches));
       isMatch = (mismatches == 0);
-      if (!isMatch) TEST_ERROR("Mismatch (%zu elements) for %s", mismatches, this->GetDescription().c_str());
+      if (!isMatch)
+      {
+        TEST_ERROR("Mismatch (%zu elements) for %s", mismatches, this->GetDescription().c_str());
+      }
       return isMatch ? TEST_SUCCESS : TEST_FAIL;
     }
 
@@ -191,7 +194,10 @@ namespace RcclUnitTesting
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
-    if (this->expectedGpu.ptr != nullptr) this->expectedGpu.FreeGpuMem();
+    if (this->expectedGpu.ptr != nullptr)
+    {
+      this->expectedGpu.FreeGpuMem();
+    }
 
     if (this->localScalar.ptr != nullptr)
     {
