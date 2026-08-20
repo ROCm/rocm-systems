@@ -81,14 +81,6 @@ if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
 endif()
 set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
 
-if(NOT TORCH_TRACE_CXX11_ABI MATCHES "^[01]$")
-    message(
-        FATAL_ERROR
-        "torch_trace_collector: TORCH_TRACE_CXX11_ABI must be 0 or 1."
-    )
-endif()
-set(_torch_cxx11_abi "${TORCH_TRACE_CXX11_ABI}")
-
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
 set(_tag "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}")
@@ -244,6 +236,11 @@ target_link_libraries(
     PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB} synchronized gsl_assert
 )
 target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
+# Official ROCm libtorch 2.10+ is CXX11 ABI.
+target_compile_definitions(
+    torch-trace-collector
+    PUBLIC _GLIBCXX_USE_CXX11_ABI=1
+)
 target_compile_options(
     torch-trace-collector
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations

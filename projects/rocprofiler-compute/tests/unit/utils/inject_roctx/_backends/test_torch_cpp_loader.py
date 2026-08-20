@@ -18,7 +18,6 @@ from utils.inject_roctx._backends import torch_cpp_loader as inject_roctx_loader
 from utils.inject_roctx._backends import torch_trace_fingerprint
 
 _FAKE_TAG = "py3.12_torch2.9_src000000000000"
-_FAKE_CXX11_ABI = "1"
 
 
 # ---------------------------------------------------------------------------
@@ -54,18 +53,6 @@ def test_compute_tag_returns_well_formed_string():
 def test_compute_tag_is_stable_across_calls():
     """``compute_tag()`` returns the same value for repeated calls in one process."""
     assert inject_roctx_loader.compute_tag() == inject_roctx_loader.compute_tag()
-
-
-def test_tag_and_cxx11_abi_matches_loaded_torch():
-    """The ABI passed to cmake is ``int(torch.compiled_with_cxx11_abi())``."""
-    identity = inject_roctx_loader._tag_and_cxx11_abi()
-    if identity is None:
-        pytest.skip("torch not importable")
-    tag, abi = identity
-    import torch
-
-    assert abi == str(int(torch.compiled_with_cxx11_abi()))
-    assert tag == inject_roctx_loader.compute_tag()
 
 
 def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
@@ -264,6 +251,24 @@ def test_cmake_buildfile_strips_lib_prefix():
     active_src = "\n".join(active_lines)
 
     assert re.search(r'PREFIX\s+""', active_src), 'must set PREFIX ""'
+
+
+def test_cmake_buildfile_hardcodes_cxx11_abi():
+    """Official ROCm libtorch 2.10+ is CXX11 ABI."""
+    cmake_path = inject_roctx_loader._SO_BUILDFILE
+    active_lines = [
+        line
+        for line in cmake_path.read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    active_src = "\n".join(active_lines)
+
+    assert "PUBLIC _GLIBCXX_USE_CXX11_ABI=1" in active_src, (
+        "the collector must compile with CXX11 ABI to match ROCm libtorch 2.10+"
+    )
+    assert "TORCH_TRACE_CXX11_ABI" not in active_src, (
+        "ABI must not be a configure cache variable"
+    )
 
 
 def test_loader_and_cmake_agree_on_artifact_filename_shape():
@@ -467,9 +472,7 @@ def test_runtime_build_skips_when_sources_missing(monkeypatch, tmp_path):
         "_cmake_executable",
         lambda: pytest.fail("cmake must not be consulted when sources are missing"),
     )
-    assert inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, cxx11_abi=_FAKE_CXX11_ABI
-    ) is None
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is None
 
 
 def test_runtime_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
@@ -478,9 +481,7 @@ def test_runtime_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: None)
     instances = _patch_finder(monkeypatch)
 
-    assert inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, cxx11_abi=_FAKE_CXX11_ABI
-    ) is None
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is None
     assert instances == [], "cmake absence must be detected before the finder runs"
 
 
@@ -488,7 +489,7 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
     monkeypatch, tmp_path
 ):
     """The finder is asked for the tagged artifact and target, and cmake is told
-    which interpreter, source fingerprint, and CXX11 ABI to build against.
+    which interpreter and source fingerprint to build against.
     """
     _set_so_inputs_present(monkeypatch, tmp_path)
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
@@ -507,9 +508,7 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
         lambda _n, _p: sentinel,
     )
 
-    assert inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, cxx11_abi=_FAKE_CXX11_ABI
-    ) is sentinel
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is sentinel
     assert len(instances) == 1, f"expected one finder, saw {instances!r}"
     finder = instances[0]
     assert finder.artifact_name == f"torch_trace_collector-{_FAKE_TAG}.so"
@@ -527,12 +526,14 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
         f"-DTORCH_TRACE_SOURCE_FINGERPRINT must be the tag's src suffix; "
         f"saw {finder.configure_options!r}"
     )
-    assert f"-DTORCH_TRACE_CXX11_ABI={_FAKE_CXX11_ABI}" in finder.configure_options, (
-        f"-DTORCH_TRACE_CXX11_ABI must equal {_FAKE_CXX11_ABI!r}; "
-        f"saw {finder.configure_options!r}"
-    )
     assert "-DBUILD_TORCH_TRACE_COLLECTOR=ON" in finder.configure_options, (
         "the extension must be required so an absent torch is an error"
+    )
+    assert not any(
+        opt.startswith("-DTORCH_TRACE_CXX11_ABI=") for opt in finder.configure_options
+    ), (
+        "CXX11 ABI is hardcoded in CMakeLists.txt; the loader must not pass it; "
+        f"saw {finder.configure_options!r}"
     )
     assert finder.cmake_executable == "/fake/cmake"
     assert finder.search_installed is True
@@ -567,7 +568,7 @@ def test_runtime_build_force_rebuild_discards_the_build_directory(
     )
 
     result = inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, cxx11_abi=_FAKE_CXX11_ABI, force_rebuild=True
+        _FAKE_TAG, force_rebuild=True
     )
 
     assert result is not None
@@ -601,7 +602,7 @@ def test_runtime_build_returns_none_and_classifies_a_cmake_failure(
 
     diagnostics: list[tuple[str, str]] = []
     result = inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, cxx11_abi=_FAKE_CXX11_ABI, diagnostics=diagnostics
+        _FAKE_TAG, diagnostics=diagnostics
     )
 
     assert result is None
@@ -666,7 +667,7 @@ def test_explain_cmake_failure_never_recommends_installing_ninja():
 def test_rebuild_env_var_skips_prebuilt_and_forces_a_rebuild(monkeypatch):
     """REBUILD=1 routes directly to the runtime build, skipping the prebuilt tier."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     calls = []
     monkeypatch.setattr(
@@ -695,7 +696,7 @@ def test_rebuild_env_var_skips_prebuilt_and_forces_a_rebuild(monkeypatch):
 def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
     """Under REBUILD, a failing build yields ``None`` with no fallback."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.setattr(
         inject_roctx_loader,
@@ -714,7 +715,7 @@ def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
 def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
     """The prebuilt tier short-circuits the default load path."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     calls = []
@@ -740,7 +741,7 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
 def test_default_load_path_walks_prebuilt_then_runtime_build(monkeypatch):
     """Tiers are tried in order: prebuilt, then runtime build."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     calls = []
@@ -765,7 +766,7 @@ def test_default_load_path_walks_prebuilt_then_runtime_build(monkeypatch):
 
 def test_load_does_not_raise_when_torch_missing(monkeypatch):
     """``load()`` returns ``None`` when ``torch`` is not importable."""
-    monkeypatch.setattr(inject_roctx_loader, "_tag_and_cxx11_abi", lambda: None)
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: None)
     assert inject_roctx_loader.load().module is None
 
 
@@ -792,7 +793,7 @@ def test_load_returns_module_or_none_no_raise():
 def test_load_result_records_successful_tier(monkeypatch):
     """``LoadResult.tier`` reports the name of the tier that returned a module."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     sentinel = object()
@@ -813,7 +814,7 @@ def test_load_result_records_successful_tier(monkeypatch):
 def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
     """``LoadResult.tier`` is ``None`` when every tier returns ``None``."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
@@ -832,7 +833,7 @@ def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
 def test_load_returns_independent_diagnostics(monkeypatch):
     """Each ``load()`` call returns its own diagnostics list."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
@@ -867,7 +868,7 @@ def test_safe_log_appends_to_provided_diagnostics():
 def test_load_result_carries_tier_and_diagnostics(monkeypatch):
     """``load()`` returns the tier scalar and a diagnostics list."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
@@ -887,7 +888,7 @@ def test_load_result_carries_tier_and_diagnostics(monkeypatch):
 def test_load_result_returns_python_tier_failure_trail(monkeypatch):
     """When every tier misses the trail includes the terminal fallback line."""
     monkeypatch.setattr(
-        inject_roctx_loader, "_tag_and_cxx11_abi", lambda: (_FAKE_TAG, _FAKE_CXX11_ABI)
+        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
     )
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
