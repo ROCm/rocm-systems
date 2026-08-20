@@ -4950,6 +4950,134 @@ TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeRejectsNestedFrameClobber) {
   }));
 }
 
+struct Gfx1250RecoveredBranchCalleeProgram {
+  std::vector<uint32_t> words;
+  uint64_t origin_consumer_offset = 0;
+  uint64_t final_consumer_offset = 0;
+  uint64_t target_offset = 0;
+  uint64_t callee_offset = 0;
+  uint64_t internal_branch_offset = 0;
+  uint64_t relay_offset = 0;
+};
+
+Gfx1250RecoveredBranchCalleeProgram
+build_gfx1250_recovered_branch_callee_program(bool clobber_carrier_in_relay) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kBranchSreg = 60;
+  constexpr uint16_t kCarrierVgpr = 41;
+  constexpr uint16_t kLowLane = 128 + 12;
+  constexpr uint16_t kHighLane = 128 + 13;
+
+  Gfx1250RecoveredBranchCalleeProgram program;
+  const auto append = [&](const auto &encoded) {
+    program.words.insert(program.words.end(), encoded.begin(), encoded.end());
+  };
+  const auto offset = [&] {
+    return static_cast<uint64_t>(program.words.size()) * sizeof(uint32_t);
+  };
+
+  // Keep the reusable target in bank-one v41 (physical v297), outside the
+  // architecture ABI's v0-v255 callee-saved table.  The later recovery must
+  // therefore prove the complete helper body, including its internal SETPC
+  // relay, rather than succeeding through an ABI shortcut.
+  program.words.push_back(cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41})[0]);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kTargetSreg, 0));
+  const uint64_t target_getpc_next = offset();
+  append(cdna5::build_sop2(cdna5::kSAddNcU64Sop2,
+                           {.ssrc0 = kTargetSreg, .ssrc1 = 254, .sdst = kTargetSreg}));
+  const size_t target_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(0);
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg, kLowLane));
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg + 1, kHighLane));
+  program.origin_consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kReturnSreg, kTargetSreg));
+  const size_t preserving_call_word = program.words.size();
+  program.words.push_back(0);
+  append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, kLowLane));
+  append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, kHighLane));
+  program.final_consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kReturnSreg, kTargetSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  program.target_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
+
+  // This compact helper models a generated long-branch island followed by an
+  // out-of-line instrumentation relay.  Its SETPC is recovered exactly from
+  // the local getpc/add builder and is an internal branch, not a return.
+  program.callee_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kBranchSreg, 0));
+  const uint64_t relay_getpc_next = offset();
+  append(cdna5::build_sop2(cdna5::kSAddNcU64Sop2,
+                           {.ssrc0 = kBranchSreg, .ssrc1 = 254, .sdst = kBranchSreg}));
+  const size_t relay_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(0);
+  program.internal_branch_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kBranchSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.relay_offset = offset();
+  if (clobber_carrier_in_relay) {
+    program.words.push_back(cdna5::build_vop1(cdna5::kVMovB32Vop1,
+                                              {.src0 = /*inline 0=*/128, .vdst = kCarrierVgpr})[0]);
+  } else {
+    program.words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  }
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
+
+  const uint64_t target_delta = program.target_offset - target_getpc_next;
+  program.words[target_delta_word] = static_cast<uint32_t>(target_delta);
+  program.words[target_delta_word + 1] = static_cast<uint32_t>(target_delta >> 32);
+  const uint64_t relay_delta = program.relay_offset - relay_getpc_next;
+  program.words[relay_delta_word] = static_cast<uint32_t>(relay_delta);
+  program.words[relay_delta_word + 1] = static_cast<uint32_t>(relay_delta >> 32);
+  const int64_t preserving_call_next =
+      static_cast<int64_t>(preserving_call_word + 1u) * sizeof(uint32_t);
+  const int64_t preserving_call_delta =
+      static_cast<int64_t>(program.callee_offset) - preserving_call_next;
+  program.words[preserving_call_word] = rocjitsu::build_s_call_b64(
+      kReturnSreg, static_cast<int16_t>(preserving_call_delta / sizeof(uint32_t)),
+      ROCJITSU_CODE_ARCH_GFX1250);
+  return program;
+}
+
+TEST(CfgAnalysis, Gfx1250CalleeFollowsRecoveredInternalBranchToPreserveLaneTarget) {
+  const auto program = build_gfx1250_recovered_branch_callee_program(false);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.internal_branch_offset &&
+           fixup.source_target_offset == program.relay_offset && !fixup.source_is_call &&
+           !fixup.source_incomplete && fixup.source_targets_exhaustive;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.origin_consumer_offset &&
+           fixup.source_target_offset == program.target_offset;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset &&
+           fixup.source_target_offset == program.target_offset && !fixup.source_incomplete &&
+           fixup.source_targets_exhaustive;
+  }));
+}
+
+TEST(CfgAnalysis, Gfx1250CalleeRecoveredInternalBranchStillRejectsLaneClobber) {
+  const auto program = build_gfx1250_recovered_branch_callee_program(true);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.internal_branch_offset &&
+           fixup.source_target_offset == program.relay_offset;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  }));
+}
+
 Gfx1250ScratchLaneTargetProgram
 build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode_write) {
   constexpr uint16_t kTargetSreg = 0;

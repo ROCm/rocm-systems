@@ -4579,6 +4579,29 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
       }
 
       if (facts.setpc_ssrc) {
+        // A recovered SETPC inside a callee is an internal branch, not the
+        // callee's return.  Instrumentation detours use exactly this shape:
+        // a direct branch reaches a getpc/add/setpc island, which transfers to
+        // an out-of-line relay and eventually rejoins the original function.
+        // Follow every proven target while carrying the preservation state
+        // through the relay.  Treating the island SETPC as a return would ask
+        // whether its temporary target pair still held the caller's return PC
+        // and conservatively reject otherwise-preserving instrumented callees.
+        bool recovered_internal_branch = false;
+        for (const IndirectCallFixup &fixup : recovered) {
+          if (fixup.source_call_offset != term.src_loc() || fixup.source_is_call ||
+              fixup.source_call_selector != *facts.setpc_ssrc)
+            continue;
+          recovered_internal_branch = true;
+          if (fixup.source_incomplete || !fixup.source_targets_exhaustive)
+            return false;
+          const auto target = block_by_offset.find(fixup.source_target_offset);
+          if (target == block_by_offset.end() || !propagate(target->second, state))
+            return false;
+        }
+        if (recovered_internal_branch)
+          continue;
+
         if (!state_has_sgpr_pair(state, *facts.setpc_ssrc)) {
           return false;
         }
