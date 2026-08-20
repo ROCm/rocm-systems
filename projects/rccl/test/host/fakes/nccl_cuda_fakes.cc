@@ -10,46 +10,14 @@
 #include <vector>
 
 #include "nccl.h"
-#include "alloc.h"        // allocationTracker, ncclCuMemEnable
+#include "alloc.h"        // ncclCuMemEnable
 #include "rocmwrap.h"     // ncclCuMemHandleType
-#include "archinfo.h"     // IsArchMatch
-#include "utils.h"        // busIdToInt64
-#include "graph.h"        // getBusId
 
 #include "nccl_fakes.h"    // reusable nccl* fakes + their reset
 #include "nccl_cuda_fakes.h" // controllable seam hooks
 #include "hip_fakes.h"     // ResetHipFakes
 
 #include <type_traits>
-
-// ---------------------------------------------------------------------------
-// Trivial globals
-// ---------------------------------------------------------------------------
-
-// allocTracker is an array of per-device counters in alloc.h; size it to
-// the same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
-struct allocationTracker allocTracker[32 /* MAX_ALLOC_TRACK_NGPU */] = {};
-
-// ---------------------------------------------------------------------------
-// Arch / topology / busId helpers
-// ---------------------------------------------------------------------------
-
-bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
-{
-    return false;
-}
-
-ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
-{
-    if (id) *id = 0;
-    return ncclSuccess;
-}
-
-ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
-{
-    if (busId) *busId = 0;
-    return ncclSuccess;
-}
 
 // ---------------------------------------------------------------------------
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync
