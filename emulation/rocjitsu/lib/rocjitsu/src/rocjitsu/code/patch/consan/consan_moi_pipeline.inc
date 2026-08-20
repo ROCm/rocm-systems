@@ -621,6 +621,10 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     }
     if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
       return;
+    std::ranges::sort(candidates, {}, [](const BarrierRecordCandidate &candidate) {
+      return candidate.site.text_offset;
+    });
+    erase_redundant_adjacent_full_barrier_candidates(candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
       const BarrierRecordCandidate &candidate = candidates[index];
       result.resource_plans.push_back(plan_moi_resource_site(
@@ -849,6 +853,7 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
+  const ConSanBarrierSite *previous_site = nullptr;
   for (const ConSanBarrierSite &site : container.barrier_sites) {
     if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
         site.operation == ConSanBarrierSite::Operation::Signal) {
@@ -862,10 +867,14 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
         continue;
     }
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
+    const bool redundant =
+        previous_site != nullptr && redundant_adjacent_full_barrier(*previous_site, site);
     const bool unavailable_cluster_form =
         site.scope == ConSanBarrierSite::Scope::Cluster &&
         !consan_arch_supports_capability_form(result.arch, ConSanCapabilityForm::ClusterBarrier);
-    if (unavailable_cluster_form) {
+    if (redundant) {
+      reason = ConSanSiteDispositionReason::RedundantAdjacentBarrier;
+    } else if (unavailable_cluster_form) {
       reason = ConSanSiteDispositionReason::UnsupportedScope;
     } else if (options.moi_engine == ConSanMoiEngine::Sampled) {
       const ConSanSyncEvent *event = sync_index.event(ConSanSyncEventKind::Barrier, container.name,
@@ -882,7 +891,8 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
     }
     append_moi_site_disposition(ConSanResourceSiteKind::Barrier, container.name, in_kernel,
                                 site.text_offset, site.mnemonic, reason, result,
-                                unavailable_cluster_form);
+                                redundant || unavailable_cluster_form);
+    previous_site = &site;
   }
 }
 

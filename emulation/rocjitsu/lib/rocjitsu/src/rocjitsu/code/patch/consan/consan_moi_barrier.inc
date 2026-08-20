@@ -42,6 +42,33 @@ struct BarrierRecordCandidate {
       consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
+[[nodiscard]] bool redundant_adjacent_full_barrier(const ConSanBarrierSite &previous,
+                                                   const ConSanBarrierSite &current) {
+  return previous.operation == ConSanBarrierSite::Operation::Full &&
+         current.operation == ConSanBarrierSite::Operation::Full && previous.size != 0u &&
+         previous.text_offset + previous.size == current.text_offset;
+}
+
+void erase_redundant_adjacent_full_barrier_candidates(
+    std::vector<BarrierRecordCandidate> &candidates) {
+  std::vector<BarrierRecordCandidate> retained;
+  retained.reserve(candidates.size());
+  std::optional<ConSanBarrierSite> previous_site;
+  std::string previous_container_name;
+  bool previous_in_kernel = true;
+  for (BarrierRecordCandidate &candidate : candidates) {
+    const bool redundant = previous_site && previous_container_name == candidate.container_name &&
+                           previous_in_kernel == candidate.in_kernel &&
+                           redundant_adjacent_full_barrier(*previous_site, candidate.site);
+    previous_site = candidate.site;
+    previous_container_name = candidate.container_name;
+    previous_in_kernel = candidate.in_kernel;
+    if (!redundant)
+      retained.push_back(std::move(candidate));
+  }
+  candidates = std::move(retained);
+}
+
 class MoiPatchAnchorRangeIndex {
 public:
   explicit MoiPatchAnchorRangeIndex(const ConSanResult &result) {
@@ -653,6 +680,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
+  erase_redundant_adjacent_full_barrier_candidates(candidates);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline-shadow barrier epoch patch found no barriers");
     return;
@@ -2107,6 +2135,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
+  erase_redundant_adjacent_full_barrier_candidates(candidates);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI barrier record patch found no barriers");
     return;

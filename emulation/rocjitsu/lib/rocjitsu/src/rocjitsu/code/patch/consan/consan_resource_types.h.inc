@@ -50,6 +50,7 @@ enum class ConSanSiteDispositionReason : uint8_t {
   IneligibleFence,
   MissingCommunicationEvent,
   InvalidBarrierEncoding,
+  RedundantAdjacentBarrier,
 };
 
 /// Durable final outcome for a semantically inventoried site. Unlike

@@ -6257,6 +6257,59 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   EXPECT_GT(only_non_entry_prologue_patch(result).trampoline_size, 0u);
 }
 
+TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(barrier);
+  const std::array<uint32_t, 3> text_words = {
+      *barrier,
+      *barrier,
+      build_s_endpgm(kArch),
+  };
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.moi_owner_vgpr = 14u;
+  options.moi_epoch_vgpr = 15u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 1u);
+  options.max_patches = 2u;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "adjacent_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  std::vector<const ConSanPatchInfo *> barriers;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord)
+      barriers.push_back(&patch);
+  }
+  ASSERT_EQ(barriers.size(), 1u);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels[0].barrier_sites.size(), 2u);
+  EXPECT_EQ(barriers[0]->anchor_offset, result.kernels[0].barrier_sites[0].text_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> second_barrier = text_words_at_offset(
+      patched, result.kernels[0].barrier_sites[1].text_offset, sizeof(uint32_t));
+  ASSERT_EQ(second_barrier.size(), 1u);
+  EXPECT_EQ(second_barrier.front(), *barrier);
+  const auto redundant_disposition = std::ranges::find(
+      result.site_dispositions, ConSanSiteDispositionReason::RedundantAdjacentBarrier,
+      &ConSanSiteDispositionRecord::reason);
+  ASSERT_NE(redundant_disposition, result.site_dispositions.end());
+  EXPECT_EQ(redundant_disposition->disposition, ConSanSiteDisposition::NotApplicable);
+  EXPECT_EQ(redundant_disposition->lowering_outcome, ConSanSiteLoweringOutcome::NotApplicable);
+  EXPECT_STREQ(consan_site_disposition_reason_name(redundant_disposition->reason),
+               "redundant_adjacent_barrier");
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, BarrierRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   constexpr size_t kLargeTextWords = 33000u;
   std::vector<uint32_t> text_words = {

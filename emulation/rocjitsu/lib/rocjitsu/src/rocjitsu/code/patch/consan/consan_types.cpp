@@ -410,6 +410,8 @@ const char *consan_site_disposition_reason_name(ConSanSiteDispositionReason reas
     return "missing_communication_event";
   case ConSanSiteDispositionReason::InvalidBarrierEncoding:
     return "invalid_barrier_encoding";
+  case ConSanSiteDispositionReason::RedundantAdjacentBarrier:
+    return "redundant_adjacent_barrier";
   }
   return "unknown";
 }
