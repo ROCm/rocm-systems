@@ -6,6 +6,7 @@
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include <cstdint>
 
@@ -156,13 +157,14 @@ struct client_data
     // Unconditional so client_data has one layout regardless of ROCPROFSYS_USE_SPM.
     // A translation unit that misses the macro would otherwise see a shorter struct
     // and read past the end of every member below.
-    common::synchronized<agent_spm_counter_config_map_t> agent_spm_counter_configs = {};
-    std::atomic<std::uint64_t>                           spm_data_loss_reports{ 0 };
-    common::synchronized<code_object_vec_t>              code_object_records   = {};
-    common::synchronized<kernel_symbol_vec_t>            kernel_symbol_records = {};
-    buffer_name_info_t                                   buffered_tracing_info = {};
-    callback_name_info_t                                 callback_tracing_info = {};
-    backtrace_operation_map_t                            backtrace_operations  = {};
+    common::synchronized<agent_spm_counter_config_map_t, state::thread>
+                                                           agent_spm_counter_configs = {};
+    std::atomic<std::uint64_t>                             spm_data_loss_reports{ 0 };
+    common::synchronized<code_object_vec_t, state::thread> code_object_records     = {};
+    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records = {};
+    buffer_name_info_t                                       buffered_tracing_info = {};
+    callback_name_info_t                                     callback_tracing_info = {};
+    backtrace_operation_map_t                                backtrace_operations  = {};
 
     void                        initialize();
     void                        initialize_event_info();

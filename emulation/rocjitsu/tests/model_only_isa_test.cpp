@@ -24,10 +24,10 @@ TEST(ModelOnlyIsaTest, DecodesWithoutExecutionCallback) {
 
   const IsaTargetRegistry &registry = default_isa_target_registry();
   ASSERT_EQ(registry.targets().size(), 1u);
-  EXPECT_EQ(registry.targets()[0].id, "gfx1250");
+  EXPECT_EQ(registry.targets()[0].id, "cdna5");
   EXPECT_FALSE(registry.targets()[0].supports_execution);
 
-  std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_GFX1250);
+  std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(Decoder::create(registry, ROCJITSU_CODE_ARCH_RDNA4), nullptr);
 

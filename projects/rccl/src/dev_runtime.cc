@@ -1838,6 +1838,18 @@ NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* ptr, size_
          int winFlags);
 ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, size_t userSize,
                                          struct ncclWindow_vidmem** outWinDev, int winFlags) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(outWinDev, __func__, "win"));
+  *outWinDev = nullptr;
+  if (userPtr == nullptr || userSize == 0) {
+    WARN("%s: invalid pointer %p / size %zu", __func__, userPtr, userSize);
+    return ncclInvalidArgument;
+  }
+
+  if (!comm->symmetricSupport && !comm->hostRmaSupport) {
+    return ncclSuccess;
+  }
+
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrRegTask* task;

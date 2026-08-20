@@ -75,7 +75,7 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 namespace rocjitsu::test::cdna5 {
 
-inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
+inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 
 inline constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 inline constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -323,7 +323,7 @@ inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;

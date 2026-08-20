@@ -35,6 +35,14 @@ ll128_reg_variant_colls = {"AllReduce", "AllGather", "Broadcast"}
 def reg_values_of(coll, proto):
   if proto == "LL128" and coll in ll128_reg_variant_colls:
     return ["1", "2"]
+  # SendRecv is generated as two latency-protocol kernel variants, selected on the
+  # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
+  #   reg "0" = legacy LL latency path (built on every arch; the default)
+  #   reg "1" = LL128 latency path (built for gfx942/gfx950 only; used when
+  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
+  if coll == "SendRecv":
+    return ["0", "1"]
   return ["0"]
 
 ################################################################################
@@ -278,6 +286,12 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
     return False
   if coll == "" or algo == "":
     return False
+  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, which never
+  # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
+  # device linker would skip compiling them for gfx942 while the dispatch table still expected
+  # them (undefined-symbol link error).
+  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
+    return False
   if not is_rocshmem and coll in gda_colls:
     return False
   if (algo not in algos_of_coll[coll] or
@@ -402,7 +416,11 @@ def custom_sort_key(fn: Fn):
 def get_arch_guard(fn):
   cond = None
 
-  if fn.unroll in ("8", "16", "32"):
+  if fn.coll == "SendRecv" and fn.reg == "1":
+      # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
+      # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
+      cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+  elif fn.unroll in ("8", "16", "32"):
       cond = "defined(__gfx1250__)"
   elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
@@ -578,7 +596,11 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       )
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
-      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
+      if fn.coll == "SendRecv":
+        # SendRecv has two latency-protocol variants distinguished by reg (0=LL, 1=LL128).
+        # reg=0 keeps the historical coll-only key for backward compatibility.
+        key = ((coll_idx & 0x3F) | ((reg_idx & 0xF) << 28))
+      if fn.coll in ["AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')

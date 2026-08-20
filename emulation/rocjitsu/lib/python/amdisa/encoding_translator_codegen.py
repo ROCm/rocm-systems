@@ -18,10 +18,10 @@ Fields are classified as:
 Usage::
 
     from amdisa import Parser
-    from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+    from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
     from amdisa.encoding_translator_codegen import generate_encoding_translators
 
-    cdna4 = Parser('amdgpu_isa_cdna4.xml', CdnaProfile()).parse()
+    cdna4 = Parser('amdgpu_isa_cdna4.xml', Cdna4Profile()).parse()
     rdna4 = Parser('amdgpu_isa_rdna4.xml', Rdna4Profile()).parse()
     generate_encoding_translators(cdna4, rdna4, 'cdna4', 'rdna4', 'output/')
 """
