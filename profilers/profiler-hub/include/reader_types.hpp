@@ -25,12 +25,11 @@ using timestamp_t = size_t;
 /// Opaque track identifier. Treat as opaque: the only portable operations are equality,
 /// ordering, hashing (so it can key a map), and reading value() — i.e. the public `value`
 /// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB
-/// identity; do not synthesize or do arithmetic on it. (Spec §3: struct
-/// track_id_t{value}.) DESIGN DECISION (deviation, 2026-07-27): the underlying integer is
-/// size_t, not the spec's uint32_t, so real DB ids cannot truncate and the consumer's
-/// SIZE_MAX invalid sentinel survives round-trips. Deliberately UNLIKE
-/// event_id_t/flow_id_t (which fully hide their value): a track id is a stable DB
-/// identity the consumer must serialize, so the integer stays publicly reachable.
+/// identity; do not synthesize or do arithmetic on it. The underlying integer is size_t,
+/// not uint32_t, so real DB ids cannot truncate and the consumer's SIZE_MAX invalid
+/// sentinel survives round-trips. Unlike event_id_t/flow_id_t (which fully hide their
+/// value), a track id is a stable DB identity the consumer must serialize, so the integer
+/// stays publicly reachable.
 struct track_id_t
 {
     size_t value{};
@@ -69,13 +68,9 @@ struct time_window_t
     };  ///< Window upper bound (ns); unset = open
 };
 
-// DESIGN DECISION (deviation, 2026-07-23): track reads chunk with
-// pagination_t{limit,offset} only — a straight window into the ordered event list. There
-// is NO level-of-detail / max_records decimation on track reads; the draft's LOD knob is
-// deferred. (Flow-edge decimation IS implemented, as max_edges on get_flows_in_window —
-// see reader.hpp.) Open for Anthony review — see
-// design/gap_analysis_current_vs_design_2026-07-23.md §3.5,
-// design/draft_api_2026-06-22.md §10.
+// Track reads chunk with pagination_t{limit, offset} only — a straight window into the
+// ordered event list. There is no level-of-detail decimation on track reads; flow-edge
+// decimation is available as max_edges on get_flows_in_window (see reader.hpp).
 struct pagination_t
 {
     std::optional<size_t> limit{ std::nullopt };   ///< Max events to return
@@ -312,13 +307,9 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  * the caller calls get_interval_track() or get_scalar_track(), and which
  * get_*_details() method applies to event handles drawn from that track.
  */
-// DESIGN DECISION (deviation, 2026-07-23): track_type_t is DOMAIN-first (cpu_thread,
-// gpu_queue, dma, counter, ...) and is the reader's dispatch key. The draft wanted a
-// SHAPE-first model (track_shape_t{scalar,interval} + a separate track_category_t
-// metadata field); here shape is IMPLIED by which accessor applies (get_interval_track vs
-// get_scalar_track). Deliberate, inherent to the incremental reader_t path — not a gap.
-// Open for Anthony review — see design/gap_analysis_current_vs_design_2026-07-23.md §2.3,
-// design/draft_api_2026-06-22.md principle #1.
+// track_type_t is domain-first (cpu_thread, gpu_queue, dma, counter, ...) and is the
+// reader's dispatch key; shape is implied by which accessor applies (get_interval_track
+// vs get_scalar_track).
 enum class track_type_t
 {
     cpu_thread,  ///< thread_info populated. Interval track of region events.
@@ -386,13 +377,11 @@ enum class region_track_kind_t
  */
 enum class nesting_model_t
 {
-    // DESIGN DECISION (gap #2, 2026-07-20): a track is `stack` only when its overlaps
-    // are true synchronous containment (region = HIP->HSA API call nesting); every
-    // concurrency track (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`,
-    // where overlap means concurrency, not a parent/child edge. Only `stack` tracks
-    // populate interval_entry_t::parent. Per draft principle #4/#6 + §5.
-    // Open for Anthony review — see design/draft_api_2026-06-22.md §4-6,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // A track is `stack` only when its overlaps are true synchronous containment
+    // (region = HIP->HSA API call nesting); every concurrency track
+    // (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`, where overlap means
+    // concurrency, not a parent/child edge. Only `stack` tracks populate
+    // interval_entry_t::parent.
     stack,  ///< Overlaps are true containment: interval_entry_t::parent is populated and
             ///< `lane` coincides with call depth on real (non-overlapping-sibling) data.
     lane,   ///< Overlaps are concurrency: interval_entry_t::parent is always no-parent;
@@ -413,13 +402,10 @@ struct track_info_t
     std::string name{};
     std::string extdata{};
 
-    // DESIGN DECISION (deviation, 2026-07-23): identity is carried as relational
-    // shared_ptr objects (node/process/thread/agent/queue/stream/pmc), sharing one
-    // instance across every track that references it. The draft wanted flat scalar ids
-    // (node_id/process_id/ sub_process_id) shaped for a C-ABI. Relational topology is
-    // deliberate; the flattened-id + C-ABI shim is deferred, not a gap. Open for Anthony
-    // review — see design/gap_analysis_current_vs_design_2026-07-23.md §2.4,
-    // design/draft_api_2026-06-22.md §8.
+    // Identity is carried as relational shared_ptr objects
+    // (node/process/thread/agent/queue/stream/pmc), sharing one instance across every
+    // track that references it. There is no flat scalar-id (node_id/process_id/
+    // sub_process_id) or C-ABI form.
     std::shared_ptr<node_info_t>    node_info;     ///< Always populated.
     std::shared_ptr<process_info_t> process_info;  ///< Always populated.
     std::shared_ptr<thread_info_t>  thread_info;   ///< cpu_thread, counter.
@@ -430,12 +416,9 @@ struct track_info_t
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
     std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter, kernel_dispatch_pmc.
 
-    // DESIGN DECISION (gap #2, 2026-07-20): nesting_model gates whether
-    // interval_entry_t::parent is populated for this track's events (stack only);
-    // max_lane exposes the track's peak concurrency so height consumers can migrate off
-    // the deprecated interval_entry_t::level. Open for Anthony review — see
-    // design/draft_api_2026-06-22.md §4-6,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // nesting_model gates whether interval_entry_t::parent is populated for this track's
+    // events (stack only); max_lane exposes the track's peak concurrency so height
+    // consumers can migrate off the deprecated interval_entry_t::level.
     nesting_model_t nesting{
         nesting_model_t::lane
     };  ///< stack = containment (parent populated); lane = concurrency (no parent).
@@ -513,8 +496,8 @@ struct arg_data_t
 using arg_data_ptr_t  = std::shared_ptr<arg_data_t>;
 using arg_data_list_t = std::vector<arg_data_ptr_t>;
 
-// DESIGN DECISION (gap#4, 2026-07-20): detail property values are a typed variant, not
-// stringly. This deliberately mirrors the SDK rocpd writer's `struct sql_insert_value`
+// Detail property values are a typed variant, not stringly. This mirrors the SDK rocpd
+// writer's `struct sql_insert_value`
 // (rocprofiler-sdk/source/lib/output/generateRocpd.cpp) — the exact read/write seam
 // profiler-hub sits opposite — which uses the same alternatives. We define our own copy
 // rather than depend on the SDK header. `monostate` = present-but-empty; `nullptr_t` =
@@ -715,10 +698,6 @@ struct flow_id_access;
  * get_*_details() accessor of interest; the reader recovers internally which
  * source table and row it names.
  */
-// DESIGN DECISION (task 028, 2026-07-23): the opacity above is deliberate — the private
-// encoding leaks no rocpd row id and needs no companion type tag; only ==/</hash are
-// public. Open for Anthony review — see
-// design/gap_analysis_current_vs_design_2026-07-23.md §2.1/A.2.
 class event_id_t
 {
 public:
@@ -768,11 +747,11 @@ struct event_id_access
 /**
  * @brief Unified detail record for any event, keyed by its opaque handle.
  *
- * One collapsed detail path across all six event_type_t cases (gap#4, draft §7): a fixed
- * common header plus a generic `properties` bag of named, typed values. Replaces the
- * seven typed get_*_details() accessors. Linked entities (agent, kernel_symbol,
- * code_object, stream, queue, node/process/thread) appear in `properties` as their
- * integer id, NOT as a resolved sub-struct — consumers do a follow-up lookup by id.
+ * One collapsed detail path across all six event_type_t cases: a fixed common header
+ * plus a generic `properties` bag of named, typed values. Replaces the seven typed
+ * get_*_details() accessors. Linked entities (agent, kernel_symbol, code_object, stream,
+ * queue, node/process/thread) appear in `properties` as their integer id, NOT as a
+ * resolved sub-struct — consumers do a follow-up lookup by id.
  */
 struct event_info_t
 {
@@ -795,15 +774,12 @@ struct interval_entry_t
     std::string display_name;  ///< Human-readable label for the bar.
     std::string category;      ///< Event category display string (e.g. "rocm_hip_api",
                                ///< "timer_sampling"); empty when the event carries none.
-    // DESIGN DECISION (gap #2, 2026-07-20): `level` and `parent_id` were one overloaded
-    // concept; split per draft principle #4/§5. `lane` is the geometric packing row and
-    // is ALWAYS valid; `parent_id` is a true containment edge, populated only on `stack`
-    // tracks (track_info_t::nesting == stack) and carrying the opaque event_id_t (task
-    // 028), never a raw row id. `level` is retained for backward compatibility (Optiq
-    // reads it for height) — stack tracks: containment depth; lane tracks: == lane.
-    // Height consumers should migrate to track_info_t::max_lane. Open for Anthony review
-    // — see design/draft_api_2026-06-22.md §4-5,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // `lane` is the geometric packing row and is always valid; `parent_id` is a true
+    // containment edge, populated only on `stack` tracks (track_info_t::nesting == stack)
+    // and carrying the opaque event_id_t, never a raw row id. `level` is retained for
+    // backward compatibility (Optiq reads it for height) — stack tracks: containment
+    // depth; lane tracks: == lane. Height consumers should migrate to
+    // track_info_t::max_lane.
     int level{};      ///< Deprecated. Nesting depth on stack tracks; == lane on lane
                       ///< tracks. Prefer `lane` (row) + `parent_id` (containment).
     uint32_t lane{};  ///< Geometric packing row so overlapping intervals never collide.
@@ -825,10 +801,8 @@ struct scalar_sample_t
 
 using scalar_sample_list_t = std::vector<scalar_sample_t>;
 
-// DESIGN DECISION (gap #3, 2026-07-20): the flow-edge kind, tagged from the endpoint-type
-// pairing. Reversible mapping (see get_flows). Open for Anthony review — see
-// design/draft_api_2026-06-22.md §5-6,
-// design/gap_analysis_current_vs_design_2026-07-23.md.
+// The flow-edge kind, tagged from the endpoint-type pairing. Reversible mapping (see
+// get_flows).
 enum class flow_kind_t
 {
     launch_to_dispatch,   ///< region -> kernel_dispatch (CPU launch to GPU dispatch).
@@ -876,13 +850,10 @@ struct flow_id_access
 };
 }  // namespace detail
 
-// DESIGN DECISION (gap #3, 2026-07-20): flow is a DIRECTED, TYPED, chain-grouped edge,
-// not the old undirected/untyped {source,dest} pair. Each unordered clique pair yields
-// ONE directed edge (source -> dest); `flow_id` groups the edges of one stack lineage;
+// A flow is a directed, typed, chain-grouped edge. Each unordered clique pair yields
+// one directed edge (source -> dest); `flow_id` groups the edges of one stack lineage;
 // `kind` classifies the edge. Endpoints stay opaque event_id_t. The source/dest field
-// names are kept (over the draft's src/dst) for backward compatibility. Open for Anthony
-// review -- see design/draft_api_2026-06-22.md §5-6,
-// design/gap_analysis_current_vs_design_2026-07-23.md.
+// names are kept for backward compatibility.
 struct flow_edge_t
 {
     event_id_t  source{};   ///< Opaque handle of the source event (arrow tail).
