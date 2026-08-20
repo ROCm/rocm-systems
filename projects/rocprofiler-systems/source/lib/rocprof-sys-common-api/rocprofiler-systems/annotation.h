@@ -4,7 +4,6 @@
 #ifndef ROCPROFSYS_ANNOTATION_H_
 #define ROCPROFSYS_ANNOTATION_H_
 
-#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__cplusplus)

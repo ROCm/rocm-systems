@@ -4,8 +4,9 @@
 #include "api.hpp"
 
 #include "logger/debug.hpp"
+#include "rocprofiler-systems/annotation.h"
+#include "rocprofiler-systems/categories.h"
 #include <exception>
-#include <stdexcept>
 
 extern "C" void
 rocprofsys_push_trace(const char* _name)

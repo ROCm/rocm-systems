@@ -7,6 +7,8 @@
 
 #include "rocprofiler-systems/causal_api.h"
 
+#include <cstddef>
+
 namespace
 {
 rocprofsys_causal_callbacks_t _callbacks = { .begin              = nullptr,
