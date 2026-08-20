@@ -142,7 +142,8 @@ main(int argc, char** argv)
                 std::this_thread::yield();
             if(stop.load()) return;
             hipLaunchKernelGGL(hog, dim3(256), dim3(256), 0, sa, hogbuf, n, hog_reps);
-            (void) hipStreamSynchronize(sa);
+            HC(hipGetLastError());
+            HC(hipStreamSynchronize(sa));
             while(!stop.load() && c->cycle_done.load() != k)
                 std::this_thread::yield();
         }
