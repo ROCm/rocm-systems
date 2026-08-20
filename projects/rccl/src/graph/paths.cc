@@ -1296,14 +1296,13 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // MAXCHANNELS). Otherwise keep the historical 64 cap and the per-arch caps below.
     //
     // Detect the opt-in from the environment, not from the value: the param default is
-    // MAXCHANNELS (kept in sync with NCCL), which is already above 4*CHANNEL_LIMIT, so a
-    // value test treats every unset run as an opt-in. That left non-gfx1250 P2P bounded
-    // only by the collective pool and made the `upper == defaultMax` caps below dead.
+    // MAXCHANNELS (kept in sync with NCCL), so a value test reads every unset run as an
+    // opt-in. pow2Down because ncclP2pChannelForPart masks with (nP2pChannels - 1).
     {
       const bool userSetMaxP2p = ncclGetEnv("NCCL_MAX_P2P_NCHANNELS") != NULL;
       int userMaxP2p = (int)ncclParamMaxP2pNChannels();
       int defaultMax = isGfx1250 ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
-      int upper = userSetMaxP2p ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      int upper = userSetMaxP2p ? pow2Down(std::min(userMaxP2p, (int)MAXCHANNELS)) : defaultMax;
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
       if (upper == defaultMax) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS

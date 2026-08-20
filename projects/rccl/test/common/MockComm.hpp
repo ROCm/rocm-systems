@@ -8,7 +8,8 @@
 // from the topology (comm->topo->nodes[GPU].nodes[0].gpu.gcn) rather than from
 // comm->archName. Promoted out of RcclWrapTests.cpp so other fixtures can reuse it.
 
-#pragma once
+#ifndef RCCL_TEST_MOCK_COMM_HPP
+#define RCCL_TEST_MOCK_COMM_HPP
 
 #include <rccl/rccl.h>
 
@@ -83,4 +84,14 @@ inline void AttachMockSharedRes(ncclComm_t mockComm, struct ncclSharedResources&
     mockComm->sharedRes = &sharedRes;
 }
 
+// Make the comm look multi-node. topo->nRanks is the total rank count the per-arch
+// multi-node caps in ncclTopoComputeP2pChannels match on.
+inline void SetMockNodes(ncclComm_t mockComm, int nNodes, int topoNRanks)
+{
+    mockComm->nNodes       = nNodes;
+    mockComm->topo->nRanks = topoNRanks;
+}
+
 } // namespace RcclUnitTesting
+
+#endif // RCCL_TEST_MOCK_COMM_HPP

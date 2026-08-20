@@ -42,7 +42,9 @@ struct ResolvedChannels
 };
 
 // Drive the production function with a mock comm and return what it resolved.
-ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChannels = kDefaultCollChannels)
+// nNodes > 1 also sets topo->nRanks, which the per-arch multi-node caps match on.
+ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChannels = kDefaultCollChannels,
+                                    int nNodes = 1)
 {
     ncclComm_t                 comm = nullptr;
     struct ncclTopoSystem      topo;
@@ -51,6 +53,7 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
 
     CreateMockComm(comm, topo, gpu, arch, nRanks);
     AttachMockSharedRes(comm, sharedRes);
+    if (nNodes > 1) SetMockNodes(comm, nNodes, nRanks);
     comm->nChannels           = collChannels;
     comm->p2pnChannelsPerPeer = kInputChannelsPerPeer;
 
@@ -118,10 +121,36 @@ TEST(ChannelDefaults, Gfx1250_SaturateOnByDefault)
     ExpectPoolInvariant(r);
 }
 
+// nRanks=4 so the two paths differ: saturate on would give pow2Down(64/4) = 16, saturate
+// off leaves the input 8. At nRanks=8 both are 8 and the case cannot fail.
 TEST(ChannelDefaults, Gfx950_SaturateOffByDefault)
 {
-    const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/8);
+    const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/4);
     EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer);
+    ExpectPoolInvariant(r);
+}
+
+// Multi-node gfx950 caps. Dead code until the NCCL_MAX_P2P_NCHANNELS opt-in was fixed,
+// since they are gated on upper == defaultMax.
+TEST(ChannelDefaults, Gfx950_TwoNode16Ranks_CapsTo32)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/16, /*collChannels=*/64, /*nNodes=*/2);
+    EXPECT_EQ(r.p2pnChannels, 32);
+    ExpectPoolInvariant(r);
+}
+
+TEST(ChannelDefaults, Gfx950_TwoNodeHalfSubscribed_CapsTo16)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/8, /*collChannels=*/64, /*nNodes=*/2);
+    EXPECT_EQ(r.p2pnChannels, 16);
+    ExpectPoolInvariant(r);
+}
+
+// The caps are gfx950-only, so an otherwise identical gfx942 job keeps the full 64.
+TEST(ChannelDefaults, Gfx942_TwoNode16Ranks_NotCapped)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx942", /*nRanks=*/16, /*collChannels=*/64, /*nNodes=*/2);
+    EXPECT_EQ(r.p2pnChannels, kNonGfx1250Default);
     ExpectPoolInvariant(r);
 }
 
@@ -171,16 +200,17 @@ TEST(ChannelDefaults, Gfx1250_RequestedOverridesArchDefault)
         {{"NCCL_MAX_P2P_NCHANNELS", "32"}});
 }
 
-// A non power of two request lands on the next power of two, because
-// ncclP2pChannelForPart indexes the pool modulo its size.
-TEST(ChannelDefaults, Gfx1250_RequestedNonPow2RoundsUp)
+// A non power of two request rounds down, never up past the cap. The pool must stay pow2
+// because ncclP2pChannelForPart masks with (nP2pChannels - 1).
+TEST(ChannelDefaults, Gfx1250_RequestedNonPow2RoundsDown)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
         "ChannelDefaults_Gfx1250_Requested48",
         []()
         {
             const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8);
-            EXPECT_EQ(r.p2pnChannels, 64);
+            EXPECT_EQ(r.p2pnChannels, 32);
+            EXPECT_EQ(r.p2pnChannels & (r.p2pnChannels - 1), 0) << "pool must be a power of two";
             ExpectPoolInvariant(r);
         },
         {{"NCCL_MAX_P2P_NCHANNELS", "48"}});
