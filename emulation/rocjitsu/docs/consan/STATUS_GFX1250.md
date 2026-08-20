@@ -124,14 +124,21 @@ MT128x128 kernels and runs only their first exact problem.  Access-only
 Record/Replay passes with all 288 filtered access sites.  With barriers
 enabled, patch limits 16 and 17 form an exact behavioral boundary: both PGR1
 and PGR2 pass with the first 16 access and barrier candidates, while candidate
-17 makes PGR1 leave every output element at its initial value; PGR2 remains
-exact.  The newly admitted barrier is candidate 16 in zero-based resource
-logs, the loop-end `s_barrier_signal` at `.text+0x143fc` (code-object PC
-`0x2f4fc`).  The patched object reveals the immediate cause: its local
-trampoline begins at `0x2f088` and replaces live tail-loop WMMA and loop-counter
-instructions.  The remaining repair is therefore in local-body placement and
-live-range preservation, not barrier publication, replay analysis, or the
-Tensile oracle.
+17 formerly made PGR1 leave every output element at its initial value.  The
+newly admitted barrier is candidate 16 in zero-based resource logs, the
+loop-end `s_barrier_signal` at `.text+0x143fc` (code-object PC `0x2f4fc`).
+Object comparison found that its dense relay host displaced an
+`s_set_vgpr_msb 4` transition plus live WMMA instructions.  That made the
+appended copy use the new bank while the original continuation was statically
+decoded in the old bank.  Dense gfx1250 hosts now require low-bank entry and a
+mode-neutral displaced range.  A focused host regression reproduces the
+transition-plus-dense-barrier shape, and the same patch-limit-17 E2E command
+now passes exact PGR1 and PGR2 oracles with 17/288 accesses, 17/68 barriers,
+and 8/8 fences selected.  A subsequent all-supported focused run also passes
+both exact rows with 288/288 accesses and 68/68 barriers patched, 35,184
+visible events, and zero diagnostics.  Its static verdict remains incomplete
+because none of the 8/8 selected fences could be placed; that independent
+coverage gap and a fresh full 75-row client verdict remain open.
 
 The preceding 55-second diagnostic
 `rebase-20260820-gfx1250-mxf4-tdm-rr-c55a13a` exposed a separate validation
@@ -596,7 +603,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current 600-second run completes 29 exact rows and fails four: both PGR1 and PGR2 MT128x128 solutions fail for the first two problem sizes. Access and barrier lowering is complete at 2448/2448 and 544/544, but only 1/64 fences patches and no final analysis verdict is reached | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | A filtered current-tip run localizes PGR1 corruption to the 17th admitted barrier: its loop-end signal trampoline overwrites live WMMA/loop-counter instructions. The uninstrumented current baseline passes all 75 rows in 232.01 seconds. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 The four failures in the prior 600-second run are repaired: an all-supported focused rerun passes both formerly failing PGR1 and PGR2 rows with 288/288 accesses and 68/68 barriers patched, 35,184 visible events, and zero diagnostics. Its static verdict is incomplete because 0/8 fences patch; a fresh unrestricted full-client verdict is still required | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. The uninstrumented current baseline passes all 75 rows in 232.01 seconds. |
 | P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |

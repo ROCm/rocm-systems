@@ -5904,6 +5904,76 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Gfx1250DenseBarrierHostAvoidsImplicitHighVgprBank) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kSiteCount = 17u;
+  constexpr uint32_t kFillerWords = 20u;
+  constexpr std::array<uint16_t, 6> kDead = {0u, 1u, 4u, 6u, 8u, 9u};
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch);
+  std::vector<uint32_t> words(kFillerWords, filler);
+  for (uint32_t index = 0u; index < kSiteCount; ++index) {
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  // Give the midpoint-biased host search an otherwise ideal relocation range
+  // that begins with a high-bank transition.  The gfx1250 MXF4 workload had
+  // this exact shape followed by WMMA instructions.  Moving the transition
+  // made either the appended WMMA operands or the original continuation use
+  // v[0+] instead of v[256+].
+  words.push_back(*build_gfx1250_s_set_vgpr_msb(/*mode=*/4u, kArch));
+  words.insert(words.end(), kFillerWords, filler);
+  words.push_back(*build_gfx1250_s_set_vgpr_msb(/*previous_mode=*/4u << 8u, kArch));
+  words.insert(words.end(), kFillerWords, filler);
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(kDead, sgpr) == kDead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, kArch));
+  }
+  words.resize(33'000u, filler);
+  words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(0u, 0u, 0u, 0u, 2u * kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kSiteCount;
+
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(words, "gfx1250_dense_barrier_high_vgpr_bank");
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            2u * kSiteCount);
+  const auto host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(host, result.patches.end()) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const Section *text = original.text_sections().front();
+  const std::optional<uint16_t> host_mode = consan_gfx1250_vgpr_msb_mode_at(
+      bytes, text->sectionOffset(), /*container_entry_text_offset=*/0u,
+      text->sectionOffset() + host->anchor_offset);
+  ASSERT_TRUE(host_mode);
+  EXPECT_EQ(*host_mode, 0u);
+  const std::optional<uint16_t> continuation_mode = consan_gfx1250_vgpr_msb_mode_at(
+      bytes, text->sectionOffset(), /*container_entry_text_offset=*/0u,
+      text->sectionOffset() + host->anchor_offset + host->original_size);
+  ASSERT_TRUE(continuation_mode);
+  EXPECT_EQ(*continuation_mode, 0u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, RecordReplaySpillBackedDenseHostAvoidsTransientSgprLiveRange) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr std::array<uint16_t, 4> kTransientWindow = {0u, 1u, 4u, 6u};

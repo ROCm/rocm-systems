@@ -2408,7 +2408,7 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
 [[nodiscard]] std::optional<MoiDenseRelayHost> select_moi_dense_relay_host(
     const MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
     size_t host_word_count, std::span<const uint64_t> anchors,
-    std::span<const uint64_t> candidate_offsets,
+    std::span<const uint64_t> candidate_offsets, uint64_t owner_begin,
     std::span<const std::pair<uint64_t, uint64_t>> claimed_host_ranges = {}) {
   if (host_word_count == 0u || anchors.empty() || candidate_offsets.empty())
     return std::nullopt;
@@ -2426,6 +2426,18 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
                     maximum_anchor - std::min(relay_offset, maximum_anchor));
   };
   const auto decode_host = [&](uint64_t host_offset) -> std::optional<MoiDenseRelayHost> {
+    // gfx1250 instruction encodings name the high VGPR banks relative to the
+    // most recent s_set_vgpr_msb.  A dense host moves its guest instructions
+    // into an appended body, but that body does not yet reproduce the host's
+    // incoming bank mode.  Relocating a high-bank WMMA sequence therefore
+    // silently changes its operands.  Keep host relocation in the low bank
+    // until the host-body ABI explicitly carries and restores this state.
+    if (resource_state.arch == ROCJITSU_CODE_ARCH_GFX1250) {
+      const std::optional<uint16_t> mode =
+          consan_gfx1250_vgpr_msb_mode_at(text, /*text_file_offset=*/0u, owner_begin, host_offset);
+      if (!mode || *mode != 0u)
+        return std::nullopt;
+    }
     const uint64_t host_end = host_offset + host_word_count * sizeof(uint32_t);
     if (std::ranges::any_of(claimed_host_ranges, [&](const auto &range) {
           return host_offset < range.second && range.first < host_end;
@@ -2450,6 +2462,14 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     }
     if (displaced_words.size() != host_word_count)
       return std::nullopt;
+    if (resource_state.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        std::ranges::any_of(displaced_words,
+                            [](uint32_t word) { return (word & 0xffff0000u) == 0xbf860000u; })) {
+      // Moving the transition would also remove it from the original CFG.
+      // The appended copy would then decode the displaced tail in the new
+      // mode, while the original continuation would decode in the old mode.
+      return std::nullopt;
+    }
     return MoiDenseRelayHost{
         .host_offset = host_offset,
         .displaced_words = std::move(displaced_words),
@@ -2475,7 +2495,7 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
   const std::vector<uint64_t> candidates = collect_moi_dense_relay_host_candidates(
       resource_state, search, std::forward<OverlapsReserved>(overlaps_reserved));
   return select_moi_dense_relay_host(resource_state, text, search.host_word_count, search.anchors,
-                                     candidates);
+                                     candidates, search.owner_begin);
 }
 
 [[nodiscard]] RegisterSet

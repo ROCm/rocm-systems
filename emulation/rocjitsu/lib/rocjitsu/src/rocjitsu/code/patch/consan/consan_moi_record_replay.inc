@@ -397,7 +397,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           }
           auto best_host = select_moi_dense_relay_host(
               resource_state, original_text, static_cast<size_t>(host_words_count), anchors,
-              cached_candidates->second, claimed_dense_host_ranges);
+              cached_candidates->second, owner_begin, claimed_dense_host_ranges);
           if (best_host) {
             claimed_dense_host_ranges.emplace_back(best_host->host_offset,
                                                    best_host->host_offset +
