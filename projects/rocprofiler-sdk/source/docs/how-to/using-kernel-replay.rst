@@ -16,10 +16,9 @@ restores the snapshot between them so every pass observes identical captured inp
 The domain is not tied to hardware counters. A tool can use it for counters, timing, PC sampling,
 thread trace, or any other per-pass work.
 
-This page is the SDK how-to: it covers subscribing to the replay domain from a custom tool.
-Conceptual and API detail live under :ref:`kernel-replay-conceptual` and
-:ref:`kernel-replay-sdk-api`. For the ``rocprofv3`` command-line option
-(``--kernel-replay-beta-enabled``), see the rocprofv3 how-to guide.
+This page is the SDK how-to. Conceptual and API detail live under :ref:`kernel-replay-conceptual`
+and :ref:`kernel-replay-sdk-api`. Command-line ``rocprofv3`` usage
+(``--kernel-replay-beta-enabled``) is :ref:`using-kernel-replay-rocprofv3`.
 
 .. warning::
 
