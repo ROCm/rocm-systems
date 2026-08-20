@@ -51,7 +51,7 @@ preserve an earlier green claim.
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
-| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Current strict clean row: all four exact host-reference oracles in 73.87 seconds; 24/24 accesses, 8/8 barriers, and no Record/Replay saturation; fresh paired/fault evidence remains | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current strict clean row: all four exact host-reference oracles in 117.90 seconds; 24/24 accesses and 4/4 barriers; prior paired 1.29x retained |
+| **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟩 Current accepted bundle: all four exact clean oracles; 24/24 accesses and 8/8 barriers; paired 1.33x; reviewed exact-one first barrier drop fails the oracle and emits attributable diagnostics; containment, health, cleanup, and provenance pass | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current strict clean row: all four exact host-reference oracles in 117.90 seconds; 24/24 accesses and 4/4 barriers; prior paired 1.29x retained |
 | **P4 hip-moi WMMA attention** | 🟩 Current strict clean row: both exact oracles in 15.62 seconds with complete 18/18 access coverage; paired 1.78x retained | 🟩 Current strict clean row: both exact oracles in 16.87 seconds with 18/18 accesses, 8/8 barriers, and zero diagnostics; paired 1.17x retained | 🟩 Current strict clean row: both exact oracles in 15.86 seconds with 18/18 accesses and 8/8 applicable barriers; paired 1.15x retained | 🟩 Current strict clean row: both exact oracles in 21.52 seconds with 18/18 accesses and 4/4 barriers; paired 1.17x retained |
 | **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
@@ -164,6 +164,23 @@ The gfx1250 D128-pressure manifest now uses a target-specific 180-second
 process bound, providing the same approximate 1.5x simulator margin as the
 D128-block row. Runner tests pin both that effective bound and the unchanged
 ordinary 30-second gfx950 bound.
+
+The current Record/Replay bundle is completed at source revision
+`4bd97f150f`.  Artifact
+`rebase-20260820-gfx1250-d128-pressure-rr-overhead-4bd97f1` records a
+15.470-second paired baseline median, 20.623-second profile median, and 1.333x
+slowdown.  Fresh inventory
+`rebase-20260820-gfx1250-d128-pressure-inventory-4bd97f1` reviews the first
+compiler signal/wait sequence.  In accepted fault artifact
+`rebase-20260820-gfx1250-d128-pressure-rr-fault-4bd97f1-002`, exactly one
+requested and planned mutation is installed, the exact GoogleTest oracle
+fails, and Record/Replay emits 6,156 attributable diagnostics.  The surviving
+object remains analysis-complete at 24/24 accesses and 6/6 barriers; before
+and after RocJitsu gfx1250 dispatch probes pass.  The fault campaign uses the
+fast D128 oracle for health because the default Qwen health smoke currently
+exceeds its 30-second simulator deadline.  The hook SHA-256 for inventory,
+paired, and fault evidence is
+`7b7b5fc01a9874b05d058492bd79231bbddba597196a258802cb7433ff3eb60f`.
 
 ### Target-native Jakub matmul
 
