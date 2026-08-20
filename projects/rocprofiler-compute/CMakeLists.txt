@@ -869,6 +869,14 @@ add_test(
 )
 
 add_test(
+    NAME test_torch_trace_coverage_utils
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_coverage_utils.xml ${COV_OPTION}
+        tests/unit/test_torch_trace_coverage_utils.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_inject_roctx_package
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
@@ -1057,6 +1065,7 @@ if(${ENABLE_COVERAGE})
         test_profile_torch_trace
         test_profile_triton_trace
         test_torch_cpp_loader
+        test_torch_trace_coverage_utils
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
