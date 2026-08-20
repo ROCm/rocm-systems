@@ -71,7 +71,7 @@ public:
     uint32_t l2_assoc = 16;
 
     // Engines and queues
-    uint32_t num_sdma_engines = 2;
+    uint32_t num_sdma_engines = 0;
     uint32_t num_sdma_xgmi_engines = 0;
     uint32_t num_sdma_queues_per_engine = 0;
     uint32_t num_cp_queues = 128;

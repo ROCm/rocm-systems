@@ -27,6 +27,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -487,8 +488,45 @@ TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresen
       }
     })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(missing.path()), std::runtime_error);
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(zero.path()), std::runtime_error);
+  for (const auto &path : {missing.path(), zero.path()})
+    EXPECT_THAT([&] { (void)config::load_dbt_guest_config_from_file(path); },
+                testing::ThrowsMessage<std::runtime_error>(
+                    testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
+                                   testing::HasSubstr("num_sdma_queues_per_engine"))));
+}
+
+TEST(ConfigLoaderTest, SdmaQueueValidationIdentifiesVmDevicePath) {
+  const char *json = R"({
+    "max_ticks": 1,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": { "num_sdma_engines": 1 } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  EXPECT_THAT(
+      [&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
+      testing::ThrowsMessage<std::runtime_error>(testing::AllOf(
+          testing::HasSubstr("vm.gpu.device."), testing::HasSubstr("num_sdma_queues_per_engine"))));
 }
 
 TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
@@ -506,6 +544,13 @@ TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
   ASSERT_TRUE(dbt.guest_device.present);
   EXPECT_EQ(dbt.guest_device.num_sdma_engines, 0u);
   EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 0u);
+}
+
+TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaEngines) {
+  const config::KfdDeviceConfig device;
+
+  EXPECT_EQ(device.num_sdma_engines, 0u);
+  EXPECT_EQ(device.num_sdma_queues_per_engine, 0u);
 }
 
 TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
@@ -532,6 +577,25 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
 
   EXPECT_GE(checked, 12u) << "expected every shipped device config to be discovered";
 }
+
+#if defined(RJ_DAEMON_LOGGING_CONFIG_PATH) && defined(RJ_LOGGING_CONFIG_PATH) &&                   \
+    defined(RJ_INSTALLED_LOGGING_CONFIG_PATH)
+TEST(ConfigLoaderTest, GeneratedDeviceConfigsDeclareSdmaQueues) {
+  const std::string paths[] = {
+      RJ_DAEMON_LOGGING_CONFIG_PATH,
+      RJ_LOGGING_CONFIG_PATH,
+      RJ_INSTALLED_LOGGING_CONFIG_PATH,
+  };
+
+  for (const std::string &path : paths) {
+    SCOPED_TRACE(path);
+    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_NE(loaded.device.num_sdma_engines, 0u);
+    EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
+  }
+}
+#endif
 
 TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
   unsigned checked = 0;

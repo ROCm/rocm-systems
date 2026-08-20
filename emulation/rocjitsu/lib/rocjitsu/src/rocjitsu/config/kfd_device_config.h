@@ -51,7 +51,7 @@ struct KfdDeviceConfig {
   uint32_t l2_size_kb = 4096;                ///< L2 cache size in KiB.
   uint32_t l2_line_size = 128;               ///< L2 cache line size in bytes.
   uint32_t l2_assoc = 16;                    ///< L2 cache associativity.
-  uint32_t num_sdma_engines = 2;             ///< SDMA engine count.
+  uint32_t num_sdma_engines = 0;             ///< SDMA engine count.
   uint32_t num_sdma_xgmi_engines = 0;        ///< XGMI SDMA engine count.
   uint32_t num_cp_queues = 128;              ///< Hardware queue count.
   uint32_t max_engine_clk_fcompute = 2100;   ///< Maximum compute clock in MHz.
