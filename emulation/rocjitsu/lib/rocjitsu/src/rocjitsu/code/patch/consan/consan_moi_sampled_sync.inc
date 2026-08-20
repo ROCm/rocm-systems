@@ -2128,8 +2128,29 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
-  MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
-                                                kMoiLocalIndirectIslandWords);
+  AmdGpuCodeObject original_code_object(bytes.data(), bytes.size());
+  const uint64_t original_text_size = original_code_object.text_sections().size() == 1
+                                          ? original_code_object.text_sections().front()->size()
+                                          : 0u;
+  const uint64_t reserved_barrier_island_count =
+      sampled_reserved_barrier_island_count(result, options);
+  const uint64_t reserved_atomic_island_count =
+      sampled_reserved_atomic_island_count(result, options);
+  const uint64_t reserved_atomic_island_begin =
+      original_text_size +
+      reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
+  std::vector<ConSanPreappliedReservedRange> local_island_reserved_ranges =
+      options.preapplied_reserved_ranges;
+  const uint64_t reserved_sync_island_bytes =
+      reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t) +
+      reserved_atomic_island_count * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
+  if (reserved_sync_island_bytes != 0u) {
+    local_island_reserved_ranges.push_back(
+        {.text_offset = original_text_size,
+         .size = static_cast<uint32_t>(reserved_sync_island_bytes)});
+  }
+  MoiLocalNopIslandAllocator indirect_allocator(
+      old_text, result, arch, kMoiLocalIndirectIslandWords, local_island_reserved_ranges);
   std::vector<MoiLocalNopIsland> appended_indirect_islands;
   if (selected.size() > 1u) {
     const uint64_t island_bytes =
@@ -2158,7 +2179,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   };
   std::vector<ConSanPatchInfo> patches;
-  for (const Planned &planned : selected) {
+  for (size_t planned_index = 0; planned_index < selected.size(); ++planned_index) {
+    const Planned &planned = selected[planned_index];
     const ConSanAtomicSite &site = planned.candidate.atomic.site;
     const uint64_t physical_anchor_offset = planned.physical_anchor_offset;
     const uint64_t cave_offset = placement_planner.appended_end();
@@ -2216,6 +2238,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         compute_sopp_branch_simm16(physical_anchor_offset, cave_offset).has_value();
     std::optional<uint64_t> indirect_entry_island;
     if (!direct_entry) {
+      const uint64_t reserved_island =
+          reserved_atomic_island_begin +
+          planned_index * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
+      if (planned_index < reserved_atomic_island_count && reserved_island <= new_text.size() &&
+          kMoiLocalIndirectIslandWords * sizeof(uint32_t) <= new_text.size() - reserved_island &&
+          compute_sopp_branch_simm16(physical_anchor_offset, reserved_island)) {
+        indirect_entry_island = reserved_island;
+      }
+    }
+    if (!direct_entry && !indirect_entry_island) {
       indirect_entry_island = claim_appended_island(physical_anchor_offset);
       if (!indirect_entry_island)
         indirect_entry_island = indirect_allocator.claim_reachable(physical_anchor_offset);

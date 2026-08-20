@@ -2,6 +2,89 @@
 atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
                            bool in_kernel, const ConSanAtomicSite &site);
 
+[[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanResult &result,
+                                                             const ConSanOptions &options) {
+  if (!options.moi_track_barriers)
+    return 0u;
+  uint64_t count = 0u;
+  for (const ConSanKernelInfo &kernel : result.kernels)
+    count += kernel.barrier_sites.size();
+  for (const ConSanFunctionInfo &function : result.functions)
+    count += function.barrier_sites.size();
+  return std::min<uint64_t>(count, options.max_patches);
+}
+
+[[nodiscard]] uint32_t sampled_qualified_atomic_sequence_count(const ConSanResult &result,
+                                                               const ConSanOptions &options) {
+  if (!options.moi_track_atomics)
+    return 0u;
+  uint32_t count = 0u;
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::Atomic || sequence.width_bits != 32u ||
+        !consan_sync_confidence_meets(sequence.confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        (sequence.memory_role != ConSanSyncMemoryRole::Release &&
+         sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
+         sequence.memory_role != ConSanSyncMemoryRole::AcquireRelease) ||
+        (sequence.rmw_outcome != ConSanSyncRmwOutcome::NoReturn &&
+         sequence.rmw_outcome != ConSanSyncRmwOutcome::ReturnsOldValue &&
+         sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange))
+      continue;
+    bool eligible = false;
+    for (const std::string &identity : sequence.member_event_identities) {
+      const auto event =
+          std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
+      if (event == result.sync_events.end() || event->kind != ConSanSyncEventKind::Atomic)
+        continue;
+      const ConSanAtomicSite *site = nullptr;
+      if (event->in_kernel) {
+        const auto kernel =
+            std::ranges::find(result.kernels, event->container_name, &ConSanKernelInfo::name);
+        if (kernel != result.kernels.end()) {
+          const auto found = std::ranges::find(kernel->atomic_sites, event->text_offset,
+                                               &ConSanAtomicSite::text_offset);
+          if (found != kernel->atomic_sites.end())
+            site = &*found;
+        }
+      } else {
+        const auto function =
+            std::ranges::find(result.functions, event->container_name, &ConSanFunctionInfo::name);
+        if (function != result.functions.end()) {
+          const auto found = std::ranges::find(function->atomic_sites, event->text_offset,
+                                               &ConSanAtomicSite::text_offset);
+          if (found != function->atomic_sites.end())
+            site = &*found;
+        }
+      }
+      const bool supported_scope = sequence.raw_scope
+                                       ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
+                                       : result.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                             site != nullptr && site->mnemonic.starts_with("ds_");
+      if (site != nullptr && supported_scope &&
+          (site->mnemonic.starts_with("flat_atomic") ||
+           site->mnemonic.starts_with("global_atomic") ||
+           (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site->mnemonic.starts_with("ds_"))) &&
+          (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
+           site->returns_old_value.value_or(false))) {
+        eligible = true;
+        break;
+      }
+    }
+    if (eligible && count != std::numeric_limits<uint32_t>::max())
+      ++count;
+  }
+  return count;
+}
+
+[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanResult &result,
+                                                            const ConSanOptions &options) {
+  const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
+  const uint32_t total_budget = std::min(options.max_patches, layout.sampled_watchpoint_capacity);
+  return std::min(total_budget, sampled_qualified_atomic_sequence_count(result, options));
+}
+
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                MoiResourcePlanningState &resource_state,
@@ -21,66 +104,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
 
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
   const uint32_t total_budget = std::min(options.max_patches, layout.sampled_watchpoint_capacity);
-  uint32_t qualified_atomic_sequences = 0;
-  if (options.moi_track_atomics) {
-    for (const ConSanSyncSequence &sequence : result.sync_sequences) {
-      if (sequence.kind != ConSanSyncSequenceKind::Atomic || sequence.width_bits != 32u ||
-          !consan_sync_confidence_meets(sequence.confidence,
-                                        ConSanSemanticConfidence::Conservative) ||
-          !consan_sync_confidence_meets(sequence.memory_role_confidence,
-                                        ConSanSemanticConfidence::Conservative) ||
-          (sequence.memory_role != ConSanSyncMemoryRole::Release &&
-           sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
-           sequence.memory_role != ConSanSyncMemoryRole::AcquireRelease) ||
-          (sequence.rmw_outcome != ConSanSyncRmwOutcome::NoReturn &&
-           sequence.rmw_outcome != ConSanSyncRmwOutcome::ReturnsOldValue &&
-           sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange))
-        continue;
-      bool eligible = false;
-      for (const std::string &identity : sequence.member_event_identities) {
-        const auto event =
-            std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
-        if (event == result.sync_events.end() || event->kind != ConSanSyncEventKind::Atomic)
-          continue;
-        const ConSanAtomicSite *site = nullptr;
-        if (event->in_kernel) {
-          const auto kernel =
-              std::ranges::find(result.kernels, event->container_name, &ConSanKernelInfo::name);
-          if (kernel != result.kernels.end()) {
-            const auto found = std::ranges::find(kernel->atomic_sites, event->text_offset,
-                                                 &ConSanAtomicSite::text_offset);
-            if (found != kernel->atomic_sites.end())
-              site = &*found;
-          }
-        } else {
-          const auto function =
-              std::ranges::find(result.functions, event->container_name, &ConSanFunctionInfo::name);
-          if (function != result.functions.end()) {
-            const auto found = std::ranges::find(function->atomic_sites, event->text_offset,
-                                                 &ConSanAtomicSite::text_offset);
-            if (found != function->atomic_sites.end())
-              site = &*found;
-          }
-        }
-        const bool supported_scope = sequence.raw_scope
-                                         ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
-                                         : result.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                               site != nullptr && site->mnemonic.starts_with("ds_");
-        if (site != nullptr && supported_scope &&
-            (site->mnemonic.starts_with("flat_atomic") ||
-             site->mnemonic.starts_with("global_atomic") ||
-             (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site->mnemonic.starts_with("ds_"))) &&
-            (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
-             site->returns_old_value.value_or(false))) {
-          eligible = true;
-          break;
-        }
-      }
-      if (eligible && qualified_atomic_sequences != std::numeric_limits<uint32_t>::max())
-        ++qualified_atomic_sequences;
-    }
-  }
-  const uint32_t reserved_atomic_slots = std::min(total_budget, qualified_atomic_sequences);
+  const uint32_t reserved_atomic_slots = sampled_reserved_atomic_island_count(result, options);
   const uint32_t max_candidates = total_budget - reserved_atomic_slots;
   if (max_candidates == 0) {
     if (total_budget == 0) {
@@ -234,20 +258,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
       (candidates.size() > 8u || has_function_candidate || has_spill_backed_scalar_assignment);
-  uint64_t reserved_barrier_island_count = 0u;
-  if (use_indirect_appended && options.moi_track_barriers) {
-    for (const ConSanKernelInfo &kernel : result.kernels)
-      reserved_barrier_island_count += kernel.barrier_sites.size();
-    for (const ConSanFunctionInfo &function : result.functions)
-      reserved_barrier_island_count += function.barrier_sites.size();
-    reserved_barrier_island_count =
-        std::min<uint64_t>(reserved_barrier_island_count, options.max_patches);
-  }
-  const uint64_t indirect_body_begin =
-      original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
-      candidates.size() * access_relay_words * sizeof(uint32_t);
-  const uint64_t access_island_begin =
-      original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t);
+  const uint64_t reserved_barrier_island_count =
+      use_indirect_appended ? sampled_reserved_barrier_island_count(result, options) : 0u;
+  const uint64_t reserved_atomic_island_count = use_indirect_appended ? reserved_atomic_slots : 0u;
+  const uint64_t reserved_sync_island_bytes =
+      reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
+      reserved_atomic_island_count * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
+  const uint64_t indirect_body_begin = original_text_size + reserved_sync_island_bytes +
+                                       candidates.size() * access_relay_words * sizeof(uint32_t);
+  const uint64_t access_island_begin = original_text_size + reserved_sync_island_bytes;
   uint64_t indirect_body_cursor = indirect_body_begin;
   std::span<const uint8_t> original_text;
   if (code_object.text_sections().size() == 1) {
