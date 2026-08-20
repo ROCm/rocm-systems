@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>

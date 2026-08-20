@@ -28,6 +28,7 @@ test_categories:
       - "RcclCeAllReduceEligibility.*"
       - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
+      - "NetBootstrapInterfaceTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"

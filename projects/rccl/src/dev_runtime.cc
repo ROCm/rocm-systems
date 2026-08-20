@@ -1718,14 +1718,8 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECK(ncclGinDevCommSetup(comm, reqs, outDevComm));
-#ifdef ENABLE_ROCSHMEM_GIN
-    if (ginSignalTotal > 0 && devr->winSortedCount > 0) {
-      struct ncclDevrWindow* win0 = devr->winSorted[0].win;
-      NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win0->userPtr, ginAnvilNetSignalsOffset,
-                                                          nGinContextsTotal, ginSignalTotal),
-                    ret, fail);
-    }
-#endif
+    // SDMA signal binding is deferred until the resource window is created
+    // (see ncclGinAnvilBindResourceWindowSignals call below).
   }
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
@@ -1801,6 +1795,17 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   }
 
   CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win);
+
+#ifdef ENABLE_ROCSHMEM_GIN
+  // Bind SDMA signal regions after the resource window is created and zeroed.
+  // Must use this devComm's own resource window (win->userPtr), not
+  // devr->winSorted[0] which may belong to a different devComm (e.g. symk).
+  if (devr->ginEnabled && ginSignalTotal > 0 && outDevComm->resourceWindow != nullptr) {
+    NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset,
+                                                        nGinContextsTotal, ginSignalTotal),
+                  ret, fail_stream_mem_win);
+  }
+#endif
 
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_stream_mem_win);
   CUDACHECKGOTO(cudaStreamDestroy(stream), ret, fail_stream_mem_win);

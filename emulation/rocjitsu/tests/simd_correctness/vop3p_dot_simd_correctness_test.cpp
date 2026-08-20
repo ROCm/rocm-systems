@@ -25,6 +25,7 @@
 /// payload divergence, same carve-out as the pk_fma slices). Default packing
 /// (op_sel = 0, op_sel_hi = 3) only — non-default modes bail to scalar.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -135,7 +136,7 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     uint32_t words[2] = {0u, 0u};
     vop3p_encode_dot(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, /*neg=*/0,
                      /*neg_hi=*/0, clamp, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
 
     uint32_t vb = wf->vgpr_alloc().base;
@@ -245,7 +246,7 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     uint32_t words[2] = {0u, 0u};
     vop3p_encode_dot(/*op=*/35, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, neg, neg_hi,
                      clamp, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr) << "v_dot2_f32_f16 decode failed";
 
     uint32_t vb = wf->vgpr_alloc().base;

@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
-#include "util/except.h"
 #include <cstring>
 #include <string>
 
@@ -1197,9 +1196,6 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-      (has_encoded_literal32()))
-    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_encoded_literal32())
     size_ += sizeof(MachineInst);
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -1303,9 +1299,6 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-      (has_encoded_literal32()))
-    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_encoded_literal32())
     size_ += sizeof(MachineInst);
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -1503,9 +1496,6 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
-      (has_encoded_literal32()))
-    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_encoded_literal32())
     size_ += sizeof(MachineInst);
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))

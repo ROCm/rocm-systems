@@ -15,7 +15,7 @@ _AMDGPU_ARCH_ORDER = (
     'rdna3',
     'rdna3_5',
     'rdna4',
-    'gfx1250',
+    'cdna5',
 )
 
 

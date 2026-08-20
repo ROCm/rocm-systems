@@ -433,7 +433,7 @@ class Parser:
 
     def _inject_compat_insts(self) -> None:
         """Add instructions accepted by LLVM but missing from selected XML specs."""
-        if self.isa_spec.arch_name not in {'rdna4', 'gfx1250'}:
+        if self.isa_spec.arch_name not in {'rdna4', 'cdna5'}:
             return
 
         # The RDNA4/GFX12 XML only lists split S_WAIT_* instructions, but LLVM
