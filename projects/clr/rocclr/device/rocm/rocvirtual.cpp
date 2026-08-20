@@ -1532,6 +1532,11 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   writePacketToRingBuffer(aql_loc, packet, header, rest, index & queueMask);
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
+    if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+      // setup travels in `rest`, not in the local packet struct, so the log
+      // would otherwise print setup=0. Populate it before logging.
+      packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
+    }
     if (dev().settings().ext_dispatch_packet_) {
       logAqlDispatchPacketExtended(
           roc_device_, gpu_queue_, header,
