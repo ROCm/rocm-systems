@@ -1059,6 +1059,9 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             expected.agent_id    = agent.get_rocp_agent()->id;
             expected.kernel_id   = 42;
             expected.dispatch_id = 7;
+            expected.correlation_id.internal        = corr_id.internal;
+            expected.correlation_id.external.ptr    = corr_id.external.ptr;
+            expected.correlation_id.external.value  = corr_id.external.value;
 
             auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
             auto ret_pkt   = spm::pre_kernel_call(ctx_p,
