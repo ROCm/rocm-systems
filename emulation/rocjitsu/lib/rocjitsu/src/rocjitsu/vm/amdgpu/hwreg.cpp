@@ -5,6 +5,7 @@
 /// @brief Shader-visible AMDGPU hardware register access helpers.
 
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -28,6 +29,10 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  StatePrivGfx12,
+  ExcpFlagPrivGfx12,
+  ExcpFlagUserGfx12,
+  TrapCtrlGfx12,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -289,7 +294,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     // departure recorded in cdna5::Isa.
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
-    {4, "WAVE_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx12, HwregWritePolicy::Privileged},
     {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::IbStsGfx1250, HwregWritePolicy::ReadOnly},
@@ -299,9 +304,9 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {14, "FLUSH_IB", HwregState::Unsupported, HwregWritePolicy::UserWritable},
     {15, "PERF_SNAPSHOT_DATA1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {16, "PERF_SNAPSHOT_DATA2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {18, "WAVE_EXCP_FLAG_USER", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {19, "WAVE_TRAP_CTRL", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {17, "WAVE_EXCP_FLAG_PRIV", HwregState::ExcpFlagPrivGfx12, HwregWritePolicy::Privileged},
+    {18, "WAVE_EXCP_FLAG_USER", HwregState::ExcpFlagUserGfx12, HwregWritePolicy::UserWritable},
+    {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -369,6 +374,86 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
   return decoded.offset < offset + size && offset < decoded.offset + decoded.size;
 }
 
+// GFX12 split gfx9's STATUS in two: WAVE_STATUS keeps the user-visible bits and
+// is read-only, while the privileged ones moved to WAVE_STATE_PRIV. The wave
+// still stores them in one gfx9-shaped word, so these translate between the two
+// layouts. Bit positions follow rocdbgapi's gfx12 architecture definition
+// (sq_wave_state_priv_*_mask in projects/rocdbgapi/src/architecture.cpp).
+constexpr uint32_t kStatePrivSccMask = 1u << 9;
+constexpr uint32_t kStatePrivHaltMask = 1u << 14;
+
+uint32_t gfx12_state_priv_raw(const Wavefront &wf) {
+  uint32_t raw = 0;
+  if (wf.read_scc())
+    raw |= kStatePrivSccMask;
+  if (wf.status_halt())
+    raw |= kStatePrivHaltMask;
+  return raw;
+}
+
+// GFX12 renamed gfx9's TRAPSTS to WAVE_EXCP_FLAG_PRIV and repacked it. The wave
+// stores trap status in the gfx9 layout, so translate both ways for the bits the
+// emulator actually models. The gfx12 positions follow rocdbgapi's
+// sq_wave_excp_priv_*_mask; the gfx9 positions are the ones simulated_kfd.cpp
+// writes. Bits neither side models read back as zero.
+struct ExcpPrivBit {
+  uint32_t gfx9;
+  uint32_t gfx12;
+};
+constexpr ExcpPrivBit kExcpPrivBits[] = {
+    {1u << 7, 1u << 0},   // addr_watch0
+    {1u << 12, 1u << 1},  // addr_watch1
+    {1u << 13, 1u << 2},  // addr_watch2
+    {1u << 14, 1u << 3},  // addr_watch3
+    {1u << 11, 1u << 6},  // illegal_inst
+    {1u << 25, 1u << 11}, // trap_after_inst
+    {1u << 28, 1u << 12}, // xnack_error
+};
+
+uint32_t gfx12_excp_flag_priv_raw(const Wavefront &wf) {
+  const uint32_t trapsts = wf.trapsts();
+  uint32_t raw = 0;
+  for (const auto &bit : kExcpPrivBits)
+    if (trapsts & bit.gfx9)
+      raw |= bit.gfx12;
+  return raw;
+}
+
+void set_gfx12_excp_flag_priv(Wavefront &wf, uint32_t raw_value) {
+  uint32_t trapsts = wf.trapsts();
+  for (const auto &bit : kExcpPrivBits) {
+    if (raw_value & bit.gfx12)
+      trapsts |= bit.gfx9;
+    else
+      trapsts &= ~bit.gfx9;
+  }
+  wf.set_trapsts(trapsts);
+}
+
+// The seven ALU exception causes keep the same order in every layout, so these
+// two are pure repositionings of bits the emulator already models:
+// WAVE_TRAP_CTRL[6:0] is gfx9 MODE.EXCP_EN (bits 18:12) and
+// WAVE_EXCP_FLAG_USER[6:0] is gfx9 TRAPSTS.EXCP (bits 6:0). Causes above bit 6
+// on either gfx12 register -- addr_watch, wave_end, trap_after_inst, buffer_oob,
+// lod_clamped -- are outside kAluExceptionTrapstsMask and read back as zero.
+uint32_t gfx12_trap_ctrl_raw(const Wavefront &wf) {
+  return (wf.mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
+}
+
+void set_gfx12_trap_ctrl(Wavefront &wf, uint32_t raw_value) {
+  const uint32_t enables = (raw_value & kAluExceptionTrapstsMask) << kAluExceptionModeShift;
+  wf.set_mode_raw((wf.mode_raw() & ~kAluExceptionModeMask) | enables);
+}
+
+uint32_t gfx12_excp_flag_user_raw(const Wavefront &wf) {
+  return wf.trapsts() & kAluExceptionTrapstsMask;
+}
+
+void set_gfx12_excp_flag_user(Wavefront &wf, uint32_t raw_value) {
+  wf.set_trapsts((wf.trapsts() & ~kAluExceptionTrapstsMask) |
+                 (raw_value & kAluExceptionTrapstsMask));
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -394,6 +479,18 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx12:
+    raw_value = gfx12_state_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx12:
+    raw_value = gfx12_excp_flag_priv_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx12:
+    raw_value = gfx12_excp_flag_user_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx12:
+    raw_value = gfx12_trap_ctrl_raw(wf);
     return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
@@ -423,6 +520,24 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     // drop any s_sendmsghalt provenance, whichever way the handler wrote it.
     wf.set_status_raw(raw_value);
     wf.set_self_halted(false);
+    return HwregAccessResult::Success;
+  case HwregState::StatePrivGfx12:
+    // The GFX12 trap handler halts a wave here, the way the gfx9 handler does
+    // through STATUS. Same ownership rule as the Status case: this write is now
+    // the origin of the halt, so any s_sendmsghalt provenance is dropped.
+    wf.set_status_halt((raw_value & kStatePrivHaltMask) != 0);
+    wf.set_self_halted(false);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagPrivGfx12:
+    // The handler clears the excp bit it just serviced before s_rfe, exactly as
+    // the gfx9 handler does through TRAPSTS.
+    set_gfx12_excp_flag_priv(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::ExcpFlagUserGfx12:
+    set_gfx12_excp_flag_user(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::TrapCtrlGfx12:
+    set_gfx12_trap_ctrl(wf, raw_value);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:

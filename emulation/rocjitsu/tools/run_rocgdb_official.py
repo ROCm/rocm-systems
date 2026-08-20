@@ -27,6 +27,16 @@ import time
 # the same run is reproducible in CI and in a second worktree.
 SESSION_ROOT = Path(f"/run/user/{os.getuid()}/mirage/session")
 
+# Mirage builtin profile -> the gfx target its agent advertises. The tests
+# compile their own HIP programs, so HCC_AMDGPU_TARGET has to track whichever
+# GPU the emulated agent claims to be or every kernel is built for the wrong
+# ISA. Kept in step with emulation/mirage/builtin/src/agents.rs.
+PROFILE_GFX = {
+    "mi300x": "gfx942",
+    "mi350x": "gfx950",
+    "mi450x": "gfx1250",
+}
+
 # Resolved by configure() before main() does any work.
 ROOT = Path()
 SUITE_ROOT = Path()
@@ -218,6 +228,12 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument(
+        "--profile",
+        default="mi350x",
+        choices=sorted(PROFILE_GFX),
+        help="mirage builtin profile to run under (selects the emulated GPU)",
+    )
     parser.add_argument("--stop-after-failure", action="store_true")
     parser.add_argument("--root", type=Path, help="rocm-systems checkout under test")
     parser.add_argument("--rocgdb-suite", type=Path, help="ROCgdb source checkout")
@@ -287,7 +303,8 @@ def main() -> int:
         "rocjitsu_sha256": sha256(ROCJITSU),
         "sdk": str(SDK),
         "core": str(CORE),
-        "profile": "mi350x",
+        "profile": args.profile,
+        "gfx_target": PROFILE_GFX[args.profile],
         "daemon_required": True,
         "per_file_timeout_seconds": args.timeout,
         "tests": tests,
@@ -327,13 +344,13 @@ def main() -> int:
             "--daemon",
             "--keep-session",
             "--profile",
-            "mi350x",
+            args.profile,
             "--env",
             f"LD_LIBRARY_PATH={ld_path}",
             "--",
             "env",
             f"ROCM_PATH={SDK}",
-            "HCC_AMDGPU_TARGET=gfx950",
+            f"HCC_AMDGPU_TARGET={PROFILE_GFX[args.profile]}",
             f"PATH={tool_path}",
             f"LD_LIBRARY_PATH={ld_path}",
             f"RJ_LOG_FILE={rj_log}",
