@@ -232,16 +232,15 @@ TEST(ChannelDefaults, Gfx1250_RequestedOverridesArchDefault)
         {{"NCCL_MAX_P2P_NCHANNELS", "32"}});
 }
 
-// A non power of two request rounds down, never up past the cap. The pool must stay pow2
-// because ncclP2pChannelForPart masks with (nP2pChannels - 1).
-TEST(ChannelDefaults, Gfx1250_RequestedNonPow2RoundsDown)
+// Below the arch default, a non-pow2 request takes the existing pow2Up rounding: 48 -> 64.
+TEST(ChannelDefaults, Gfx1250_RequestedNonPow2RoundsUp)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
         "ChannelDefaults_Gfx1250_Requested48",
         []()
         {
             const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8);
-            EXPECT_EQ(r.p2pnChannels, 32);
+            EXPECT_EQ(r.p2pnChannels, 64);
             EXPECT_EQ(r.p2pnChannels & (r.p2pnChannels - 1), 0) << "pool must be a power of two";
             ExpectPoolInvariant(r);
         },

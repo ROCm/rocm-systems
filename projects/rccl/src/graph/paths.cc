@@ -1233,12 +1233,16 @@ int ncclMaxP2pNchannels() {
   return maxP2pNchannels;
 }
 
-int ncclP2pChannelsUpperBound(bool* userOptedHigherOut) {
+int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
   int64_t userMaxP2pParam = ncclParamMaxP2pNChannels();
-  int defaultMax = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
+  // gfx1250 full pool on single node only; the NET path stays at the historical bound.
+  bool gfx1250SingleNode =
+    comm->nNodes == 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+  int defaultMax = gfx1250SingleNode ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
   bool userOptedHigher = (userMaxP2pParam != -2 && userMaxP2pParam > defaultMax);
   if (userOptedHigherOut != nullptr) *userOptedHigherOut = userOptedHigher;
-  return userOptedHigher ? std::min((int)userMaxP2pParam, (int)MAXCHANNELS) : defaultMax;
+  // pow2Down: ncclP2pChannelForPart masks with (nP2pChannels - 1). defaultMax is pow2.
+  return userOptedHigher ? pow2Down(std::min((int)userMaxP2pParam, (int)MAXCHANNELS)) : defaultMax;
 }
 
 // When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
@@ -1320,7 +1324,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // opt-in. pow2Down because ncclP2pChannelForPart masks with (nP2pChannels - 1).
     {
       bool userOptedHigher = false;
-      int upper = ncclP2pChannelsUpperBound(&userOptedHigher);
+      int upper = ncclP2pChannelsUpperBound(comm, &userOptedHigher);
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
       if (!userOptedHigher) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
