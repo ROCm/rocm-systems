@@ -14,11 +14,13 @@ device memory between those executions so each pass observes identical inputs. I
 .. warning::
 
    This API is experimental. The public header is
-   ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain, payload, and
-   ``rocprofv3 --kernel-replay-beta-enabled`` flag are expected to change before a stable release.
+   ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain and payload are expected
+   to change before a stable release. Command-line ``rocprofv3`` wiring is the stacked tool
+   integration PR.
 
-For the ``rocprofv3`` command-line workflow, see :ref:`using-kernel-replay`. For pass-count
-semantics, localized context control, and source maps, see :ref:`kernel-replay-callback-api`.
+For the configure / ``pass_count_cb`` / local-context how-to, see :ref:`using-kernel-replay`. For
+pass-count semantics, localized context control, and source maps, see
+:ref:`kernel-replay-callback-api`.
 
 This page is the tool-author counterpart of :ref:`rocprofiler_sdk_callback_tracing_services`: how to
 subscribe, what the payload contains, and how replay interacts with dispatch counting.
@@ -87,13 +89,13 @@ After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``pass_count_cb`` if it is n
 * returns ``N > 1`` — ``N`` passes; ``replay_continue_cb`` may still stop early.
 * returns ``0`` — indefinite loop; ``replay_continue_cb`` is required.
 
-``rocprofv3`` returns the number of ``--pmc`` groups collectable on ``dispatch_info.agent_id``.
-A custom tool can return any of the cases above.
+``rocprofv3`` (in the stacked tool PR) returns the number of ``--pmc`` groups collectable on
+``dispatch_info.agent_id``. A custom tool can return any of the cases above.
 
 Using replay with dispatch counting
 -----------------------------------
 
-Replay does **not** replace dispatch counting. Typical pattern, as used by ``rocprofv3``:
+Replay does **not** replace dispatch counting. Typical pattern:
 
 1. Configure kernel replay on one context.
 2. Configure dispatch counting on another (or the same) context as usual.
@@ -120,7 +122,7 @@ There is no separate ``kernel_replay_service`` Doxygen group.
 See also
 --------
 
-* :ref:`using-kernel-replay` — ``rocprofv3`` users
-* :ref:`kernel-replay-callback-api` — API contract and ``rocprofv3`` wiring
+* :ref:`using-kernel-replay` — configure, ``pass_count_cb``, local context
+* :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do

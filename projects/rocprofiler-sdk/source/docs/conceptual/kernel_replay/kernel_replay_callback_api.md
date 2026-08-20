@@ -8,8 +8,9 @@ Kernel replay is exposed as a **callback tracing service**, not through a dedica
 it receives.
 
 The API is experimental. Its public header is
-`source/include/rocprofiler-sdk/experimental/kernel_replay.h`, and both the API and the `rocprofv3`
-flag are expected to change before a stable release.
+`source/include/rocprofiler-sdk/experimental/kernel_replay.h`. The domain and payload are expected
+to change before a stable release. Command-line `rocprofv3` wiring is the stacked tool integration
+PR, not this SDK change.
 
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
 hardware counters, kernel timing statistics, PC sampling, thread trace, or anything else, and it
@@ -112,8 +113,8 @@ fired once after the loop ends, not at pass `N-1`.
 Returning non-zero continues the loop; returning zero breaks out. Because the break happens before
 `restore()`, the last executed pass leaves device memory in the state the application expects.
 
-There is no environment variable that overrides this. `rocprofv3` returns the number of counter
-groups collectable on the dispatch's agent from `pass_count_cb`.
+There is no environment variable that overrides this. A tool returns whatever count it needs —
+for example the number of counter groups collectable on the dispatch's agent.
 
 ## Localized context control
 
@@ -212,36 +213,17 @@ tool_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
 }
 ```
 
-Deriving the count from `dispatch_info.agent_id` rather than from a global is deliberate in the
-`rocprofv3` tool: the number of collectable counter groups can differ per agent, and pass `i` must
-map to group `i` with no wrap or skip on an agent with a different or partial group set.
+Deriving the count from `dispatch_info.agent_id` rather than from a global is the usual pattern
+when collectable counter groups differ per agent: pass `i` must map to group `i` with no wrap or
+skip on an agent with a different or partial group set.
 
 ## API reference
 
 The payload struct is documented in the `CALLBACK_TRACING_SERVICE` Doxygen group and appears on the
 {ref}`callback_tracing_reference` page along with the rest of the callback tracing API. There is no
 separate kernel replay Doxygen group (the earlier prototype's `kernel_replay_service` group is
-gone). A walkthrough for tool authors is {ref}`kernel-replay-sdk-api`.
-
-## rocprofv3 integration
-
-`rocprofv3` exposes replay through one flag:
-
-```bash
-rocprofv3 --pmc <counters...> --kernel-replay-beta-enabled -- <app>
-```
-
-- `--kernel-replay-beta-enabled` requires `--pmc`, and the CLI fails with a diagnostic if it is used
-  without it.
-- The flag sets `ROCPROF_KERNEL_REPLAY`, which the tool library reads to decide whether to create the
-  kernel replay context.
-- There is no pass-count environment variable. The tool derives the pass count from the number of
-  counter groups collectable on the dispatch's agent and returns it from `pass_count_cb`.
-- Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
-  application is re-run once per group.
-
-JSON counter records include a `replay_pass` field. CSV `counter_collection.csv` does **not** add a
-`Replay_Pass` column. See {ref}`using-kernel-replay`.
+gone). A walkthrough for tool authors is {ref}`kernel-replay-sdk-api`. See
+{ref}`using-kernel-replay` for a configure / `pass_count_cb` / local-context how-to.
 
 ## Source reference
 
@@ -260,7 +242,4 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
 | Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_start_context()`, `replay_local_stop_context()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
-| Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
-| Tool-side flag | `source/lib/rocprofiler-sdk-tool/config.hpp` | `kernel_replay` (`ROCPROF_KERNEL_REPLAY`) |
-| CLI flag | `source/bin/rocprofv3.py` | `--kernel-replay-beta-enabled` |
-| Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context_test.cpp` |
+| Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |

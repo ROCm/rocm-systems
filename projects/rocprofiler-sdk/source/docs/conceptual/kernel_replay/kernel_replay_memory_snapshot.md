@@ -127,13 +127,13 @@ A failed individual copy is logged and skipped; it does not abort the replay.
 
 ## HIP graphs
 
-HIP graph launches are not supported, and the behavior is deliberately two-tier — one case warns,
-the other aborts.
+HIP graph launches are not replayed. The interceptor warns once (process-wide) and the graph runs
+once on the ordinary path. Excluding `graph_launch_active` from the replay gate is what makes that
+a graceful decline rather than an abort: snapshot and restore around a graph's runtime-managed
+memory and ordering is undefined, so the dispatch is not replayed.
 
-| Situation | Behavior | Why |
-|---|---|---|
-| A graph launch is seen while a replay service is active | Warn once (process-wide), then handle the launch normally. A graph with no other consumers runs un-replayed through the interceptor's fast path. | Silently skipping replay for graph work would leave a tool wondering why its passes never fired. The warning is emitted once so a large graph workload does not flood the log. |
-| A graph node's dispatch reaches the replay gate | `ROCP_FATAL` — hard error | Snapshot and restore around a graph's runtime-managed memory and execution ordering is undefined. Mis-handling it silently is worse than aborting, so this is a hard error rather than a fallback. |
+A graph with no other consumers runs un-replayed through the interceptor's fast path. The warning
+is emitted once so a large graph workload does not flood the log.
 
 Graph replay is future work.
 
@@ -157,7 +157,7 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only.** Kernarg, host, fine-grained and executable allocations are
   excluded by design, as is unified and managed memory.
-- **HIP graph launches are unsupported**, as described above.
+- **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
 - **The tracked device footprint is duplicated in host RAM** for the lifetime of the replay, and
@@ -183,6 +183,5 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Trackability classifier | `source/lib/rocprofiler-sdk/kernel_replay/utils.cpp` | `query_alloc()` |
 | Tracking activation | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service()` |
 | Snapshot-declined fallback | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `snapshot.ok` branch in `WriteInterceptor` |
-| HIP graph warn-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay` in `WriteInterceptor` |
-| HIP graph hard error | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `graph_launch_active` assertion at the replay gate |
+| HIP graph warn-once + run-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay`; `graph_launch_active` excluded from the replay gate |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `snap_restore.cpp`, `snap_kernels.{hpp,cpp}` |
