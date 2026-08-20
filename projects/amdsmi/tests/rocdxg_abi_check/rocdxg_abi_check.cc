@@ -68,8 +68,106 @@ ABI_ASSERT_SIZE(rocdxg_smi_fw_entry_t);
 ABI_ASSERT_SIZE(rocdxg_smi_fw_info_t);
 ABI_ASSERT_SIZE(rocdxg_smi_device_info_t);
 
-// Sub-struct offsets inside the aggregate: catches a field added to an earlier
-// member, which shifts everything after it without changing any single size.
+// Offset of every field in every exchanged struct. Sizes alone miss a swap of
+// two same-sized members, which keeps sizeof identical while silently landing
+// each value in the wrong field.
+ABI_ASSERT_FIELD(rocdxg_smi_bdf_info_t, domain_number);
+ABI_ASSERT_FIELD(rocdxg_smi_bdf_info_t, bus_number);
+ABI_ASSERT_FIELD(rocdxg_smi_bdf_info_t, device_number);
+ABI_ASSERT_FIELD(rocdxg_smi_bdf_info_t, function_number);
+
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, device_id);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, vendor_id);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, subvendor_id);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, subsystem_id);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, rev_id);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, asic_serial);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, market_name);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, num_of_compute_units);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, num_xcc);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, target_graphics_version);
+
+ABI_ASSERT_FIELD(rocdxg_smi_board_info_t, product_name);
+ABI_ASSERT_FIELD(rocdxg_smi_board_info_t, manufacturer_name);
+
+ABI_ASSERT_FIELD(rocdxg_smi_vram_info_t, vram_type);
+ABI_ASSERT_FIELD(rocdxg_smi_vram_info_t, vram_bit_width);
+ABI_ASSERT_FIELD(rocdxg_smi_vram_info_t, vram_size_mb);
+
+ABI_ASSERT_FIELD(rocdxg_smi_vram_usage_t, vram_used_mb);
+ABI_ASSERT_FIELD(rocdxg_smi_vram_usage_t, vram_total_mb);
+
+ABI_ASSERT_FIELD(rocdxg_smi_power_info_t, current_socket_power);
+ABI_ASSERT_FIELD(rocdxg_smi_power_info_t, gfx_voltage);
+ABI_ASSERT_FIELD(rocdxg_smi_power_info_t, soc_voltage);
+ABI_ASSERT_FIELD(rocdxg_smi_power_info_t, mem_voltage);
+ABI_ASSERT_FIELD(rocdxg_smi_power_info_t, power_limit);
+
+ABI_ASSERT_FIELD(rocdxg_smi_clock_info_t, clk);
+ABI_ASSERT_FIELD(rocdxg_smi_clock_info_t, min_clk);
+ABI_ASSERT_FIELD(rocdxg_smi_clock_info_t, max_clk);
+ABI_ASSERT_FIELD(rocdxg_smi_clock_info_t, clk_locked);
+ABI_ASSERT_FIELD(rocdxg_smi_clock_info_t, clk_deep_sleep);
+
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, max_pcie_width);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, max_pcie_speed);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_interface_version);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, slot_type);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_width);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_speed);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_bandwidth);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_replay_count);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_l0_to_recovery_count);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_replay_roll_over_count);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_nak_sent_count);
+ABI_ASSERT_FIELD(rocdxg_smi_pcie_info_t, pcie_nak_received_count);
+
+ABI_ASSERT_FIELD(rocdxg_smi_driver_info_t, driver_version);
+ABI_ASSERT_FIELD(rocdxg_smi_driver_info_t, driver_date);
+ABI_ASSERT_FIELD(rocdxg_smi_driver_info_t, driver_name);
+
+ABI_ASSERT_FIELD(rocdxg_smi_vbios_info_t, name);
+ABI_ASSERT_FIELD(rocdxg_smi_vbios_info_t, build_date);
+ABI_ASSERT_FIELD(rocdxg_smi_vbios_info_t, part_number);
+ABI_ASSERT_FIELD(rocdxg_smi_vbios_info_t, version);
+ABI_ASSERT_FIELD(rocdxg_smi_vbios_info_t, boot_firmware);
+
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, temperature_edge);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, temperature_hotspot);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, temperature_mem);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, average_gfx_activity);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, average_umc_activity);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, current_socket_power);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, current_gfxclk);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, current_socclk);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, current_fan_speed);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, current_fan_speed_percent);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, voltage_soc);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, voltage_gfx);
+ABI_ASSERT_FIELD(rocdxg_smi_gpu_metrics_info_t, voltage_mem);
+
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, process_id);
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, vram_usage_bytes);
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, sdma_usage);
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, cu_occupancy);
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, engine_usage);
+ABI_ASSERT_FIELD(rocdxg_smi_process_info_t, evicted_time);
+
+ABI_ASSERT_FIELD(rocdxg_smi_cache_entry_t, cache_size_kb);
+ABI_ASSERT_FIELD(rocdxg_smi_cache_entry_t, cache_level);
+ABI_ASSERT_FIELD(rocdxg_smi_cache_entry_t, cache_properties);
+ABI_ASSERT_FIELD(rocdxg_smi_cache_entry_t, max_num_cu_shared);
+ABI_ASSERT_FIELD(rocdxg_smi_cache_entry_t, num_cache_instance);
+
+ABI_ASSERT_FIELD(rocdxg_smi_cache_info_t, num_cache_types);
+ABI_ASSERT_FIELD(rocdxg_smi_cache_info_t, cache);
+
+ABI_ASSERT_FIELD(rocdxg_smi_fw_entry_t, fw_id);
+ABI_ASSERT_FIELD(rocdxg_smi_fw_entry_t, fw_version);
+
+ABI_ASSERT_FIELD(rocdxg_smi_fw_info_t, entries);
+ABI_ASSERT_FIELD(rocdxg_smi_fw_info_t, num_fw_info);
+
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, struct_size);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, bdf);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, asic);
@@ -84,9 +182,6 @@ ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, fw);
 // built from any layout can still read it.
 static_assert(offsetof(rocdxg_smi_device_info_t, struct_size) == 0,
               "struct_size must be the first member of rocdxg_smi_device_info_t");
-
-ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, num_xcc);
-ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, target_graphics_version);
 
 // Status codes are exchanged by value; mismatched numbering would silently
 // remap errors.
