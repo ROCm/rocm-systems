@@ -1968,6 +1968,10 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 90)
         self.assertEqual(workloads["tp1-prefill"]["run_timeout_seconds"], 60)
         self.assertEqual(
+            workloads["tp1-prefill"]["record_replay_runtime_sample_stride"],
+            256,
+        )
+        self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),
         )
@@ -2480,6 +2484,27 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", qwen_environment)
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", qwen_environment)
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", tp1_environment)
+
+    def test_gfx1250_tp1_record_replay_uses_bounded_validation_stride(self) -> None:
+        tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
+        gfx1250_environment = validation._clean_environment(
+            "record-replay",
+            tp1,
+            Path("/hook.so"),
+            "gfx1250",
+            Path("/workspace"),
+        )
+        gfx950_environment = validation._clean_environment(
+            "record-replay",
+            tp1,
+            Path("/hook.so"),
+            "gfx950",
+            Path("/workspace"),
+        )
+        self.assertEqual(
+            gfx1250_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "256"
+        )
+        self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", gfx950_environment)
 
     def test_qwen_gfx1250_overhead_uses_a_software_backend_median(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]

@@ -105,6 +105,54 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_FALSE(result.warnings.empty());
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayZerosUnusedPersistentClusterCoordinate) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint16_t kClusterCoordinateSgpr = 53u;
+  std::vector<uint32_t> words(64u, build_s_nop(0u, kArch));
+  words[8] = 0xD8340000u;
+  words[9] = 0x00000000u; // ds_store_b32 v0, v0
+  words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_record_replay_workgroup_sgprs = {
+      .x = 50u,
+      .y = 51u,
+      .z = 52u,
+      .cluster_workgroup_id = kClusterCoordinateSgpr,
+  };
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(words, "gfx1250_zero_unused_cluster_coordinate"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_FALSE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  EXPECT_NE(
+      std::ranges::find(prologue_words, build_s_mov_b32(kClusterCoordinateSgpr,
+                                                        scalar_positive_inline_u32(0), kArch)),
+      prologue_words.end());
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.entry_nop_words = 2u;
@@ -8226,6 +8274,68 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
                                  &ConSanPatchInfo::kind),
               2u); // One local relay plus one appended return-PC dispatcher.
   }
+}
+
+TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint16_t kExecSaveSgpr = 80u;
+  constexpr uint16_t kDispatchIdSgpr = 70u;
+  constexpr uint16_t kCallReturnSgpr = kExecSaveSgpr + 6u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, ROCJITSU_CODE_ARCH_GFX1250));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = kExecSaveSgpr;
+  options.moi_dispatch_id_sgpr = kDispatchIdSgpr;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_record_replay_workgroup_sgprs = {.x = 50u, .y = 51u, .z = 52u};
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_runtime_sample_stride = 256u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_dense_runtime_gate"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto access_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access_patch, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, access_patch->trampoline_offset, access_patch->trampoline_size);
+  const auto save_scc = instrumentation::build_s_cselect_b32(
+      /*sdst=*/kExecSaveSgpr + 4u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const auto initialize_residue = instrumentation::build_s_sub_u32(
+      /*sdst=*/kExecSaveSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const auto clobber_call_return = instrumentation::build_s_sub_u32(
+      /*sdst=*/kCallReturnSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(save_scc);
+  ASSERT_TRUE(initialize_residue);
+  ASSERT_TRUE(clobber_call_return);
+  ASSERT_GE(words.size(), 2u);
+  EXPECT_EQ(words[0], *save_scc);
+  EXPECT_EQ(words[1], *initialize_residue);
+  EXPECT_EQ(std::ranges::find(words, *clobber_call_return), words.end());
+  EXPECT_NE(
+      std::ranges::find(words, build_s_setpc_b64(kCallReturnSgpr, ROCJITSU_CODE_ARCH_GFX1250)),
+      words.end());
 }
 
 TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {

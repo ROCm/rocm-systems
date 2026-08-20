@@ -239,10 +239,34 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
     if (!scalar_tuple[index] && !vector_tuple[index])
       continue;
     const ConSanMoiWorkgroupSource &source = *source_tuple[index];
-    if (!source.is_well_formed() || !source.has_value()) {
+    if (!source.is_well_formed()) {
       errors.emplace_back(
           "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
       return false;
+    }
+    if (!source.has_value()) {
+      if (index != 3u) {
+        errors.emplace_back(
+            "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
+        return false;
+      }
+      // A code-object-wide gfx1250 tuple reserves the cluster coordinate when
+      // any owning kernel consumes it. Ordinary kernels in the same object do
+      // not receive that launch input; zero is their exact cluster identity.
+      if (scalar_tuple[index]) {
+        if (!append_moi_entry_salu_write(
+                words, build_s_mov_b32(*scalar_tuple[index], scalar_positive_inline_u32(0), arch),
+                arch)) {
+          errors.emplace_back(
+              "ConSan MOI exact scalar workgroup-tuple prologue could not zero an absent "
+              "cluster coordinate");
+          return false;
+        }
+      } else {
+        words.push_back(
+            build_v_mov_b32_e32(*vector_tuple[index], scalar_positive_inline_u32(0), arch));
+      }
+      continue;
     }
     if (scalar_tuple[index]) {
       if (!source.scalar_src) {
@@ -1219,10 +1243,22 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     for (size_t index = 0; index < sources.size(); ++index) {
       if (!record_replay_workgroup_offset_values[index])
         continue;
-      if (!sources[index].has_value() || !consan_detail::append_workgroup_source_value(
-                                             words, sources[index], scratch_vgpr, arch)) {
+      if (!sources[index].is_well_formed()) {
         errors.emplace_back(
             "ConSan MOI private prologue requires every exact workgroup coordinate");
+        return std::nullopt;
+      }
+      if (!sources[index].has_value()) {
+        if (index != 3u) {
+          errors.emplace_back(
+              "ConSan MOI private prologue requires every exact workgroup coordinate");
+          return std::nullopt;
+        }
+        words.push_back(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch));
+      } else if (!consan_detail::append_workgroup_source_value(words, sources[index], scratch_vgpr,
+                                                               arch)) {
+        errors.emplace_back(
+            "ConSan MOI private prologue could not capture an exact workgroup coordinate");
         return std::nullopt;
       }
       words.insert(words.end(), record_replay_workgroup_stores[index]->begin(),

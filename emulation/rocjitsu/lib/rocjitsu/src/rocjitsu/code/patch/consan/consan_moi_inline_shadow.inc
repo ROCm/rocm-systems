@@ -3404,7 +3404,17 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
   const uint16_t quotient = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 5u);
-  const uint16_t residue = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
+  // Dense gfx1250 Record/Replay callers keep their s_call_i64 return PC in
+  // base+6:base+7 until the body returns with s_setpc. The indirect-PC pair at
+  // base+0 is dead after the dispatcher reaches this gate and is reinitialized
+  // by the non-selected return jump or the selected body, so reuse its low
+  // word for that engine without destroying the live call return. Sampled
+  // returns with its ordinary indirect-PC pair and retains the established
+  // residue slot.
+  const uint16_t residue =
+      options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? *options.moi_exec_save_sgpr
+          : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t shift =
       scalar_positive_inline_u32(std::countr_zero(options.moi_runtime_sample_stride));
   const uint32_t mask = options.moi_runtime_sample_stride - 1u;

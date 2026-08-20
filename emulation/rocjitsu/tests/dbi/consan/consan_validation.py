@@ -221,6 +221,7 @@ class Workload:
     fault_filter: str | None = None
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
+    record_replay_runtime_sample_stride: int | None = None
     run_timeout_seconds: int = TIMEOUT_SECONDS
     coverage_output_contract: CoverageOutputContract | None = None
     tensile_inner_timeout_seconds: int | None = None
@@ -1492,8 +1493,15 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after
         # transformation under RocJitsu. Keep a bounded twofold margin without
-        # weakening the ordinary physical-target timeout.
-        "tp1-prefill": {"run_timeout_seconds": 60},
+        # weakening the ordinary physical-target timeout. Record/Replay's
+        # 65,536-workgroup production sampling stride deterministically selects
+        # no workgroup from this compact 32-dispatch validation schedule. A
+        # stride of 256 retains bounded execution while producing runtime
+        # evidence from the same unmodified workload.
+        "tp1-prefill": {
+            "record_replay_runtime_sample_stride": 256,
+            "run_timeout_seconds": 60,
+        },
     },
 }
 
@@ -2146,6 +2154,16 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
+    if (
+        profile == "record-replay"
+        and workload.record_replay_runtime_sample_stride is not None
+    ):
+        stride = workload.record_replay_runtime_sample_stride
+        if stride <= 0 or stride & (stride - 1):
+            raise ValidationError(
+                f"{workload.id} has a non-power-of-two Record/Replay sampling stride: {stride}"
+            )
+        environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"] = str(stride)
     if workload.kind in {"pytorch", "llama", "rdna4-matmul"}:
         # These clients use a modern HSA runtime which returns after successful
         # rocprofiler registration unless legacy environment tools are
