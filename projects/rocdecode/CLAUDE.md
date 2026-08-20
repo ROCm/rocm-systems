@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-rocDecode is AMD's high-performance video decode SDK (currently v1.9.0). It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265/HEVC (8/10 bit), H.264/AVC (8 bit), AV1 (8/10 bit), VP9 (8/10 bit). Requires AMD GPU gfx908+.
+rocDecode is AMD's high-performance video decode SDK. It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265/HEVC (8/10 bit), H.264/AVC (8 bit), AV1 (8/10 bit), VP9 (8/10 bit). Requires AMD GPU gfx908+.
 
 - rocDecode is located at `projects/rocdecode` within the `rocm-systems` repo
 - CI is at `.github/workflows/media-libs-ci.yml` (builds via TheRock super-project)
@@ -50,7 +50,7 @@ Tests use a **build-and-test pattern**: CTest configures and builds each sample 
 
 ## Required Dependencies
 
-HIP, libva (>= 1.22), libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, extended tests, and rocdecode-host. Custom Find modules are in `cmake/` (FindFFmpeg, FindLibva, FindLibdrm_amdgpu — all support TheRock sysdeps paths).
+HIP, libva, libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, extended tests, and rocdecode-host. Custom Find modules are in `cmake/` (FindFFmpeg, FindLibva, FindLibdrm_amdgpu — all support TheRock sysdeps paths).
 
 ## Test Inventory
 
