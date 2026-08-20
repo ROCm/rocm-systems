@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "ScopedHook.h"
 #include "fakes/nccl_cuda_fakes.h"
 
 // TODO: Replace with projects/rccl/test/host/fakes/param_redirect.h after
@@ -79,72 +80,6 @@ protected:
 
 namespace {
 
-// ScopedHook -- RAII wrapper around a controllable seam (any of the
-// std::function<...> hooks declared in fakes/nccl_cuda_fakes.h).
-//
-// Three jobs in one type:
-//   1. Installs the test's behaviour on construction.
-//   2. Counts calls automatically (.calls), so tests don't hand-roll a
-//      separate `int xCalls = 0; ++xCalls` per hook.
-//   3. Restores the previous behaviour on destruction. This means tests
-//      don't have to inherit the fixture or rely on ResetNcclCudaFakes() to
-//      avoid contaminating each other -- the hook's lifetime ends with
-//      the ScopedHook local, before the captured stack locals die.
-//
-// Usage (CTAD picks up the signature from the hook variable):
-//   ScopedHook memGet(g_hipMemGetAddressRange,
-//       [&](hipDeviceptr_t* pb, std::size_t* ps, hipDeviceptr_t) {
-//           if (pb) *pb = ...;
-//           return hipSuccess;
-//       });
-//   ...
-//   EXPECT_EQ(memGet.calls, 1);
-//
-// Non-movable + non-copyable because the installed lambda captures `this`
-// to bump the counter.
-template <typename FnSig>
-class ScopedHook;
-
-template <typename R, typename... Args>
-class ScopedHook<R(Args...)> {
-public:
-    template <typename Callable>
-    ScopedHook(std::function<R(Args...)>& slot, Callable fn)
-        : slot_(slot), saved_(std::move(slot))
-    {
-        slot_ = [this, fn = std::move(fn)](Args... args) -> R {
-            ++calls;
-            return fn(std::forward<Args>(args)...);
-        };
-    }
-    ~ScopedHook() { slot_ = std::move(saved_); }
-
-    ScopedHook(const ScopedHook&)            = delete;
-    ScopedHook& operator=(const ScopedHook&) = delete;
-    ScopedHook(ScopedHook&&)                 = delete;
-    ScopedHook& operator=(ScopedHook&&)      = delete;
-
-    int calls = 0;
-private:
-    std::function<R(Args...)>& slot_;
-    std::function<R(Args...)>  saved_;
-};
-
-// CTAD: deduce R(Args...) from the std::function<R(Args...)>& argument so
-// call sites don't have to spell out the signature.
-template <typename R, typename... Args, typename Callable>
-ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
-
-// RegRecordCleaner -- RAII guard that frees the allocations
-// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
-//
-//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
-//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
-//
-// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
-// ncclCudaCallocAsync default registers it there), so this guard
-// deliberately doesn't touch it.
-//
 // MakeHeapIpcInfo -- allocate a zeroed ncclIpcRegInfo the same way
 // ipcRegisterBuffer's fresh-registration arm does (ncclCalloc == malloc +
 // memset)
@@ -159,8 +94,15 @@ inline ncclIpcRegInfo* MakeHeapIpcInfo(int peerRank, uintptr_t rmtRegAddr,
     return info;
 }
 
-// RegRecordCleaner -- RAII guard that owns and frees the heap allocations a
-// ncclReg accumulates
+// RegRecordCleaner -- RAII guard that frees the allocations
+// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
+//
+//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
+//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
+//
+// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
+// ncclCudaCallocAsync default registers it there), so this guard
+// deliberately doesn't touch it.
 struct RegRecordCleaner {
     ncclReg& reg;
     explicit RegRecordCleaner(ncclReg& r) : reg(r) {}
