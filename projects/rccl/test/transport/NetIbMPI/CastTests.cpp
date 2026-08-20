@@ -590,6 +590,59 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads. Scheduler state is per send
+    // communicator, so every worker arms and audits its own tokens while N
+    // schedulers run the boundary decision concurrently.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        const int nqps = CastEnvNqps();
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, MPIEnvironment::nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(threshold);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, buffer, threshold, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                const int seed = 1599 + threadIdx * 1000;
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1599, seed);
+                if (!result.ok) return result;
+
+                // At the threshold the split path must leave WRR tokens alone.
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, threshold, 1600,
+                                                        mhandle, seed + 1, /*tokens=*/0);
+                if (!result.ok) return result;
+
+                // One byte below it, WRR must consume exactly one token.
+                return WorkerCastTransferExpectTokens(rank, pair, buffer, threshold - 1, 1601,
+                                                      mhandle, seed + 2, /*tokens=*/1);
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(),
+                          "threaded CastSplitDataThresholdBoundary");
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1029,6 +1082,71 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: N schedulers sweep both sides of
+    // the WRR/split boundary at once, each auditing its own token ledger.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        const int nqps = CastEnvNqps();
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        const size_t bufSize = threshold * 2;
+
+        std::vector<size_t> wrrSizes;
+        for (size_t size : std::initializer_list<size_t>{512, 4096, splitDataMin, threshold - 1})
+            if (size > 0 && size < threshold) wrrSizes.push_back(size);
+        wrrSizes.erase(std::unique(wrrSizes.begin(), wrrSizes.end()), wrrSizes.end());
+        const std::vector<size_t> splitSizes = {threshold, threshold * 2};
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, MPIEnvironment::nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(bufSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, buffer, bufSize, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                const int seedBase = 1999 + threadIdx * 1000;
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1999,
+                                                 seedBase);
+                if (!result.ok) return result;
+
+                int tag = 2000;
+                for (size_t size : wrrSizes) {
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, tag++,
+                                                            mhandle, seedBase + tag,
+                                                            /*tokens=*/1);
+                    if (!result.ok) return result;
+                }
+                for (size_t size : splitSizes) {
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, tag++,
+                                                            mhandle, seedBase + tag,
+                                                            /*tokens=*/0);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastSendRecvMultipleSizes");
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1140,6 +1258,47 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent 16 MB split-path
+    // transfers, each worker confirming its own scheduler stayed untouched.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        const int nqps = CastEnvNqps();
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, MPIEnvironment::nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(kLargeBufferSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, buffer, kLargeBufferSize, NCCL_PTR_HOST,
+                                        &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                const int seed = 2099 + threadIdx * 1000;
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2099, seed);
+                if (!result.ok) return result;
+
+                return WorkerCastTransferExpectTokens(rank, pair, buffer, kLargeBufferSize,
+                                                      2100, mhandle, seed + 1, /*tokens=*/0);
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastLargeTransfer");
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1205,6 +1364,47 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     CAST_ENV_CHECK_OR_SKIP();
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+
+    // Parameterized by MPIEnvironment::nThreads: a zero-byte send must still take
+    // the WRR path on every worker's own scheduler.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        const int nqps = CastEnvNqps();
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, MPIEnvironment::nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t regSize = 64;
+                void* buffer = malloc(regSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, buffer, regSize, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                const int seed = 2199 + threadIdx * 1000;
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2199, seed);
+                if (!result.ok) return result;
+
+                return WorkerCastTransferExpectTokens(rank, pair, buffer, 0, 2200, mhandle,
+                                                      seed + 1, /*tokens=*/1);
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastSendRecvZeroSize");
+        return;
+    }
 
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
@@ -1279,6 +1479,99 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     CAST_ENV_CHECK_OR_SKIP();
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+
+    // Parameterized by MPIEnvironment::nThreads. The single-threaded body already
+    // drives many connections, but strictly one after another; here every worker
+    // owns a connection so the schedulers advance simultaneously. Each worker
+    // audits its own ledger: tokens are per send communicator.
+    if (MPIEnvironment::nThreads > 1) {
+        if (GetSplitDataMin() == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+
+        const int nqps = CastEnvNqps();
+        const size_t splitDataMin = GetSplitDataMin();
+        const size_t msgSize = std::max<size_t>(64, splitDataMin - 1);
+        const std::vector<size_t> rampSizes = {splitDataMin / 4, splitDataMin / 2,
+                                               splitDataMin, splitDataMin * 4};
+        const size_t bufSize = std::max(msgSize, splitDataMin * 4);
+        static constexpr int kThreadedMsgs = 100;
+        static constexpr int kThreadedRampRounds = 5;
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, MPIEnvironment::nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(bufSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mhandle = nullptr;
+                result = WorkerRegister(workerComm, buffer, bufSize, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhandleGuard(mhandle,
+                                                   NetMHandleWorkerDeleter(net_, workerComm));
+
+                const int tagBase = 10000 + threadIdx * 200;
+                const int seedBase = 3999 + threadIdx * 1000;
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, tagBase,
+                                                 seedBase);
+                if (!result.ok) return result;
+
+                // Phase 1: small messages, all on the WRR path.
+                for (int i = 0; i < kThreadedMsgs; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, msgSize, tagBase + 1 + i,
+                                                   mhandle, seedBase + i);
+                    if (!result.ok) return result;
+                }
+
+                if (rank == 1) {
+                    struct ncclIbCastSchedState state = {};
+                    result = WorkerCastGetSchedState(pair.sendComm, &state);
+                    if (!result.ok) return result;
+                    if (!state.schedInit) {
+                        result.ok = false;
+                        result.msg = "scheduler never initialized after the WRR phase";
+                        return result;
+                    }
+                    int sum = 0;
+                    for (int qp = 0; qp < state.nqps; qp++) sum += state.activeQpTokens[qp];
+                    if (sum != state.activeTotTokens) {
+                        result.ok = false;
+                        result.msg = "per-QP tokens do not sum to activeTotTokens";
+                        return result;
+                    }
+                    if (state.activeTotTokens < 0
+                        || state.activeTotTokens > state.initTotTokens) {
+                        result.ok = false;
+                        result.msg = "activeTotTokens left the [0, initTotTokens] range";
+                        return result;
+                    }
+                }
+
+                // Phase 2: ramp across the WRR/split boundary.
+                int tag = tagBase + 1 + kThreadedMsgs;
+                for (int round = 0; round < kThreadedRampRounds; round++) {
+                    for (size_t size : rampSizes) {
+                        if (size == 0 || size > bufSize) continue;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag++, mhandle,
+                                                       seedBase + tag,
+                                                       kLargeTransferTimeoutMs);
+                        if (!result.ok) return result;
+                    }
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(),
+                          "threaded CastStressMultiRoundTwoConns");
+        return;
+    }
 
     constexpr int kNConns = 100;
     std::vector<void*> listenComms(kNConns, nullptr);

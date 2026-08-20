@@ -48,11 +48,64 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 // E1.  MrCacheRefCount — registers the same host buffer twice on the same
 //      comm: cache hit bumps refs to 2, two Dereg calls bring it back to 0
 //      (covers the refs>0 branch in ncclIbDeregMrInternal).
+//      Parameterized by MPIEnvironment::nThreads: every worker registers the
+//      SAME address from its own communicator, so all of them contend on one
+//      cache entry's refcount rather than merely on the cache mutex.
 TEST_F(NetIbMPITest, MrCacheRefCount) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        const size_t sharedSz = 4096;
+        auto shared = makeHostBufferAutoGuard(malloc(sharedSz));
+        ASSERT_NE(shared.get(), nullptr);
+
+        // Every worker must be holding both of its registrations before any of
+        // them starts releasing. The body gate only synchronizes entry, so
+        // without this a worker could register twice and release both before the
+        // next one ran, and the refcount would never climb past the two that the
+        // serial body already covers.
+        std::atomic<int> bothHeld{0};
+        static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                (void)threadIdx;
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh1 = nullptr;
+                void* mh2 = nullptr;
+                ThreadResult result = WorkerRegister(comm, shared.get(), sharedSz,
+                                                     NCCL_PTR_HOST, &mh1);
+                if (!result.ok) return result;
+                result = WorkerRegister(comm, shared.get(), sharedSz, NCCL_PTR_HOST, &mh2);
+                if (!result.ok) {
+                    DeregisterMemory(comm, mh1);
+                    return result;
+                }
+                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls)) {
+                    DeregisterMemory(comm, mh1);
+                    DeregisterMemory(comm, mh2);
+                    result.ok = false;
+                    result.msg = "only " + std::to_string(bothHeld.load()) + " of "
+                                 + std::to_string(nThreads)
+                                 + " workers reached the point where all hold two registrations";
+                    return result;
+                }
+                if (DeregisterMemory(comm, mh1) != ncclSuccess
+                    || DeregisterMemory(comm, mh2) != ncclSuccess) {
+                    result.ok = false;
+                    result.msg = "deregMr failed while unwinding the cache refcount";
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MrCacheRefCount");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -168,11 +221,49 @@ TEST_F(NetIbMPITest, NullCommClose) {
 // E4.  TagZeroReuse — 50 messages all sent with tag=0.
 //      Verifies FIFO ordering: messages arrive in send order because
 //      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).
+//      Parameterized by MPIEnvironment::nThreads: with every worker reusing
+//      tag 0 on its own connection, a completion routed to the wrong comm shows
+//      up as a data mismatch instead of passing silently.
 TEST_F(NetIbMPITest, TagZeroReuse) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    static constexpr int kTagZeroIters = 50;
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            ThreadDevPolicy::Spread(), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t sz = kSmallBufferSize;
+                void* buffer = malloc(sz);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh = nullptr;
+                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                for (int i = 0; i < kTagZeroIters; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, sz, /*tag=*/0, mh,
+                                                   threadIdx * 10000 + i);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded TagZeroReuse");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -275,11 +366,28 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 // E7.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
 //      Exercises alignment boundaries, AR threshold, inline paths, and
 //      large-MR registration.
+//      Parameterized by MPIEnvironment::nThreads: concurrent workers sweep the
+//      whole ladder at once, so alignment and chunking paths run under real
+//      bandwidth pressure with several 64 MB registrations live per device.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    static const std::vector<size_t> kBarrageSizes = {
+        1, 7, 13, 64, 127, 128, 129, 255, 256, 512,
+        1023, 1024, 4095, 4096, 8191, 8192, 8193,
+        16384, 32768, 65536, 131072,
+        1048576, 4194304, 16777216, 67108864
+    };
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Spread(), nThreads, kBarrageSizes,
+                             /*repeats=*/1, "threaded MixedSizeBarrage");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -322,11 +430,82 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 // A1.  FifoPressureSenderFast — receiver deliberately slow, sender in
 //      tight loop.  Verifies that isend returns *request==NULL when the
 //      FIFO slot is not ready (backpressure).
+//      Parameterized by MPIEnvironment::nThreads: N slow receivers against N
+//      tight senders replace an idle fabric with genuine queue contention, while
+//      the backpressure assertion stays per-connection.
 TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        static constexpr int kThreadedMsgs = 20;
+        static constexpr int kThreadedRecvDelayUs = 50000; // 50ms
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t sz = kSmallBufferSize;
+                void* buffer = malloc(sz);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh = nullptr;
+                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                int nullCount = 0;
+                for (int i = 0; i < kThreadedMsgs; i++) {
+                    void* request = nullptr;
+                    if (rank == 0) {
+                        if (i > 0) usleep(kThreadedRecvDelayUs);
+                        result = WorkerPostRecv(pair.recvComm, buffer, sz, i, mh, &request);
+                    } else {
+                        fillHostBufferWithPattern<uint8_t>(buffer, sz, makeBytePattern(i));
+                        int attempts = 0;
+                        do {
+                            if (PostSend(pair.sendComm, buffer, sz, i, mh, &request)
+                                != ncclSuccess) {
+                                result.ok = false;
+                                result.msg = "isend failed";
+                                return result;
+                            }
+                            if (request) break;
+                            nullCount++;
+                            usleep(1000);
+                            if (++attempts > kMaxRetryAttempts) {
+                                result.ok = false;
+                                result.msg = "isend never got a FIFO slot";
+                                return result;
+                            }
+                        } while (!request);
+                    }
+                    if (!result.ok) return result;
+
+                    int sizes[1] = {0};
+                    result = WorkerWait(request, sizes, kStressTimeoutMs);
+                    if (!result.ok) return result;
+                }
+
+                // The slow receiver guarantees the sender saw backpressure.
+                if (rank != 0 && nullCount == 0) {
+                    result.ok = false;
+                    result.msg = "expected at least one NULL request (FIFO backpressure)";
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded FifoPressureSenderFast");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -392,11 +571,90 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
 // A2.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
 //      then drain all via matching sends, then verify slots are recycled.
+//      Parameterized by MPIEnvironment::nThreads: request pools are per-comm, so
+//      the point is N x 32 requests in flight on one NIC and the confirmation
+//      that completion routing never crosses communicators.
 TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    static constexpr int kMaxReqsPerComm = 32; // NCCL_NET_MAX_REQUESTS
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t sz = 256;
+                void* buffer = malloc(sz * kMaxReqsPerComm);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh = nullptr;
+                result = WorkerRegister(comm, buffer, sz * kMaxReqsPerComm, NCCL_PTR_HOST, &mh);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                // No rank handshake here: the sender's retry loop waits for the
+                // receiver's FIFO slots instead of a barrier the worker cannot use.
+                // Per-worker seeds, checked on arrival: with the slot index alone
+                // every worker would send the same bytes for a slot, and a
+                // completion delivered to the wrong worker's request would satisfy
+                // the wait unnoticed.
+                std::vector<void*> requests(kMaxReqsPerComm, nullptr);
+                for (int i = 0; i < kMaxReqsPerComm; i++) {
+                    char* slot = static_cast<char*>(buffer) + i * sz;
+                    if (rank == 0) {
+                        memset(slot, 0, sz);
+                        result = WorkerPostRecv(pair.recvComm, slot, sz, i, mh, &requests[i]);
+                    } else {
+                        fillHostBufferWithPattern<uint8_t>(
+                            slot, sz, makeBytePattern(WorkerSeed(threadIdx, i)));
+                        result = WorkerPostSend(pair.sendComm, slot, sz, i, mh, &requests[i]);
+                    }
+                    if (!result.ok) return result;
+                }
+                for (int i = 0; i < kMaxReqsPerComm; i++) {
+                    int sizes[1] = {0};
+                    result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+                    if (!result.ok) return result;
+                    if (rank != 0) continue;
+                    const char* slot = static_cast<char*>(buffer) + i * sz;
+                    if (sizes[0] != (int)sz) {
+                        result.ok = false;
+                        result.msg = "slot " + std::to_string(i) + " completed with size "
+                                     + std::to_string(sizes[0]) + " instead of "
+                                     + std::to_string(sz);
+                        return result;
+                    }
+                    if (!verifyHostBufferData<uint8_t>(slot, sz,
+                                                       makeBytePattern(WorkerSeed(threadIdx, i)))) {
+                        result.ok = false;
+                        result.msg = "slot " + std::to_string(i)
+                                     + " holds another worker's payload";
+                        return result;
+                    }
+                }
+
+                // Slots must be recycled: another round on the same comm.
+                for (int i = 0; i < 4; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, sz, 100 + i, mh,
+                                                   threadIdx * 10000 + i, kStressTimeoutMs);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded RequestSlotExhaustion");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -455,11 +713,88 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 
 // A3.  MemoryRegistrationStorm — register/deregister 512 unique buffers
 //      in various patterns to stress the MR cache.
+//      Parameterized by MPIEnvironment::nThreads: the MR cache is per physical
+//      device behind a single mutex, so concurrent storms are the only way to
+//      race its insert, lookup and eviction paths against each other.
 TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        // Keep the aggregate registration count near the serial test's 512 rather
+        // than multiplying it by the worker count. What is under test is
+        // contention on the one per-device cache, and a per-worker storm that
+        // grows with N only spreads the workers apart in time until the
+        // verification transfer outlives any sane timeout.
+        const int kThreadedBufs = std::max(16, 512 / nThreads);
+        static constexpr size_t kThreadedBufSz = 4096;
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+                std::vector<void*> bufs(kThreadedBufs, nullptr);
+                auto bufCleanup = makeScopeGuard([&]() {
+                    for (auto* p : bufs) free(p);
+                });
+                for (int i = 0; i < kThreadedBufs; i++) {
+                    bufs[i] = malloc(kThreadedBufSz);
+                    if (!bufs[i]) {
+                        result.ok = false;
+                        result.msg = "malloc failed";
+                        return result;
+                    }
+                }
+
+                std::vector<void*> handles(kThreadedBufs, nullptr);
+                auto registerAll = [&]() {
+                    for (int i = 0; i < kThreadedBufs; i++) {
+                        result = WorkerRegister(comm, bufs[i], kThreadedBufSz, NCCL_PTR_HOST,
+                                                &handles[i]);
+                        if (!result.ok) return false;
+                    }
+                    return true;
+                };
+                auto deregisterOrder = [&](const std::vector<int>& order) {
+                    for (int idx : order) {
+                        if (DeregisterMemory(comm, handles[idx]) != ncclSuccess) {
+                            result.ok = false;
+                            result.msg = "deregMr failed";
+                            return false;
+                        }
+                        handles[idx] = nullptr;
+                    }
+                    return true;
+                };
+
+                std::vector<int> reverse(kThreadedBufs);
+                for (int i = 0; i < kThreadedBufs; i++) reverse[i] = kThreadedBufs - 1 - i;
+                std::vector<int> shuffled(kThreadedBufs);
+                for (int i = 0; i < kThreadedBufs; i++) shuffled[i] = i;
+                for (int i = kThreadedBufs - 1; i > 0; i--) {
+                    int j = (i * 42 + 17 + threadIdx) % (i + 1);
+                    std::swap(shuffled[i], shuffled[j]);
+                }
+
+                if (!registerAll()) return result;
+                if (!deregisterOrder(reverse)) return result;
+                if (!registerAll()) return result;
+                if (!deregisterOrder(shuffled)) return result;
+
+                // The connection must still work after the storm. The peer's
+                // worker may be several hundred registrations behind, so this
+                // transfer waits on the stress budget rather than the default.
+                return WorkerHostTransfer(rank, pair, kThreadedBufSz, 0,
+                                          999 + threadIdx * 10000, kStressTimeoutMs);
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MemoryRegistrationStorm");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -888,6 +1223,16 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent workers multiply the
+    // QPs in flight per device while each one checks its own split payloads.
+    if (MPIEnvironment::nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Spread(), MPIEnvironment::nThreads,
+                             {127, 128, 129, 255, 256, 257, 1023, 1024, 1025,
+                              4095, 4096, 4097, 65535, 65536, 65537},
+                             /*repeats=*/2, "threaded MultiQpSplitDataStress");
+        return;
+    }
+
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
     SetupConnectionWithGuard(0, cp, guard);
@@ -932,6 +1277,15 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    // Parameterized by MPIEnvironment::nThreads: same sweep on the nDataQps path.
+    if (MPIEnvironment::nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Spread(), MPIEnvironment::nThreads,
+                             {127, 128, 129, 255, 256, 257, 1023, 1024, 1025,
+                              4095, 4096, 4097, 65535, 65536, 65537},
+                             /*repeats=*/2, "threaded MultiQpNoSplitStress");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -1404,11 +1758,49 @@ TEST_F(NetIbMPITest, BidirectionalSaturation) {
 
 // F1.  LongRunningEndurance — 10000 transfers on a single connection,
 //      tag cycling, RDMA checkpoints.
+//      Parameterized by MPIEnvironment::nThreads. The leak checkpoints move to
+//      the main thread around the whole run: an in-loop snapshot would see the
+//      other workers' live QPs and report a false leak.
 TEST_F(NetIbMPITest, LongRunningEndurance) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        static constexpr int kThreadedIters = 2000;
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            ThreadDevPolicy::Spread(), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t sz = kSmallBufferSize;
+                void* buffer = malloc(sz);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh = nullptr;
+                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                for (int i = 0; i < kThreadedIters; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, sz, i % 1000, mh,
+                                                   WorkerSeed(threadIdx, i), kStressTimeoutMs);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded LongRunningEndurance");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -1458,6 +1850,80 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
         GTEST_SKIP() << "No GPU Direct RDMA support";
     }
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent GPU registrations
+    // drive the peer-memory path into the same per-device MR cache. Workers
+    // inherit this rank's HIP device from the harness, since the current device
+    // is thread-local.
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        static constexpr int kThreadedCycles = 3;
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t cycleSizes[kThreadedCycles] = {512 * 1024, 1024 * 1024,
+                                                            2 * 1024 * 1024};
+                for (int cycle = 0; cycle < kThreadedCycles; cycle++) {
+                    const size_t sz = cycleSizes[cycle];
+                    const int seed = threadIdx * 100 + cycle;
+
+                    void* devBuf = nullptr;
+                    if (hipMalloc(&devBuf, sz) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "hipMalloc failed";
+                        return result;
+                    }
+                    auto devGuard = makeDeviceBufferAutoGuard(devBuf);
+
+                    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                    void* mh = nullptr;
+                    result = WorkerRegister(comm, devBuf, sz, NCCL_PTR_CUDA, &mh);
+                    if (!result.ok) return result;
+                    NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                    if (rank == 1
+                        && initializeBufferWithPattern<uint8_t>(devBuf, sz,
+                                                                makeBytePattern(seed))
+                               != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "GPU buffer initialization failed";
+                        return result;
+                    }
+
+                    result = WorkerSendRecvRaw(rank, pair, devBuf, sz, cycle, mh,
+                                               kLargeTransferTimeoutMs);
+                    if (!result.ok) return result;
+
+                    if (rank == 0) {
+                        void* flushRequest = nullptr;
+                        int flushSize = static_cast<int>(sz);
+                        // A null request means the flush was a no-op; an error
+                        // return means the flush itself failed.
+                        if (FlushRecv(pair.recvComm, 1, &devBuf, &flushSize, &mh, &flushRequest)
+                            != ncclSuccess) {
+                            result.ok = false;
+                            result.msg = "FlushRecv failed at cycle " + std::to_string(cycle);
+                            return result;
+                        }
+                        if (flushRequest) {
+                            int flushed[1] = {0};
+                            result = WorkerWait(flushRequest, flushed, kLargeTransferTimeoutMs);
+                            if (!result.ok) return result;
+                        }
+                        if (!verifyBufferData<uint8_t>(devBuf, sz, makeBytePattern(seed))) {
+                            result.ok = false;
+                            result.msg = "GPU data mismatch";
+                            return result;
+                        }
+                    }
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded GpuMemoryTransferStress");
+        return;
+    }
+
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
     SetupConnectionWithGuard(0, cp, guard);
@@ -1499,6 +1965,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
             void* flushReq = nullptr;
             int flushSz = static_cast<int>(sz);
             ncclResult_t fr = FlushRecv(cp.recvComm, 1, &devBuf, &flushSz, &mh, &flushReq);
+            EXPECT_EQ(fr, ncclSuccess) << "FlushRecv failed at cycle " << cycle;
             if (fr == ncclSuccess && flushReq) {
                 int fsz = 0;
                 EXPECT_EQ(WaitForCompletion(flushReq, &fsz, kLargeTransferTimeoutMs), ncclSuccess);
@@ -1516,11 +1983,64 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 // =====================================================================
 
 // J1.  RapidRecvPostDrain — 100 cycles of post-32-recv → send-32 → drain.
+//      Parameterized by MPIEnvironment::nThreads: batches from all workers are
+//      in flight on one NIC at once, so recycling has to hold up while other
+//      communicators are draining their own batches.
 TEST_F(NetIbMPITest, RapidRecvPostDrain) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        static constexpr int kThreadedCycles = 25;
+        static constexpr int kThreadedBatch  = 32;
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                const size_t sz = 256;
+                void* buffer = malloc(sz * kThreadedBatch);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                void* mh = nullptr;
+                result = WorkerRegister(comm, buffer, sz * kThreadedBatch, NCCL_PTR_HOST, &mh);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+
+                for (int cycle = 0; cycle < kThreadedCycles; cycle++) {
+                    std::vector<void*> requests(kThreadedBatch, nullptr);
+                    for (int i = 0; i < kThreadedBatch; i++) {
+                        char* slot = static_cast<char*>(buffer) + i * sz;
+                        if (rank == 0) {
+                            result = WorkerPostRecv(pair.recvComm, slot, sz, i, mh, &requests[i]);
+                        } else {
+                            fillHostBufferWithPattern<uint8_t>(
+                                slot, sz, makeBytePattern(cycle * kThreadedBatch + i));
+                            result = WorkerPostSend(pair.sendComm, slot, sz, i, mh, &requests[i]);
+                        }
+                        if (!result.ok) return result;
+                    }
+                    for (int i = 0; i < kThreadedBatch; i++) {
+                        int sizes[1] = {0};
+                        result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+                        if (!result.ok) return result;
+                    }
+                }
+                (void)threadIdx;
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded RapidRecvPostDrain");
+        return;
+    }
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
@@ -1586,5 +2106,169 @@ TEST_F(NetIbMPITest, SetNetAttrNoOp) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: ThreadedProgressDoesNotSerialize
+//
+// Multithread-only gate on the data path itself: independent workers must make
+// progress at the same time, not one after another. It exists because a single
+// process-global lock anywhere under isend/irecv/test is enough to turn every
+// concurrent communicator into a queue while every functional test still passes.
+// The known instance is the libibverbs ops shims, whose poll_cq takes one
+// process-global mutex per call, but nothing about this test is specific to
+// them: any future global lock on the progress path shows up here.
+//
+// Method. The same body runs in one process, on the same devices: once with a
+// single worker, then with all of them, and each worker times only its own loop,
+// so connection setup is outside the measurement. Every worker does the same
+// fixed number of transfers, so the parallel phase moves N times the data.
+// Perfect overlap therefore lands near the single-worker time, and full
+// serialization near N times it. Calibration runs before and after the parallel
+// phase and is averaged, so a machine that drifts mid-test is visible rather
+// than silently shifting the verdict. A fourth phase holds a mutex across every
+// transfer, and the same measurement has to notice it -- otherwise the verdict
+// on the plugin means nothing.
+//
+// What it does and does not see. A lock held across a progress call serializes
+// the call itself and shows up here immediately. A lock taken and released
+// around one, like the two acquisitions shimPollCq adds per poll_cq, does not:
+// measured at four and sixteen workers, with the ops shims installed and
+// without, the factor was 1.00 either way, because the critical section is a map
+// lookup next to a driver call. That leak is caught deterministically instead, by
+// FaultInjectionShimsAbsentUnlessRequested.
+// =============================================================================
+TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const int rank     = MPIEnvironment::world_rank;
+    const int nThreads = MPIEnvironment::nThreads;
+    // Below four workers the ratio is too close to one to separate contention
+    // from ordinary noise.
+    if (nThreads < 4) {
+        GTEST_SKIP() << "requires --net_ib_nthreads of at least 4 to separate contention "
+                        "from noise";
+    }
+
+    AssertInitAndGetDevices(nullptr);
+
+    // Small messages: the point is how many transfers overlap, not bandwidth.
+    static constexpr size_t kMsgSize = 256;
+    static constexpr int    kIters   = 100;
+    static constexpr int    kTimeoutMs = 60000;
+    // Full serialization costs N times the single-worker time. Passing means
+    // staying below 60% of that, which on healthy hardware measures near 1.
+    static constexpr double kSerializedFraction = 0.6;
+
+    std::vector<double> workerMs(nThreads, 0.0);
+    // Phase 3 holds this across each transfer to imitate a global lock on the
+    // progress path, which is how the measurement proves it can still see one.
+    std::mutex serializeAll;
+    bool serialize = false;
+
+    auto body = [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        ThreadResult result;
+        void* buffer = malloc(kMsgSize);
+        if (!buffer) {
+            result.ok = false;
+            result.msg = "malloc failed";
+            return result;
+        }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+        memset(buffer, 0x5A, kMsgSize);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        result = WorkerRegister(comm, buffer, kMsgSize, NCCL_PTR_HOST, &mhandle);
+        if (!result.ok) return result;
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < kIters; i++) {
+            // Only the sending rank serializes. Locking both would let the two
+            // ranks admit different workers at the same time, and each would then
+            // wait for a peer that its own lock is keeping out -- a deadlock,
+            // which is its own argument against a global lock on this path.
+            if (serialize && rank == 1) {
+                std::lock_guard<std::mutex> lock(serializeAll);
+                result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
+                                           kTimeoutMs);
+            } else {
+                result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
+                                           kTimeoutMs);
+            }
+            if (!result.ok) return result;
+        }
+        const auto end = std::chrono::steady_clock::now();
+        workerMs[threadIdx] =
+            std::chrono::duration<double, std::milli>(end - start).count();
+        return result;
+    };
+
+    // The slowest worker bounds the phase: the others waited for it.
+    auto measure = [&](int workers) -> double {
+        std::fill(workerMs.begin(), workerMs.end(), 0.0);
+        RunMultiThreadedIndependent(0, workers, body);
+        double worst = 0.0;
+        for (int t = 0; t < workers; t++) worst = std::max(worst, workerMs[t]);
+        return worst;
+    };
+
+    const double singleBefore = measure(1);
+    const double parallel     = measure(nThreads);
+    const double singleAfter  = measure(1);
+    serialize = true;
+    const double serialized = measure(nThreads);
+    serialize = false;
+
+    // A worker can fail on one rank only, and the harness reports that on both
+    // ranks already. What must not happen here is a fatal assertion: this rank
+    // would leave the test while the peer, whose own timings are fine, waits in
+    // the barrier below forever. So a missing measurement is reported and the
+    // verdict skipped, and both ranks reach the barrier either way.
+    const bool measured = singleBefore > 0.0 && singleAfter > 0.0 && parallel > 0.0
+                          && serialized > 0.0;
+    EXPECT_TRUE(measured)
+        << "a phase produced no timing on this rank (single " << singleBefore << "/"
+        << singleAfter << " ms, parallel " << parallel << " ms, serialized " << serialized
+        << " ms), so the scaling verdict is skipped";
+
+    if (measured) {
+        const double single = (singleBefore + singleAfter) / 2.0;
+        const double factor = parallel / single;
+        const double budget = kSerializedFraction * nThreads;
+        const double serializedFactor = serialized / single;
+
+        TEST_INFO("progress scaling: %d workers, single %.1f/%.1f ms, parallel %.1f ms, "
+                  "factor %.2f; deliberately serialized %.1f ms, factor %.2f; budget %.2f",
+                  nThreads, singleBefore, singleAfter, parallel, factor, serialized,
+                  serializedFactor, budget);
+
+        // Without this the gate could pass by being blind: a wait that sleeps, or a
+        // workload that spends its time off the progress path, would report a flat
+        // factor no matter what. The same measurement has to flag a lock it knows is
+        // there before its verdict on the plugin means anything.
+        EXPECT_GT(serializedFactor, budget)
+            << "the measurement did not notice a mutex held across every transfer (factor "
+            << serializedFactor << ", budget " << budget
+            << "), so it cannot be trusted to notice one inside the plugin either";
+
+        EXPECT_LT(factor, budget)
+            << nThreads << " workers each moved " << kIters << " messages in " << parallel
+            << " ms while one worker needed " << single << " ms, a factor of " << factor
+            << " where full serialization is " << nThreads << ". Concurrent progress is being "
+            << "serialized somewhere under isend/irecv/test: a lock held across a progress "
+            << "call would do exactly this.";
+
+        // A machine that changed speed under us would invalidate the ratio above.
+        const double drift =
+            std::max(singleBefore, singleAfter) / std::min(singleBefore, singleAfter);
+        EXPECT_LT(drift, 1.5) << "single-worker calibration drifted between " << singleBefore
+                              << " ms and " << singleAfter
+                              << " ms, so the scaling factor cannot be trusted";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
 
 #endif /* MPI_TESTS_ENABLED */

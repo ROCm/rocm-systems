@@ -350,6 +350,9 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SimpleSendRecv");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent workers each sweep the
+// same size ladder on an independent connection, so registrations of many
+// different sizes hit the shared per-device MR cache at once.
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
@@ -359,12 +362,33 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    const int nThreads = MPIEnvironment::nThreads;
 
     // Test various sizes
     std::vector<size_t> testSizes = {1, 64, 256, 1024, 4096, 16384, 65536};
+
+    if (nThreads > 1) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            ThreadDevPolicy::Spread(), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                for (size_t size : testSizes) {
+                    const int seed = kMultiSizeSeedOffset + threadIdx * 10000
+                                     + static_cast<int>(size);
+                    result = WorkerHostTransfer(rank, pair, size, 100, seed);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SendRecvMultipleSizes");
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(0, pair, connGuard);
 
     for (size_t size : testSizes) {
         const int tag = 100;
@@ -736,6 +760,9 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MultipleSequentialTransfers");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent 16 MB transfers put
+// several large registrations in the per-device MR cache simultaneously and
+// keep the NIC saturated while every worker verifies its own payload.
 TEST_F(NetIbMPITest, LargeTransfer) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
@@ -745,6 +772,22 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
+    const int nThreads = MPIEnvironment::nThreads;
+
+    if (nThreads > 1) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            ThreadDevPolicy::Spread(), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, kLargeBufferSize, 400,
+                                          kBaseSeedOffset + threadIdx,
+                                          kLargeTransferTimeout);
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded LargeTransfer");
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
