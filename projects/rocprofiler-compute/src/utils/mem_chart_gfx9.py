@@ -27,6 +27,7 @@ from utils.mem_chart_common import (
     mem_chart_cli_main,
     metric_line,
     pad_to,
+    progress_bar,
     render_chart_to_string,
     stack_metrics,
 )
@@ -156,6 +157,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["buffer_write"] = metric_dict.get("Buffer Write")
     metrics["buffer_atomic"] = metric_dict.get("Buffer Atomic")
     metrics["lds_req"] = metric_dict.get("LDS Req")
+    metrics["lds_util"] = metric_dict.get("LDS Util")
     metrics["lds_read"] = metric_dict.get("LDS Read")
     metrics["lds_write"] = metric_dict.get("LDS Write")
     metrics["lds_atomic"] = metric_dict.get("LDS Atomic")
@@ -222,11 +224,13 @@ _TOTAL_H = _VL1D_H + _LDS_H + _SL1D_H + _L1I_H
 # Panel widths — all non-Kernel IP blocks share one width for a uniform grid
 _IP_BLOCK_W = 22
 # IO row panels (separate layout above/below the main grid)
-_XGMI_PANEL_W = 24  # fits "XGMI (to Peer GPU)" label
-_PCIE_PANEL_W = 46  # fits "PCIe (to CPU or Non-XGMI connected GPU)" label
+_XGMI_PANEL_W = 24  # fits "xGMI (to Peer GPU)" label
+_PCIE_PANEL_W = 46  # fits "PCIe (to CPU or Non-xGMI connected GPU)" label
 
 # Layout offsets
 _IO_PAD_OFFSET = 3  # gap between fabric_col edge and xGMI/PCIe arrow text
+# Arch capability sets
+_MALL_ARCHS = frozenset({"gfx940", "gfx941", "gfx942", "gfx950"})
 # Console dimensions
 _CONSOLE_WIDTH = 240  # CDNA layout is wider (more IP blocks than RDNA3.5)
 
@@ -322,7 +326,13 @@ def _build_l1_stack(metrics: dict[str, Any]) -> Group:
         width=_IP_BLOCK_W,
         height=_VL1D_H,
     )
-    lds_panel = build_ip_block("LDS", _IP_BLOCK_W, _LDS_H)
+    lds_util_line = (
+        f"{metric_line('Util', metrics['lds_util'], '%', COLORS['util'])}\n"
+        f"[dim]{progress_bar(metrics['lds_util'])}[/dim]"
+        if metrics["lds_util"] is not None
+        else ""
+    )
+    lds_panel = build_ip_block("LDS", _IP_BLOCK_W, _LDS_H, stack_metrics(lds_util_line))
     sl1d_panel = build_cache_panel(
         "sL1D",
         [("Hit", metrics["sl1d_hit"], "%", COLORS["hit"])],
@@ -464,19 +474,17 @@ def _build_io_row(
     panel_grid.add_column()
     panel_grid.add_row("", panel)
 
-    top_arrow = "|^" if panel_above else "||"
-    bot_arrow = "||" if panel_above else "V|"
     arrow_grid = Table.grid(padding=0)
     arrow_grid.add_column(width=fabric_col + _IO_PAD_OFFSET)
     arrow_grid.add_column()
     arrow_grid.add_row(
         "",
         Text.from_markup(
-            f"[{color_read}]{top_arrow}  Read BW"
+            f"[{color_read}]||  Read BW"
             f"    {read_bw}[/{color_read}]\n"
             f"[{color_write}]||  Write BW"
             f"   {write_bw}[/{color_write}]\n"
-            f"[{color_atomic}]{bot_arrow}  Atomic BW"
+            f"[{color_atomic}]||  Atomic BW"
             f"  {atomic_bw}[/{color_atomic}]"
         ),
     )
@@ -527,7 +535,7 @@ def create_mem_chart_diagram(
     kernel_arrows = make_arrows(_KERNEL_ARROW_LEN)
     std_arrows = make_arrows(_STD_ARROW_LEN)
     is_gfx950 = gpu_arch is not None and gpu_arch.startswith("gfx950")
-    has_mall = gpu_arch is not None and gpu_arch >= "gfx940"
+    has_mall = gpu_arch in _MALL_ARCHS
 
     # Build main diagram grid first (needed to measure width for scope bar)
     kernel = build_kernel_panel(_TOTAL_H, padding_lines=13)
@@ -600,7 +608,7 @@ def create_mem_chart_diagram(
                 metrics,
                 fabric_col,
                 bw_keys=("xgmi_read_bw", "xgmi_write_bw", "xgmi_atomic_bw"),
-                panel_label="XGMI (to Peer GPU)",
+                panel_label="xGMI (to Peer GPU)",
                 panel_width=_XGMI_PANEL_W,
                 panel_above=True,
             )
@@ -617,14 +625,14 @@ def create_mem_chart_diagram(
                 metrics,
                 fabric_col,
                 bw_keys=("pcie_read_bw", "pcie_write_bw", "pcie_atomic_bw"),
-                panel_label="PCIe (to CPU or Non-XGMI connected GPU)",
+                panel_label="PCIe (to CPU or Non-xGMI connected GPU)",
                 panel_width=_PCIE_PANEL_W,
                 panel_above=False,
             )
         )
 
     sections.append("")
-    sections.append(build_legend(include_util=False))
+    sections.append(build_legend())
 
     if show_debug:
         notes: list[tuple[str, str]] = [
