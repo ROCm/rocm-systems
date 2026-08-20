@@ -13,6 +13,15 @@
 
 #include <cstdlib>
 
+// ROCR serializes its async-event pool with rocr::HybridMutex, an atomic CAS
+// spinlock. The external HSA runtime is not instrumented, so ThreadSanitizer
+// cannot observe that happens-before edge and reports the pool's heap reuse as
+// a race. Ignore only interceptors called from the HSA runtime while retaining
+// ThreadSanitizer coverage for rocjitsu and this test executable.
+extern "C" const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n";
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
