@@ -69,6 +69,13 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
+  // A caller that lost its connection reaches here with a null comm, and reading
+  // the device list off it segfaults inside the plugin instead of telling the
+  // caller what was wrong. Report the bad argument.
+  if (comm == NULL || mhandle == NULL) {
+    WARN("NET/IB: regMr called with comm=%p mhandle=%p", comm, (void*)mhandle);
+    return ncclInvalidArgument;
+  }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
   for (int i = 0; i < base->vProps.ndevs; i++) {
@@ -116,6 +123,10 @@ ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
 
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
+  if (comm == NULL) {
+    WARN("NET/IB: deregMr called with a null comm");
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;

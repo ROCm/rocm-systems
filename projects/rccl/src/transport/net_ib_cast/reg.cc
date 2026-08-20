@@ -71,6 +71,12 @@ ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
+  // See the note in net_ib/reg.cc: a null comm here used to segfault inside the
+  // plugin rather than reporting the bad argument.
+  if (comm == NULL || mhandle == NULL) {
+    WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p", comm, (void*)mhandle);
+    return ncclInvalidArgument;
+  }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
   if (mhandleWrapper == nullptr) {
@@ -122,6 +128,10 @@ ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
 
 ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
+  if (comm == NULL) {
+    WARN("NET/IB-CAST: deregMr called with a null comm");
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
