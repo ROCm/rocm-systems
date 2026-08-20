@@ -241,6 +241,53 @@ struct ReusableIpcInfo {
     }
 };
 
+// SinglePeerReuseScenario -- the scaffolding every single-peer reuse-arm
+// test shares: a CommBuilder with one local rank mapped, a ncclReg whose
+// ipcInfos[] slot is pre-populated (so the per-peer loop takes the reuse
+// branch rather than fresh registration), and the matching host
+// remote-address table. Owns all backing storage; the instance must
+// outlive the ipcRegisterBuffer call.
+//
+// The one thing that actually varies between reuse tests is the
+// constructor arg `legacyIpcCap` (propagated into the reused ipcInfo, and
+// thus into the isLegacyIpc OUT param). Everything else (comm wiring,
+// addresses, buffer offset, region span) is identical across these tests
+// and lives here. The region span feeds only a TRACE message in
+// production (endAddr - begAddr), so a single fixed value suffices.
+struct SinglePeerReuseScenario {
+    static constexpr int       kPeerRank      = 1;
+    static constexpr int       kPeerLocalRank = 1;
+    static constexpr uintptr_t kBegAddr       = 0x10000;
+    static constexpr uintptr_t kBuffOffset    = 0x80;
+    static constexpr uintptr_t kRmtRegAddr    = 0xA000;
+
+    CommBuilder     cb;
+    ncclReg         reg{};
+    IpcInfosBacking ipcInfosBacking{reg};
+    ReusableIpcInfo existing;
+
+    explicit SinglePeerReuseScenario(bool legacyIpcCap)
+        : existing(kPeerRank, kPeerLocalRank, kRmtRegAddr, legacyIpcCap)
+    {
+        // WithMaxLocalRanks / WithSharedRes are defensive: the reuse path
+        // reads localRanks and (when the strong-stream block would run)
+        // sharedRes, but never dereferences either on a pure-reuse call.
+        cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+          .WithMaxLocalRanks()
+          .WithSharedRes();
+        reg.begAddr = kBegAddr;
+        reg.endAddr = kBegAddr + 0x1000;
+        existing.InstallInto(reg);
+    }
+
+    const void* userbuff() const {
+        return reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    }
+
+    SinglePeerReuseScenario(const SinglePeerReuseScenario&)            = delete;
+    SinglePeerReuseScenario& operator=(const SinglePeerReuseScenario&) = delete;
+};
+
 // IpcRegOutputs -- the four OUT parameters of ipcRegisterBuffer, pre-seeded
 // with sentinel values. The sentinels matter: ipcRegisterBuffer is required
 // to either populate them on success or zero them on failure, and an
@@ -469,40 +516,24 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullRegRecordIsNoOp)
 // arm returns the host-side remote address as *peerRmtAddrsOut.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
 {
-    constexpr int       kPeerRank      = 3;
-    constexpr int       kPeerLocalRank = 2;
-    constexpr uintptr_t kBegAddr       = 0x10000;
-    constexpr uintptr_t kBuffOffset    = 0x40;
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
+    SinglePeerReuseScenario s(/*legacyIpcCap=*/ true);
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank);
-
-    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                             /*legacyIpcCap=*/ true);
-    ncclReg regRecord{};
-    IpcInfosBacking ipcInfosBacking{regRecord};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    existing.InstallInto(regRecord);
-
-    int peerRanks[] = {kPeerRank};
+    int peerRanks[] = {s.kPeerRank};
     IpcRegOutputs out;
     bool isLegacyIpc = false;
 
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(s.cb, s.userbuff(),
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
                                    NCCL_IPC_SENDRECV,
-                                   &regRecord, out, &isLegacyIpc);
+                                   &s.reg, out, &isLegacyIpc);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
-    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.offsetOut,  s.kBuffOffset);
     // SENDRECV returns the raw remote address (cast to uintptr_t*), not a
     // pointer into a peer-address table.
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), kRmtRegAddr);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), s.kRmtRegAddr);
     EXPECT_TRUE(isLegacyIpc);  // propagated from existing.info.impInfo
 }
 
@@ -512,43 +543,26 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
 // because both devPeerRmtAddrs is non-null and needUpdate is false.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable)
 {
-    constexpr int       kPeerRank      = 1;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBegAddr       = 0x10000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks();  // unused on this path, set defensively
-
-    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                             /*legacyIpcCap=*/ false);
-    ncclReg regRecord{};
-    IpcInfosBacking ipcInfosBacking{regRecord};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x2000;
-    existing.InstallInto(regRecord);
+    SinglePeerReuseScenario s(/*legacyIpcCap=*/ false);
 
     // Pre-populated dev table -> needUpdate stays false, strong-stream
     // block stays skipped.
     std::array<uintptr_t, NCCL_MAX_LOCAL_RANKS> devPeerRmtAddrs{};
-    regRecord.regIpcAddrs.devPeerRmtAddrs = devPeerRmtAddrs.data();
+    s.reg.regIpcAddrs.devPeerRmtAddrs = devPeerRmtAddrs.data();
 
-    int peerRanks[] = {kPeerRank};
+    int peerRanks[] = {s.kPeerRank};
     IpcRegOutputs out;
     bool isLegacyIpc = true;  // start true to see it cleared
 
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(s.cb, s.userbuff(),
                                    /*buffSize=*/ 512,
                                    peerRanks, 1,
                                    NCCL_IPC_COLLECTIVE,
-                                   &regRecord, out, &isLegacyIpc);
+                                   &s.reg, out, &isLegacyIpc);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
-    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.offsetOut,  s.kBuffOffset);
     EXPECT_EQ(out.peerRmtAddrs, devPeerRmtAddrs.data());  // the table itself
     EXPECT_FALSE(isLegacyIpc);
 }
@@ -568,27 +582,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable
 // skipped-block contract.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseSkipsStrongStreamWhenNoUpdate)
 {
-    constexpr int       kPeerRank      = 1;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBegAddr       = 0x10000;
-    constexpr uintptr_t kBuffOffset    = 0x100;
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
-
-    // sharedRes must be non-null: the strong-stream call site takes the
-    // address of comm->sharedRes->hostStream. The block is skipped, so it
-    // is never dereferenced, but keep it set defensively.
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes();
-
-    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                             /*legacyIpcCap=*/ false);
-    ncclReg regRecord{};
-    IpcInfosBacking ipcInfosBacking{regRecord};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x4000;
-    existing.InstallInto(regRecord);
+    SinglePeerReuseScenario s(/*legacyIpcCap=*/ false);
     // devPeerRmtAddrs intentionally left null. Under the old guard this
     // alone entered the strong-stream block; under the new needUpdate-only
     // guard the block stays skipped.
@@ -602,24 +596,23 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseSkipsStrongStreamWhenNoUpd
             return ncclSystemError;
         });
 
-    int peerRanks[] = {kPeerRank};
+    int peerRanks[] = {s.kPeerRank};
     IpcRegOutputs out;
     bool isLegacyIpc = true;
 
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(s.cb, s.userbuff(),
                                    /*buffSize=*/ 1024,
                                    peerRanks, 1,
                                    NCCL_IPC_COLLECTIVE,
-                                   &regRecord, out, &isLegacyIpc);
+                                   &s.reg, out, &isLegacyIpc);
 
     EXPECT_EQ(acquire.calls, 0);    // strong-stream block skipped
     EXPECT_EQ(r, ncclSuccess);      // no failure path taken
     EXPECT_EQ(out.regBufFlag, 1);
-    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.offsetOut,  s.kBuffOffset);
     // Block skipped -> dev table never allocated -> COLLECTIVE returns the
     // (still-null) dev table.
-    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);
+    EXPECT_EQ(s.reg.regIpcAddrs.devPeerRmtAddrs, nullptr);
     EXPECT_EQ(out.peerRmtAddrs, nullptr);
     EXPECT_FALSE(isLegacyIpc);      // reused info's legacyIpcCap = false
 }
@@ -1170,39 +1163,23 @@ TEST_F(FreshRegistrationMicrotest, RegressionNcclIssue1859_SendrecvThenCollectiv
 // proxy) so the *only* thing it exercises is the gated-write contract.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
 {
-    constexpr int       kPeerRank      = 3;
-    constexpr int       kPeerLocalRank = 2;
-    constexpr uintptr_t kBegAddr       = 0x10000;
-    constexpr uintptr_t kBuffOffset    = 0x40;
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
+    SinglePeerReuseScenario s(/*legacyIpcCap=*/ true);
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank);
-
-    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                             /*legacyIpcCap=*/ true);
-    ncclReg regRecord{};
-    IpcInfosBacking ipcInfosBacking{regRecord};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    existing.InstallInto(regRecord);
-
-    int peerRanks[] = {kPeerRank};
+    int peerRanks[] = {s.kPeerRank};
     IpcRegOutputs out;
 
     // The contract: passing nullptr must not crash and must not affect any
     // OUT param other than isLegacyIpc itself.
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(s.cb, s.userbuff(),
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
                                    NCCL_IPC_SENDRECV,
-                                   &regRecord, out, /*isLegacyIpc=*/ nullptr);
+                                   &s.reg, out, /*isLegacyIpc=*/ nullptr);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
-    EXPECT_EQ(out.offsetOut,  kBuffOffset);
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), kRmtRegAddr);
+    EXPECT_EQ(out.offsetOut,  s.kBuffOffset);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), s.kRmtRegAddr);
 }
 
 // Fresh-registration variant: ncclProxyConnect returns failure. Drives the
@@ -1696,24 +1673,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
 // nccl#1859 bug the fix removes. This test now asserts neither seam fires.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseSkipsDevTableAllocWhenNoUpdate)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBegAddr       = 0x10000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes();
-
-    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                             /*legacyIpcCap=*/ false);
-    ncclReg regRecord{};
-    IpcInfosBacking ipcInfosBacking{regRecord};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x2000;
-    existing.InstallInto(regRecord);
+    SinglePeerReuseScenario s(/*legacyIpcCap=*/ false);
     // devPeerRmtAddrs intentionally left null. Under the new needUpdate-only
     // guard the strong-stream block is skipped, so it stays null.
 
@@ -1731,25 +1691,24 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseSkipsDevTableAllocWhenNoUp
             return ncclSystemError;
         });
 
-    int peerRanks[] = {kPeerRank};
+    int peerRanks[] = {s.kPeerRank};
     IpcRegOutputs out;
     bool isLegacyIpc = true;  // start true to see it cleared
 
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(s.cb, s.userbuff(),
                                    /*buffSize=*/ 512,
                                    peerRanks, 1,
                                    NCCL_IPC_COLLECTIVE,
-                                   &regRecord, out, &isLegacyIpc);
+                                   &s.reg, out, &isLegacyIpc);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(calloc.calls,  0);
     EXPECT_EQ(memcpy_.calls, 0);
     EXPECT_EQ(out.regBufFlag, 1);
-    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.offsetOut,  s.kBuffOffset);
     // Block skipped -> dev table never allocated -> COLLECTIVE returns the
     // (still-null) dev table.
-    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);
+    EXPECT_EQ(s.reg.regIpcAddrs.devPeerRmtAddrs, nullptr);
     EXPECT_EQ(out.peerRmtAddrs, nullptr);
     EXPECT_FALSE(isLegacyIpc);
 }
