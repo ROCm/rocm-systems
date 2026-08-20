@@ -864,8 +864,7 @@ TEST_F(FallbackDeviceSwitch, WriteSwitchesToBufferDeviceBeforeCopyAndRestoresAft
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
 
-    ASSERT_EQ(kIoSize,
-              Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    ASSERT_EQ(kIoSize, Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
 }
 
 TEST_F(FallbackDeviceSwitch, ReadSwitchesToBufferDeviceBeforeCopyAndRestoresAfter)
@@ -881,8 +880,7 @@ TEST_F(FallbackDeviceSwitch, ReadSwitchesToBufferDeviceBeforeCopyAndRestoresAfte
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
 
-    ASSERT_EQ(kIoSize,
-              Fallback().io(IoType::Read, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    ASSERT_EQ(kIoSize, Fallback().io(IoType::Read, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
 }
 
 TEST_F(FallbackDeviceSwitch, RestoresCallerDeviceWhenCopyThrows)
