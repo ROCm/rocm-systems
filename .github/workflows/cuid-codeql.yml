@@ -94,6 +94,16 @@ jobs:
              echo "OpenSSL 3.0+ already installed."
           fi
 
+      - name: Build CUID
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
+          make -j $(nproc)
+
       - name: Perform CodeQL Analysis
         shell: bash
         run: |
