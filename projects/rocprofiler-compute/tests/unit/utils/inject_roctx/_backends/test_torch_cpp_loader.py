@@ -102,7 +102,7 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
     assert torch_trace_fingerprint.source_fingerprint() == "missing"
 
 
-def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
+def test_source_fingerprint_separates_input_boundaries(tmp_path, monkeypatch):
     """Reshuffling bytes across input boundaries changes the fingerprint."""
     a = tmp_path / "a.cpp"
     b = tmp_path / "b.txt"
@@ -125,11 +125,7 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
 
 
 def torch_trace_collector_module_sources():
-    """The module's own C++ source and header files, from the fingerprint inputs.
-
-    The inputs also carry shared headers from outside the module directory, so
-    the parent is part of the filter.
-    """
+    """Collector ``*.cpp`` and ``*.h`` files from the fingerprint inputs."""
     return sorted(
         p
         for p in torch_trace_fingerprint.fingerprint_input_paths()
@@ -138,18 +134,10 @@ def torch_trace_collector_module_sources():
 
 
 def cmake_declared_sources():
-    """The C++ files CMakeLists.txt names, from its header list and add_library
-    calls.
-
-    Parsed from the build file rather than globbed, so this is independent of
-    how the loader collects its fingerprint inputs. Globbing here would restate
-    the implementation and pass regardless of what it missed.
-    """
+    """C++ files named in ``add_library`` and ``_ttc_headers`` in CMakeLists.txt."""
     text = inject_roctx_loader._SO_BUILDFILE.read_text()
     names = set()
 
-    # Longest extension first, and a trailing non-word guard, so ".hpp" is not
-    # truncated to ".h" by the alternation.
     header_block = re.search(r"set\(_ttc_headers(.*?)\)", text, re.DOTALL)
     if header_block:
         names.update(re.findall(r"[\w.-]+\.(?:hpp|hxx|h)(?!\w)", header_block.group(1)))
@@ -176,8 +164,6 @@ def test_fingerprint_inputs_cover_every_build_input():
     missing = declared - input_names
     assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
 
-    # None of these is a compiled source, so none is reachable from add_library.
-    # The module includes synchronized.hpp and gsl_assert.h from the shared utils.
     for required in (
         "CMakeLists.txt",
         "synchronized.hpp",
@@ -563,9 +549,7 @@ def test_runtime_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
 def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
     monkeypatch, tmp_path
 ):
-    """The finder is asked for the tagged artifact and target, and cmake is told
-    which interpreter and source fingerprint to build against.
-    """
+    """Runtime cmake receives the tagged artifact, interpreter, and fingerprint."""
     _set_so_inputs_present(monkeypatch, tmp_path)
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     monkeypatch.setattr(

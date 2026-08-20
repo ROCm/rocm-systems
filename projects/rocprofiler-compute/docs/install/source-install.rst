@@ -86,9 +86,9 @@ follows.
         built against. Defaults to the ``python3`` interpreter that CMake locates.
 
     * - ``TORCH_TRACE_SOURCE_FINGERPRINT``
-      - Optional override of the source fingerprint used in the
-        ``torch_trace_collector`` artifact tag. When omitted, configure computes
-        it from the collector sources.
+      - Fingerprint used in the ``torch_trace_collector`` artifact tag. When
+        omitted, CMake hashes the collector sources, ``CMakeLists.txt``, and
+        the shared utility headers.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for kernel-name suffix stripping in torch_trace_coverage_utils."""
+"""Tests for ``normalize_kernel_name`` and ``normalize_kernel_names``."""
 
 import pytest
 
