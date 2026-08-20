@@ -171,7 +171,7 @@ pub fn mi450x() -> AgentDef {
                 },
             },
         },
-        topology: topology(2, "4", "80", "128", "1024", "160"),
+        topology: topology(2, "4", "64", "128", "1024", "320"),
     }
 }
 
@@ -308,6 +308,23 @@ mod tests {
 
     use super::*;
 
+    /// One per-CU config value from an agent's component tree.
+    ///
+    /// The compute unit is the deepest node — `soc -> xcd -> se -> cu` —
+    /// so this walks to the first leaf that carries the key rather than
+    /// spelling that path out and breaking whenever the tree grows a
+    /// level.
+    fn cu_config(agent: &AgentDef, key: &str) -> String {
+        fn find(node: &ComponentDef, key: &str) -> Option<String> {
+            if let Some(entry) = node.config.iter().find(|e| e.key == key) {
+                return Some(entry.value.clone());
+            }
+            node.children.iter().find_map(|child| find(child, key))
+        }
+        find(&agent.topology.root, key)
+            .unwrap_or_else(|| panic!("no `{key}` anywhere in the component tree"))
+    }
+
     #[test]
     fn agents_have_expected_keys() {
         let a = agents();
@@ -342,5 +359,14 @@ mod tests {
         assert_eq!(a.vm.gpu.device.marketing_name, "gfx1250");
         assert_eq!(a.vm.gpu.device.gfx_target_version, 120500);
         assert_eq!(a.topology.links.len(), 6);
+        // The per-CU limits, which nothing pinned. `cdna5` caps wave
+        // slots at 64 and rocjitsu refuses a config that asks for more —
+        // at `rj_vm_create_from_string`, so the session fails at daemon
+        // start rather than at profile validation. These are
+        // `configs/gfx1250_mi455x.json`'s, the file this agent mirrors.
+        assert_eq!(cu_config(&a, "num_wf_slots"), "64");
+        assert_eq!(cu_config(&a, "sgprs_per_wf"), "128");
+        assert_eq!(cu_config(&a, "vgprs_per_wf"), "1024");
+        assert_eq!(cu_config(&a, "lds_size_kb"), "320");
     }
 }
