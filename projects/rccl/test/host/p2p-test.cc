@@ -26,22 +26,10 @@
 // fresh-registration arm calls (hipMemGetAddressRange, hipIpcGetMemHandle)
 // through hookable fakes. The real symbols resolve at link time from
 // hip::host but would need a real GPU at runtime.
-#define hipMemGetAddressRange(pbase, psize, dptr) \
-    g_hipMemGetAddressRange((pbase), (psize), (dptr))
 #define hipIpcGetMemHandle(handle, devPtr) \
     g_hipIpcGetMemHandle((handle), (devPtr))
-
-#define hipMemRetainAllocationHandle(handle, addr) \
-    g_hipMemRetainAllocationHandle((handle), (addr))
 #define hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags) \
     g_hipMemExportToShareableHandle((shareableHandle), (handle), (handleType), (flags))
-#define hipMemRelease(handle) \
-    g_hipMemRelease((handle))
-
-// hipPointerGetAttribute: HIP_VERSION >= 71260540 fresh-reg arm queries
-// legacy-IPC capability through this instead of ncclParamLegacyCudaRegister().
-#define hipPointerGetAttribute(data, attribute, ptr) \
-    g_hipPointerGetAttribute((data), (attribute), (ptr))
 
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
