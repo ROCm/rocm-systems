@@ -28,20 +28,6 @@ target_link_libraries(
     PRIVATE compression
 )
 
-# TheRock stamps INSTALL_RPATH on every shared library relative to lib/, but
-# this one installs to lib/rocprofiler-compute/, so its lib/rocm_sysdeps/lib
-# entry lands one directory short and librocm_sysdeps_z.so.1 goes unresolved.
-# Opt out of the stamping and spell out the rpath for the real install dir.
-# Drop this once TheRock's post_hook_rocprofiler-compute.cmake sets
-# THEROCK_INSTALL_RPATH_ORIGIN for this target, the way the SDK hook already
-# does for librocprofiler-sdk-tool.so.
-set_target_properties(
-    ${target}
-    PROPERTIES
-        THEROCK_NO_INSTALL_RPATH ON
-        INSTALL_RPATH "$ORIGIN:$ORIGIN/..:$ORIGIN/../rocm_sysdeps/lib"
-)
-
 if(ENABLE_TESTS)
     add_subdirectory(tests)
 endif()

@@ -872,7 +872,7 @@ class CodeGenerator:
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> bool:
         return (
-            getattr(self.isa_spec, 'arch_name', None) == 'gfx1250'
+            getattr(self.isa_spec, 'arch_name', None) == 'cdna5'
             and inst_sem is not None
             and inst_sem.name in self._GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS
             and opnd.name == 'src2'
@@ -2703,7 +2703,7 @@ class CodeGenerator:
         if self._supports_generated_vopd():
             maximum = max(maximum, 3)
         if (
-            self._supports_gfx1250_scaled_wmma_vop3px2()
+            self._supports_cdna5_scaled_wmma_vop3px2()
             or self._supports_cdna_mfma_f8f6f4_vop3px2()
         ):
             maximum = max(maximum, 4)
@@ -2736,7 +2736,7 @@ class CodeGenerator:
                 inst_enc.enc_name
             )
             supports_fixed_size_embedding = (
-                self._supports_gfx1250_scaled_wmma_vop3px2()
+                self._supports_cdna5_scaled_wmma_vop3px2()
                 and inst_enc.fmt_enc_name == 'Vop3p'
             )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
@@ -3932,9 +3932,9 @@ class CodeGenerator:
 
         return None
 
-    def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
+    def _supports_cdna5_scaled_wmma_vop3px2(self) -> bool:
         return (
-            self.isa_spec.arch_name.lower() == 'gfx1250'
+            self.isa_spec.arch_name.lower() == 'cdna5'
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
@@ -3947,10 +3947,10 @@ class CodeGenerator:
             and inst.name in self.isa_spec.profile.inst_size_overrides
         )
 
-    def _gfx1250_f8f6f4_wmma_shape(
+    def _cdna5_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
-        if self.isa_spec.arch_name != 'gfx1250' or not inst.name.startswith('V_WMMA_'):
+        if self.isa_spec.arch_name != 'cdna5' or not inst.name.startswith('V_WMMA_'):
             return None
         m = re.match(
             r'V_WMMA_(?:F32|F16|BF16|I32)_(\d+)X(\d+)X(\d+)_?F8F6F4$',
@@ -3970,12 +3970,10 @@ class CodeGenerator:
             return None
         return tuple(int(x) for x in m.groups())
 
-    def _gfx1250_swmmac_has_modifiers(self, inst: Instruction) -> bool:
-        return self.isa_spec.arch_name == 'gfx1250' and inst.name.startswith(
-            'V_SWMMAC_'
-        )
+    def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
+        return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
-    def _gfx1250_matrix_fmt_operand_size_expr(
+    def _cdna5_matrix_fmt_operand_size_expr(
         self, shape: tuple[int, int, int] | None, opnd_name: str
     ) -> str | None:
         if shape is None or opnd_name not in ('src0', 'src1'):
@@ -3989,7 +3987,7 @@ class CodeGenerator:
                 '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
-        return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+        return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
 
     @staticmethod
     def _cdna4_matrix_fmt_operand_size_expr(
@@ -4096,7 +4094,7 @@ class CodeGenerator:
             } // namespace''')
 
     @staticmethod
-    def _emit_gfx1250_matrix_fmt_helpers() -> _ImplOutputs:
+    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
@@ -4118,7 +4116,7 @@ class CodeGenerator:
         model = (
             'namespace {\n\n'
             + (
-                'const char *gfx1250_matrix_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_FMT_FP8";\n'
@@ -4135,7 +4133,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_matrix_scale_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_SCALE_FMT_E8";\n'
@@ -4148,7 +4146,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'uint32_t gfx1250_matrix_fmt_element_bits(uint32_t fmt) {\n'
+                'uint32_t cdna5_matrix_fmt_element_bits(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 2:\n'
                 '  case 3:\n'
@@ -4160,46 +4158,46 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
-                '  return static_cast<int>((dim * k * gfx1250_matrix_fmt_element_bits(fmt)) / 32);\n'
+                'int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
+                '  return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst)->op == 0x3a;\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst + 2)->op == 0x88;\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
-                '    return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
+                'const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '    return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
                 '                                               : "v_wmma_scale_f32_32x16x128_f4";\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scale_operand_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
+                'int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 512;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
@@ -4265,7 +4263,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
             class VWmmaScaleF32Vop3px2 : public Vop3p {
             public:
@@ -4284,23 +4282,23 @@ class CodeGenerator:
             };
             ''')
 
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+    def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
-                : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
+                : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
                         @EXEC_FN@, Vop3p::ExtensionDecodePolicy::Skip),
-                  vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
+                  vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
-                  src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src0(cdna5_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
-                  src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src1(cdna5_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
-                  src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
+                  src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
@@ -4329,11 +4327,11 @@ class CodeGenerator:
                 const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
                 if (matrix_a_fmt != 0) {
                   out += " matrix_a_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_a_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_a_fmt);
                 }
                 if (matrix_b_fmt != 0) {
                   out += " matrix_b_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_b_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_b_fmt);
                 }
               }
               if (scale_inst_.opsel & 0x1u)
@@ -4344,11 +4342,11 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               if (matrix_a_scale_fmt != 0) {
                 out += " matrix_a_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_a_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_a_scale_fmt);
               }
               if (matrix_b_scale_fmt != 0) {
                 out += " matrix_b_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_b_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_b_scale_fmt);
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
@@ -4431,7 +4429,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -4546,6 +4544,131 @@ class CodeGenerator:
             body_uses_true16=body_uses_true16,
             enabled=enabled,
         )
+
+    # The trap-handler control ops are spelled differently per ISA. Every
+    # spelling has to be listed: an omitted one derives as `true_nop` and its
+    # generated execute_impl() comes out an empty body, which leaves that ISA's
+    # trap handlers unable to return at all. GFX1250 spells the return
+    # S_RFE_I64 (SOP1 opcode 74).
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
+    _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
+
+    def _sleep_body(self, sem: InstructionSemantics) -> str:
+        """execute() body for S_SLEEP / S_SLEEP_VAR.
+
+        The MR ISA gives these no pseudocode, so they derive as `true_nop` and
+        the generator used to emit the yield alone. The delay *is* the whole
+        instruction -- there is no result register -- so retiring it in one step
+        leaves it with no effect and lets a sleep loop spin at the speed of its
+        own scalar code. That is not only a performance detail: an asynchronous
+        debugger suspend then lands uniformly across the loop body instead of
+        overwhelmingly on the sleep, and -O0 loop bodies are full of short
+        windows where the compiler has forced EXEC to all lanes to spill an
+        AGPR. Stopping inside one reports every lane active, which
+        gdb.rocm/lane-info.exp catches by comparing the stopped lane states
+        against the ones it recorded at a breakpoint. That expect test is the
+        only guard -- the C++ ISA harness lists s_sleep in SKIP_PREFIXES -- so
+        the policy belongs here, where a regeneration cannot drop it.
+        """
+        # S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks; S_SLEEP_VAR takes
+        # the same 7-bit count from a scalar operand instead of the literal.
+        count = (
+            'static_cast<uint32_t>(simm16.encoding_value_)'
+            if sem.name == 'S_SLEEP'
+            else 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)'
+        )
+        return (
+            '  constexpr uint32_t kSleepClocksPerUnit = 64;\n'
+            f'  wf.set_sleep_cycles(kSleepClocksPerUnit * ({count} & 0x7Fu));\n'
+            '  wf.cu().request_functional_yield();'
+        )
+
+    def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
+        """execute() body for a trap-handler control op, or None if not one.
+
+        The MR ISA carries no pseudocode for these, so they derive as
+        `true_nop`. They are not nops: the configured GPU trap handler returns
+        through S_RFE and reports through S_SENDMSG, and leaving them empty
+        silently disables ROCgdb's whole stop/resume path (see
+        docs/rocgdb-debugging.md). The bodies belong here rather than in a
+        hand-edit of the generated header, which a regeneration would drop.
+        """
+        if sem.name in self._TRAP_RETURN_NAMES:
+            # Return from exception: restore the PC the trap handler saved in
+            # ssrc0. The 48-bit mask drops the status bits the hardware packs
+            # into the high half, and the instruction size is subtracted
+            # because the interpreter advances the PC after execute() returns.
+            return (
+                # Bare operand and size_ spellings: that is the arch-local form
+                # every generated execute_impl() uses, and
+                # _write_shared_execute_templates() lifts them to inst.ssrc0 /
+                # inst.size() for the shared template. Writing the lifted form
+                # here instead compiles only on the ISAs that happen to share
+                # the body -- S_RFE_I64 is gfx1250-only, so it does not.
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
+                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
+                '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
+                '  // MSG_INTERRUPT -- and restoring that is part of returning, not part of\n'
+                '  // stopping for a debugger: a handler that returns without stopping the wave\n'
+                '  // used to leave its mask installed, so the application ran on with every lane\n'
+                '  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees\n'
+                '  // lanes that converged out of a branch reported active again) and is\n'
+                '  // permanent, because nothing later puts the application\'s mask back.\n'
+                '  if (wf.in_trap_handler())\n'
+                '    wf.set_exec(wf.trap_saved_exec());\n'
+                '  wf.set_in_trap_handler(false);\n'
+                '\n'
+                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
+                '  // stopped for the debugger; honour that on the way out.\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '    wf.set_debug_single_step(false);\n'
+                '    wf.set_debug_halted(true);\n'
+                '  } else {\n'
+                '    // Nothing is halting the wave any more, so an s_sendmsghalt marker\n'
+                '    // left over from an earlier stop is stale. Leaving it set would make\n'
+                '    // the next resume clear a HALT the handler raises later.\n'
+                '    wf.set_self_halted(false);\n'
+                '  }'
+            )
+
+        if sem.name in self._TRAP_SENDMSG_NAMES:
+            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
+            # tells KFD it has stopped; the CU turns it into a debug event.
+            body = (
+                '  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);\n'
+                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
+                '    wf.set_trap_interrupt_sent(true);\n'
+                '  wf.cu().handle_sendmsg(wf, message);'
+            )
+            if sem.name == 'S_SENDMSGHALT':
+                # "...and then HALT the wavefront". The halt is architectural,
+                # so publish it in STATUS.HALT and not only in the debugger's
+                # private flag: the s_rfe path above reads STATUS.HALT to decide
+                # whether the wave stays stopped, and saw 0 for a wave this
+                # instruction had already halted. Both halves now agree, and a
+                # debugger reading STATUS sees the same thing the wave does.
+                body += (
+                    '\n'
+                    '\n'
+                    '  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the\n'
+                    '  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.\n'
+                    '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                    '  wf.set_status_raw(wf.status_raw() | kStatusHalt);\n'
+                    '  wf.set_debug_halted(true);\n'
+                    '  // Remember who raised the bit. The trap handler also raises HALT, via\n'
+                    '  // s_setreg just before it returns, and there it means "keep the wave\n'
+                    '  // stopped" -- the opposite of what it means here, where the wave has\n'
+                    '  // already reported and is waiting to be resumed. The CWSR record cannot\n'
+                    '  // distinguish the two, so the resume path reads this instead.\n'
+                    '  wf.set_self_halted(true);'
+                )
+            return body
+
+        return None
 
     def _gen_execute_body(
         self, inst: Instruction, sem: InstructionSemantics, enc_name: str = ''
@@ -4875,13 +4998,13 @@ class CodeGenerator:
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
 
-        # Sleep has no architectural register effect, but FUNCTIONAL execution
-        # must return to the event loop so peer CUs can make progress.
-        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
-            return '  wf.cu().request_functional_yield();'
-
         if cls == 'true_nop':
-            return '  (void)wf;'
+            # Sleep has no architectural register effect, but FUNCTIONAL
+            # execution must return to the event loop so peer CUs can make
+            # progress.
+            if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+                return self._sleep_body(sem)
+            return self._trap_control_body(sem) or '  (void)wf;'
 
         if cls == 'gpr_idx':
             if op == 'on':
@@ -5062,17 +5185,39 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append(
+                '    target = wf.code_load_bias() + static_cast<int32_t>(encoded);'
+            )
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(f'  uint64_t next_pc = wf.pc + size_;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append('    target = next_pc - 20 + static_cast<int32_t>(encoded);')
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
@@ -5483,7 +5628,7 @@ class CodeGenerator:
                     or cls == 'vector_cvt_sr_fp8_f16'
                 )
                 and is_vop3
-                and self.isa_spec.arch_name.lower() == 'gfx1250'
+                and self.isa_spec.arch_name.lower() == 'cdna5'
                 else None
             )
             return gen_vector_cvt_pk(
@@ -5606,9 +5751,9 @@ class CodeGenerator:
             return (
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
-                '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+                '  const uint32_t dst_sel = inst_.sdata;\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -5796,6 +5941,7 @@ class CodeGenerator:
         nd = sem.num_elems if elem_size == 4 else 1
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(f'  d->dst_selector = inst_.sdata;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
         L.append(f'  d->sign_extend = {str(sem.sign_extend).lower()};')
@@ -5823,11 +5969,10 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'smem_store')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
-        L.append('  auto &cu = wf.cu();')
-        L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append('  const uint32_t sdata_sel = inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append(
-            '    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);'
+            '    d->store_data[i] = amdgpu::read_scalar_selector(wf, sdata_sel + i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
@@ -6324,7 +6469,7 @@ class CodeGenerator:
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         offset_expr = (
             'signed_ioffset(inst_.ioffset)'
-            if self.isa_spec.arch_name == 'gfx1250'
+            if self.isa_spec.arch_name == 'cdna5'
             else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
         L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
@@ -7857,19 +8002,17 @@ class CodeGenerator:
                         d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
-                    gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
+                    cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
-                    gfx1250_swmmac_has_modifiers = self._gfx1250_swmmac_has_modifiers(
-                        inst
-                    )
+                    cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         opnd_size_expr = self._operand_size_override(
                             enc.enc_name, opnd, inst_sem
                         )
                         if opnd_size_expr is None:
-                            opnd_size_expr = self._gfx1250_matrix_fmt_operand_size_expr(
-                                gfx1250_f8f6f4_shape, opnd.name
+                            opnd_size_expr = self._cdna5_matrix_fmt_operand_size_expr(
+                                cdna5_f8f6f4_shape, opnd.name
                             )
                         if opnd_size_expr is None:
                             opnd_size_expr = self._cdna4_matrix_fmt_operand_size_expr(
@@ -7892,7 +8035,7 @@ class CodeGenerator:
                         # here makes def/use and liveness falsely clobber the
                         # following SGPR.
                         if (
-                            self.isa_spec.arch_name == 'gfx1250'
+                            self.isa_spec.arch_name == 'cdna5'
                             and inst_sem is not None
                             and inst_sem.semantic_class
                             in ('vector_cmp', 'vector_cmp_class')
@@ -8196,7 +8339,7 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
+                    if cdna5_f8f6f4_shape is not None or cdna5_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -9501,18 +9644,18 @@ class CodeGenerator:
                                 '} // namespace detail'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None:
+                    if cdna5_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  out += " matrix_a_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name(inst_.opsel);\n'
+                                f'  out += cdna5_matrix_fmt_name(inst_.opsel);\n'
                                 f'  out += " matrix_b_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
+                                f'  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
                                 f'}}'
                             )
                         )
-                    elif gfx1250_swmmac_has_modifiers:
+                    elif cdna5_swmmac_has_modifiers:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
@@ -9871,16 +10014,16 @@ class CodeGenerator:
                 if _has_size_overrides:
                     h_includes.append(('array', True))
                 if (
-                    self._supports_gfx1250_scaled_wmma_vop3px2()
+                    self._supports_cdna5_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
                     if not _has_size_overrides:
                         h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
-                        cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
+                        cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
-                    scaled_outputs = self._emit_gfx1250_scaled_wmma_vop3px2_impls()
+                    scaled_outputs = self._emit_cdna5_scaled_wmma_vop3px2_impls()
                     class_func_impls.model.extend(
                         cgen.Line(impl) for impl in scaled_outputs.model
                     )
@@ -9903,10 +10046,10 @@ class CodeGenerator:
                 # from data_types.h (included via cpp_includes when has_sem).
 
                 if (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                    self.isa_spec.arch_name.lower() == 'cdna5'
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    matrix_outputs = self._emit_gfx1250_matrix_fmt_helpers()
+                    matrix_outputs = self._emit_cdna5_matrix_fmt_helpers()
                     class_func_impls.model[0:0] = [
                         cgen.Line(impl) for impl in matrix_outputs.model
                     ]
@@ -10559,6 +10702,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
@@ -10583,9 +10727,28 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
             probe = simd_probe_line(mnemonic, true16_vop3=is_true16_vop3)
+            alu_classifiers = {
+                'v_mul_f32_vop2': 'classify_mul_f32_vop2',
+                'v_mul_f32_vop3': 'classify_mul_f32_vop3',
+                'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
+                'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
+                'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
+                'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
+            }
+            classifier = alu_classifiers.get(mnemonic)
+            if classifier is not None:
+                lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
             if probe is not None:
-                lines.append(probe)
+                if classifier is None:
+                    lines.append(probe)
+                else:
+                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append(probe.replace('  ', '    ', 1))
+                    lines.append('  }')
             lines.append(prefixed_body)
+            if classifier is not None:
+                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             lines.append('}')
             lines.append('')
 
@@ -12679,9 +12842,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ),
         ]
         decode_body = []
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             class_impl.append(
-                cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
+                cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers())
             )
         decode_body.extend(
             [
@@ -12773,7 +12936,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 ]
             )
 
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             for _dte in self.isa_spec.primary_decode_table:
                 if (
                     _dte is not None
