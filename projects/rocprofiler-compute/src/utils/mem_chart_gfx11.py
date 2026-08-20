@@ -47,74 +47,46 @@ from utils.utils_analysis import format_bw_human_readable
 
 # Keys = ``metric:`` names under each ``metric_table`` in
 # ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
-# Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
+# Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
-    ("ICache Utilization", 45.2),
     ("ICache Hit Rate", 98.5),
-    ("ICache Miss Rate", 1.5),
-    ("ICache Request Stall Rate", 2.1),
     ("ICache-GL1 Read Bandwidth", 57.6e9),
     # Table 302: Scalar Data Cache
-    ("Dcache Requests", 225),
-    ("Dcache Utilization", 38.7),
-    ("Dcache Hit Rate", 95.3),
-    ("Dcache Request Stall Rate", 1.8),
-    ("Dcache-GL1 Read Bandwidth", 28.8e9),
+    ("DCache Requests", 225),
+    ("DCache Hit Rate", 95.3),
+    ("DCache-GL1 Read Bandwidth", 28.8e9),
     # Table 303: TCP Cache (GL0 Vector Cache)
-    ("TCP Total Requests", 1_250_000),
     ("TCP Read Requests", 875_000),
     ("TCP Write Requests", 375_000),
-    ("TCP Miss Requests", 150_000),
     ("GL0 Cache Hit Rate (TCP Cache)", 88.0),
     ("GL0 Cache BW (TCP Cache)", 80e9),
     # Table 304: LDS
-    ("LDS Instructions", 125_000),
-    ("LDS Atomic Instructions", 10_000),
-    ("LDS Instruction Cycles", 250_000),
-    ("LDS Wait Cycles", 12_500),
+    ("LDS Req", 125_000),
+    ("LDS Utilization", 62.0),
     ("LDS Bank Conflict Rate", 4.0),
     ("LDS Estimated Bandwidth", 256e9),
     # Table 305: TCP-GL1 Interface
-    ("TCP-GL1 Read Requests", 150_000),
-    ("TCP-GL1 Write Requests", 50_000),
     ("TCP-GL1 Read Bandwidth", 96e9),
     ("TCP-GL1 Write Bandwidth", 32e9),
     # Table 306: GL1 Cache (L1)
     ("GL1 Cache Utilization", 65.2),
-    ("GL1 Cache Total Requests", 200_000),
-    ("GL1 Cache Read Requests", 150_000),
-    ("GL1 Cache Write Requests", 50_000),
-    ("GL1 Cache Miss Requests", 30_000),
     ("GL1 Cache Hit Rate", 85.0),
-    ("GL1 Cache Starve Rate", 5.2),
     ("GL1 Cache Stall GL2 Backpressure", 8.5),
     # Table 307: GL1-GL2 Interface
-    ("GL1-GL2 Read Requests", 30_000),
-    ("GL1-GL2 Write Requests", 10_000),
     ("GL1-GL2 Read Bandwidth", 48e9),
     ("GL1-GL2 Write Bandwidth", 16e9),
-    ("GL1-GL2 Read Latency", 85.2),
-    ("GL1-GL2 Write Latency", 62.4),
     # Table 308: GL2 Cache (L2)
     ("GL2 Cache Utilization", 74.2),
-    ("GL2 Cache Total Requests", 40_000),
-    ("GL2 Cache Read Requests", 30_000),
-    ("GL2 Cache Write Requests", 10_000),
-    ("GL2 Cache Atomic Requests", 1_000),
     ("GL2 Cache Hit Rate", 82.5),
-    ("GL2 Cache Read BW", 64e9),
-    ("GL2 Cache Write BW", 24e9),
+    ("GL2-Fabric Read BW", 64e9),
+    ("GL2-Fabric Write BW", 24e9),
     # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
-    ("SARB Utilization", 52.3),
-    ("SARB Stall Rate", 12.4),
-    ("DRAM Read Requests", 25_000),
-    ("DRAM Write Requests", 8_000),
+    ("SysArb Utilization", 52.3),
+    ("SysArb Stall Rate", 12.4),
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
-    ("Read Returns", 25_000),
-    ("Write Returns", 8_000),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -131,7 +103,6 @@ COLORS = {
     "sqc": "yellow",
     "read": "bright_cyan",
     "write": "bright_yellow",
-    "atomic": "bright_magenta",
     "util": "bright_green",
     "hit": "yellow",
     "stall": "indian_red",
@@ -210,11 +181,17 @@ def _safe_float_sum(
     return total if any_valid else None
 
 
+def _stack_metrics(*lines: str) -> str:
+    """Join panel metric lines with a blank line, skipping suppressed ones."""
+    return "\n\n".join(ln for ln in lines if ln)
+
+
 def _fmt_edge(
     label: str,
     value: Any,  # noqa: ANN401
-    width: int = 7,
+    width: int = 11,
 ) -> str:
+    """Format one kernel-edge row: ``Label  : value``."""
     label_str = f"{label:<{width}}"
     if value is not None:
         value_str = f": {format_sci(value):>7}"
@@ -228,19 +205,21 @@ def _fmt_edge(
 # ---------------------------------------------------------------------------
 
 
-def _print_mem_chart_scope_bar(console: Console) -> None:
-    """Horizontal rule: GPU span vs System Memory (above the diagram body)."""
-    console.print(
-        "|"
-        + "-" * 62
-        + " [dim]GPU[/dim] "
-        + "-" * 62
-        + "|"
-        + "-" * 4
-        + " [dim]System Memory[/dim] "
-        + "-" * 4
-        + "|"
-    )
+def _scope_bar(gpu_span: int, sysmem_span: int) -> str:
+    """Horizontal rule marking the GPU span vs System Memory.
+
+    Spans are measured from the assembled layout so the rule always lines up
+    with the diagram, whatever the panel and edge-column widths happen to be.
+    """
+
+    def section(label: str, span: int) -> str:
+        inner = max(len(label) + 2, span - 1)
+        pad = inner - len(label) - 2
+        left = pad // 2
+        return "|" + "-" * left + f" [dim]{label}[/dim] " + "-" * (pad - left)
+
+    # The closing "|" sits on the diagram's last column, so it is part of the span.
+    return section("GPU", gpu_span) + section("System Memory", sysmem_span - 1) + "|"
 
 
 def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
@@ -271,18 +250,17 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["icache_hit"] = metric_dict.get("ICache Hit Rate")
     m["icache_gl1_bw"] = metric_dict.get("ICache-GL1 Read Bandwidth")
 
-    m["dcache_req"] = metric_dict.get("Dcache Requests")
-    m["dcache_hit"] = metric_dict.get("Dcache Hit Rate")
-    m["dcache_gl1_bw"] = metric_dict.get("Dcache-GL1 Read Bandwidth")
+    m["dcache_req"] = metric_dict.get("DCache Requests")
+    m["dcache_hit"] = metric_dict.get("DCache Hit Rate")
+    m["dcache_gl1_bw"] = metric_dict.get("DCache-GL1 Read Bandwidth")
 
     m["tcp_read_req"] = metric_dict.get("TCP Read Requests")
     m["tcp_write_req"] = metric_dict.get("TCP Write Requests")
     m["tcp_hit"] = metric_dict.get("GL0 Cache Hit Rate (TCP Cache)")
     m["tcp_bw"] = metric_dict.get("GL0 Cache BW (TCP Cache)")
 
-    m["lds_insts"] = metric_dict.get("LDS Instructions")
-    m["lds_inst_cycles"] = metric_dict.get("LDS Instruction Cycles")
-    m["lds_atomic_insts"] = metric_dict.get("LDS Atomic Instructions")
+    m["lds_req"] = metric_dict.get("LDS Req")
+    m["lds_util"] = metric_dict.get("LDS Utilization")
     m["lds_bw"] = metric_dict.get("LDS Estimated Bandwidth")
     m["lds_bank_conflict"] = metric_dict.get("LDS Bank Conflict Rate")
 
@@ -300,15 +278,15 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     m["gl2c_util"] = metric_dict.get("GL2 Cache Utilization")
     m["gl2c_hit"] = metric_dict.get("GL2 Cache Hit Rate")
-    m["gl2c_read_bw"] = metric_dict.get("GL2 Cache Read BW")
-    m["gl2c_write_bw"] = metric_dict.get("GL2 Cache Write BW")
+    m["gl2_fabric_read_bw"] = metric_dict.get("GL2-Fabric Read BW")
+    m["gl2_fabric_write_bw"] = metric_dict.get("GL2-Fabric Write BW")
 
-    m["sarb_util"] = metric_dict.get("SARB Utilization")
-    m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
-    m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth", 0)
-    m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth", 0)
+    m["sysarb_util"] = metric_dict.get("SysArb Utilization")
+    m["sysarb_stall"] = metric_dict.get("SysArb Stall Rate")
+    m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth")
+    m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth")
 
-    m["total_bw"] = (m["dram_read_bw"] or 0) + (m["dram_write_bw"] or 0)
+    m["total_bw"] = _safe_float_sum(m["dram_read_bw"], m["dram_write_bw"])
 
     return m
 
@@ -325,7 +303,6 @@ def _build_kernel_and_l0(
     fmt_bw = format_bw_human_readable
     c_rd = COLORS["read"]
     c_wr = COLORS["write"]
-    c_at = COLORS["atomic"]
     c_bl = COLORS["block"]
 
     # Kernel panel (height = 10+10+10 = 30 to match L0 stack)
@@ -337,54 +314,69 @@ def _build_kernel_and_l0(
         height=30,
     )
 
-    # Kernel edges — LDS, TCP, SQC groups
+    # Kernel edges — LDS, TCP and SQC request counts. Each arrow row sits on the
+    # same rendered row as its counterpart in the GL1 edge column, so a read (or
+    # write) reads straight across the chart at one height.
     ka_l = kernel_arrows["left"]
     ka_r = kernel_arrows["right"]
     ka_b = kernel_arrows["both"]
     kernel_edges_lines = [
-        "",
+        # Row 0 = the "LDS" title row, and the header for every request row below.
         "     [white]Request[/white]",
         "",
-        f"[{c_rd}]{_fmt_edge('Read', m['lds_insts'])}[/{c_rd}]",
-        f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_wr}]{_fmt_edge('Write', m['lds_inst_cycles'])}[/{c_wr}]",
-        f"[{c_wr}]{ka_r}[/{c_wr}]",
-        f"[{c_at}]{_fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
-        f"[{c_at}]{ka_b}[/{c_at}]",
+        "",
+        # SQ_INSTS_LDS counts instructions issued, not data movement, so it splits
+        # into neither reads nor writes: one unstyled, bidirectional line.
+        _fmt_edge("LDS", m["lds_req"]),
+        ka_b,
         "",
         "",
+        "",
+        "",
+        "",
+        # Row 10 = the "GL0 (TCP Cache)" title row
         "",
         "",
         f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
+        "",
+        "",
         f"[{c_wr}]{_fmt_edge('Write', m['tcp_write_req'])}[/{c_wr}]",
         f"[{c_wr}]{ka_r}[/{c_wr}]",
         "",
         "",
         "",
+        # Row 21 = the SQC "Read BW" label in the GL1 edge column
         "",
-        "",
-        "",
-        "",
-        "",
-        f"[{c_rd}]{_fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('ICache Read', m['icache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
-        f"[{c_rd}]{_fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('DCache Read', m['dcache_req'])}[/{c_rd}]",
         f"[{c_rd}]{ka_l}[/{c_rd}]",
+        "",
+        "",
+        "",
     ]
     kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
 
     # LDS panel
+    lds_util_line = (
+        f"{metric_line('Util', m['lds_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['lds_util'])}[/dim]"
+        if m["lds_util"] is not None
+        else ""
+    )
     lds_bw_line = (
-        metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"]) if m["lds_bw"] else ""
+        metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"])
+        if m["lds_bw"] is not None
+        else ""
     )
     lds_conflict_line = (
         metric_line("Bank Conflict", m["lds_bank_conflict"], "%", COLORS["stall"])
-        if m["lds_bank_conflict"]
+        if m["lds_bank_conflict"] is not None
         else ""
     )
     lds_panel = Panel(
-        f"{lds_bw_line}\n{lds_conflict_line}",
+        _stack_metrics(lds_util_line, lds_bw_line, lds_conflict_line),
         title=f"[bold {c_bl}]LDS[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -393,10 +385,16 @@ def _build_kernel_and_l0(
 
     # GL0 (TCP Cache) panel
     tcp_bw_line = (
-        metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"]) if m["tcp_bw"] else ""
+        metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"])
+        if m["tcp_bw"] is not None
+        else ""
     )
     tcp_panel = Panel(
-        f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
+        _stack_metrics(
+            f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['tcp_hit'])}[/dim]",
+            tcp_bw_line,
+        ),
         title=f"[bold {c_bl}]GL0 (TCP Cache)[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -405,8 +403,12 @@ def _build_kernel_and_l0(
 
     # SQC panel
     sqc_panel = Panel(
-        f"{metric_line('ICache', m['icache_hit'], '%', COLORS['hit'])}\n"
-        f"{metric_line('DCache', m['dcache_hit'], '%', COLORS['hit'])}",
+        _stack_metrics(
+            f"{metric_line('ICache Hit Rate', m['icache_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['icache_hit'])}[/dim]",
+            f"{metric_line('DCache Hit Rate', m['dcache_hit'], '%', COLORS['hit'])}\n"
+            f"[dim]{bar(m['dcache_hit'])}[/dim]",
+        ),
         title=f"[bold {c_bl}]SQC[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
@@ -544,8 +546,8 @@ def _build_memory_columns(
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
 
-    gl2_rd = fmt_bw(m["gl2c_read_bw"], precision=1)
-    gl2_wr = fmt_bw(m["gl2c_write_bw"], precision=1)
+    gl2_rd = fmt_bw(m["gl2_fabric_read_bw"], precision=1)
+    gl2_wr = fmt_bw(m["gl2_fabric_write_bw"], precision=1)
     gl2_gcea_edges_lines = [
         "",
         "",
@@ -573,10 +575,10 @@ def _build_memory_columns(
     gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
 
     gcea_panel = Panel(
-        f"{metric_line('SysArb Util', m['sarb_util'], '%', COLORS['util'])}\n"
-        f"[dim]{bar(m['sarb_util'])}[/dim]\n"
+        f"{metric_line('SysArb Util', m['sysarb_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['sysarb_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('Stall', m['sarb_stall'], '%', COLORS['stall'])}",
+        f"{metric_line('SysArb Stall', m['sysarb_stall'], '%', COLORS['stall'])}",
         title=f"[bold {c_bl}]GCEA[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
@@ -646,8 +648,6 @@ def create_mem_chart_diagram(
     console.print()
     if chart_title:
         console.print(f"[bold]{chart_title}[/bold]")
-    _print_mem_chart_scope_bar(console)
-    console.print()
 
     # Arrow constants
     std_arrow_len = 8
@@ -656,7 +656,7 @@ def create_mem_chart_diagram(
         "right": "-" * std_arrow_len + ">",
     }
 
-    kernel_edge_width = 16
+    kernel_edge_width = 20
     kernel_arrows = {
         "left": "<" + "-" * (kernel_edge_width - 1),
         "right": "-" * (kernel_edge_width - 1) + ">",
@@ -691,13 +691,21 @@ def create_mem_chart_diagram(
         dram_panel,
     )
 
+    # Scope rule, sized from the assembled layout: everything left of the DRAM
+    # edge column is on-GPU, the DRAM edge and panel are System Memory.
+    total = console.measure(main_layout).maximum
+    sysmem_span = (
+        console.measure(dram_edges).maximum + console.measure(dram_panel).maximum
+    )
+    console.print(_scope_bar(total - sysmem_span, sysmem_span))
+    console.print()
+
     console.print(main_layout)
     console.print()
     legend = (
         f"[dim]Legend:[/dim] "
         f"[{COLORS['read']}]<----[/{COLORS['read']}] Read  "
         f"[{COLORS['write']}]---->[/{COLORS['write']}] Write  "
-        f"[{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  "
         f"[{COLORS['util']}]█[/{COLORS['util']}] Util  "
         f"[{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  "
         f"[{COLORS['stall']}]█[/{COLORS['stall']}] Stall"
