@@ -1490,14 +1490,23 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
+    "gfx950": {
+        # The compact TP1 schedule selects no workgroup at the production
+        # stride.  A target-resolved validation cadence retains evidence from
+        # the same unmodified workload.  Native execution itself is fast, but
+        # strict replay analysis scans the target's conservative 2M-slot table;
+        # retain a bounded margin for that host-side validation step.
+        "tp1-prefill": {
+            "record_replay_runtime_sample_stride": 256,
+            "run_timeout_seconds": 300,
+        },
+    },
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after
         # transformation under RocJitsu. Keep a bounded twofold margin without
-        # weakening the ordinary physical-target timeout. Record/Replay's
-        # 65,536-workgroup production sampling stride deterministically selects
-        # no workgroup from this compact 32-dispatch validation schedule. A
-        # stride of 256 retains bounded execution while producing runtime
-        # evidence from the same unmodified workload.
+        # weakening the ordinary physical-target timeout.  This compact
+        # emulated schedule needs a denser Record/Replay cadence than the
+        # production operating point to produce validation evidence.
         "tp1-prefill": {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,

@@ -1985,7 +1985,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "d128-pressure", 180),
                 ("gfx950", "jakub-attention", 30),
                 ("gfx1250", "jakub-attention", 90),
-                ("gfx950", "tp1-prefill", 30),
+                ("gfx950", "tp1-prefill", 300),
                 ("gfx1250", "tp1-prefill", 60),
             )
             for target, workload, expected_timeout in cases:
@@ -2485,26 +2485,31 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", qwen_environment)
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", tp1_environment)
 
-    def test_gfx1250_tp1_record_replay_uses_bounded_validation_stride(self) -> None:
+    def test_tp1_record_replay_uses_target_bounded_validation_stride(self) -> None:
         tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
-        gfx1250_environment = validation._clean_environment(
-            "record-replay",
-            tp1,
-            Path("/hook.so"),
-            "gfx1250",
-            Path("/workspace"),
-        )
-        gfx950_environment = validation._clean_environment(
-            "record-replay",
-            tp1,
-            Path("/hook.so"),
-            "gfx950",
-            Path("/workspace"),
-        )
-        self.assertEqual(
-            gfx1250_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "256"
-        )
-        self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", gfx950_environment)
+        for target, expected_stride in (
+            ("gfx942", None),
+            ("gfx950", "256"),
+            ("gfx1201", None),
+            ("gfx1250", "256"),
+        ):
+            with self.subTest(target=target):
+                environment = validation._clean_environment(
+                    "record-replay",
+                    tp1,
+                    Path("/hook.so"),
+                    target,
+                    Path("/workspace"),
+                )
+                if expected_stride is None:
+                    self.assertNotIn(
+                        "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", environment
+                    )
+                else:
+                    self.assertEqual(
+                        environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
+                        expected_stride,
+                    )
 
     def test_qwen_gfx1250_overhead_uses_a_software_backend_median(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
