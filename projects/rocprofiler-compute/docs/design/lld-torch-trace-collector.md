@@ -402,7 +402,10 @@ must tolerate the missing field: `_parse_function_backend` in
   otherwise; `ON` makes an absent torch a configure error;
   `OFF` skips the directory. Any other value stops the configure.
   `TORCH_TRACE_PYTHON` selects the interpreter, defaulting to the one CMake finds.
-  `TORCH_TRACE_SOURCE_FINGERPRINT` is required.
+  When `TORCH_TRACE_SOURCE_FINGERPRINT` is unset, configure computes it with that
+  interpreter and `torch_trace_fingerprint.source_fingerprint()`. The runtime
+  loader still passes `-DTORCH_TRACE_SOURCE_FINGERPRINT` from the tag it already
+  computed.
 - CMake locates the interpreter with `find_package(Python3)` and the wheel with
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
