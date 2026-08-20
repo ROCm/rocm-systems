@@ -7,10 +7,21 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
 ### Changed
 
 * Profile mode retains per-process rocpd databases and native counter CSVs under ``out/{pass}/`` instead of converting them to ``results_*.csv.gz``.
-* Analyze mode merges profile artifacts from ``out/`` into ``pmc_perf.csv``. Workloads that still carry ``results_*.csv.gz`` remain readable until golden workloads are regenerated.
+* Analyze mode merges profile artifacts from ``out/`` into ``pmc_perf.csv``.
+
+* gfx115x Memory Chart improvements.
+  * Renamed memory chart metric names for more clarity.
+  * Each edge now reports the traffic measured at the interface it represents.
+  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
+
+* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
+  * gfx908–gfx942: added HBM and remote traffic percentages.
+  * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
 
 ### Removed
 
@@ -23,6 +34,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile compacts per-process rocpd databases at end of each pass when native counter CSVs exist, dropping unused PMC catalog tables.
 
 ### Resolved issues
+
+* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
 
 ### Upcoming changes
 
