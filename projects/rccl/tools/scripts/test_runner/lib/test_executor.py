@@ -384,7 +384,7 @@ class TestExecutor:
     def _detect_mpi_hostfile(self):
         """
         Detect MPI hostfile.
-        Checks RCCL_TEST_MPI_HOSTFILE env var, then ~/.mpi_hostfile default.
+        Checks RCCL_TEST_MPI_HOSTFILE, then ~/.mpi_hostfile and ~/mpi_hostfile.
 
         Returns:
             str: Path to hostfile, or None if not found
@@ -394,14 +394,15 @@ class TestExecutor:
             print(f"Using MPI hostfile from RCCL_TEST_MPI_HOSTFILE: {hostfile}")
             return hostfile
 
-        # Check default hostfile
-        default_hostfile = os.path.expanduser('~/.mpi_hostfile')
-        if os.path.isfile(default_hostfile):
-            print(f"Using default MPI hostfile: {default_hostfile}")
-            return default_hostfile
+        for default_name in ('~/.mpi_hostfile', '~/mpi_hostfile'):
+            default_hostfile = os.path.expanduser(default_name)
+            if os.path.isfile(default_hostfile):
+                print(f"Using default MPI hostfile: {default_hostfile}")
+                return default_hostfile
 
         if self.args.verbose:
-            print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
+            print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE, "
+                  "~/.mpi_hostfile, and ~/mpi_hostfile)")
         return None
 
     def _detect_mpi_hosts(self):

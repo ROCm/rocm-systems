@@ -298,6 +298,8 @@
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -307,6 +309,19 @@
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        },
+        {
+          "name": "DeepEP_Hybrid_Positive_And_Stress",
+          "description": "Four-rank DeepEP hybrid [GPU][CPU rank 0][CPU rank 1] registration, handle reuse, GIN IGet, and multi-node stress coverage",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:GinMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:GinMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:GinMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Elastic_Gating",
+          "description": "Hybrid host-backed window must be rejected when elastic registration is disabled",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
         }
       ]
     },
@@ -316,7 +331,7 @@
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
       "num_nodes": 2,
-      "num_gpus": 2,
+      "num_gpus": 1,
       "timeout": 300,
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
@@ -329,7 +344,7 @@
         {
           "name": "MultiSegment_Transport_All_MultiNode",
           "description": "All classic NET/IB and GIN multi-segment tests, including DeepEP patterns, cross-boundary sweeps, flushes, stress, and negative coverage",
-          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*"
+          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*-GinMultiSegmentMPITest.DeepEP_Hybrid*"
         }
       ]
     },

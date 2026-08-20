@@ -327,6 +327,8 @@
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -335,6 +337,17 @@
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        },
+        {
+          "name": "DeepEP_Hybrid_Positive_And_Stress",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:GinMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:GinMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:GinMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
         }
       ]
     },
@@ -344,7 +357,7 @@
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
       "num_nodes": 2,
-      "num_gpus": 2,
+      "num_gpus": 1,
       "timeout": 300,
       "env_variables": {
         "NCCL_NET": "IB",
@@ -357,7 +370,7 @@
       "tests": [
         {
           "name": "MultiSegment_Transport_All_MultiNode",
-          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*"
+          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*-GinMultiSegmentMPITest.DeepEP_Hybrid*"
         }
       ]
     },
