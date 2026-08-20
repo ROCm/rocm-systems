@@ -43,7 +43,8 @@ deliberate:
   snapshot because a single pass is the ordinary path.
 - **Localized start/stop as function pointers on the PASS payload**, mirroring
   `rocprofiler_start_context` / `rocprofiler_stop_context`, rather than a new public API.
-- **No pass-count environment variable.** `rocprofv3` derives N from `--pmc` groups per agent.
+- **No pass-count environment variable.** A tool (including the stacked `rocprofv3` integration)
+  derives N itself — for example from `--pmc` groups per agent.
 
 `ROCPROFILER_KERNEL_REPLAY_SNAPSHOT` and `ROCPROFILER_KERNEL_REPLAY_RESTORE` are TODOs in
 `fwd.h` for tool visibility into those phases; they are not implemented.
