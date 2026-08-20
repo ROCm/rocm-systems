@@ -506,9 +506,7 @@ def test_runtime_build_path_falls_back_to_the_user_cache(monkeypatch, tmp_path):
     )
 
 
-def test_runtime_build_skips_when_a_required_source_is_absent(
-    monkeypatch, tmp_path
-):
+def test_runtime_build_skips_when_a_required_source_is_absent(monkeypatch, tmp_path):
     """A missing required source skips the runtime build."""
     src_dir = tmp_path / "torch_trace_collector"
     src_dir.mkdir(parents=True, exist_ok=True)

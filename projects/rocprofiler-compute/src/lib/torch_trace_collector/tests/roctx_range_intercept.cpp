@@ -35,7 +35,6 @@ std::vector<std::string> stop_recording()
 
 extern "C"
 {
-
 int __real_roctxRangePushA(const char* message);
 
 int __wrap_roctxRangePushA(const char* message)
@@ -49,5 +48,4 @@ int __wrap_roctxRangePushA(const char* message)
     }
     return __real_roctxRangePushA(message);
 }
-
 }
