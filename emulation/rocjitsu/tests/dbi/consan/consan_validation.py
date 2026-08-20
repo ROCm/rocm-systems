@@ -1805,10 +1805,10 @@ def _tensile_python() -> Path:
 def _tensile_runtime_probe(
     python: Path, paths: TensileValidationPaths
 ) -> dict:
-    """Proves that the selected interpreter can import the Tensile driver."""
+    """Proves that the Tensile driver and its native client are loadable."""
     environment = tensile_python_environment(paths)
     try:
-        probe = subprocess.run(
+        import_probe = subprocess.run(
             [str(python), "-P", "-c", "from Tensile import Tensile"],
             check=False,
             capture_output=True,
@@ -1818,16 +1818,58 @@ def _tensile_runtime_probe(
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return {"ok": False, "python": str(python), "detail": str(error)}
-    detail = (probe.stderr or probe.stdout).strip()
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        return {
+            "ok": False,
+            "python": str(python),
+            "detail": "ldd is missing",
+            "reasons": ["cannot verify Tensile client runtime dependencies"],
+        }
+    try:
+        client_probe = subprocess.run(
+            [ldd, str(paths.client)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {
+            "ok": False,
+            "python": str(python),
+            "detail": str(error),
+            "reasons": ["cannot inspect Tensile client runtime dependencies"],
+        }
+    import_detail = (import_probe.stderr or import_probe.stdout).strip()
+    client_detail = (client_probe.stdout or client_probe.stderr).strip()
+    missing_libraries = [
+        line.strip()
+        for line in client_detail.splitlines()
+        if re.search(r"\s=>\s+not found\s*$", line)
+    ]
+    reasons = []
+    if import_probe.returncode != 0:
+        reasons.append(f"Tensile import exited with status {import_probe.returncode}")
+    if client_probe.returncode != 0:
+        reasons.append(f"Tensile client ldd exited with status {client_probe.returncode}")
+    if missing_libraries:
+        reasons.append(
+            "Tensile client has missing runtime libraries: "
+            + ", ".join(missing_libraries)
+        )
+    linkage_detail = "\n".join(missing_libraries)
+    if client_probe.returncode != 0 and not linkage_detail:
+        linkage_detail = client_detail
+    detail = "\n".join(
+        part for part in (import_detail, linkage_detail) if part
+    ) or "Tensile import and client runtime closure passed"
     return {
-        "ok": probe.returncode == 0,
+        "ok": not reasons,
         "python": str(python),
         "detail": detail,
-        "reasons": (
-            []
-            if probe.returncode == 0
-            else [f"Tensile import exited with status {probe.returncode}"]
-        ),
+        "reasons": reasons,
     }
 
 

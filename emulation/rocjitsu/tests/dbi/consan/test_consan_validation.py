@@ -4531,7 +4531,11 @@ class ConSanValidationTest(unittest.TestCase):
         with temporary_root() as root:
             package = root / "Tensile"
             package.mkdir()
-            paths = mock.Mock(tensilelite=root, rocm=root)
+            paths = mock.Mock(
+                tensilelite=root,
+                rocm=root,
+                client=Path(sys.executable),
+            )
             init = package / "__init__.py"
             init.write_text(
                 "import consan_missing_tensile_dependency\n",
@@ -4543,6 +4547,33 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(rejected["ok"], rejected)
         self.assertIn("consan_missing_tensile_dependency", rejected["detail"])
         self.assertTrue(accepted["ok"], accepted)
+
+    def test_tensile_runtime_probe_rejects_missing_client_library(self) -> None:
+        paths = mock.Mock(
+            tensilelite=Path("/toolchain/tensilelite"),
+            rocm=Path("/toolchain/rocm"),
+            client=Path("/toolchain/tensilelite-client"),
+        )
+        import_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        linkage_result = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="libamd_smi.so.26 => not found\nlibc.so.6 => /lib/libc.so.6\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(validation.shutil, "which", return_value="/bin/ldd"),
+            mock.patch.object(
+                validation.subprocess,
+                "run",
+                side_effect=(import_result, linkage_result),
+            ),
+        ):
+            result = validation._tensile_runtime_probe(Path("/python"), paths)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("libamd_smi.so.26 => not found", result["detail"])
+        self.assertIn("missing runtime libraries", result["reasons"][0])
 
     def test_pytorch_json_reports_independent_variant_medians(self) -> None:
         document = {
