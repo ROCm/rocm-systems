@@ -24,12 +24,14 @@ def _find_instruction(spec, encoding_name: str, instruction_name: str):
     return next(inst for inst in encoding.insts if inst.name == instruction_name)
 
 
-def test_cdna4_preserves_conditional_dpp_encoding_availability():
+def test_cdna4_manual_opcode_rule_filters_xml_dpp_availability():
     spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     inst = _find_instruction(spec, 'ENC_VOP1', 'V_CVT_F64_I32')
 
+    # The XML exposes the conditional extension, but CDNA4 section 12.16.1
+    # explicitly prohibits DPP for this opcode.
     assert 'VOP1_VOP_DPP' in inst.available_encodings
-    assert CodeGenerator(spec, '')._instruction_supports_dpp(inst, 'ENC_VOP1')
+    assert not CodeGenerator(spec, '')._instruction_supports_dpp(inst, 'ENC_VOP1')
 
 
 def test_rdna4_distinguishes_vop1_instructions_with_and_without_dpp():

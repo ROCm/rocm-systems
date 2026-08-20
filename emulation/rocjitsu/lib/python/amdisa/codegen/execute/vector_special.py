@@ -151,6 +151,7 @@ def gen_vector_movrel(
     supports_dpp: bool = False,
     supports_dpp8: bool = False,
     supports_sdwa: bool = False,
+    inactive_uses_bound_ctrl: bool = False,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -172,7 +173,9 @@ def gen_vector_movrel(
             f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
             f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
         )
-        _stage_movrel_source(L, supports_dpp, supports_dpp8, supports_sdwa)
+        _stage_movrel_source(
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+        )
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -217,7 +220,9 @@ def gen_vector_movrel(
         L.append(
             f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
         )
-        _stage_movrel_source(L, supports_dpp, supports_dpp8, supports_sdwa)
+        _stage_movrel_source(
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+        )
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -253,25 +258,36 @@ def gen_vector_movrel(
 
 
 def _stage_movrel_source(
-    lines: list[str], supports_dpp: bool, supports_dpp8: bool, supports_sdwa: bool
+    lines: list[str],
+    supports_dpp: bool,
+    supports_dpp8: bool,
+    supports_sdwa: bool,
+    inactive_uses_bound_ctrl: bool,
 ) -> None:
     """Stage modifiers from the M0-adjusted source VGPR, not its encoded base."""
     if not (supports_dpp or supports_dpp8 or supports_sdwa):
         return
-    lines.append('  std::unique_ptr<StagedOperand> rel_staged_src;')
+    lines.append('  std::optional<StagedOperand> rel_staged_src;')
     if supports_dpp:
+        inactive_policy = str(inactive_uses_bound_ctrl).lower()
         lines.extend(
             [
-                '  if (inst_.src0 == amdgpu::SRC_DPP)',
-                '    amdgpu::dpp::apply_dpp(&rel_src, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,',
-                '                           dpp_bound_ctrl_, dpp_fi_, rel_staged_src, wf);',
+                '  amdgpu::dpp::DppPlan rel_dpp_plan;',
+                '  if (inst_.src0 == amdgpu::SRC_DPP) {',
+                '    rel_dpp_plan = amdgpu::dpp::make_dpp_plan(',
+                '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,',
+                '        dpp_bound_ctrl_, dpp_fi_, wf.exec(),',
+                f'        {inactive_policy});',
+                '    amdgpu::dpp::apply_dpp(',
+                '        rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);',
+                '  }',
             ]
         )
     if supports_dpp8:
         lines.extend(
             [
                 '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))',
-                '    amdgpu::dpp::apply_dpp8(&rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);',
+                '    amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);',
             ]
         )
     if supports_sdwa:
@@ -285,7 +301,8 @@ def _stage_movrel_source(
             ]
         )
     lines.append(
-        '  ScopedOperandDelegate rel_staged_src_binding(rel_src, rel_staged_src.get());'
+        '  ScopedOperandDelegate rel_staged_src_binding('
+        'rel_src, rel_staged_src ? &*rel_staged_src : nullptr);'
     )
 
 
@@ -674,7 +691,12 @@ def gen_vector_trig_preop(
     return '\n'.join(L)
 
 
-def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> str:
+def gen_vector_mad_64_32(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    result_writer: str | None = None,
+) -> str:
     """Generate V_MAD_U64_U32 / V_MAD_I64_I32 body.
 
     D.i64 = S0.i32 * S1.i32 + S2.i64 (signed)
@@ -734,7 +756,10 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         )
     L.append('  }')
     if writes_carry:
-        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
+        if result_writer is not None:
+            L.append(f'  {result_writer}(carry);')
+        else:
+            L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, carry);')
     return '\n'.join(L)
 
 
@@ -993,6 +1018,7 @@ def gen_vector_div_scale(
     dtype: str | None,
     is_vop3: bool = False,
     has_abs: bool = False,
+    result_writer: str | None = None,
 ) -> str:
     """Generate V_DIV_SCALE body per ISA pseudocode (CDNA4 p.363-365).
 
@@ -1073,7 +1099,10 @@ def gen_vector_div_scale(
     )
     L.append('  }')
     if len(dst) > 1:
-        L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
+        if result_writer is not None:
+            L.append(f'  {result_writer}(vcc);')
+        else:
+            L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
         L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)

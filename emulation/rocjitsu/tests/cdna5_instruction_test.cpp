@@ -917,7 +917,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE; // row-select lane 0
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -930,8 +930,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
         static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst, lane)) |
         (static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst + 1, lane)) << 32);
     const uint64_t expected =
-        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase + (lane ^ 1u)))
-                  : kOldDstBase + lane;
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstLoBase + lane) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, lane), kLowDstHiBase + lane) << "lane " << lane;

@@ -2863,9 +2863,17 @@ inline void execute_v_add3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = a + b;
+    auto c1 = t1 < a;
+    auto t2 = t1 + cin;
+    auto c2 = t2 < t1;
+    return make_simd_carry(t2, c1 | c2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2882,13 +2890,14 @@ inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a + b;
     auto c1 = t1 < a;
     auto t2 = t1 + cin;
@@ -2912,12 +2921,13 @@ inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto) {
     auto s = a + b;
     return make_simd_carry(s, s < a);
   });
@@ -2936,12 +2946,13 @@ inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CO([](auto a, auto b, auto) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CO_RESULT(commit_result, [](auto a, auto b, auto) {
     auto s = a + b;
     return make_simd_carry(s, s < a);
   });
@@ -2960,7 +2971,7 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       return static_cast<uint32_t>(w);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -3308,10 +3319,10 @@ inline void execute_v_add_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   }
 }
 
-template <typename Inst>
-inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a + b;
     auto c1 = t1 < a;
     auto t2 = t1 + cin;
@@ -3334,13 +3345,13 @@ inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a + b;
     auto c1 = t1 < a;
     auto t2 = t1 + cin;
@@ -3364,7 +3375,7 @@ inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -3953,10 +3964,11 @@ inline void execute_v_clz_i32_u32_vop3([[maybe_unused]] Inst &inst,
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32(0x8000u, [](auto a, auto b) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32_RESULT(commit_result, 0x8000u, [](auto a, auto b) {
     using U = util::native<uint32_t>;
     U h = a & 0xFFFFu;
     U exp = (h >> 10) & 0x1Fu;
@@ -4026,7 +4038,7 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4099,10 +4111,11 @@ inline void execute_v_cmp_class_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32(0x80000000u, [](auto a, auto b) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32_RESULT(commit_result, 0x80000000u, [](auto a, auto b) {
     using U = util::native<uint32_t>;
     U exp = (a >> 23) & 0xFFu;
     U mant = a & 0x7FFFFFu;
@@ -4163,7 +4176,7 @@ inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4229,10 +4242,11 @@ inline void execute_v_cmp_class_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(0x8000000000000000ull, [](auto s, auto m) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CLASS_F64_RESULT(commit_result, 0x8000000000000000ull, [](auto s, auto m) {
     using U = std::decay_t<decltype(s)>;
     using M = std::decay_t<decltype(m)>;
     U exp = (s >> 52) & 0x7FFu;
@@ -4297,7 +4311,7 @@ inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4367,9 +4381,10 @@ inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4395,7 +4410,7 @@ inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4417,9 +4432,10 @@ inline void execute_v_cmp_eq_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4443,7 +4459,7 @@ inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4461,9 +4477,10 @@ inline void execute_v_cmp_eq_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4489,7 +4506,7 @@ inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4507,8 +4524,9 @@ inline void execute_v_cmp_eq_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4518,7 +4536,7 @@ inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4539,9 +4557,11 @@ inline void execute_v_cmp_eq_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4551,7 +4571,7 @@ inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4569,9 +4589,11 @@ inline void execute_v_cmp_eq_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4581,7 +4603,7 @@ inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4599,8 +4621,9 @@ inline void execute_v_cmp_eq_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4610,7 +4633,7 @@ inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4628,9 +4651,11 @@ inline void execute_v_cmp_eq_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4640,7 +4665,7 @@ inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4658,9 +4683,11 @@ inline void execute_v_cmp_eq_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a == b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a == b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4670,7 +4697,7 @@ inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4688,9 +4715,11 @@ inline void execute_v_cmp_eq_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result,
+                                          [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4699,7 +4728,7 @@ inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4718,9 +4747,11 @@ inline void execute_v_cmp_f_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result,
+                                          [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4729,7 +4760,7 @@ inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4746,9 +4777,11 @@ inline void execute_v_cmp_f_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4757,7 +4790,7 @@ inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4791,9 +4824,11 @@ inline void execute_v_cmp_f_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4802,7 +4837,7 @@ inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4819,10 +4854,11 @@ inline void execute_v_cmp_f_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t,
-                                    [](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4831,7 +4867,7 @@ inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4863,9 +4899,11 @@ inline void execute_v_cmp_f_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4874,7 +4912,7 @@ inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4891,10 +4929,11 @@ inline void execute_v_cmp_f_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t,
-                                    [](auto a, auto b) { return decltype(a == b)(false); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return decltype(a == b)(false); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4903,7 +4942,7 @@ inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4920,9 +4959,10 @@ inline void execute_v_cmp_f_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4948,7 +4988,7 @@ inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -4970,9 +5010,10 @@ inline void execute_v_cmp_ge_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4996,7 +5037,7 @@ inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5014,9 +5055,10 @@ inline void execute_v_cmp_ge_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5042,7 +5084,7 @@ inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5060,8 +5102,9 @@ inline void execute_v_cmp_ge_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5071,7 +5114,7 @@ inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5092,9 +5135,11 @@ inline void execute_v_cmp_ge_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5104,7 +5149,7 @@ inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5122,9 +5167,11 @@ inline void execute_v_cmp_ge_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5134,7 +5181,7 @@ inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5152,8 +5199,9 @@ inline void execute_v_cmp_ge_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5163,7 +5211,7 @@ inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5181,9 +5229,11 @@ inline void execute_v_cmp_ge_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5193,7 +5243,7 @@ inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5211,9 +5261,11 @@ inline void execute_v_cmp_ge_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a >= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a >= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5223,7 +5275,7 @@ inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5241,9 +5293,10 @@ inline void execute_v_cmp_ge_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5269,7 +5322,7 @@ inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5290,9 +5343,10 @@ inline void execute_v_cmp_gt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5316,7 +5370,7 @@ inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5334,9 +5388,10 @@ inline void execute_v_cmp_gt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5362,7 +5417,7 @@ inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5380,8 +5435,9 @@ inline void execute_v_cmp_gt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5391,7 +5447,7 @@ inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5412,9 +5468,11 @@ inline void execute_v_cmp_gt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5424,7 +5482,7 @@ inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5442,9 +5500,11 @@ inline void execute_v_cmp_gt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5454,7 +5514,7 @@ inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5472,8 +5532,9 @@ inline void execute_v_cmp_gt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5483,7 +5544,7 @@ inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5501,9 +5562,11 @@ inline void execute_v_cmp_gt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5513,7 +5576,7 @@ inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5531,9 +5594,11 @@ inline void execute_v_cmp_gt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a > b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a > b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5543,7 +5608,7 @@ inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5561,9 +5626,10 @@ inline void execute_v_cmp_gt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5589,7 +5655,7 @@ inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5611,9 +5677,10 @@ inline void execute_v_cmp_le_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5637,7 +5704,7 @@ inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5655,9 +5722,10 @@ inline void execute_v_cmp_le_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5683,7 +5751,7 @@ inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5701,8 +5769,9 @@ inline void execute_v_cmp_le_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5712,7 +5781,7 @@ inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5733,9 +5802,11 @@ inline void execute_v_cmp_le_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5745,7 +5816,7 @@ inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5763,9 +5834,11 @@ inline void execute_v_cmp_le_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5775,7 +5848,7 @@ inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5793,8 +5866,9 @@ inline void execute_v_cmp_le_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5804,7 +5878,7 @@ inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5822,9 +5896,11 @@ inline void execute_v_cmp_le_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5834,7 +5910,7 @@ inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5852,9 +5928,11 @@ inline void execute_v_cmp_le_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a <= b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a <= b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5864,7 +5942,7 @@ inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5882,9 +5960,11 @@ inline void execute_v_cmp_le_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return (a < b) || (a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result,
+                                          [](auto a, auto b) { return (a < b) || (a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5913,7 +5993,7 @@ inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5939,9 +6019,11 @@ inline void execute_v_cmp_lg_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return (a < b) || (a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result,
+                                          [](auto a, auto b) { return (a < b) || (a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5968,7 +6050,7 @@ inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -5989,9 +6071,11 @@ inline void execute_v_cmp_lg_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return (a < b) || (a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return (a < b) || (a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6020,7 +6104,7 @@ inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6041,9 +6125,10 @@ inline void execute_v_cmp_lg_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6069,7 +6154,7 @@ inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6090,9 +6175,10 @@ inline void execute_v_cmp_lt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6116,7 +6202,7 @@ inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6134,9 +6220,10 @@ inline void execute_v_cmp_lt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6162,7 +6249,7 @@ inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6180,8 +6267,9 @@ inline void execute_v_cmp_lt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6191,7 +6279,7 @@ inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6212,9 +6300,11 @@ inline void execute_v_cmp_lt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6224,7 +6314,7 @@ inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6242,9 +6332,11 @@ inline void execute_v_cmp_lt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6254,7 +6346,7 @@ inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6272,8 +6364,9 @@ inline void execute_v_cmp_lt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6283,7 +6376,7 @@ inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6301,9 +6394,11 @@ inline void execute_v_cmp_lt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6313,7 +6408,7 @@ inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6331,9 +6426,11 @@ inline void execute_v_cmp_lt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a < b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a < b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6343,7 +6440,7 @@ inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6361,8 +6458,9 @@ inline void execute_v_cmp_lt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6372,7 +6470,7 @@ inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6393,9 +6491,11 @@ inline void execute_v_cmp_ne_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6405,7 +6505,7 @@ inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6423,9 +6523,11 @@ inline void execute_v_cmp_ne_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6435,7 +6537,7 @@ inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6453,8 +6555,9 @@ inline void execute_v_cmp_ne_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6464,7 +6567,7 @@ inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6482,9 +6585,11 @@ inline void execute_v_cmp_ne_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6494,7 +6599,7 @@ inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6512,9 +6617,11 @@ inline void execute_v_cmp_ne_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t, [](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6524,7 +6631,7 @@ inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane))))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6542,10 +6649,10 @@ inline void execute_v_cmp_ne_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6571,7 +6678,7 @@ inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6594,10 +6701,10 @@ inline void execute_v_cmp_neq_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6621,7 +6728,7 @@ inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6640,10 +6747,10 @@ inline void execute_v_cmp_neq_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return a != b; });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return a != b; });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6669,7 +6776,7 @@ inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
          }()))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6688,10 +6795,10 @@ inline void execute_v_cmp_neq_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return !(a >= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return !(a >= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6717,7 +6824,7 @@ inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6740,10 +6847,10 @@ inline void execute_v_cmp_nge_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return !(a >= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return !(a >= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6767,7 +6874,7 @@ inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6786,10 +6893,11 @@ inline void execute_v_cmp_nge_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return !(a >= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return !(a >= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6815,7 +6923,7 @@ inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6834,10 +6942,10 @@ inline void execute_v_cmp_nge_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return !(a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return !(a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6863,7 +6971,7 @@ inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6886,10 +6994,10 @@ inline void execute_v_cmp_ngt_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return !(a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return !(a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6913,7 +7021,7 @@ inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6932,10 +7040,10 @@ inline void execute_v_cmp_ngt_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return !(a > b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return !(a > b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6961,7 +7069,7 @@ inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -6980,10 +7088,10 @@ inline void execute_v_cmp_ngt_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return !(a <= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return !(a <= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7009,7 +7117,7 @@ inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7032,10 +7140,10 @@ inline void execute_v_cmp_nle_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return !(a <= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return !(a <= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7059,7 +7167,7 @@ inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7078,10 +7186,11 @@ inline void execute_v_cmp_nle_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return !(a <= b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return !(a <= b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7107,7 +7216,7 @@ inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7126,10 +7235,11 @@ inline void execute_v_cmp_nle_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return !((a < b) || (a > b)); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result,
+                                          [](auto a, auto b) { return !((a < b) || (a > b)); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7158,7 +7268,7 @@ inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7185,10 +7295,11 @@ inline void execute_v_cmp_nlg_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return !((a < b) || (a > b)); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result,
+                                          [](auto a, auto b) { return !((a < b) || (a > b)); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7215,7 +7326,7 @@ inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7237,10 +7348,11 @@ inline void execute_v_cmp_nlg_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return !((a < b) || (a > b)); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return !((a < b) || (a > b)); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7269,7 +7381,7 @@ inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7291,10 +7403,10 @@ inline void execute_v_cmp_nlg_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return !(a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result, [](auto a, auto b) { return !(a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7320,7 +7432,7 @@ inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7343,10 +7455,10 @@ inline void execute_v_cmp_nlt_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return !(a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result, [](auto a, auto b) { return !(a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7370,7 +7482,7 @@ inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7389,10 +7501,10 @@ inline void execute_v_cmp_nlt_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return !(a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result, [](auto a, auto b) { return !(a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7418,7 +7530,7 @@ inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
            }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7437,10 +7549,11 @@ inline void execute_v_cmp_nlt_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16(
-      [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(
+      commit_result, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7466,7 +7579,7 @@ inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7489,10 +7602,11 @@ inline void execute_v_cmp_o_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32(
-      [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(
+      commit_result, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7516,7 +7630,7 @@ inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7535,10 +7649,11 @@ inline void execute_v_cmp_o_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(
-      [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(
+      commit_result, [](auto a, auto b) { return !util::stdx::isnan(a) && !util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7564,7 +7679,7 @@ inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7598,9 +7713,11 @@ inline void execute_v_cmp_t_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result,
+                                          [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7609,7 +7726,7 @@ inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7625,9 +7742,11 @@ inline void execute_v_cmp_t_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7636,7 +7755,7 @@ inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7669,9 +7788,11 @@ inline void execute_v_cmp_t_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(int32_t, [](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, int32_t,
+                                         [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7680,7 +7801,7 @@ inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7697,9 +7818,11 @@ inline void execute_v_cmp_t_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(int64_t, [](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, int64_t,
+                                           [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7708,7 +7831,7 @@ inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7740,9 +7863,11 @@ inline void execute_v_cmp_t_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result, uint32_t,
+                                         [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7751,7 +7876,7 @@ inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7768,10 +7893,11 @@ inline void execute_v_cmp_t_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(uint64_t,
-                                    [](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(commit_result, uint64_t,
+                                           [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7780,7 +7906,7 @@ inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7797,10 +7923,11 @@ inline void execute_v_cmp_t_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16([](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(commit_result,
+                                          [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7809,7 +7936,7 @@ inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7829,10 +7956,11 @@ inline void execute_v_cmp_tru_f16_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32([](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(commit_result,
+                                          [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7841,7 +7969,7 @@ inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7859,10 +7987,11 @@ inline void execute_v_cmp_tru_f32_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64([](auto a, auto b) { return decltype(a == b)(true); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(commit_result,
+                                            [](auto a, auto b) { return decltype(a == b)(true); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7871,7 +8000,7 @@ inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7889,10 +8018,11 @@ inline void execute_v_cmp_tru_f64_vopc([[maybe_unused]] Inst &inst,
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16(
-      [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16_RESULT(
+      commit_result, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7918,7 +8048,7 @@ inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7941,10 +8071,11 @@ inline void execute_v_cmp_u_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32(
-      [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32_RESULT(
+      commit_result, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7968,7 +8099,7 @@ inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -7987,10 +8118,11 @@ inline void execute_v_cmp_u_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   wf.set_vcc_mask(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(
-      [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                     [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64_RESULT(
+      commit_result, [](auto a, auto b) { return util::stdx::isnan(a) || util::stdx::isnan(b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -8016,7 +8148,7 @@ inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
          }())))
       vcc |= (1ULL << lane);
   }
-  amdgpu::write_wave_mask_scalar(inst.vdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -10157,9 +10289,10 @@ inline void execute_v_div_fmas_f64_vop3([[maybe_unused]] Inst &inst,
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_div_scale_f32_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -10210,12 +10343,13 @@ inline void execute_v_div_scale_f32_vop3([[maybe_unused]] Inst &inst,
       vcc &= ~(1ULL << lane);
     sdwa::write_lane<true>(inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>(result));
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -10266,7 +10400,7 @@ inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
       vcc &= ~(1ULL << lane);
     sdwa::write_lane64<true>(inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>(result));
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -13016,9 +13150,10 @@ inline void execute_v_mac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
+                                          [[maybe_unused]] Wavefront &wf,
+                                          [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t carry = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -13034,12 +13169,13 @@ inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
+  commit_result(carry);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_mad_co_u64_u32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
+                                          [[maybe_unused]] Wavefront &wf,
+                                          [[maybe_unused]] CommitResult commit_result) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t carry = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -13054,7 +13190,7 @@ inline void execute_v_mad_co_u64_u32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
+  commit_result(carry);
 }
 
 template <typename Inst>
@@ -13170,10 +13306,10 @@ inline void execute_v_mad_i32_i24_vop3([[maybe_unused]] Inst &inst,
   }
 }
 
-template <typename Inst>
-inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3([](auto a, auto b, auto c) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3_RESULT(commit_result, [](auto a, auto b, auto c) {
     auto wa = util::stdx::static_simd_cast<util::native<uint64_t>>(
         util::stdx::static_simd_cast<util::native<int64_t>>(
             util::stdx::static_simd_cast<util::narrow32<int32_t>>(a)));
@@ -13199,7 +13335,7 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
+  commit_result(carry);
 }
 
 template <typename Inst>
@@ -13436,10 +13572,10 @@ inline void execute_v_mad_u32_u24_vop3([[maybe_unused]] Inst &inst,
   }
 }
 
-template <typename Inst>
-inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3([](auto a, auto b, auto c) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3_RESULT(commit_result, [](auto a, auto b, auto c) {
     auto product = util::stdx::static_simd_cast<util::native<uint64_t>>(a) *
                    util::stdx::static_simd_cast<util::native<uint64_t>>(b);
     auto result = product + c;
@@ -13459,7 +13595,7 @@ inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst,
       carry |= 1ULL << lane;
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, carry);
+  commit_result(carry);
 }
 
 template <typename Inst>
@@ -18825,9 +18961,17 @@ inline void execute_v_sqrt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = a - b;
+    auto bw1 = a < b;
+    auto t2 = t1 - cin;
+    auto bw2 = t1 < cin;
+    return make_simd_carry(t2, bw1 | bw2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -18844,13 +18988,14 @@ inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a - b;
     auto bw1 = a < b;
     auto t2 = t1 - cin;
@@ -18874,12 +19019,14 @@ inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -18895,12 +19042,14 @@ inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return a - b;
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CO([](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CO_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -18916,7 +19065,7 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       return a - b;
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>
@@ -19186,10 +19335,10 @@ inline void execute_v_sub_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   }
 }
 
-template <typename Inst>
-inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a - b;
     auto bw1 = a < b;
     auto t2 = t1 - cin;
@@ -19212,13 +19361,13 @@ inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a - b;
     auto bw1 = a < b;
     auto t2 = t1 - cin;
@@ -19242,13 +19391,14 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+                                          [[maybe_unused]] Wavefront &wf,
+                                          [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = b - a;
     auto bw1 = b < a;
     auto t2 = t1 - cin;
@@ -19271,13 +19421,14 @@ inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+                                          [[maybe_unused]] Wavefront &wf,
+                                          [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = b - a;
     auto bw1 = b < a;
     auto t2 = t1 - cin;
@@ -19301,12 +19452,20 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {
+                                            [[maybe_unused]] Wavefront &wf,
+                                            [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = b - a;
+    auto bw1 = b < a;
+    auto t2 = t1 - cin;
+    auto bw2 = t1 < cin;
+    return make_simd_carry(t2, bw1 | bw2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19323,13 +19482,14 @@ inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CIN([](auto a, auto b, auto cin) {
+                                            [[maybe_unused]] Wavefront &wf,
+                                            [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = b - a;
     auto bw1 = b < a;
     auto t2 = t1 - cin;
@@ -19353,13 +19513,15 @@ inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19375,13 +19537,15 @@ inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return a - b;
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CO([](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP3_CO_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19397,7 +19561,7 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
       return a - b;
     }());
   }
-  amdgpu::write_wave_mask_scalar(inst.sdst, wf, vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst>

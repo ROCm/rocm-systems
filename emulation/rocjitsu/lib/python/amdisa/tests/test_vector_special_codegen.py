@@ -64,8 +64,9 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
         assert '(wf.m0() >> 16) & 0x3ffu' in cpp
         assert 'resolved_vgpr_offset(wf' in cpp
     assert 'read_lane(rel_src, lane)' in move
-    assert 'apply_dpp(&rel_src' in move
-    assert 'apply_dpp8(&rel_src' in move
+    assert 'DppPlan rel_dpp_plan' in move
+    assert 'apply_dpp(\n        rel_src, rel_dpp_plan' in move
+    assert 'apply_dpp8(rel_src' in move
     assert 'stage_source(rel_src' in move
     assert 'rel_staged_src_binding(rel_src' in move
     assert 'write_lane(rel_src, lane, dst_value)' in swap

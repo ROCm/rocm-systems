@@ -500,8 +500,9 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   // scratch, not of the instruction, so issue the two groups separately rather
   // than striding a global lane's second dword by lane_count*4. Uniform waves
   // (including every dedicated SCRATCH op) take the single-request path.
-  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & d.lane_mask : 0;
-  const uint64_t plain_lanes = d.lane_mask & ~scratch_lanes;
+  const uint64_t request_lanes = transpose_request_lane_mask(d);
+  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
+  const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
 
   if (d.is_load) {

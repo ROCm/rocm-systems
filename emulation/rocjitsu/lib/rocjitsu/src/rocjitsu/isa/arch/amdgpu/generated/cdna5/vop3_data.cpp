@@ -59,6 +59,17 @@ DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_mov_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_mov_b32: reserved DPP control";
+  }
   return std::make_unique<VMovB32Vop3>(opcode);
 }
 } // namespace detail
@@ -147,6 +158,17 @@ DecodeResult decodeVMovB16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
+      return emit_error.emit() << "v_mov_b16: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_mov_b16: reserved DPP control";
+  }
   return std::make_unique<VMovB16Vop3>(opcode);
 }
 } // namespace detail
@@ -205,6 +227,21 @@ DecodeResult decodeVMovB64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_MOV_B64 does not support DPP8";
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_mov_b64: DPP requires matching OPSEL halves";
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "v_mov_b64: only DPP row-select controls 0x150-0x15f are supported";
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
+        [[unlikely]]
+      return emit_error.emit()
+             << "v_mov_b64: only DPP row-select controls 0x150-0x15f are supported";
+  }
   return std::make_unique<VMovB64Vop3>(opcode);
 }
 } // namespace detail
@@ -260,6 +297,17 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_movreld_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_movreld_b32: reserved DPP control";
+  }
   return std::make_unique<VMovreldB32Vop3>(opcode);
 }
 } // namespace detail
@@ -311,6 +359,17 @@ DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::None, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_movrels_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_movrels_b32: reserved DPP control";
+  }
   return std::make_unique<VMovrelsB32Vop3>(opcode);
 }
 } // namespace detail
@@ -362,6 +421,17 @@ DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::None, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_movrelsd_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_movrelsd_b32: reserved DPP control";
+  }
   return std::make_unique<VMovrelsdB32Vop3>(opcode);
 }
 } // namespace detail
@@ -413,6 +483,17 @@ DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::None, 1);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_movrelsd_2_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_movrelsd_2_b32: reserved DPP control";
+  }
   return std::make_unique<VMovrelsd2B32Vop3>(opcode);
 }
 } // namespace detail
@@ -510,6 +591,17 @@ DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_cndmask_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cndmask_b32: reserved DPP control";
+  }
   return std::make_unique<VCndmaskB32Vop3>(opcode);
 }
 } // namespace detail
@@ -575,6 +667,17 @@ DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_cubeid_f32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cubeid_f32: reserved DPP control";
+  }
   return std::make_unique<VCubeidF32Vop3>(opcode);
 }
 } // namespace detail
@@ -640,6 +743,17 @@ DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_cubesc_f32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cubesc_f32: reserved DPP control";
+  }
   return std::make_unique<VCubescF32Vop3>(opcode);
 }
 } // namespace detail
@@ -705,6 +819,17 @@ DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_cubetc_f32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cubetc_f32: reserved DPP control";
+  }
   return std::make_unique<VCubetcF32Vop3>(opcode);
 }
 } // namespace detail
@@ -770,6 +895,17 @@ DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_cubema_f32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cubema_f32: reserved DPP control";
+  }
   return std::make_unique<VCubemaF32Vop3>(opcode);
 }
 } // namespace detail
@@ -997,6 +1133,17 @@ DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
+      return emit_error.emit() << "v_perm_b32: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_perm_b32: reserved DPP control";
+  }
   return std::make_unique<VPermB32Vop3>(opcode);
 }
 } // namespace detail
@@ -1158,6 +1305,17 @@ DecodeResult decodeVCndmaskB16Vop3(const MachineInst *opcode,
       reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
+      return emit_error.emit() << "v_cndmask_b16: DPP requires matching OPSEL halves";
+  }
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cndmask_b16: reserved DPP control";
+  }
   return std::make_unique<VCndmaskB16Vop3>(opcode);
 }
 } // namespace detail

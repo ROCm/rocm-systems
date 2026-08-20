@@ -118,6 +118,7 @@ class LoweringContext:
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
+    mask_result_writer: str | None = None
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
@@ -269,6 +270,8 @@ def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
     """Return the C++ statement to write back the vcc local variable."""
+    if ctx.mask_result_writer:
+        return f'{ctx.mask_result_writer}(vcc);'
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
         return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
