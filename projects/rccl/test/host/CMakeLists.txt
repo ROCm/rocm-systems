@@ -145,9 +145,13 @@ add_library(rccl-source-wrappers STATIC
 )
 target_include_directories(rccl-source-wrappers PRIVATE
   ${ACCL_PROFILER_DIR}
-  ${RCCL_SRC_ROOT}/src/include/plugin
-  ${RCCL_SRC_ROOT}/src/include
   ${RCCL_INCLUDE_DIRS}
+)
+# accl_profiler_wrapper.cc needs the non-hipified profiler headers;
+# scope the extra include to just that file to avoid os.h/rocmwrap.h
+# conflicts with the hipified sources used by other wrappers.
+set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
+  COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
 )
 target_compile_definitions(rccl-source-wrappers PRIVATE
   __HIP_PLATFORM_AMD__
@@ -183,9 +187,10 @@ add_executable(rccl-HostUnitTests
 
 target_include_directories(rccl-HostUnitTests PRIVATE
   ${ACCL_PROFILER_DIR}
-  ${RCCL_SRC_ROOT}/src/include/plugin
-  ${RCCL_SRC_ROOT}/src/include
   ${RCCL_INCLUDE_DIRS}
+)
+set_source_files_properties(${RCCL_TEST_DIR}/AcclProfilerTests.cpp PROPERTIES
+  COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
 )
 
 target_compile_definitions(rccl-HostUnitTests PRIVATE
