@@ -760,7 +760,8 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        const void* acc) {
   static int enabled = rcclParamCeAllReduce();
   static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
@@ -772,6 +773,10 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
     }
     return false;
   }
+
+  // The CE kernels never read the bias buffer, so taking this path for
+  // ncclAllReduceWithBias would silently drop the bias from the result.
+  if (acc != nullptr) return false;
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) {
@@ -908,8 +913,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
   const bool force = rcclParamForceCeAllReduce() != 0;
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
-  const bool ceAllReduceAllowed =
-    ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) && (force || symReg);
+  // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
+  // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+                                  rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
 
   // (3) Eager CE 2-shot (staging buffer). Requires !symEligible and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
@@ -1109,7 +1116,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         intraProto = task.protocol;
         intraChan = task.nMaxChannels;
       }
-      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d", decision->protocol,
+      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%u, intra: proto=%d channels=%d", decision->protocol,
            decision->nMaxChannels, intraProto, intraChan);
     }
     return ncclSuccess;

@@ -176,9 +176,9 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
-int ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const auto grid = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype)).first;
-  return (int)(grid.x * grid.y);
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

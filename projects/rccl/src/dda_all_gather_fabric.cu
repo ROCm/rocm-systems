@@ -126,9 +126,9 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
-int ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
   const auto grid = ddaAllGatherFabricGeom(comm, sendcount * ncclTypeSize(datatype)).first;
-  return (int)(grid.x * grid.y);
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,

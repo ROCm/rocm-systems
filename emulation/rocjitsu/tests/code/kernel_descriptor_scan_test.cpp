@@ -139,7 +139,7 @@ TEST(KernelWavefrontSize, Rdna4HonorsEnableWavefrontSize32Bit) {
                   rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 32); // bit set
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA4, desc), 64);
-  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_GFX1250, desc), 32);
+  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA5, desc), 32);
 }
 
 // The AMDHSA descriptor VGPR granule is wave-size dependent on RDNA: 8 for Wave32,
@@ -150,7 +150,7 @@ TEST(KernelDescriptorVgprGranule, RdnaIsWaveSizeDependent) {
   EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_RDNA4, 64), 4u);
   EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA4, 64), 8u);
   EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA1, 64), 4u);
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 32), 16u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA5, 32), 16u);
 }
 
 // Paired Wave32/Wave64 example: an RDNA4 descriptor with GRANULATED_WORKITEM_VGPR_COUNT=0

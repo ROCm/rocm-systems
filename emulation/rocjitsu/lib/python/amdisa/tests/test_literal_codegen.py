@@ -14,7 +14,7 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -151,7 +151,7 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
 
 
 def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    source = CodeGenerator._emit_gfx1250_matrix_fmt_helpers().execution[0]
+    source = CodeGenerator._emit_cdna5_matrix_fmt_helpers().execution[0]
 
     reader_start = source.index('PkF32Words read_pk_f32_words')
     reader_end = source.index('\n}', reader_start)
@@ -173,6 +173,63 @@ def test_literal_fixups_require_generated_machine_inst_struct():
 
     codegen.isa_spec = SimpleNamespace(inst_encodings=[_enc('ENC_VOP3P')])
     assert not codegen._has_machine_inst_struct(info[0])
+
+
+def test_literal_extension_fields_follow_each_opcodes_operands():
+    enc = _enc('ENC_VOP3P')
+    enc.insts = [
+        Instruction(
+            'V_PK_ADD_I16',
+            'ENC_VOP3P',
+            opcode=2,
+            operands=[
+                _operand('src0', 'OPR_SRC'),
+                _operand('src1', 'OPR_SRC'),
+            ],
+        ),
+        Instruction('V_NOP', 'ENC_VOP3P', opcode=384, operands=[]),
+    ]
+
+    masks = CodeGenerator._encoded_literal_field_masks(enc, ('src0', 'src1', 'src2'))
+
+    assert masks == {2: ('src0', 'src1'), 384: ()}
+
+
+def test_only_literal_capable_operand_fields_select_extension_words():
+    enc = _enc('ENC_SOPC')
+    enc.insts = [
+        Instruction(
+            'S_SET_GPR_IDX_ON',
+            'ENC_SOPC',
+            opcode=17,
+            operands=[
+                _operand('ssrc0', 'OPR_SSRC'),
+                _operand('ssrc1', 'OPR_SIMM4'),
+            ],
+        ),
+        Instruction(
+            'S_CBRANCH_G_FORK',
+            'ENC_SOPC',
+            opcode=18,
+            operands=[
+                _operand('ssrc0', 'OPR_SSRC_NOLIT'),
+                _operand('ssrc1', 'OPR_SRC_NOLIT'),
+            ],
+        ),
+        Instruction(
+            'V_READFIRSTLANE_B32',
+            'ENC_SOPC',
+            opcode=19,
+            operands=[_operand('ssrc0', 'OPR_VGPR')],
+        ),
+    ]
+
+    masks = CodeGenerator._encoded_literal_field_masks(enc, ('ssrc0', 'ssrc1'))
+    helper = CodeGenerator._encoded_literal_helper_impl(enc, ('ssrc0', 'ssrc1'), 255)
+
+    assert masks == {17: ('ssrc0',), 18: (), 19: ()}
+    assert 'inst_.ssrc0 == 255' in helper
+    assert 'inst_.ssrc1 == 255' not in helper
 
 
 def test_simm32_literal_operand_is_initialized_from_extension_word():
@@ -688,8 +745,8 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
-        profile=Gfx1250Profile(),
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -722,9 +779,7 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
     rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 
     gfx_codegen = object.__new__(CodeGenerator)
-    gfx_codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250', profile=Gfx1250Profile()
-    )
+    gfx_codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     gfx_codegen.shared_plan = plan
     gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 

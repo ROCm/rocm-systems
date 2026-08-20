@@ -11,14 +11,13 @@ namespace amdgpu {
 
 /// Raw LDS barrier cell used by the gfx1250 DS barrier-arrive instructions.
 ///
-/// The AMDGCN ISA raw async-barrier object uses [15:0] pending, [31:16]
-/// phase, and [47:32] init count. This is intentionally distinct from MLIR's
-/// ds_barrier_state helper; kernels that poll the raw cell directly test bit
-/// 16 for phase parity.
-constexpr uint64_t kLdsBarrierCellPendingMask = 0xffffull;
-constexpr uint64_t kLdsBarrierCellPhaseMask = 0xffffull;
+/// RocJITsu uses the CDNA5 WIDTH=29 form described by the architectural LDS
+/// barrier layout: [28:0] pending, [31:29] phase, and [47:32] init count.
+/// Polling kernels test bit 29 for phase parity.
+constexpr uint64_t kLdsBarrierCellPendingMask = (1ull << 29) - 1;
+constexpr uint64_t kLdsBarrierCellPhaseMask = 0x7ull;
 constexpr uint64_t kLdsBarrierCellInitCountMask = 0xffffull;
-constexpr uint32_t kLdsBarrierCellPhaseShift = 16;
+constexpr uint32_t kLdsBarrierCellPhaseShift = 29;
 constexpr uint32_t kLdsBarrierCellInitCountShift = 32;
 constexpr uint64_t kLdsBarrierCellReservedMask = 0xffff000000000000ull;
 
@@ -27,7 +26,7 @@ inline uint64_t lds_barrier_cell_pending_count(uint64_t state) {
   return state & kLdsBarrierCellPendingMask;
 }
 
-/// Return the raw 16-bit phase counter.
+/// Return the raw three-bit phase counter.
 inline uint64_t lds_barrier_cell_phase(uint64_t state) {
   return (state >> kLdsBarrierCellPhaseShift) & kLdsBarrierCellPhaseMask;
 }

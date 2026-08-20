@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
@@ -41,10 +42,10 @@ namespace {
 using namespace rocjitsu;
 using test::kernel_path;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
-constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs × 8 CUs
+constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs × 9 physical CUs
 constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 
 // AMDGPU kernel descriptor (HSA code object v3, 64 bytes).
@@ -74,7 +75,7 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
     size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      std::unique_ptr<Instruction> inst(decoder->decode(&data[pc]));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, &data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
       if (inst && inst->size() == 8)
@@ -284,7 +285,9 @@ TEST(MatmulCodeObjectTest, TiledKernelDescriptor) {
   EXPECT_GE((kd.compute_pgm_rsrc2 >> 1) & 0x1F, 2u) << "Need at least 2 user SGPRs for kernarg ptr";
 }
 
-// Each test dispatches one workgroup per CU across all 8 XCDs (256 CUs total).
+// Each stress test dispatches one workgroup per physical CU across all 8 XCDs
+// (288 CUs total). Some extra workgroups exit through kernel bounds checks
+// because the square matrix shapes contain 256 useful output tiles.
 
 constexpr unsigned STRESS_N = 128;
 
@@ -294,9 +297,9 @@ void run_matmul_stress(const char *kernel_name, unsigned N, uint32_t num_threads
 
   // For MFMA with 4x4 tiles: total_wgs = (N/4)^2.
   // For tiled with 64-element blocks: total_wgs = ceil(N*N / 64).
-  // With N=128: tiled = 256 WGs, MFMA (4x4 tiles) = 1024 WGs.
-  // With N=64:  tiled = 64 WGs, MFMA (4x4 tiles) = 256 WGs.
-  // We pick N so that the number of WGs equals TOTAL_CUS for exact 1:1 mapping.
+  // N controls the useful output range; dispatch_all_xcds deliberately launches
+  // TOTAL_CUS workgroups so every physical CU participates. Out-of-range groups
+  // return without touching memory.
 
   // Generate input matrices.
   std::vector<float> A(mat_elems);
@@ -337,12 +340,11 @@ void run_matmul_stress(const char *kernel_name, unsigned N, uint32_t num_threads
   EXPECT_EQ(mismatches, 0u) << mismatches << " elements differ (showing first 10)";
 }
 
-// Tiled (VALU) stress test: N=128, 256 WGs of 64 threads each.
+// Tiled (VALU) stress test: N=128, 288 WGs of 64 threads each.
 // global_id = blockIdx.x * 64 + threadIdx.x → covers all 128*128 = 16384 elements.
 TEST(MatmulStressTest, TiledAllCUs) { run_matmul_stress("matmul_tiled", STRESS_N); }
 
-// MFMA stress test: N=64, 256 WGs of 4x4 MFMA tiles.
-// (64/4)^2 = 16*16 = 256 tiles, one per CU.
+// MFMA stress test: N=64, 288 WGs; 256 useful 4x4 tiles and 32 bounded exits.
 constexpr unsigned MFMA_N = 64;
 TEST(MatmulStressTest, MfmaAllCUs) { run_matmul_stress("matmul_mfma", MFMA_N); }
 
@@ -358,7 +360,7 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 }
 
 // Topology-only stress test: verify that the CDNA4 topology builds correctly
-// and all 256 CUs can dispatch and halt wavefronts (engine-driven, no kernel execution).
+// and all 288 physical CUs can dispatch and halt wavefronts (engine-driven, no kernel execution).
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
