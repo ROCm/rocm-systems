@@ -2120,10 +2120,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               }
 #else
               // Portable equivalent. seq_cst fence keeps the load inside
-              // ncclGdrCudaRead from being reordered ahead of the CQE poll.
+              // the volatile read from being reordered ahead of the CQE poll.
               std::atomic_thread_fence(std::memory_order_seq_cst);
-              uint64_t dummy;
-              NCCLCHECK(ncclGdrCudaRead(resources->gdrDesc, &dummy, resources->gdcFlush, sizeof(dummy)));
+              (void)*(volatile int*)resources->gdcFlush;
 #endif
             } else {
               int subCount = 0;
