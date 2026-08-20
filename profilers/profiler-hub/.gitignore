@@ -45,6 +45,12 @@ _toc.yml
 /build*
 /rocprof-sys-build
 
+# CTest scratch output
+/Testing/
+
+# Capture artifact; the fixtures under tests/unit/fixtures replace it
+/rocpd-transpose.db
+
 /.vscode
 /.cache
 /.clangd
