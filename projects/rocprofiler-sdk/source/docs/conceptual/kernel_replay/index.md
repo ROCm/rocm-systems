@@ -11,6 +11,7 @@ application run, restoring device memory between executions so every pass sees i
 |---|---|---|---|
 | Application replay (multiple `--pmc` groups) | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
 | **Kernel replay** | one dispatch, re-executed in place | device memory snapshot and restore between passes | `O(N ×` kernel time `+ N ×` snap/restore`)` |
+| [Range replay](../range_replay/index.md) | a recorded sequence, re-executed after it closes | the same snapshot, spanning the sequence | `O(N ×` phase time `+ N ×` snap/restore`)` |
 | Counter group rotation | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
 
 Kernel replay is **experimental**. The public header lives under
