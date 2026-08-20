@@ -67,18 +67,18 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
         lambda: (cpp, cmake),
     )
 
-    baseline = inject_roctx_loader._source_fingerprint()
+    baseline = torch_trace_fingerprint.source_fingerprint()
     assert len(baseline) == 12
 
     for input_path in (cpp, cmake):
         original = input_path.read_bytes()
         input_path.write_bytes(original + b"\n# mutation\n")
-        mutated = inject_roctx_loader._source_fingerprint()
+        mutated = torch_trace_fingerprint.source_fingerprint()
         assert mutated != baseline, (
             f"editing {input_path.name} did not change the fingerprint"
         )
         input_path.write_bytes(original)
-        assert inject_roctx_loader._source_fingerprint() == baseline
+        assert torch_trace_fingerprint.source_fingerprint() == baseline
 
 
 def test_source_fingerprint_excludes_tool_version_file():
@@ -99,7 +99,7 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
         "fingerprint_input_paths",
         lambda: (tmp_path / "does_not_exist.cpp",),
     )
-    assert inject_roctx_loader._source_fingerprint() == "missing"
+    assert torch_trace_fingerprint.source_fingerprint() == "missing"
 
 
 def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
@@ -112,10 +112,10 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
 
     a.write_bytes(b"AB")
     b.write_bytes(b"C")
-    fp1 = inject_roctx_loader._source_fingerprint()
+    fp1 = torch_trace_fingerprint.source_fingerprint()
     a.write_bytes(b"A")
     b.write_bytes(b"BC")
-    fp2 = inject_roctx_loader._source_fingerprint()
+    fp2 = torch_trace_fingerprint.source_fingerprint()
     assert fp1 != fp2, "fingerprint collided across an input boundary"
 
 
@@ -133,7 +133,7 @@ def test_print_fingerprint_matches_source_fingerprint():
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines == [inject_roctx_loader._source_fingerprint()]
+    assert lines == [torch_trace_fingerprint.source_fingerprint()]
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +520,7 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
         f"saw {finder.configure_options!r}"
     )
     assert (
-        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={inject_roctx_loader._source_fingerprint()}"
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={torch_trace_fingerprint.source_fingerprint()}"
         in finder.configure_options
     ), (
         f"-DTORCH_TRACE_SOURCE_FINGERPRINT must match the source fingerprint; "
