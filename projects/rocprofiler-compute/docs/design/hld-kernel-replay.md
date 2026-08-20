@@ -482,3 +482,5 @@ snapshot-decline diagnostic also recommends application replay.
 - **Filtering on non-native backends.** `rocprofv3` and `rocprofiler-sdk` without the
    native collector resolve filters inside the SDK tool library. Will `rocprofv3` support
    in future?
+- **Cache related counter value validity.** Can cache-related metrics be trusted
+   since the cache state is not restored between replay passes?
