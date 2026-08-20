@@ -15,11 +15,14 @@ Run from this directory:
 ```bash
 cd /path/to/rocm-systems/emulation/rocjitsu/model_validation/tinyllama
 
-# Point these at your local ROCm PyTorch and rocjitsu build.
+# Point these at your local ROCm PyTorch and runtime libraries.
 export ROCM_PYTHON=/path/to/rocm-python
 export ROCM_LIB_DIR=/path/to/rocm-runtime-libs
-export ROCJITSU_BUILD=/path/to/rocjitsu-build
-export ROCJITSU_CONFIG=${ROCJITSU_CONFIG:-../../configs/gfx1250.json}
+
+# Build rocjitsu from this checkout unless you override these paths.
+export ROCJITSU_ROOT=${ROCJITSU_ROOT:-"$(git rev-parse --show-toplevel)/emulation/rocjitsu"}
+export ROCJITSU_BUILD=${ROCJITSU_BUILD:-"$ROCJITSU_ROOT/build-tinyllama"}
+export ROCJITSU_CONFIG=${ROCJITSU_CONFIG:-"$ROCJITSU_ROOT/configs/gfx1250.json"}
 
 # Directory-local defaults are fine for these.
 export HF_DEPS=${HF_DEPS:-"$PWD/.deps/hf"}
@@ -33,7 +36,10 @@ $ROCM_PYTHON -m pip install \
   --target "$HF_DEPS" \
   transformers huggingface_hub hf_xet tokenizers sentencepiece safetensors numpy
 
-cmake --build "$ROCJITSU_BUILD" --target rocjitsu_bin -j "$(nproc)"
+cmake -S "$ROCJITSU_ROOT" -B "$ROCJITSU_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build "$ROCJITSU_BUILD" \
+  --target rocjitsu_bin rocjitsu_shared rocjitsu_hooks \
+  -j "$(nproc)"
 ```
 
 ## Download Model
