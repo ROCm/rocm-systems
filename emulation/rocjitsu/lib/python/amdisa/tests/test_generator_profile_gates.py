@@ -37,6 +37,7 @@ from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     Cdna5Profile,
     Rdna1Profile,
@@ -111,7 +112,7 @@ def _profile_for_arch(arch_name: str):
         'cdna1': Cdna1Profile,
         'cdna2': Cdna2Profile,
         'cdna3': CdnaProfile,
-        'cdna4': CdnaProfile,
+        'cdna4': Cdna4Profile,
         'rdna1': Rdna1Profile,
         'rdna2': Rdna2Profile,
         'rdna3': Rdna3Profile,
@@ -394,7 +395,7 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
         ('cdna1', Cdna1Profile),
         ('cdna2', Cdna2Profile),
         ('cdna3', CdnaProfile),
-        ('cdna4', CdnaProfile),
+        ('cdna4', Cdna4Profile),
         ('rdna1', Rdna1Profile),
         ('rdna2', Rdna2Profile),
         ('rdna3', Rdna3Profile),
@@ -3417,18 +3418,36 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     assert codegen._supports_cdna5_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_cdna5_scaled_wmma_vop3px2_class())
-    model_impl = ' '.join(
-        codegen._emit_cdna5_scaled_wmma_vop3px2_impls().model[0].split()
-    )
+    impls = codegen._emit_cdna5_scaled_wmma_vop3px2_impls()
+    model_impl = ' '.join(impls.model[0].split())
     assert (
         'reinterpret_cast<const OpEncoding *>(inst + 2), '
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
         'Vop3p::ExtensionDecodePolicy::Skip),'
     ) in model_impl
+    assert model_impl.count('cdna5_scale_operand_size_bits( inst,') == 2
+
+    helper_model = ' '.join(codegen._emit_cdna5_matrix_fmt_helpers().model[0].split())
+    assert (
+        'int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector)'
+        in helper_model
+    )
+    assert (
+        'return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;'
+        in helper_model
+    )
 
     helpers = codegen._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
+    assert 'isGfx1250WmmaScaleSource' in helpers
+    assert 'isGfx1250WmmaScaleFormatPairLegal' in helpers
+    assert 'isGfx1250WmmaScalePairValid' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
+
+    execution_impl = impls.execution[0]
+    assert '0x7f7f7f7f7f7f7f7full' in execution_impl
+    assert 'byte * 0x0101010101010101ull' in execution_impl
+    assert 'scale0_inline_zero ? 0u : matrix_a_scale_fmt' in execution_impl
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
@@ -3438,15 +3457,16 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'isWmmaScaleF32Vop3px2' not in decode_body
     assert decoder.count('&DecoderImpl::decodeVWmmaScaleF32Vop3px2,') == 2
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
+    assert 'if (!isGfx1250WmmaScalePairValid(opcode))' in decoder
 
 
 def test_generated_decoders_publish_instruction_lookahead_bounds(
     amdgpu_generated_root: Path,
 ) -> None:
     expected_bounds = {
-        'cdna1': 4,
-        'cdna2': 4,
-        'cdna3': 4,
+        'cdna1': 2,
+        'cdna2': 2,
+        'cdna3': 2,
         'cdna4': 4,
         'cdna5': 4,
         'rdna1': 3,
@@ -3467,10 +3487,10 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
 @pytest.mark.parametrize(
     ('arch_name', 'profile_type', 'expected_bound'),
     [
-        ('cdna1', Cdna1Profile, 4),
-        ('cdna2', Cdna2Profile, 4),
-        ('cdna3', CdnaProfile, 4),
-        ('cdna4', CdnaProfile, 4),
+        ('cdna1', Cdna1Profile, 2),
+        ('cdna2', Cdna2Profile, 2),
+        ('cdna3', CdnaProfile, 2),
+        ('cdna4', Cdna4Profile, 4),
         ('cdna5', Cdna5Profile, 4),
         ('rdna1', Rdna1Profile, 3),
         ('rdna2', Rdna2Profile, 3),
@@ -3500,6 +3520,7 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
         has_vopd: bool = False,
         arch_name: str = 'synthetic',
         scaled_wmma: bool = False,
+        compound_mfma: bool = False,
         owns_dpp_extension: bool = False,
     ) -> CodeGenerator:
         instruction = SimpleNamespace(
@@ -3520,6 +3541,9 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
             inst_size_overrides=size_overrides or {},
             has_vopd=has_vopd,
             generate_scaled_wmma_vop3px2=scaled_wmma,
+            mfma_scale_vop3px2_specs=(
+                (SimpleNamespace(dense_name='SYNTHETIC'),) if compound_mfma else ()
+            ),
         )
         generator = object.__new__(CodeGenerator)
         generator.isa_spec = SimpleNamespace(
@@ -3556,28 +3580,12 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
         == 5
     )
     assert generator_for(has_vopd=True)._max_instruction_word_count() == 3
-    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 4
+    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 1
+    assert generator_for(compound_mfma=True)._max_instruction_word_count() == 4
     assert (
         generator_for(arch_name='cdna5', scaled_wmma=True)._max_instruction_word_count()
         == 4
     )
-
-
-def test_cdna4_vop3px2_prefix_decoder_validates_suffix(cdna4_generated_root: Path):
-    decoder = (cdna4_generated_root / 'decoder.cpp').read_text()
-    decode_body = decoder.split(
-        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
-        'const DecodeErrorEmitter &emit_error) {'
-    )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
-
-    assert 'isMfmaScaleF8f6f4Vop3px2' not in decode_body
-    assert 'suffix_encoding != encoding::kVop3pMfma' in decoder
-    assert 'kVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
-    assert 'kVMfmaF3232x32x64F8f6f4Vop3pMfma' in decoder
-    assert 'return decodeInvalid(opcode, emit_error);' in decoder
-    assert 'VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
-    assert 'VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
-    assert '#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"' in decoder
 
 
 @pytest.mark.parametrize(
@@ -3653,6 +3661,7 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
 ):
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
     encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    decoder_cpp = (gfx1250_generated_root / 'decoder.cpp').read_text()
     vop3p_cpp = ' '.join((gfx1250_generated_root / 'vop3p.cpp').read_text().split())
 
     assert 'enum class ExtensionDecodePolicy { Decode, Skip };' in encodings_h
@@ -3686,6 +3695,12 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
         'Vop3p::ExtensionDecodePolicy::Skip)'
     ) in vop3p_cpp
+    assert 'scale->src2 == 0x080u || scale->src2 == 0x100u' in decoder_cpp
+    assert '!fixed_src2_valid' in decoder_cpp
+    assert '(scale->opsel & 0x2u) != 0u' in decoder_cpp
+    assert '(scale->opsel_hi & 0x2u) != 0u' in decoder_cpp
+    assert '(matrix->neg_hi & 0x3u) != 0u' in decoder_cpp
+    assert '(matrix->neg & 0x3u) != 0u' in decoder_cpp
 
 
 @pytest.mark.parametrize(
@@ -3694,7 +3709,7 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
         ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
@@ -4390,20 +4405,97 @@ def test_generated_operand_validation_switch_is_shared_by_constructors(
         assert literal16_constructor in operand
 
 
-def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
+def test_cdna4_mfma_f8f6f4_decodes_dense_and_exact_abid1_scaled_encodings(
     amdgpu_generated_root: Path,
 ):
     decoder = (amdgpu_generated_root / 'cdna4' / 'decoder.cpp').read_text()
     header = (amdgpu_generated_root / 'cdna4' / 'vop3p.h').read_text()
     source = (amdgpu_generated_root / 'cdna4' / 'vop3p.cpp').read_text()
+    exec_source = (amdgpu_generated_root / 'cdna4' / 'vop3p_exec.cpp').read_text()
 
-    assert 'VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
-    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode,' in source
-    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
-    assert 'bool has_vop3px2_prefix = false' in header
-    assert 'if (has_vop3px2_prefix)' in source
+    assert 'VMfmaScaleF3216x16x128F8f6f4Vop3px2>(opcode)' in decoder
+    assert 'VMfmaScaleF3232x32x64F8f6f4Vop3px2>(opcode)' in decoder
+    assert 'isLegalMfmaScaleF8f6f4Selector(uint32_t selector)' in decoder
+    assert 'selector >= 240 && selector <= 248' in decoder
+    assert 'selector >= 256 && selector <= 511' in decoder
+    assert 'auto abid2 = (opcode[2] >> 11) & 0xFu;' in decoder
+    assert (
+        'return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46) && abid2 == 1u;'
+        in decoder
+    )
+    assert 'decodeCdna4MfmaF8f6f4Suffix' in decoder
+    assert (
+        'DecodeResult DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode,'
+        in decoder
+    )
+    assert 'return decodeInvalid(opcode, emit_error);' in decoder
+    assert 'reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode)' in decoder
+    assert 'isLegalMfmaF8f6f4Format(uint32_t format)' in decoder
+    assert (
+        'op.abid != 0u || !isLegalMfmaF8f6f4Format(op.cbsz) || '
+        '!isLegalMfmaF8f6f4Format(op.blgp)' in decoder
+    )
+    assert (
+        'return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);' in decoder
+    )
+    assert (
+        'return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);' in decoder
+    )
+    assert 'if (!isValidMfmaScaleF8f6f4(opcode))' in decoder
+    assert decoder.count('return false;') >= 2
+    assert 'return (neg & 0x3u) == 0 && (neg_hi & 0x3u) == 0;' in decoder
+    assert 'class VMfmaScaleF3216x16x128F8f6f4Vop3px2 : public Vop3pMfma' in header
+    assert 'class VMfmaScaleF3232x32x64F8f6f4Vop3px2 : public Vop3pMfma' in header
+    for class_name, mnemonic in (
+        (
+            'VMfmaScaleF3216x16x128F8f6f4Vop3px2',
+            'v_mfma_scale_f32_16x16x128_f8f6f4',
+        ),
+        (
+            'VMfmaScaleF3232x32x64F8f6f4Vop3px2',
+            'v_mfma_scale_f32_32x32x64_f8f6f4',
+        ),
+    ):
+        wrapper = _generated_constructor_body(source, class_name)
+        assert f'Vop3pMfma("{mnemonic}"' in wrapper
+        assert f'InstructionExecutionId::{class_name}' in wrapper
+        assert wrapper.count('OperandType::OPR_SRC_SIMPLE') == 2
+        assert 'reinterpret_cast<const OpEncoding *>(inst)->src0' in wrapper
+        assert 'reinterpret_cast<const OpEncoding *>(inst)->src1' in wrapper
+        assert 'raw_words_{inst[0], inst[1], inst[2], inst[3]}' in wrapper
+        assert 'src_operands_[3] = &scale_src0;' in wrapper
+        assert 'src_operands_[4] = &scale_src1;' in wrapper
+        assert 'num_src_ = 5;' in wrapper
+        assert f'void {class_name}::execute_impl' in exec_source
+    assert 'has_vop3px2_prefix' not in header
+    assert 'has_vop3px2_prefix' not in source
     assert 'cdna4_matrix_fmt_element_bits' in source
     assert 'cdna4_matrix_fmt_element_bits(fmt) / 64' in source
+
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna5',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        arch_root = amdgpu_generated_root / arch
+        combined = '\n'.join(
+            (arch_root / rel).read_text()
+            for rel in ('decoder.cpp', 'vop3p.h', 'vop3p.cpp', 'vop3p_exec.cpp')
+            if (arch_root / rel).exists()
+        )
+        assert 'VMfmaScaleF32' not in combined
+        assert 'decodeVop3pX2Prefix' not in combined
+        assert 'decodeCdna4MfmaF8f6f4Suffix' not in combined
+        assert 'has_vop3px2_prefix' not in combined
+        assert 'exec_f32_scaled_mixed' not in combined
+        assert 'v_mfma_scale_f32_16x16x128_f8f6f4' not in combined
+        assert 'v_mfma_scale_f32_32x32x64_f8f6f4' not in combined
 
     mfma16 = source.split(
         'VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma'

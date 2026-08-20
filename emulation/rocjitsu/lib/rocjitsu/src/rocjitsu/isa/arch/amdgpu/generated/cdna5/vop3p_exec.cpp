@@ -2539,12 +2539,21 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t matrix_a_scale_fmt = scale_inst_.neg & 0x3u;
   const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
   const bool scale16 = scale_inst_.op == 0x3a;
+  const bool scale0_inline_zero =
+      scale_src0.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
+  const bool scale1_inline_zero =
+      scale_src1.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
 
   auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
-    // For regular scaled WMMA, the inline integer-zero encoding
-    // selects a neutral E8M0 word rather than the numerical value 0.
-    if (!scale16 && operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
-      return 0x7f7f7f7fu;
+    // Inline zero supplies a neutral E8M0 scale for every K block.
+    if (operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+      return 0x7f7f7f7f7f7f7f7full;
+    // Scalar scale sources use only bits 7:0, repeated for every K
+    // block. VGPR scale sources retain their packed per-block bytes.
+    if (operand.encoding_value() >= 0 && operand.encoding_value() <= 105) {
+      const uint64_t byte = amdgpu::RegisterAccess(wf).read_lane(operand, lane) & 0xffu;
+      return byte * 0x0101010101010101ull;
+    }
     return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
                    : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
   };
@@ -2553,20 +2562,22 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
 
   bool dispatched = false;
   if (inst_.op == 0x88) {
-    amdgpu::exec_wmma_f32_scaled_mixed(cu, 32, 16, 128, 4, 4, dst, src0_base, src1_base, s2,
-                                       amdgpu::extract_fp4, amdgpu::extract_fp4, const_acc, scale0,
-                                       scale1, matrix_a_scale, matrix_b_scale, matrix_a_scale_fmt,
-                                       matrix_b_scale_fmt, scale16,
-                                       amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+    amdgpu::exec_wmma_f32_scaled_mixed(
+        cu, 32, 16, 128, 4, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
+        amdgpu::extract_fp4, const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale,
+        scale0_inline_zero ? 0u : matrix_a_scale_fmt, scale1_inline_zero ? 0u : matrix_b_scale_fmt,
+        scale16, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
     dispatched = true;
   } else {
     dispatched = amdgpu::dispatch_matrix_fmt_pair(
         matrix_a_fmt, matrix_b_fmt,
         [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-          amdgpu::exec_wmma_f32_scaled_mixed(
-              cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2, extract_a, extract_b,
-              const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale, matrix_a_scale_fmt,
-              matrix_b_scale_fmt, scale16, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+          amdgpu::exec_wmma_f32_scaled_mixed(cu, 16, 16, 128, a_bits, b_bits, dst, src0_base,
+                                             src1_base, s2, extract_a, extract_b, const_acc, scale0,
+                                             scale1, matrix_a_scale, matrix_b_scale,
+                                             scale0_inline_zero ? 0u : matrix_a_scale_fmt,
+                                             scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
+                                             amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
         });
   }
   if (!dispatched)
