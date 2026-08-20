@@ -857,6 +857,17 @@ class CodeGenerator:
     ) -> str:
         if self._uses_generic_wmma_accumulator_selector(inst_sem, opnd):
             return 'OPR_SRC'
+        # Lane reads may legally write VCC even when MRISA declares the
+        # otherwise-equivalent scalar selector that excludes VCC.
+        if (
+            inst_sem
+            and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
+            and opnd.name == 'vdst'
+            and opnd.is_output
+            and opnd.operand_type == 'OPR_SREG_NOVCC'
+            and 'OPR_SREG' in self.isa_spec.operand_types
+        ):
+            return 'OPR_SREG'
         if (
             inst_sem
             and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')

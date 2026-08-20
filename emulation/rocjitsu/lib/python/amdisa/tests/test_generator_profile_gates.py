@@ -1006,6 +1006,27 @@ def test_readlane_family_uses_source_vgpr_operand_type():
     assert codegen._constructor_operand_type(sem, vdst) == 'OPR_VGPR'
 
 
+@pytest.mark.parametrize('semantic_class', ['vector_readfirstlane', 'vector_readlane'])
+def test_readlane_family_accepts_vcc_destination_from_restricted_mrisa(
+    semantic_class: str,
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SREG', 'OPR_SREG_NOVCC'])
+    sem = InstructionSemantics('V_READLANE_B32', semantic_class)
+    vdst = Operand('vdst', 32, 'OPR_SREG_NOVCC', False, True, False, False, 0)
+
+    assert codegen._constructor_operand_type(sem, vdst) == 'OPR_SREG'
+
+
+def test_unrelated_restricted_scalar_destination_remains_restricted():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(operand_types=['OPR_SREG', 'OPR_SREG_NOVCC'])
+    sem = InstructionSemantics('V_FOO_B32', 'vector_unop')
+    vdst = Operand('vdst', 32, 'OPR_SREG_NOVCC', False, True, False, False, 0)
+
+    assert codegen._constructor_operand_type(sem, vdst) == 'OPR_SREG_NOVCC'
+
+
 def test_pk_mov_b32_keeps_declared_scalar_or_vector_source_types():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

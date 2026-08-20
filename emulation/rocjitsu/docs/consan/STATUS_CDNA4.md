@@ -1216,11 +1216,11 @@ above), not from renaming architecture-specific source.
 
 | Priority | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow | Why it matters and next proof |
 |---|---|---|---|---|---|---|
-| P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 Current strict transform rejects the 49.6 MB bundled object before the oracle (status 4112, 31.29 s) | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices. Record/Replay artifact `consan-gfx950-rr-pytorch-fresh-20260722-mode` records the current one-repetition rejection; the other named current artifacts retain the per-profile frontiers. |
+| P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 The CDNA lane-read decoder regression is fixed: current strict analysis and the 533,071,032-byte report plan complete, then patching the 49.6 MB bundled object exceeds the ordinary 30-second bound before the oracle | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices. Current Record/Replay artifact `rebase-20260820-gfx950-pytorch-mode-rr-vcc-dst` records the post-decoder latency frontier; the other named artifacts retain the per-profile frontiers. |
 | P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 3,056/230,438 supported accesses | 🟥 Current one-repetition run reaches the 60-second bound before an oracle or coverage verdict | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact values/indices across FP64 register pressure and BF16 coverage. Record/Replay artifact `consan-gfx950-pytorch-topk-rr-clean-20260722-010` records the bounded frontier; the SuperCollider artifact retains its current-hook coverage evidence. |
 | P1 | `torch.sort` over segmented rows | 🩶 Baseline exact; profile unassessed | 🟨 Exact segmented-sort oracle and dynamic execution pass; all 56,380 supported accesses and 6,032 barriers patch, runtime evidence is complete, and replay reports no conflict or unsupported records.  Static analysis remains incomplete because 504/56,884 discovered accesses are unsupported | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifact `consan-gfx950-pytorch-sort-rr-dense-host-fix-20260722-195514`; elapsed 46.84 s.  Global dense-host exclusion removes the former cross-partition overlapping-patch rejection; the remaining gate is the 504 unsupported access shapes. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟧 Current exact oracle and dynamic execution pass with 102/102 supported accesses patched, but the aggregate analysis/static verdict is incomplete | 🟨 Current target-bounded stride-1 row passes the exact oracle in 146.47 seconds with complete 179/179 accesses plus 84/84 barriers, 352 visible records, zero diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault refresh remain | 🟨 Current exact oracle passes in 7.71 seconds with complete 179/179 access plus 84/84 barrier coverage, zero forbidden diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Current exact oracle passes in 28.95 seconds with complete 179/179 access plus 84/84 barrier coverage and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Current all-profile artifact `rebase-20260820-gfx950-pytorch-histc-all-X38XO3` records the original selection regression and clean rows; `rebase-20260820-gfx950-pytorch-histc-rr-stride-fix-ZJHioX` records its accepted repair. The earlier green bundle remains useful comparison evidence, but paired/fault refresh is required at the repaired current tip. |
-| P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🩶 Baseline exact; profile unassessed | 🟧 Both exact collision-count oracles pass in 9.56 s with no diagnostics or dynamic incompleteness, but no atomic is admitted: 520 sites are blocked by cyclic CFGs and 440 have unknown/inapplicable roles | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition clean artifact `consan-gfx950-rr-pytorch-scatter-reduce-fresh-20260722`; inventory `consan-gfx950-pytorch-scatter-reduce-inventory-fresh-20260722` proves real atomic structure, so the cell is incomplete rather than N/A. |
+| P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟧 Exact collision-count oracles and dynamic execution pass in 7.05 seconds, but analysis/static coverage is incomplete with no applicable site | 🟨 Exact oracles pass in 8.41 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 8.48 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 10.49 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | Current all-profile artifact `rebase-20260820-gfx950-pytorch-scatter-reduce-all-76lDCB`. The collision updates are relaxed singleton atomics, so—as on gfx1250—the ordered-atomic fault modes are typed N/A rather than causal coverage obligations. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🩶 Baseline exact; profile unassessed | 🟥 Current strict Record/Replay run still rejects the bundled object before execution: preflight covers all 192 kernels and report planning completes, but persistent scalar owner/epoch state cannot be placed below heterogeneous CDNA4 AccVGPR boundaries; no oracle or coverage verdict | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact 3-4-5 norms and CPU-referenced softmax reductions. One-repetition artifact `consan-gfx950-pytorch-norm-softmax-rr-current-20260722-195825` records the 32.75-second rejection; diagnostic log `consan-gfx950-pytorch-norm-softmax-rr-log2-diagnostic-20260722-195952/run.log` identifies the terminal placement reason. |
 
 ### 2026-08-20 PyTorch `histc` all-profile refresh
@@ -1252,6 +1252,64 @@ Coverage is complete at 179/179 accesses plus 84/84 barriers, and the final
 analysis, static, and dynamic verdicts are all complete. The conventional
 validator suite's 209 tests pin both the gfx950-only cadence and timeout while
 proving that gfx1250 and the other targets retain their standard defaults.
+
+### 2026-08-20 PyTorch `scatter_reduce` all-profile refresh
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-scatter-reduce-all-76lDCB`
+records an exact physical-gfx950 baseline and all four clean profiles at source
+revision `672fab534c` and hook SHA-256
+`587f327b6c269414c61a79c8915867fdb68fc2a434cc8586ffe41e19e11cfbbc`.
+Both FP32 and BF16 collision-count oracles pass under every profile. Sampled
+and Inline Shadow report complete 27/27 ordinary-access coverage in 8.48 and
+10.49 seconds; Record/Replay reports the same in 8.41 seconds with zero
+diagnostics. SuperCollider finishes in 7.05 seconds but has no applicable
+site and an incomplete analysis/static verdict.
+
+The retained fault inventory proves that the reduction contains real atomic
+instructions, but they are relaxed singleton updates rather than qualified
+acquire/release sequences. They therefore are not causal synchronization
+events and the ordered-atomic fault families are typed N/A, matching the
+accepted gfx1250 contract. Their behavior is still covered: the exact E2E
+collision sums and the checked-in `histogram_scatter_test.hip` correct/incorrect
+pair both execute collision-heavy relaxed global scatter atomics and forbid a
+false diagnostic. Record/Replay, Sampled, and Inline Shadow advance from gray
+to yellow on current clean evidence; SuperCollider remains orange because the
+CDNA4 object presents no applicable non-atomic LDS site.
+
+### 2026-08-20 PyTorch `mode` Record/Replay decoder repair
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-mode-rr-MzeBQ8`
+records an exact 4.92-second physical-gfx950 baseline followed by the current
+strict Record/Replay rejection in 9.59 seconds. Diagnostic replay retained the
+exact 49,633,376-byte original object under
+`pytorch-torch-mode/diagnostic-code-objects/`. Both waitcheck preflight and the
+ConSan inventory fail while building the CFG because the decoder reports an
+invalid scalar-register selector. The rejected instructions occur in three
+rocPRIM block-reduction trampoline kernels at text offsets 2,808,464,
+3,911,008, and 4,212,624. No workload oracle or coverage verdict is reached.
+The minimized failure was legal compiler output:
+`v_readlane_b32 vcc_lo, v253, 0` and its matching `vcc_hi` form. LLVM accepts
+the same VCC destination contract on gfx908, gfx90a, gfx942, and gfx950, but
+their MR ISA descriptions use the restricted `OPR_SREG_NOVCC` destination.
+The generator now widens only `v_readlane_b32` and `v_readfirstlane_b32` to the
+general scalar selector on every affected CDNA target. Checked-in generator
+tests pin the semantic exception and its negative boundary; exact-encoding C++
+tests decode both VCC halves for both operations on CDNA1 through CDNA4 and
+verify their architectural register identity.
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-mode-rr-vcc-dst`
+uses rebuilt hook SHA-256
+`d1587d3a2290edc228d27df12070cb5d4c5689a05df685062511c682516af414`.
+Its exact physical-gfx950 baseline passes in 4.88 seconds. Record/Replay no
+longer emits a decode or load rejection: analysis reaches all 27,942 access
+ranges and 1,003,520 barriers, completes the 533,071,032-byte report plan and
+allocation, and enters patching. The contained process then reaches the
+ordinary 30-second bound before patch completion, so no workload oracle or
+coverage verdict is available. The remaining red frontier is therefore
+large-object patch latency, not decoding or resource placement.
 
 The portable rows are now registered for gfx950.  The next step is an
 all-profile clean inventory, followed by focused repair of the first typed

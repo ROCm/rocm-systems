@@ -1462,6 +1462,46 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+TEST(CdnaDecodeTest, ReadlaneFamilyAcceptsVccDestinations) {
+  constexpr std::array archs = {
+      ROCJITSU_CODE_ARCH_CDNA1,
+      ROCJITSU_CODE_ARCH_CDNA2,
+      ROCJITSU_CODE_ARCH_CDNA3,
+      ROCJITSU_CODE_ARCH_CDNA4,
+  };
+  constexpr uint32_t readlane_vcc_lo[] = {
+      0xD289006Au,
+      0x000101FDu,
+  };
+  constexpr uint32_t readlane_vcc_hi[] = {
+      0xD289006Bu,
+      0x000103FDu,
+  };
+  constexpr uint32_t readfirstlane_vcc_lo[] = {0x7ED405FDu};
+  constexpr uint32_t readfirstlane_vcc_hi[] = {0x7ED605FDu};
+
+  for (rj_code_arch_t arch : archs) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr) << "arch=" << arch;
+
+    const auto expect_vcc_destination = [&](const uint32_t *words, std::string_view mnemonic,
+                                            RegisterRef expected) {
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+      ASSERT_NE(inst, nullptr) << "arch=" << arch;
+      EXPECT_EQ(inst->mnemonic(), mnemonic) << "arch=" << arch;
+      ASSERT_EQ(inst->num_dst_operands(), 1) << "arch=" << arch;
+      ASSERT_NE(inst->dst_operand(0), nullptr) << "arch=" << arch;
+      ASSERT_TRUE(inst->dst_operand(0)->to_register_ref()) << "arch=" << arch;
+      EXPECT_EQ(*inst->dst_operand(0)->to_register_ref(), expected) << "arch=" << arch;
+    };
+
+    expect_vcc_destination(readlane_vcc_lo, "v_readlane_b32", {RegClass::VCC, 0, 1});
+    expect_vcc_destination(readlane_vcc_hi, "v_readlane_b32", {RegClass::VCC, 1, 1});
+    expect_vcc_destination(readfirstlane_vcc_lo, "v_readfirstlane_b32_e32", {RegClass::VCC, 0, 1});
+    expect_vcc_destination(readfirstlane_vcc_hi, "v_readfirstlane_b32_e32", {RegClass::VCC, 1, 1});
+  }
+}
+
 TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   const uint32_t words[] = {
       0xDA704746u,
