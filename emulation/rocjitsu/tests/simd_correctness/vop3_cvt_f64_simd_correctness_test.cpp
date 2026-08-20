@@ -21,6 +21,7 @@
 /// both runs skip the same words. The int conversions are exact (NaN -> 0,
 /// saturating clamp), compared with no carve-out.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -180,7 +181,7 @@ void check_case(const CvtCase &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/2, /*src0=*/256, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c, exec);
     delete inst;

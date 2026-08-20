@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -18,7 +17,7 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
                ? "v_fma_dx9_zero_f32_e64_dpp"
                : "v_fma_dx9_zero_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaDx9ZeroF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VFmaDx9ZeroF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -65,7 +64,16 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_fma_dx9_zero_f32_e64_dpp"
+          : "v_fma_dx9_zero_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFmaDx9ZeroF32Vop3>(opcode);
 }
 } // namespace detail
@@ -75,7 +83,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
                ? "v_mad_i32_i24_e64_dpp"
                : "v_mad_i32_i24",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadI32I24Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -122,7 +130,15 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadI32I24Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_i32_i24_e64_dpp"
+          : "v_mad_i32_i24",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadI32I24Vop3>(opcode);
 }
 } // namespace detail
@@ -132,7 +148,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
                ? "v_mad_u32_u24_e64_dpp"
                : "v_mad_u32_u24",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadU32U24Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -179,7 +195,15 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadU32U24Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_u32_u24_e64_dpp"
+          : "v_mad_u32_u24",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadU32U24Vop3>(opcode);
 }
 } // namespace detail
@@ -189,7 +213,7 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
                ? "v_bfe_u32_e64_dpp"
                : "v_bfe_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VBfeU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VBfeU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -236,7 +260,15 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVBfeU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_bfe_u32_e64_dpp"
+          : "v_bfe_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VBfeU32Vop3>(opcode);
 }
 } // namespace detail
@@ -246,7 +278,7 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
                ? "v_bfe_i32_e64_dpp"
                : "v_bfe_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VBfeI32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VBfeI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -293,7 +325,15 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVBfeI32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_bfe_i32_e64_dpp"
+          : "v_bfe_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VBfeI32Vop3>(opcode);
 }
 } // namespace detail
@@ -303,7 +343,7 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
                ? "v_bfi_b32_e64_dpp"
                : "v_bfi_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VBfiB32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VBfiB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -350,7 +390,15 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVBfiB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_bfi_b32_e64_dpp"
+          : "v_bfi_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VBfiB32Vop3>(opcode);
 }
 } // namespace detail
@@ -360,7 +408,7 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
                ? "v_fma_f32_e64_dpp"
                : "v_fma_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VFmaF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -407,7 +455,15 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmaF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_fma_f32_e64_dpp"
+          : "v_fma_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFmaF32Vop3>(opcode);
 }
 } // namespace detail
@@ -417,7 +473,7 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
                ? "v_fma_f64_e64_dpp"
                : "v_fma_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaF64Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VFmaF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -452,8 +508,6 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMA_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -461,7 +515,17 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmaF64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_fma_f64_e64_dpp"
+          : "v_fma_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_F64 does not support DPP8";
   return std::make_unique<VFmaF64Vop3>(opcode);
 }
 } // namespace detail
@@ -471,7 +535,7 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
                ? "v_lerp_u8_e64_dpp"
                : "v_lerp_u8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VLerpU8Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VLerpU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -518,7 +582,15 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLerpU8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_lerp_u8_e64_dpp"
+          : "v_lerp_u8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLerpU8Vop3>(opcode);
 }
 } // namespace detail
@@ -528,7 +600,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
                ? "v_alignbit_b32_e64_dpp"
                : "v_alignbit_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAlignbitB32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAlignbitB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -579,7 +651,16 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAlignbitB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_alignbit_b32_e64_dpp"
+          : "v_alignbit_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAlignbitB32Vop3>(opcode);
 }
 } // namespace detail
@@ -589,7 +670,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
                ? "v_alignbyte_b32_e64_dpp"
                : "v_alignbyte_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAlignbyteB32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAlignbyteB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -640,7 +721,16 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAlignbyteB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_alignbyte_b32_e64_dpp"
+          : "v_alignbyte_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAlignbyteB32Vop3>(opcode);
 }
 } // namespace detail
@@ -650,7 +740,7 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
                ? "v_min3_i32_e64_dpp"
                : "v_min3_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -697,7 +787,15 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_i32_e64_dpp"
+          : "v_min3_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3I32Vop3>(opcode);
 }
 } // namespace detail
@@ -707,7 +805,7 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
                ? "v_min3_u32_e64_dpp"
                : "v_min3_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3U32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -754,7 +852,15 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_u32_e64_dpp"
+          : "v_min3_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3U32Vop3>(opcode);
 }
 } // namespace detail
@@ -764,7 +870,7 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
                ? "v_max3_i32_e64_dpp"
                : "v_max3_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -811,7 +917,15 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_i32_e64_dpp"
+          : "v_max3_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3I32Vop3>(opcode);
 }
 } // namespace detail
@@ -821,7 +935,7 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
                ? "v_max3_u32_e64_dpp"
                : "v_max3_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3U32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -868,7 +982,15 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_u32_e64_dpp"
+          : "v_max3_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3U32Vop3>(opcode);
 }
 } // namespace detail
@@ -878,7 +1000,7 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
                ? "v_med3_i32_e64_dpp"
                : "v_med3_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -925,7 +1047,15 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_i32_e64_dpp"
+          : "v_med3_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3I32Vop3>(opcode);
 }
 } // namespace detail
@@ -935,7 +1065,7 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
                ? "v_med3_u32_e64_dpp"
                : "v_med3_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3U32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -982,7 +1112,15 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_u32_e64_dpp"
+          : "v_med3_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3U32Vop3>(opcode);
 }
 } // namespace detail
@@ -992,7 +1130,7 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
                ? "v_sad_u8_e64_dpp"
                : "v_sad_u8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VSadU8Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VSadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1039,7 +1177,15 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSadU8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_sad_u8_e64_dpp"
+          : "v_sad_u8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSadU8Vop3>(opcode);
 }
 } // namespace detail
@@ -1049,7 +1195,7 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
                ? "v_sad_hi_u8_e64_dpp"
                : "v_sad_hi_u8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VSadHiU8Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VSadHiU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1096,7 +1242,15 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSadHiU8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_sad_hi_u8_e64_dpp"
+          : "v_sad_hi_u8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSadHiU8Vop3>(opcode);
 }
 } // namespace detail
@@ -1106,7 +1260,7 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
                ? "v_sad_u16_e64_dpp"
                : "v_sad_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VSadU16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VSadU16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1153,7 +1307,15 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSadU16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_sad_u16_e64_dpp"
+          : "v_sad_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSadU16Vop3>(opcode);
 }
 } // namespace detail
@@ -1163,7 +1325,7 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
                ? "v_sad_u32_e64_dpp"
                : "v_sad_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VSadU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VSadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1210,7 +1372,15 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSadU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_sad_u32_e64_dpp"
+          : "v_sad_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSadU32Vop3>(opcode);
 }
 } // namespace detail
@@ -1220,7 +1390,7 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
                ? "v_min3_num_f32_e64_dpp"
                : "v_min3_num_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3NumF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1267,7 +1437,16 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3NumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3NumF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_num_f32_e64_dpp"
+          : "v_min3_num_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3NumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -1277,7 +1456,7 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
                ? "v_max3_num_f32_e64_dpp"
                : "v_max3_num_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3NumF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1324,7 +1503,16 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3NumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3NumF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_num_f32_e64_dpp"
+          : "v_max3_num_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3NumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -1334,7 +1522,7 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
                ? "v_min3_num_f16_e64_dpp"
                : "v_min3_num_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3NumF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1393,7 +1581,16 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3NumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3NumF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_num_f16_e64_dpp"
+          : "v_min3_num_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3NumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -1416,7 +1613,7 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
                ? "v_max3_num_f16_e64_dpp"
                : "v_max3_num_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3NumF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1475,7 +1672,16 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3NumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3NumF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_num_f16_e64_dpp"
+          : "v_max3_num_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3NumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -1498,7 +1704,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
                ? "v_minimum3_f32_e64_dpp"
                : "v_minimum3_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinimum3F32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinimum3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1545,7 +1751,16 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinimum3F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinimum3F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minimum3_f32_e64_dpp"
+          : "v_minimum3_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinimum3F32Vop3>(opcode);
 }
 } // namespace detail
@@ -1555,7 +1770,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
                ? "v_maximum3_f32_e64_dpp"
                : "v_maximum3_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaximum3F32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaximum3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1602,7 +1817,16 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaximum3F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaximum3F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maximum3_f32_e64_dpp"
+          : "v_maximum3_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaximum3F32Vop3>(opcode);
 }
 } // namespace detail
@@ -1612,7 +1836,7 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
                ? "v_minimum3_f16_e64_dpp"
                : "v_minimum3_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinimum3F16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinimum3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1671,7 +1895,16 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinimum3F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinimum3F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minimum3_f16_e64_dpp"
+          : "v_minimum3_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinimum3F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1694,7 +1927,7 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
                ? "v_maximum3_f16_e64_dpp"
                : "v_maximum3_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaximum3F16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaximum3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1753,7 +1986,16 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaximum3F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaximum3F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maximum3_f16_e64_dpp"
+          : "v_maximum3_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaximum3F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1776,7 +2018,7 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
                ? "v_med3_num_f32_e64_dpp"
                : "v_med3_num_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3NumF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1823,7 +2065,16 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3NumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3NumF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_num_f32_e64_dpp"
+          : "v_med3_num_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3NumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -1833,7 +2084,7 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
                ? "v_med3_num_f16_e64_dpp"
                : "v_med3_num_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3NumF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1892,7 +2143,16 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3NumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3NumF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_num_f16_e64_dpp"
+          : "v_med3_num_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3NumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -1915,7 +2175,7 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
                ? "v_mad_u32_e64_dpp"
                : "v_mad_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1947,8 +2207,6 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_MAD_U32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -1956,7 +2214,17 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_u32_e64_dpp"
+          : "v_mad_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_U32 does not support DPP8";
   return std::make_unique<VMadU32Vop3>(opcode);
 }
 } // namespace detail
@@ -1966,7 +2234,7 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
                ? "v_msad_u8_e64_dpp"
                : "v_msad_u8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMsadU8Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMsadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2013,7 +2281,15 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMsadU8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_msad_u8_e64_dpp"
+          : "v_msad_u8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMsadU8Vop3>(opcode);
 }
 } // namespace detail
@@ -2023,7 +2299,7 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
                ? "v_xor3_b32_e64_dpp"
                : "v_xor3_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VXor3B32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VXor3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2070,7 +2346,15 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVXor3B32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_xor3_b32_e64_dpp"
+          : "v_xor3_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VXor3B32Vop3>(opcode);
 }
 } // namespace detail
@@ -2080,7 +2364,7 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                ? "v_mad_u16_e64_dpp"
                : "v_mad_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadU16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2139,7 +2423,15 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadU16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_u16_e64_dpp"
+          : "v_mad_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadU16Vop3>(opcode);
 }
 } // namespace detail
@@ -2161,7 +2453,7 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
                ? "v_xad_u32_e64_dpp"
                : "v_xad_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VXadU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VXadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2208,7 +2500,15 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVXadU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_xad_u32_e64_dpp"
+          : "v_xad_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VXadU32Vop3>(opcode);
 }
 } // namespace detail
@@ -2218,7 +2518,7 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
                ? "v_lshl_add_u32_e64_dpp"
                : "v_lshl_add_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VLshlAddU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VLshlAddU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2265,7 +2565,16 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshlAddU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_lshl_add_u32_e64_dpp"
+          : "v_lshl_add_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshlAddU32Vop3>(opcode);
 }
 } // namespace detail
@@ -2275,7 +2584,7 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
                ? "v_add_lshl_u32_e64_dpp"
                : "v_add_lshl_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAddLshlU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAddLshlU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2322,7 +2631,16 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddLshlU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add_lshl_u32_e64_dpp"
+          : "v_add_lshl_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddLshlU32Vop3>(opcode);
 }
 } // namespace detail
@@ -2332,7 +2650,7 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                ? "v_fma_f16_e64_dpp"
                : "v_fma_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VFmaF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2391,7 +2709,15 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmaF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_fma_f16_e64_dpp"
+          : "v_fma_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFmaF16Vop3>(opcode);
 }
 } // namespace detail
@@ -2413,7 +2739,7 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                ? "v_min3_i16_e64_dpp"
                : "v_min3_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3I16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2472,7 +2798,15 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_i16_e64_dpp"
+          : "v_min3_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3I16Vop3>(opcode);
 }
 } // namespace detail
@@ -2494,7 +2828,7 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                ? "v_min3_u16_e64_dpp"
                : "v_min3_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMin3U16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMin3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2553,7 +2887,15 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMin3U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_min3_u16_e64_dpp"
+          : "v_min3_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMin3U16Vop3>(opcode);
 }
 } // namespace detail
@@ -2575,7 +2917,7 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                ? "v_max3_i16_e64_dpp"
                : "v_max3_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3I16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2634,7 +2976,15 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_i16_e64_dpp"
+          : "v_max3_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3I16Vop3>(opcode);
 }
 } // namespace detail
@@ -2656,7 +3006,7 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                ? "v_max3_u16_e64_dpp"
                : "v_max3_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMax3U16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMax3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2715,7 +3065,15 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMax3U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_max3_u16_e64_dpp"
+          : "v_max3_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMax3U16Vop3>(opcode);
 }
 } // namespace detail
@@ -2737,7 +3095,7 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                ? "v_med3_i16_e64_dpp"
                : "v_med3_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3I16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2796,7 +3154,15 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_i16_e64_dpp"
+          : "v_med3_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3I16Vop3>(opcode);
 }
 } // namespace detail
@@ -2818,7 +3184,7 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                ? "v_med3_u16_e64_dpp"
                : "v_med3_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMed3U16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMed3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2877,7 +3243,15 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMed3U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_med3_u16_e64_dpp"
+          : "v_med3_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMed3U16Vop3>(opcode);
 }
 } // namespace detail
@@ -2899,7 +3273,7 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
                ? "v_lshl_add_u64_e64_dpp"
                : "v_lshl_add_u64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VLshlAddU64Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VLshlAddU64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2933,8 +3307,6 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_LSHL_ADD_U64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2942,7 +3314,18 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshlAddU64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVLshlAddU64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_lshl_add_u64_e64_dpp"
+          : "v_lshl_add_u64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_LSHL_ADD_U64 does not support DPP8";
   return std::make_unique<VLshlAddU64Vop3>(opcode);
 }
 } // namespace detail
@@ -2952,7 +3335,7 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                ? "v_mad_i16_e64_dpp"
                : "v_mad_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadI16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3011,7 +3394,15 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadI16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_i16_e64_dpp"
+          : "v_mad_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadI16Vop3>(opcode);
 }
 } // namespace detail
@@ -3033,7 +3424,7 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
                ? "v_add3_u32_e64_dpp"
                : "v_add3_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAdd3U32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAdd3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3080,7 +3471,15 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAdd3U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add3_u32_e64_dpp"
+          : "v_add3_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAdd3U32Vop3>(opcode);
 }
 } // namespace detail
@@ -3090,7 +3489,7 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
                ? "v_lshl_or_b32_e64_dpp"
                : "v_lshl_or_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VLshlOrB32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VLshlOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3137,7 +3536,15 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshlOrB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_lshl_or_b32_e64_dpp"
+          : "v_lshl_or_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshlOrB32Vop3>(opcode);
 }
 } // namespace detail
@@ -3147,7 +3554,7 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
                ? "v_and_or_b32_e64_dpp"
                : "v_and_or_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAndOrB32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAndOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3194,7 +3601,15 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAndOrB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_and_or_b32_e64_dpp"
+          : "v_and_or_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAndOrB32Vop3>(opcode);
 }
 } // namespace detail
@@ -3204,7 +3619,7 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
                ? "v_or3_b32_e64_dpp"
                : "v_or3_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VOr3B32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VOr3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3251,7 +3666,15 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVOr3B32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_or3_b32_e64_dpp"
+          : "v_or3_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VOr3B32Vop3>(opcode);
 }
 } // namespace detail
@@ -3261,7 +3684,7 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
                ? "v_mad_u32_u16_e64_dpp"
                : "v_mad_u32_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadU32U16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadU32U16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3316,7 +3739,15 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadU32U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_u32_u16_e64_dpp"
+          : "v_mad_u32_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadU32U16Vop3>(opcode);
 }
 } // namespace detail
@@ -3326,7 +3757,7 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
                ? "v_mad_i32_i16_e64_dpp"
                : "v_mad_i32_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadI32I16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadI32I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3381,7 +3812,15 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadI32I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_i32_i16_e64_dpp"
+          : "v_mad_i32_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMadI32I16Vop3>(opcode);
 }
 } // namespace detail
@@ -3391,7 +3830,7 @@ VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
                ? "v_add_max_i32_e64_dpp"
                : "v_add_max_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAddMaxI32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAddMaxI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3438,7 +3877,15 @@ VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddMaxI32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAddMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add_max_i32_e64_dpp"
+          : "v_add_max_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddMaxI32Vop3>(opcode);
 }
 } // namespace detail
@@ -3448,7 +3895,7 @@ VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
                ? "v_add_max_u32_e64_dpp"
                : "v_add_max_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAddMaxU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAddMaxU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3495,7 +3942,15 @@ VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddMaxU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAddMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add_max_u32_e64_dpp"
+          : "v_add_max_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddMaxU32Vop3>(opcode);
 }
 } // namespace detail
@@ -3505,7 +3960,7 @@ VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
                ? "v_add_min_i32_e64_dpp"
                : "v_add_min_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAddMinI32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAddMinI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3552,7 +4007,15 @@ VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddMinI32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAddMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add_min_i32_e64_dpp"
+          : "v_add_min_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddMinI32Vop3>(opcode);
 }
 } // namespace detail
@@ -3562,7 +4025,7 @@ VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
                ? "v_add_min_u32_e64_dpp"
                : "v_add_min_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAddMinU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAddMinU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3609,7 +4072,15 @@ VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddMinU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAddMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_add_min_u32_e64_dpp"
+          : "v_add_min_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddMinU32Vop3>(opcode);
 }
 } // namespace detail
@@ -3619,7 +4090,7 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
                ? "v_maxmin_u32_e64_dpp"
                : "v_maxmin_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaxminU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaxminU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3666,7 +4137,15 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxminU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaxminU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maxmin_u32_e64_dpp"
+          : "v_maxmin_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxminU32Vop3>(opcode);
 }
 } // namespace detail
@@ -3676,7 +4155,7 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
                ? "v_minmax_u32_e64_dpp"
                : "v_minmax_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinmaxU32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinmaxU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3723,7 +4202,15 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinmaxU32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinmaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minmax_u32_e64_dpp"
+          : "v_minmax_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinmaxU32Vop3>(opcode);
 }
 } // namespace detail
@@ -3733,7 +4220,7 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
                ? "v_maxmin_i32_e64_dpp"
                : "v_maxmin_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaxminI32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaxminI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3780,7 +4267,15 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxminI32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaxminI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maxmin_i32_e64_dpp"
+          : "v_maxmin_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxminI32Vop3>(opcode);
 }
 } // namespace detail
@@ -3790,7 +4285,7 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
                ? "v_minmax_i32_e64_dpp"
                : "v_minmax_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinmaxI32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinmaxI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3837,7 +4332,15 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinmaxI32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinmaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minmax_i32_e64_dpp"
+          : "v_minmax_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinmaxI32Vop3>(opcode);
 }
 } // namespace detail
@@ -3847,7 +4350,7 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
                ? "v_minmax_num_f32_e64_dpp"
                : "v_minmax_num_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinmaxNumF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinmaxNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3894,7 +4397,16 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinmaxNumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinmaxNumF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minmax_num_f32_e64_dpp"
+          : "v_minmax_num_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinmaxNumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -3904,7 +4416,7 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
                ? "v_maxmin_num_f32_e64_dpp"
                : "v_maxmin_num_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaxminNumF32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaxminNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3951,7 +4463,16 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxminNumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaxminNumF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maxmin_num_f32_e64_dpp"
+          : "v_maxmin_num_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxminNumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -3961,7 +4482,7 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
                ? "v_minmax_num_f16_e64_dpp"
                : "v_minmax_num_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinmaxNumF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinmaxNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4020,7 +4541,16 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinmaxNumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinmaxNumF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minmax_num_f16_e64_dpp"
+          : "v_minmax_num_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinmaxNumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -4043,7 +4573,7 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
                ? "v_maxmin_num_f16_e64_dpp"
                : "v_maxmin_num_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaxminNumF16Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaxminNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4102,7 +4632,16 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxminNumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaxminNumF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maxmin_num_f16_e64_dpp"
+          : "v_maxmin_num_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxminNumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -4125,8 +4664,7 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
                ? "v_minimummaximum_f32_e64_dpp"
                : "v_minimummaximum_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinimummaximumF32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinimummaximumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4173,7 +4711,16 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinimummaximumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinimummaximumF32Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minimummaximum_f32_e64_dpp"
+          : "v_minimummaximum_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinimummaximumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -4183,8 +4730,7 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
                ? "v_maximumminimum_f32_e64_dpp"
                : "v_maximumminimum_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaximumminimumF32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaximumminimumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4231,7 +4777,16 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaximumminimumF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaximumminimumF32Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maximumminimum_f32_e64_dpp"
+          : "v_maximumminimum_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaximumminimumF32Vop3>(opcode);
 }
 } // namespace detail
@@ -4241,8 +4796,7 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
                ? "v_minimummaximum_f16_e64_dpp"
                : "v_minimummaximum_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMinimummaximumF16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMinimummaximumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4301,7 +4855,16 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinimummaximumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMinimummaximumF16Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_minimummaximum_f16_e64_dpp"
+          : "v_minimummaximum_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinimummaximumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -4324,8 +4887,7 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
                ? "v_maximumminimum_f16_e64_dpp"
                : "v_maximumminimum_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMaximumminimumF16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMaximumminimumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4384,7 +4946,16 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaximumminimumF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMaximumminimumF16Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_maximumminimum_f16_e64_dpp"
+          : "v_maximumminimum_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaximumminimumF16Vop3>(opcode);
 }
 } // namespace detail
@@ -4407,7 +4978,7 @@ VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
                ? "v_ashr_pk_i8_i32_e64_dpp"
                : "v_ashr_pk_i8_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAshrPkI8I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAshrPkI8I32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4454,7 +5025,16 @@ VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAshrPkI8I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAshrPkI8I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_ashr_pk_i8_i32_e64_dpp"
+          : "v_ashr_pk_i8_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAshrPkI8I32Vop3>(opcode);
 }
 } // namespace detail
@@ -4477,7 +5057,7 @@ VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
                ? "v_ashr_pk_u8_i32_e64_dpp"
                : "v_ashr_pk_u8_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VAshrPkU8I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VAshrPkU8I32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4524,7 +5104,16 @@ VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAshrPkU8I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVAshrPkU8I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_ashr_pk_u8_i32_e64_dpp"
+          : "v_ashr_pk_u8_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAshrPkU8I32Vop3>(opcode);
 }
 } // namespace detail
@@ -4547,7 +5136,7 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
                ? "v_mad_nc_u64_u32_e64_dpp"
                : "v_mad_nc_u64_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadNcU64U32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadNcU64U32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4580,8 +5169,6 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_MAD_NC_U64_U32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4589,7 +5176,18 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadNcU64U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadNcU64U32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_nc_u64_u32_e64_dpp"
+          : "v_mad_nc_u64_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_NC_U64_U32 does not support DPP8";
   return std::make_unique<VMadNcU64U32Vop3>(opcode);
 }
 } // namespace detail
@@ -4599,7 +5197,7 @@ VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
                ? "v_mad_nc_i64_i32_e64_dpp"
                : "v_mad_nc_i64_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMadNcI64I32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VMadNcI64I32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4632,8 +5230,6 @@ VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_MAD_NC_I64_I32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -4641,7 +5237,18 @@ VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadNcI64I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMadNcI64I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_mad_nc_i64_i32_e64_dpp"
+          : "v_mad_nc_i64_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_NC_I64_I32 does not support DPP8";
   return std::make_unique<VMadNcI64I32Vop3>(opcode);
 }
 } // namespace detail

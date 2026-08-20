@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -391,6 +392,7 @@ inline constexpr uint16_t kVop3pMfma = 423;
 class Sop1 : public IsaInstruction<Isa> {
 public:
   Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
@@ -401,6 +403,7 @@ public:
 class Sopc : public IsaInstruction<Isa> {
 public:
   Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -432,6 +435,7 @@ public:
 class Sop2 : public IsaInstruction<Isa> {
 public:
   Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -452,7 +456,11 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -475,14 +483,23 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
+  uint32_t sdwa_omod_ = 0;
 };
 
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
   bool has_sdwa();
@@ -504,6 +521,10 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_sdst_ = 106;
   bool sdwa_sd_ = false;
 };
@@ -511,7 +532,11 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -536,9 +561,14 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
+  uint32_t sdwa_omod_ = 0;
 };
 
 class Vop3p : public IsaInstruction<Isa> {

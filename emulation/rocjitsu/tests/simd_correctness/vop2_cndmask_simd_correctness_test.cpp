@@ -12,6 +12,7 @@
 /// (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive EXEC lanes must keep the dst sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -115,7 +116,7 @@ void check_case(uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(/*opcode=*/0, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_cndmask_b32: decode failed";
     auto out = fx.run(inst, SEED, exec, vcc);
     delete inst;

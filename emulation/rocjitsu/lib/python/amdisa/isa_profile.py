@@ -122,6 +122,22 @@ class VopdEncodingPrefix:
     is_vopd3: bool = False
 
 
+@dataclass(frozen=True)
+class MfmaScaleVop3px2Spec:
+    """One compound CDNA block-scale MFMA decoded from a VOP3PX2 pair."""
+
+    dense_name: str
+    dense_class_name: str
+    scaled_name: str
+    class_name: str
+    mnemonic: str
+    opcode: int
+    m: int
+    n: int
+    k: int
+    prefix_opcode: int = 0x2C
+
+
 _VOPD_COMMON_F32_SLOT_OPS = (
     VopdSlotOp('VopdFmacF32', 0, 'v_dual_fmac_f32'),
     VopdSlotOp('VopdFmaakF32', 1, 'v_dual_fmaak_f32'),
@@ -155,7 +171,7 @@ _RDNA4_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdAndB32', 18, 'v_dual_and_b32'),
 )
 
-_GFX1250_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
+_CDNA5_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdMaxNumF32', 10, 'v_dual_max_num_f32'),
     VopdSlotOp('VopdMinNumF32', 11, 'v_dual_min_num_f32'),
     VopdSlotOp('VopdAddNcU32', 16, 'v_dual_add_nc_u32'),
@@ -256,24 +272,18 @@ class IsaProfile(ABC):
 
     @property
     def inst_size_overrides(self) -> dict[str, int]:
-        """Per-instruction size overrides in bytes.
-
-        Used for instructions whose encoding size differs from their
-        parent encoding (e.g., VOP3PX2 instructions are 128-bit but
-        decoded under the 64-bit VOP3P_MFMA encoding).
-        """
+        """Per-instruction size overrides in bytes."""
         return {}
 
     @property
     def vop3px2_prefix_opcode(self) -> int | None:
-        """VOP3P opcode slot for the VOP3PX2 128-bit prefix decoder.
-
-        Returns the opcode index in the VOP3P sub-decode table where the
-        VOP3PX2 prefix handler should be placed.  The prefix reads the
-        actual MFMA opcode from DW2-DW3 and re-dispatches.  ``None``
-        means VOP3PX2 is not supported.
-        """
+        """VOP3P opcode slot for a VOP3PX2 prefix decoder, if any."""
         return None
+
+    @property
+    def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
+        """Compound block-scale MFMA encodings supplied by this profile."""
+        return ()
 
     @property
     def source_split_max_bytes(self) -> dict[str, int]:
@@ -304,6 +314,16 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        """True when D16 loads zero the unselected destination half."""
+        return False
+
+    @property
+    def supports_gpr_idx(self) -> bool:
+        """True when MODE.GPR_IDX_EN applies M0 indexing to VALU operands."""
+        return False
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         """True when E32 16-bit source selectors can address packed high halves."""
         return False
@@ -326,6 +346,11 @@ class IsaProfile(ABC):
     @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         """True when buffer-store data operands use the destination VGPR-MSB bank."""
+        return False
+
+    @property
+    def buffer_payload_reads_use_effective_exec_mask(self) -> bool:
+        """True when buffer store/atomic payload reads use post-address-calc EXEC."""
         return False
 
     @property
@@ -368,6 +393,15 @@ class IsaProfile(ABC):
     @property
     def ds_addtid_uses_m0_byte_base(self) -> bool:
         """True when DS ADDTID addresses use M0 as a byte-address base."""
+        return False
+
+    @property
+    def ds_transpose_ignores_exec(self) -> bool:
+        """True when DS transpose loads replace EXEC with an all-lanes mask.
+
+        The effective mask applies to issue, address generation, and load
+        writeback, not only to address formation.
+        """
         return False
 
     @property
@@ -1047,7 +1081,7 @@ class CdnaProfile(_AmdgpuProfileBase):
     XML bugs worked around:
 
     - ENC_VOP3PX2 (CDNA4 only) has zero encoding identifier entries and
-      an all-zeros mask; it is skipped entirely.
+      an all-zeros mask; it is skipped entirely by the CDNA4 profile.
     - V_SWAP_B32 operands are marked output-only in CDNA4 XML even though
       the instruction reads both registers; the codegen compensates (see
       ``codegen.py:_gen_execute_body``).
@@ -1066,6 +1100,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       encodings with ``bit_cnt >= 64``, since their ``OpEncoding``
       struct already spans the full instruction width.
     """
+
+    @property
+    def supports_gpr_idx(self) -> bool:
+        return True
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
 
@@ -1110,17 +1148,16 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def inst_size_overrides(self) -> dict[str, int]:
-        # VOP3PX2 instructions are 128-bit (16 bytes) but decoded under
-        # the 64-bit VOP3P_MFMA encoding. Override their size so the PC
-        # advances correctly past the 128-bit instruction.
-        return {
-            'V_MFMA_F32_16X16X128_F8F6F4': 16,
-            'V_MFMA_F32_32X32X64_F8F6F4': 16,
-        }
+        return {spec.dense_name: 16 for spec in self.mfma_scale_vop3px2_specs}
 
     @property
     def vop3px2_prefix_opcode(self) -> int | None:
-        return 0x2C
+        specs = self.mfma_scale_vop3px2_specs
+        return specs[0].prefix_opcode if specs else None
+
+    @property
+    def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
+        return ()
 
     # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
     # Cdna1Profile and Cdna2Profile override the ones that differ.
@@ -1164,6 +1201,42 @@ class CdnaProfile(_AmdgpuProfileBase):
         # zero the upper half; see the CDNA ISA OP_SEL field description.
         return True
 
+    @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        # CDNA2/3/4 enable SRAM ECC in the runtime ISA traits.
+        return True
+
+
+class Cdna4Profile(CdnaProfile):
+    """ISA profile for CDNA4-only encoding capabilities."""
+
+    @property
+    def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
+        return (
+            MfmaScaleVop3px2Spec(
+                dense_name='V_MFMA_F32_16X16X128_F8F6F4',
+                dense_class_name='VMfmaF3216x16x128F8f6f4Vop3pMfma',
+                scaled_name='V_MFMA_SCALE_F32_16X16X128_F8F6F4',
+                class_name='VMfmaScaleF3216x16x128F8f6f4Vop3px2',
+                mnemonic='v_mfma_scale_f32_16x16x128_f8f6f4',
+                opcode=45,
+                m=16,
+                n=16,
+                k=128,
+            ),
+            MfmaScaleVop3px2Spec(
+                dense_name='V_MFMA_F32_32X32X64_F8F6F4',
+                dense_class_name='VMfmaF3232x32x64F8f6f4Vop3pMfma',
+                scaled_name='V_MFMA_SCALE_F32_32X32X64_F8F6F4',
+                class_name='VMfmaScaleF3232x32x64F8f6f4Vop3px2',
+                mnemonic='v_mfma_scale_f32_32x32x64_f8f6f4',
+                opcode=46,
+                m=32,
+                n=32,
+                k=64,
+            ),
+        )
+
 
 class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
@@ -1173,7 +1246,12 @@ class Cdna1Profile(CdnaProfile):
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
+    - The current runtime ISA trait leaves SRAM ECC disabled.
     """
+
+    @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        return False
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1657,6 +1735,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def uses_true16_vop3_opsel(self) -> bool:
         return True
 
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
+            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
+            'S_BARRIER_WAIT': ('barrier', '', ''),
+        }
+
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
 
@@ -1708,17 +1794,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return []
 
 
-class Gfx1250Profile(Rdna4Profile):
+class Cdna5Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
-    The gfx1250 encoding model is RDNA4/GFX12-like. Keep ``gfx1250`` as the
+    The gfx1250 encoding model is RDNA4/GFX12-like. Use ``cdna5`` as the
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
     @property
     def generated_arch_name(self) -> str | None:
-        return 'gfx1250'
+        return 'cdna5'
 
     @property
     def generated_dir_name(self) -> str | None:
@@ -1727,6 +1813,17 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def cpp_namespace(self) -> str | None:
         return 'cdna5'
+
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        overrides = dict(super().semantic_overrides)
+        for mnemonic in (
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
+            'S_BARRIER_WAIT',
+        ):
+            overrides.pop(mnemonic, None)
+        return overrides
 
     @property
     def semantic_class_overrides(self) -> dict[str, str]:
@@ -1740,6 +1837,10 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def ds_addtid_uses_m0_byte_base(self) -> bool:
+        return True
+
+    @property
+    def ds_transpose_ignores_exec(self) -> bool:
         return True
 
     _SKIP = frozenset(
@@ -1824,7 +1925,7 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
-        return _GFX1250_VOPD_SLOT_OPS
+        return _CDNA5_VOPD_SLOT_OPS
 
     @property
     def vopd_x_slot_opcodes(self) -> frozenset[int]:
@@ -1847,11 +1948,19 @@ class Gfx1250Profile(Rdna4Profile):
         return True
 
     @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        return True
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         return True
 
     @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
+        return True
+
+    @property
+    def buffer_payload_reads_use_effective_exec_mask(self) -> bool:
         return True
 
     @property

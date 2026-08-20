@@ -2,11 +2,13 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
-## RCCL 2.30.7 for ROCm 7.15.0 (Unreleased)
+## RCCL 2.30.7 for ROCm 10.0.0 (Unreleased)
 
 ### Added
 * Compatibility with NCCL 2.30.7.
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
+* Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
+* Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
 
 ### Changed
 * Raised the default channel count on single-node gfx1250 (MI450) to 256 for both collectives and P2P. The count is still clamped by the GPU CU count and by `NCCL_MAX_NCHANNELS` / `NCCL_MAX_CTAS` / `NCCL_MAX_P2P_NCHANNELS`. Multi-node gfx1250 keeps the 64-channel cap on the NET path. `RCCL_SATURATE_P2P_NCHANNELS` now defaults to on for gfx1250 so the per-peer channel count tiles the larger pool; set it to `0` to restore the previous behavior.
@@ -19,6 +21,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
+* Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 
@@ -28,8 +31,10 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
+* Added GPU-Initiated Networking (GIN) InfiniBand proxy backend for device-initiated collectives on RDMA-capable NICs. Select with `NCCL_GIN_TYPE=2` (proxy). Requires symmetric window registration and Linux kernel ≥ 6.8 for expected performance.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
 * Added bias (accumulation) AllReduce on gfx1250 (MI450).
+* Added scale-up Direct AllReduce (one-shot and two-shot) for single-node/XGMI topologies, using IPC-backed temp buffers without symmetric window registration. Improves single-node AllReduce performance for messages under ~64 MB.
 * Added optimized scale-up ReduceScatter, AllGather, and AllToAll kernels.
 * Added ROCProfiler-SDK coverage for `ncclCommGrow` and `ncclCommGetUniqueId`.
 * P2P batching auto-enabled for gfx950 in combination with non-AINIC NICs.

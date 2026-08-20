@@ -151,8 +151,8 @@ void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.set_m0((wf.m0() & 0xFFFFF0FFu) |
-            ((amdgpu::RegisterAccess(wf).read_scalar(simm16) & 0xF) << 8));
+  wf.set_m0((wf.m0() & 0xFFFF0FFFu) |
+            ((amdgpu::RegisterAccess(wf).read_scalar(simm16) & 0xF) << 12));
 }
 
 void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
