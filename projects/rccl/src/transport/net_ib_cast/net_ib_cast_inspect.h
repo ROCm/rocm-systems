@@ -50,6 +50,18 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
+/* GRH (global route header) state per active QP */
+struct ncclIbCastGrhState {
+  int nqps;
+  uint8_t linkLayer[NCCL_IB_MAX_QPS];  /* IBV_LINK_LAYER_ETHERNET (RoCE) / _INFINIBAND */
+  uint8_t isGlobal[NCCL_IB_MAX_QPS];   /* ah_attr.is_global read back from the QP */
+  bool queryOk[NCCL_IB_MAX_QPS];       /* false if ibv_query_qp failed for this QP */
+};
+
+/* Copy per-QP GRH state out of a connected sendComm.
+ * Returns ncclInvalidArgument on null pointers. */
+ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out);
+
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
 #ifdef ENABLE_FAULT_INJECTION
 
