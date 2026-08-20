@@ -1239,11 +1239,6 @@ target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
   target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
 endif()
-# Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
-# and is omitted from the exported rccl-targets export set. Without this,
-# a FetchContent-built fmt-header-only target leaks into rccl's link
-# interface and breaks install(EXPORT) for static builds.
-target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part

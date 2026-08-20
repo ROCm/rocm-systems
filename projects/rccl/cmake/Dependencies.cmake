@@ -116,23 +116,6 @@ endif()
 
 set(CMAKE_INSTALL_LIBDIR lib CACHE STRING "Define install directory for libraries" FORCE)
 
-# Find or download/install fmt
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-    set(FMT_INSTALL OFF)
-    message(STATUS "fmt not found, fetching from source...")
-    FetchContent_Declare(
-        fmt
-        GIT_REPOSITORY https://github.com/fmtlib/fmt
-        GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281 # 10.2.1
-    )
-    FetchContent_MakeAvailable(fmt)
-else()
-    message(STATUS "Using system fmt")
-    get_target_property(FMT_INCLUDE_DIRS fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
-    message(STATUS "fmt include directories: ${FMT_INCLUDE_DIRS}")
-endif()
-
 # Find available local ROCM targets
 # NOTE: This will eventually be part of ROCm-CMake and should be removed at that time
 function(rocm_local_targets VARIABLE)

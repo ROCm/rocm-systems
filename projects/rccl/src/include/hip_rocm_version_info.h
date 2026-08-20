@@ -57,8 +57,8 @@ THE SOFTWARE.
 #endif
 
 // Header-only helpers for runtime version reporting.
+#include <cstdio>
 #include <string>
-#include <fmt/format.h>
 
 // A version with `valid` cleared when the originating query failed.
 struct VersionInfo {
@@ -84,7 +84,9 @@ inline std::string fmtExtVer(const std::string& hipBase, const VersionInfo& hipR
   const size_t width = hipBase.size() > rocmBase.size() ? hipBase.size() : rocmBase.size();
   auto line = [width](const std::string& base, const char* label, const VersionInfo& rt, const VersionInfo& ct) {
     if (!rt.valid || sameVer(rt, ct)) return base;
-    return fmt::format("{:<{}} / {} : {}.{}.{}", base, width, label, rt.major, rt.minor, rt.patch);
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%-*s / %s : %u.%u.%u", (int)width, base.c_str(), label, rt.major, rt.minor, rt.patch);
+    return std::string(buf);
   };
   return line(hipBase, "HIP runtime ", hipRt, hipCt) + '\n' + line(rocmBase, "ROCm runtime", rocmRt, rocmCt);
 }

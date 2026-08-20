@@ -79,31 +79,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 
 files = $(TOPO_EXPL_FILES) $(RCCL_FILES)
 
-FMT_DIR     := third_party/fmt
-FMT_INCLUDE := $(FMT_DIR)/include
-FMT_HEADER  := $(FMT_INCLUDE)/fmt/format.h
-FMT_GIT     := https://github.com/fmtlib/fmt.git
-
-# Probe for <fmt/format.h> using a portable pipe (no <<< here-string)
-HAVE_FMT := $(shell echo '#include <fmt/format.h>' | \
-               $(HIPCC) -xc++ -std=c++17 -E - >/dev/null 2>&1 && echo yes || echo no)
-
-ifeq ($(HAVE_FMT),no)
-  CXXFLAGS += -I$(FMT_INCLUDE)
-  NEED_FMT  := 1
-endif
-
-ifeq ($(NEED_FMT),1)
-$(FMT_HEADER):
-	rm -rf third_party/fmt
-	@echo ">>> fmt not found; cloning $(FMT_GIT) ..."
-	@mkdir -p $(dir $(FMT_DIR))
-	@git clone --depth=1  $(FMT_GIT) $(FMT_DIR)
-else
-$(FMT_HEADER):
-endif
-
-all: $(FMT_HEADER) hipify $(EXE)
+all: hipify $(EXE)
 	@echo "Built with ROCm version: $(ROCM_MAJOR).$(ROCM_MINOR).$(ROCM_PATCH) (ROCM_VERSION=$(ROCM_VERSION))"
 
 $(EXE): $(files)
