@@ -383,7 +383,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0x3u);
-    wf->set_vcc(0x000001c0ffffffffull);
+    wf->set_vcc_raw(0x000001c0ffffffffull);
     write_wave_sgpr(*cu, *wf, 28, 7u);
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
     cu->write_vgpr(vgpr_base + 18, 0, 6u);
@@ -1033,7 +1033,10 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     ASSERT_NE(typed_compare, nullptr);
     if (!force_scalar) {
       EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
-          *typed_compare, *wf, [](auto a, auto b) { return a < b; }));
+          *typed_compare, *wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t result) {
+            amdgpu::write_explicit_lane_mask(typed_compare->vdst, *wf, result);
+          }));
       EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
       write_wave_sgpr(*cu, *wf, 0, 0u);
       write_wave_sgpr(*cu, *wf, 1, 0u);
