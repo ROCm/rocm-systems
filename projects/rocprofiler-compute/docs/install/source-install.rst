@@ -85,11 +85,6 @@ follows.
       - Specifies the Python interpreter that the ``torch_trace_collector`` extension is
         built against. Defaults to the ``python3`` interpreter that CMake locates.
 
-    * - ``TORCH_TRACE_SOURCE_FINGERPRINT``
-      - Fingerprint used in the ``torch_trace_collector`` artifact tag. When
-        omitted, CMake hashes the collector sources, ``CMakeLists.txt``, and
-        the shared utility headers.
-
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
         One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See
