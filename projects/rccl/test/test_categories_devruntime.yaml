@@ -20,24 +20,28 @@ test_categories:
       - "quick"
       - "smoke"
       - "precheck"
+      - "microtest"
   standard:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "standard"
       - "regression"
+      - "microtest"
   comprehensive:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "comprehensive"
       - "comprehensive_regression"
+      - "microtest"
   full:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "full"
       - "full_regression"
+      - "microtest"
 
 execution_settings:
   timeout_multiplier: 1
