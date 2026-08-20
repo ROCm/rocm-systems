@@ -15,6 +15,7 @@
 //! from one the user wrote.
 
 pub mod agents;
+pub mod presets;
 pub mod profiles;
 pub mod topologies;
 
