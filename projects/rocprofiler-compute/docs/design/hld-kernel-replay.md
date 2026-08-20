@@ -478,10 +478,7 @@ snapshot-decline diagnostic also recommends application replay.
    excluded from kernel replay?
 - **Marker and ROCTx semantics.** Host regions are emitted once but span all replay passes, so
    their durations include replay overhead and are not comparable with a non-replay run. Should the
-   combination be corrected or rejected?
-- **Trace-deduplication equivalence.** How will native pass-0 context control and post-run
-   deduplication share one definition of a logical dispatch, and how will divergence between those
-   mechanisms be detected?
+   combination be rejected or duration be corrected?
 - **Filtering on non-native backends.** `rocprofv3` and `rocprofiler-sdk` without the
    native collector resolve filters inside the SDK tool library. Will `rocprofv3` support
    in future?
