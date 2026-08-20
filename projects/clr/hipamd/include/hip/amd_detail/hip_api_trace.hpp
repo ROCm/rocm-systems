@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 32
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 33
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -433,6 +433,7 @@ typedef hipError_t (*t_hipImportExternalMemory)(hipExternalMemory_t* extMem_out,
 typedef hipError_t (*t_hipImportExternalSemaphore)(
     hipExternalSemaphore_t* extSem_out, const hipExternalSemaphoreHandleDesc* semHandleDesc);
 typedef hipError_t (*t_hipInit)(unsigned int flags);
+typedef hipError_t (*t_hipInitDevice)(int device, unsigned int deviceFlags, unsigned int flags);
 typedef hipError_t (*t_hipIpcCloseMemHandle)(void* devPtr);
 typedef hipError_t (*t_hipIpcGetEventHandle)(hipIpcEventHandle_t* handle, hipEvent_t event);
 typedef hipError_t (*t_hipIpcGetMemHandle)(hipIpcMemHandle_t* handle, void* devPtr);
@@ -1832,8 +1833,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
   t_hipDeviceGetLuid hipDeviceGetLuid_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
+  t_hipInitDevice hipInitDevice_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
 
   // ******************************************************************************************* //
   //
