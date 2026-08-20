@@ -69,10 +69,33 @@ message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFI
 set(_torch_version "${Torch_VERSION}")
 
 if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
-    message(
-        FATAL_ERROR
-        "torch_trace_collector: TORCH_TRACE_SOURCE_FINGERPRINT is not set."
+    get_filename_component(
+        _ttc_pythonpath
+        "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+        ABSOLUTE
     )
+    execute_process(
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -E
+            env
+            "PYTHONPATH=${_ttc_pythonpath}"
+            "${_ttc_python}"
+            -c
+            "from utils.inject_roctx._backends.torch_trace_fingerprint import source_fingerprint; print(source_fingerprint())"
+        RESULT_VARIABLE _ttc_fp_status
+        OUTPUT_VARIABLE TORCH_TRACE_SOURCE_FINGERPRINT
+        ERROR_VARIABLE _ttc_fp_err
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(_ttc_fp_status OR NOT TORCH_TRACE_SOURCE_FINGERPRINT)
+        message(
+            ${_ttc_unavailable_severity}
+            "torch_trace_collector: could not compute the source fingerprint with "
+            "${_ttc_python}; the extension is not built. ${_ttc_fp_err}"
+        )
+        return()
+    endif()
 endif()
 set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
 
