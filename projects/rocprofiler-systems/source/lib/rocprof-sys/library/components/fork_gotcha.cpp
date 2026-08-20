@@ -137,10 +137,7 @@ postfork_child()
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
-    // all_threads=true: the pre-fork threads no longer exist in this child, but their
-    // sampler objects were inherited with the address space, so release all of them.
-    // Every other caller must use the default (own slot only) -- see sampling.hpp.
-    rocprofsys::sampling::shutdown(/*all_threads=*/true);
+    rocprofsys::sampling::postfork_child_release_samplers();
     rocprofsys::categories::shutdown();
     state::thread::set(state::thread::Disabled);
 

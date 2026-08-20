@@ -1087,29 +1087,35 @@ setup()
     return configure(true);
 }
 
+void
+postfork_child_release_samplers()
+{
+    // release() rather than reset(): deliberately skips ~sampler_t() after fork().
+    auto* _samplers = sampler_instances::get();
+    if(!_samplers) return;
+    for(auto& itr : *_samplers)
+        itr.release();
+}
+
 std::set<int>
-shutdown(bool all_threads)
+shutdown()
 {
     if(is_child_process())
     {
+        // Only this thread's sampler may be released here: shutdown() runs from the
+        // destructor of every exiting thread, and is_child_process() stays true for the
+        // child's whole lifetime, so releasing the whole array would destroy samplers
+        // belonging to threads still inside configure().
         auto* _samplers = sampler_instances::get();
         if(_samplers)
         {
-            if(all_threads)
-            {
-                for(auto& itr : *_samplers)
-                    itr.release();
-            }
-            else
-            {
-                // stable_vector::at() throws when out of range and this runs from a
-                // thread destructor, where an escaping exception would terminate the
-                // process. The pthread gotcha bounds-checks against
-                // utility::get_thread_index(), which is a different counter from
-                // threading::get_id(), so verify the index explicitly here.
-                const auto _tid = static_cast<size_t>(threading::get_id());
-                if(_tid < sampler_instances::size()) _samplers->at(_tid).release();
-            }
+            // get_id() returns -1 when the id manager is gone, and offset
+            // (rocprof-sys-internal) thread ids count downward, so the id can be
+            // negative. Bounds-check before at(), which throws -- and an exception
+            // escaping a thread destructor terminates the process.
+            const auto _tid = threading::get_id();
+            if(_tid >= 0 && static_cast<size_t>(_tid) < _samplers->size())
+                _samplers->at(static_cast<size_t>(_tid)).release();
         }
         return std::set<int>{};
     }
