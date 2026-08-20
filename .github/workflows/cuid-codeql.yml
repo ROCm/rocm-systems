@@ -48,23 +48,28 @@ jobs:
       - name: Download and extract CodeQL bundle
         shell: bash
         run: |
-          curl -sS -o codeql-bundle-win64.tar.gz \
-            "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-win64.tar.gz"
-          tar -xzf codeql-bundle-win64.tar.gz
-          ./codeql/codeql.exe --version
+          curl -sS -o codeql-bundle-linux64.tar.gz \
+            "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-linux64.tar.gz"
+          tar -xzf codeql-bundle-linux64.tar.gz
+          chmod +x ./codeql/codeql
+          ./codeql/codeql --version
       # Pack/suite version numbers change over time, so find the suite instead of hardcoding its path
       - name: Locate AMD custom query suite
         shell: bash
         run: |
-          QLPACKS_ROOT=$(./codeql/codeql.exe resolve qlpacks --format=json | jq -r '.[][]')
+          QLPACKS_ROOT=$(./codeql/codeql resolve qlpacks --format=json | jq -r '.[][]')
           AMD_SUITE=$(find $QLPACKS_ROOT -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
           echo "Using AMD suite: $AMD_SUITE"
+          if [ -z "$AMD_SUITE" ]; then
+            echo "Could not locate AMD custom query suite (amd-cpp-windows-driver.qls) under: $QLPACKS_ROOT" >&2
+            exit 1
+          fi
           echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
       # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
       - name: Create CodeQL database
         shell: bash
         run: |
-          ./codeql/codeql.exe database create codeqldb --language=${{ matrix.language }} --source-root=.
+          ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=.
 
       - name: Build and Install OpenSSL 3.0 (if needed)
         run: |
@@ -108,7 +113,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p sarif-results
-          ./codeql/codeql.exe database analyze codeqldb \
+          ./codeql/codeql database analyze codeqldb \
             security-extended "$AMD_SUITE" \
             --format=sarifv2.1.0 \
             --sarif-category "/language:${{ matrix.language }}" \
