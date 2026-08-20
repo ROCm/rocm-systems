@@ -27,8 +27,6 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
-#include "queue_pair.hpp"
-
 #if   defined(GDA_MUX)
 #include "queue_pair_mux.hpp"
 #elif defined(GDA_IONIC)

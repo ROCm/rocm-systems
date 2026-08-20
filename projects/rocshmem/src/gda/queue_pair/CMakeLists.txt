@@ -28,17 +28,5 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    context_gda_device.cpp
-    context_gda_device_coll.cpp
-    context_gda_host.cpp
-    backend_gda.cpp
-    ibv_wrapper.cpp
-    gda_team.cpp
-    topology.cpp
+    queue_pair_host.cpp
 )
-
-add_subdirectory(queue_pair)
-
-add_subdirectory(ionic)
-add_subdirectory(bnxt)
-add_subdirectory(mlx5)

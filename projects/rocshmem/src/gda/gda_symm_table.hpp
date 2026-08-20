@@ -64,14 +64,14 @@ struct QpSymmEntry {
   uint64_t length;
 
   /**
-   * @brief Remote key for this slice's (dest_pe, nic_idx).
-   */
-  uint32_t rkey;
-
-  /**
    * @brief Local key for this slice's nic_idx (locally-sourced buffers).
    */
   uint32_t lkey;
+
+  /**
+   * @brief Remote key for this slice's (dest_pe, nic_idx).
+   */
+  uint32_t rkey;
 };
 
 }  // namespace rocshmem

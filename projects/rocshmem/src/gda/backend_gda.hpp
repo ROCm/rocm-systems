@@ -39,9 +39,10 @@
 #include "memory/hip_allocator.hpp"
 #include "context_incl.hpp"
 #include "gda_context_proxy.hpp"
-#include "queue_pair.hpp"
 #include "queue_pair_provider.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "gda/queue_pair/queue_pair_device.hpp"
+#include "gda/queue_pair/queue_pair_host.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
@@ -142,7 +143,7 @@ class GDABackend : public Backend {
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
 
-  QueuePair *host_qps = nullptr;
+  std::vector<QueuePairHost> host_qps;
   QueuePair *gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;
@@ -185,7 +186,7 @@ class GDABackend : public Backend {
    * Total number of QPs created =
    * num_qps_per_pe * num_pes;
    */
-  uint32_t num_qps {1};
+  size_t num_qps {1};
 
   /**
    * @brief Select one or more NICs based on topology/env vars.

@@ -30,7 +30,7 @@
 #include "log.hpp"
 #include "gda/endian.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
-#include "gda/queue_pair.hpp"
+#include "gda/queue_pair/queue_pair_device.hpp"
 
 namespace rocshmem {
 
@@ -60,7 +60,7 @@ template <> struct QueuePairTraits<QueuePairBNXT> {
   static constexpr size_t InlineThreshold = sizeof(uint64_t);
 };
 
-class QueuePairBNXT : public QueuePairBase<QueuePairBNXT> {
+class QueuePairBNXT : public QueuePairDevice<QueuePairBNXT> {
 private:
   uint64_t* dbr;
   bnxt_device_sq sq;
@@ -69,11 +69,24 @@ private:
 public:
   __host__ explicit QueuePairBNXT(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
                                   uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                  uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
+                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
+                                  FreeList<uint64_t*> *fetching_atomic_freelist,
+                                  BufferInfo *buffer_info, size_t num_user_buffers,
                                   const QpSymmEntry *symm_entries, const int *symm_count,
-                                  struct ibv_pd* pd,
                                   uint64_t* dbr, bnxt_device_sq&& sq, bnxt_device_cq&& cq)
-    : QueuePairBase{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
-                    symm_entries, symm_count, pd},
+    : QueuePairDevice{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
+                      fetching_atomic, fetching_atomic_lkey,
+                      nonfetching_atomic, nonfetching_atomic_lkey,
+                      fetching_atomic_freelist,
+                      buffer_info, num_user_buffers,
+                      symm_entries, symm_count},
+      dbr{dbr}, sq{std::move(sq)}, cq{std::move(cq)} { }
+
+  __host__ explicit QueuePairBNXT(uint32_t qpn,
+                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
+                                  uint64_t* dbr, bnxt_device_sq&& sq, bnxt_device_cq&& cq)
+    : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
       dbr{dbr}, sq{std::move(sq)}, cq{std::move(cq)} { }
 
   __host__ QueuePairBNXT(const QueuePairBNXT& other)            = delete;

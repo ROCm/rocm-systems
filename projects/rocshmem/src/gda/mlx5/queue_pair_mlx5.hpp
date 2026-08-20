@@ -30,7 +30,7 @@
 #include "log.hpp"
 #include "gda/endian.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
-#include "gda/queue_pair.hpp"
+#include "gda/queue_pair/queue_pair_device.hpp"
 
 #define GDA_MLX5_LOCK_USE_S_SLEEP  1
 #define GDA_MLX5_LOCK_USE_S_WAKEUP (0 && GDA_MLX5_LOCK_USE_S_SLEEP)
@@ -68,7 +68,7 @@ template <> struct QueuePairTraits<QueuePairMLX5> {
   static constexpr size_t InlineThreshold = InlineMax;
 };
 
-class QueuePairMLX5 : public QueuePairBase<QueuePairMLX5> {
+class QueuePairMLX5 : public QueuePairDevice<QueuePairMLX5> {
 private:
   gda_mlx5_device_sq sq;
   gda_mlx5_device_cq cq;
@@ -81,11 +81,24 @@ private:
 public:
   __host__ explicit QueuePairMLX5(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
                                   uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                  uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
+                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
+                                  FreeList<uint64_t*> *fetching_atomic_freelist,
+                                  BufferInfo *buffer_info, size_t num_user_buffers,
                                   const QpSymmEntry *symm_entries, const int *symm_count,
-                                  struct ibv_pd* pd,
                                   gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
-    : QueuePairBase{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
-                    symm_entries, symm_count, pd},
+    : QueuePairDevice{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
+                      fetching_atomic, fetching_atomic_lkey,
+                      nonfetching_atomic, nonfetching_atomic_lkey,
+                      fetching_atomic_freelist,
+                      buffer_info, num_user_buffers,
+                      symm_entries, symm_count},
+      sq{std::move(sq)}, cq{std::move(cq)} { }
+
+  __host__ explicit QueuePairMLX5(uint32_t qpn,
+                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
+                                  gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
+    : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
       sq{std::move(sq)}, cq{std::move(cq)} { }
 
   __host__ QueuePairMLX5(const QueuePairMLX5& other)            = delete;

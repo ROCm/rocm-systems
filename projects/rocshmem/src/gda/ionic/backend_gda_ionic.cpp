@@ -106,7 +106,17 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   size_t    heap_size  = heap.get_size();
   uint32_t  lkey       = nic.heap_mr->lkey;
   uint32_t  rkey       = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
-  ibv_pd*   pd         = nic.pd_orig;
+
+  host_qps.emplace_back(nic.pd_orig);
+  const QueuePairHost &host_qp = host_qps.back();
+
+  uint64_t*            fetching_atomic          = host_qp.fetching_atomic;
+  uint32_t             fetching_atomic_lkey     = host_qp.fetching_atomic_mr->lkey;
+  uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
+  uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
+  FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
+  BufferInfo*          buffer_info              = host_qp.buffer_info;
+  size_t               num_user_buffers         = host_qp.num_user_buffers;
 
   const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
   const int         *symm_count   = symm_count_;
@@ -125,7 +135,11 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * both have a constructor that accepts rvalue reference QueuePairIONIC&&,
    * so just use that instead of trying to figure out which one we're using */
   new (gpu_qp) QueuePair{QueuePairIONIC{qpn, heap_laddr, lkey, heap_raddr, rkey, heap_size,
-                                        symm_entries, symm_count, pd,
+                                        fetching_atomic, fetching_atomic_lkey,
+                                        nonfetching_atomic, nonfetching_atomic_lkey,
+                                        fetching_atomic_freelist,
+                                        buffer_info, num_user_buffers,
+                                        symm_entries, symm_count,
                                         ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
                                         ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
 }

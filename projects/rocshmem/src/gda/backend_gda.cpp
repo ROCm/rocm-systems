@@ -107,7 +107,7 @@ void GDABackend::init() {
   configure_nic_policy();
 
   LOG_TRACE("PE %d QP config: num_nics=%d, qps_per_pe_default_ctx=%zu, "
-            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%u, "
+            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%zu, "
             "nic_policy=%s",
             my_pe, num_nics_, qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_,
             num_qps_per_pe, num_qps,
@@ -876,8 +876,8 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
       e.local_base = key;
       e.remote_base = bases[pe];
       e.length = length;
-      e.rkey = QueuePair::to_provider_endianness(rkeys[flat_pe_nic_idx(pe, n)]);
       e.lkey = QueuePair::to_provider_endianness(lkeys[n]);
+      e.rkey = QueuePair::to_provider_endianness(rkeys[flat_pe_nic_idx(pe, n)]);
     }
   }
 
@@ -1704,16 +1704,14 @@ void GDABackend::cleanup_heap_memory_rkey() {
 }
 
 void GDABackend::setup_gpu_qps() {
-  size_t qp_objs_count;
-  size_t qp_objs_mem_size;
-
-  qp_objs_count    = num_qps;
-  qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
+  size_t qp_objs_mem_size = sizeof(QueuePair) * num_qps;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
 
-  host_qps = (QueuePair*) malloc(qp_objs_mem_size);
-  CHECK_NNULL(host_qps, "malloc (host_qps)");
+  QueuePair *host_gpu_qps = static_cast<QueuePair*>(malloc(qp_objs_mem_size));
+  CHECK_NNULL(host_gpu_qps, "malloc (host_gpu_qps)");
+
+  host_qps.reserve(num_qps);
 
 #if HIP_VERSION >= 70200000
   /*
@@ -1739,25 +1737,19 @@ void GDABackend::setup_gpu_qps() {
   symm_count_host_ = 0;
 #endif
 
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    initialize_gpu_qp(&host_qps[i], i);
+  for (size_t i = 0; i < num_qps; i++) {
+    initialize_gpu_qp(&host_gpu_qps[i], i);
   }
 
-  CHECK_HIP(hipMemcpy(gpu_qps, host_qps, qp_objs_mem_size, hipMemcpyDefault));
+  CHECK_HIP(hipMemcpy(gpu_qps, host_gpu_qps, qp_objs_mem_size, hipMemcpyDefault));
+  free(host_gpu_qps);
 }
 
 void GDABackend::cleanup_gpu_qps() {
-  size_t qp_objs_count;
+  /* Calls QueuePairHost::~QueuePairHost on all elements in host_qps */
+  host_qps.clear();
 
-  qp_objs_count = num_qps;
-
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    host_qps[i].~QueuePair();
-  }
-
-  free(host_qps);
-  host_qps = nullptr;
-
+  /* QueuePair is trivially destructible, can just free it */
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
 

@@ -32,7 +32,7 @@
 #include "util.hpp"
 #include "context_gda_device.hpp"
 #include "gda_team.hpp"
-#include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 #include "rocshmem_calc.hpp"
 #include "backend_gda.hpp"
 
