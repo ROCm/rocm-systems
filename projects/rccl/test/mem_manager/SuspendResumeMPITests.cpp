@@ -1951,12 +1951,8 @@ TEST_F(SuspendResumeGroup, CollectiveAfterSuspendInSameGroup)
 // ----------------------------------------------------------------------------
 // 6. Single-process multi-GPU
 //
-// One process drives every visible GPU through ncclCommInitAll, so the peer
-// ranks of each communicator are the other communicators owned by this thread.
-// ncclCommMemSuspend/Resume barrier across all ranks of a comm and asyncJobLaunch
-// runs a lone job inline, so the whole set has to be wrapped in one group for any
-// of them to make progress. That is the configuration these tests cover, and it
-// is also the only one that reaches the intra-process peer-import path in p2pMap.
+// One process drives every visible GPU. Communicators are created through
+// ncclCommInitAll.
 //
 // The suite needs the binary launched as a single rank; validateTestPrerequisites
 // skips it otherwise.

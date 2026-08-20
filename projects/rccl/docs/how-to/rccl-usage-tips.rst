@@ -546,10 +546,7 @@ To suspend or resume several communicators together, wrap the calls in
 
 .. note::
 
-   The grouped form is required when a single process owns one communicator per
-   GPU, as created by ``ncclCommInitAll``. Every ``ncclCommSuspend`` and
-   ``ncclCommResume`` call is collective over all ranks of its communicator, and
-   here those ranks are the other communicators owned by the same thread, so an
-   ungrouped call blocks waiting for ranks that the thread only reaches after
-   that call returns.
+   When a single process owns one communicator per device through
+   ``ncclCommInitAll``, ``ncclCommSuspend`` and ``ncclCommResume`` need to be
+   wrapped around a group API.
 
