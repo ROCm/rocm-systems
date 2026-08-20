@@ -40,10 +40,17 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecAffinitySupport_Positive) {
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
 
-  // CU-count affinity is the SM_COUNT equivalent and is supported on every AMD GPU.
+  // CU-count affinity is the SM_COUNT equivalent.
   int cuCountSupported = -1;
   HIP_CHECK(hipDeviceGetExecAffinitySupport(&cuCountSupported, hipExecAffinityTypeCUCount, device));
+#if HT_AMD
+  // CU masking is available on every AMD GPU, so this is always supported.
   REQUIRE(cuCountSupported == 1);
+#else
+  // On NVIDIA, CU_EXEC_AFFINITY_TYPE_SM_COUNT is only supported on Volta+ under MPS, so the
+  // result is device-dependent; only require a valid boolean.
+  REQUIRE((cuCountSupported == 0 || cuCountSupported == 1));
+#endif
 
   // Granularity queries are boolean.
   int cuGranularity = -1;
@@ -55,8 +62,15 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecAffinitySupport_Positive) {
   REQUIRE((cuGranularity == 0 || cuGranularity == 1));
   REQUIRE((wgpGranularity == 0 || wgpGranularity == 1));
 
+#if HT_AMD
   // A device masks either per-CU or per-WGP, never both and never neither.
   REQUIRE((cuGranularity + wgpGranularity) == 1);
+#else
+  // CU-mask granularity is a ROCm-specific concept with no CUDA equivalent; both report
+  // unsupported on the NVIDIA backend.
+  REQUIRE(cuGranularity == 0);
+  REQUIRE(wgpGranularity == 0);
+#endif
 }
 
 /**
