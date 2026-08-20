@@ -164,15 +164,7 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
 
     pip_kpack_dirs = _find_pip_kpack_dirs()
     if not pip_kpack_dirs:
-        log.warning(
-            "No pip .kpack directories found — falling back to "
-            "ROCM_KPACK_PATH_PREFIX (may need kpack loader fix for "
-            "multi-archive setups)"
-        )
-        kpack_paths = [str(f.resolve()) for f in ci_kpacks]
-        os.environ["ROCM_KPACK_PATH_PREFIX"] = ":".join(kpack_paths)
-        os.environ["ROCM_KPACK_DEBUG"] = "1"
-        log.info("ROCM_KPACK_PATH_PREFIX=%s", os.environ["ROCM_KPACK_PATH_PREFIX"])
+        log.warning("No pip .kpack directories found — cannot replace kpack archives")
         return
 
     replaced = 0
@@ -200,8 +192,6 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
     else:
         log.info("No matching pip kpack archives found to replace")
 
-    os.environ["ROCM_KPACK_DEBUG"] = "1"
-    log.info("ROCM_KPACK_DEBUG=1 (verbose kpack logging enabled)")
 
 
 def _find_pip_kpack_dirs() -> list[Path]:

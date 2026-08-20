@@ -80,7 +80,6 @@ def _setup_kpack_env(env, rocm_path):
         log.info("kpack archive: %s", resolved)
     if kpack_paths:
         env["ROCM_KPACK_PATH"] = ":".join(kpack_paths)
-        env["ROCM_KPACK_DEBUG"] = "1"
         log.info("ROCM_KPACK_PATH=%s", env["ROCM_KPACK_PATH"])
 
 
