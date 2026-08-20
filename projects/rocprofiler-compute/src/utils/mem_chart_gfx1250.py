@@ -111,7 +111,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from io import StringIO
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -1816,38 +1816,27 @@ def get_sample_metrics() -> dict[str, Any]:
 # Public API (matches mem_chart.py interface)
 # ============================================================================
 def plot_mem_chart(
-    arch: str,
-    normal_unit: str,
     metric_dict: dict[str, Any],
     *,
-    chart_title: Optional[str] = None,
+    chart_title: str,
 ) -> str:
-    """
-    Plot the memory chart and return as string.
+    """Plot the memory chart and return as string.
 
     Args:
-        arch: Architecture name (e.g., "gfx1250")
-        normal_unit: Normalization unit (e.g., "per_kernel", "per_second")
         metric_dict: Dictionary of metric name -> value (keys should match
             ``MEM_CHART_PANEL_METRIC_KEYS``). Bandwidth values are in **Bytes/s**.
-        chart_title: Full heading line; if omitted, uses ``format_mem_chart_heading``
-            with ``panel_id=300`` (section ``3.``).
+        chart_title: Full heading line (e.g. from ``_mem_chart_heading``).
 
     Returns:
         String representation of the diagram
     """
     flat = normalize_mem_chart_metrics(metric_dict)
-    (
-        format_mem_chart_heading(normal_unit, panel_id=300)
-        if chart_title is None
-        else chart_title
-    )
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=220, height=100)
 
     create_mem_chart_diagram(
-        arch,
-        normal_unit,
+        "gfx1250",
+        chart_title,
         flat,
         console,
         show_debug=False,
