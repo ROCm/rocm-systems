@@ -97,7 +97,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   void*    msntbl      = bnxt_qps[conn_num].msntbl;
   uint32_t msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
   uint32_t psn_sz_log2 = bit_log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
-  uint64_t mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
+  uint32_t mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
 
   void*    cq_buf   = bnxt_scqs[conn_num].buf;
   uint32_t cq_depth = bnxt_scqs[conn_num].depth;

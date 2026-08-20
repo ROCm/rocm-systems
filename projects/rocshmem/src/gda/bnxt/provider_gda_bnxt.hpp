@@ -47,28 +47,27 @@ struct bnxt_device_wq {
 
   __host__ inline bnxt_device_wq(void *buf, uint32_t depth)
     : buf{buf}, depth{depth}, head{0}, tail{0}, flags{0} { }
-} __attribute__((packed));
+};
 
 struct bnxt_device_cq : public bnxt_device_wq {
   // inherit constructors
   using bnxt_device_wq::bnxt_device_wq;
-} __attribute__((packed));
+};
 
 struct bnxt_device_sq : public bnxt_device_wq {
-  uint32_t psn;
-
   void *msntbl;
+  uint32_t psn;
   uint32_t msn;
   uint32_t msn_tbl_sz;
   uint32_t psn_sz_log2;
-  uint64_t mtu;
+  uint32_t mtu;
   uint32_t lock;
 
   __host__ inline bnxt_device_sq(void *buf, uint32_t depth, void *msntbl, uint32_t msn_tbl_sz,
-                                 uint32_t psn_sz_log2, uint64_t mtu)
-    : bnxt_device_wq{buf, depth}, psn{0}, msntbl{msntbl}, msn{0}, msn_tbl_sz{msn_tbl_sz},
+                                 uint32_t psn_sz_log2, uint32_t mtu)
+    : bnxt_device_wq{buf, depth}, msntbl{msntbl}, psn{0}, msn{0}, msn_tbl_sz{msn_tbl_sz},
       psn_sz_log2{psn_sz_log2}, mtu{mtu}, lock{0} { }
-} __attribute__((packed));
+};
 
 struct bnxt_host_cq {
   void *buf;
