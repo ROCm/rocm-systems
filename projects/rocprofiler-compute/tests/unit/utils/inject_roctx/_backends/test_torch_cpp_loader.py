@@ -186,6 +186,34 @@ def test_fingerprint_inputs_cover_every_build_input():
         assert required in input_names, f"{required} is not a fingerprint input"
 
 
+def test_required_input_paths_include_missing_files(tmp_path, monkeypatch):
+    """``required_input_paths()`` includes collector sources that are not on disk."""
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", tmp_path)
+    monkeypatch.setattr(
+        torch_trace_fingerprint, "_SO_BUILDFILE", tmp_path / "CMakeLists.txt"
+    )
+    names = {path.name for path in torch_trace_fingerprint.required_input_paths()}
+    assert "torch_trace_collector.cpp" in names
+    assert "torch_trace_collector_module.cpp" in names
+    assert "CMakeLists.txt" in names
+    assert "synchronized.hpp" in names
+    assert "gsl_assert.h" in names
+    assert not (tmp_path / "torch_trace_collector.cpp").exists()
+
+
+def test_required_input_paths_exist_in_the_source_tree():
+    """Every required input exists in the source tree."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+    missing = [
+        path.name
+        for path in torch_trace_fingerprint.required_input_paths()
+        if not path.exists()
+    ]
+    assert not missing, f"required inputs are absent: {missing}"
+
+
 def test_torch_trace_collector_source_avoids_torch_umbrella_headers():
     """No module source may include ``<torch/{extension,all,torch}.h>``."""
     sources = torch_trace_collector_module_sources()
@@ -379,6 +407,11 @@ def _set_so_inputs_present(monkeypatch, tmp_path):
         "fingerprint_input_paths",
         lambda: (cpp, module_cpp, cml),
     )
+    monkeypatch.setattr(
+        torch_trace_fingerprint,
+        "required_input_paths",
+        lambda: (cpp, module_cpp, cml),
+    )
     return src_dir
 
 
@@ -460,19 +493,31 @@ def test_runtime_build_path_falls_back_to_the_user_cache(monkeypatch, tmp_path):
     )
 
 
-def test_runtime_build_skips_when_sources_missing(monkeypatch, tmp_path):
-    """Missing build inputs skip the runtime build before cmake is consulted."""
+def test_runtime_build_skips_when_a_required_source_is_absent(
+    monkeypatch, tmp_path
+):
+    """A missing required source skips the runtime build."""
+    src_dir = tmp_path / "torch_trace_collector"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "CMakeLists.txt").write_text("# stub\n")
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", src_dir)
     monkeypatch.setattr(
-        torch_trace_fingerprint,
-        "fingerprint_input_paths",
-        lambda: (tmp_path / "nonexistent.cpp", tmp_path / "nonexistent.txt"),
+        torch_trace_fingerprint, "_SO_BUILDFILE", src_dir / "CMakeLists.txt"
     )
     monkeypatch.setattr(
         inject_roctx_loader,
         "_cmake_executable",
-        lambda: pytest.fail("cmake must not be consulted when sources are missing"),
+        lambda: pytest.fail("cmake was invoked"),
     )
-    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is None
+    diagnostics: list[tuple[str, str]] = []
+    assert (
+        inject_roctx_loader._try_runtime_build(_FAKE_TAG, diagnostics=diagnostics)
+        is None
+    )
+    joined = " ".join(msg for _, msg in diagnostics)
+    assert "torch_trace_collector.cpp" in joined, (
+        f"absent collector source not reported; saw {diagnostics!r}"
+    )
 
 
 def test_runtime_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
