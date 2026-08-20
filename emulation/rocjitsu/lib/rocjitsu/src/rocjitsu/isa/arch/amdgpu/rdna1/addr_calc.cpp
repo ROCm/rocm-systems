@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -23,16 +24,14 @@ uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
     return 0;
   if (soffset == OPR_SMEM_OFFSET_M0)
     return wf.m0();
-  return amdgpu::RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + soffset);
+  return amdgpu::read_scalar_selector(wf, soffset);
 }
 
 } // namespace
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  const uint32_t sbase_sel = inst.sbase * 2;
+  uint64_t base = amdgpu::read_scalar_selector64(wf, sbase_sel);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   off += read_smem_offset(inst.soffset, wf);
   return (base + off) & ~0x3ULL;
@@ -47,9 +46,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
   uint64_t saddr_val = 0;
   if (inst.saddr != 0x7F) {
-    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sb + 1)) << 32) |
-                amdgpu::RegisterAccess(cu).read_sgpr(sb);
+    const uint32_t sb_sel = inst.saddr;
+    saddr_val = amdgpu::read_scalar_selector64(wf, sb_sel);
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
   amdgpu::RegisterAccess regs(cu);

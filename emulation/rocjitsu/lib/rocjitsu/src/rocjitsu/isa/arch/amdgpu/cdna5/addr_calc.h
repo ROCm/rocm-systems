@@ -18,6 +18,23 @@ struct VectorMemState;
 
 namespace rocjitsu::cdna5 {
 
+/// @brief Decoded CDNA5 buffer resource descriptor fields.
+struct BufferResource {
+  uint64_t base_address = 0;
+  uint64_t num_records = 0;
+  uint32_t raw_stride = 0;
+  uint32_t stride = 0;
+  uint8_t stride_scale = 0;
+  bool swizzle_enabled = false;
+  bool oob_select = false;
+  uint8_t type = 0;
+};
+
+BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd2, uint32_t srd3);
+
+/// @brief Sign-extend a CDNA5 24-bit IOFFSET field.
+inline int32_t signed_ioffset(uint32_t ioffset) { return static_cast<int32_t>(ioffset << 8) >> 8; }
+
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes);
 
@@ -26,6 +43,14 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
 
 void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);
+
+/// @brief Compute an absolute async LDS address within the workgroup allocation.
+///
+/// @returns amdgpu::kInvalidLdsAddress when any byte in the access is outside
+/// the allocation or the absolute address equals the reserved invalid value or
+/// cannot be represented in 32 bits.
+uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                uint32_t lds_operand, uint32_t access_size_bytes);
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

@@ -22,6 +22,7 @@
 ///   0xBFB00000 = s_endpgm (op = 48) — RDNA3/3.5/4
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -54,7 +55,6 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -65,6 +65,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -97,10 +98,10 @@ TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
+  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_CDNA5), 11);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RDNA4), 8);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV32I), 9);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV64I), 10);
-  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_GFX1250), 11);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_NUM_ARCHS), 12);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_INVALID), 12);
 }
@@ -115,13 +116,62 @@ struct DecodeCase {
 
 class DecoderSmokeTest : public ::testing::TestWithParam<DecodeCase> {};
 
+TEST(DecoderDiagnosticTest, ValidEncodingEmitsNothingAndKeepsLocation) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::vector<std::string> messages;
+  auto collect = [&](std::string_view message) { messages.emplace_back(message); };
+
+  DecodeResult decoded = decoder->decode(&S_NOP, 24, DecodeErrorEmitter(collect));
+
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value()->src_loc(), 24u);
+  EXPECT_TRUE(messages.empty());
+}
+
+TEST(DecoderDiagnosticTest, InvalidOpcodeEmitsExactlyOneDiagnostic) {
+  constexpr uint32_t invalid_opcode = 0xffffffffu;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::vector<std::string> messages;
+  auto collect = [&](std::string_view message) { messages.emplace_back(message); };
+
+  DecodeResult decoded = decoder->decode(&invalid_opcode, DecodeErrorEmitter(collect));
+
+  EXPECT_TRUE(decoded.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_EQ(messages.front(), "Invalid instruction opcode: FFFFFFFF");
+}
+
+TEST(DecoderDiagnosticTest, InvalidOperandEmitsExactlyOneDiagnostic) {
+  constexpr auto words = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 209, .vdst = 0});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::vector<std::string> messages;
+  auto collect = [&](std::string_view message) { messages.emplace_back(message); };
+
+  DecodeResult decoded = decoder->decode(words.data(), DecodeErrorEmitter(collect));
+
+  EXPECT_TRUE(decoded.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_EQ(messages.front(), "invalid operand selector");
+}
+
+TEST(DecoderDiagnosticTest, NoOpEmitterStillRejectsInvalidOpcode) {
+  constexpr uint32_t invalid_opcode = 0xffffffffu;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  EXPECT_TRUE(decoder->decode(&invalid_opcode).failed());
+}
+
 TEST_P(DecoderSmokeTest, DecodesCorrectly) {
   const DecodeCase &tc = GetParam();
 
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << "Decoder::create() returned nullptr for arch=" << tc.arch_name;
 
-  std::unique_ptr<Instruction> inst(decoder->decode(&tc.word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &tc.word));
   ASSERT_NE(inst, nullptr) << "decode() returned nullptr for arch=" << tc.arch_name << " word=0x"
                            << std::hex << tc.word;
 
@@ -135,9 +185,9 @@ TEST(Gfx1250DecodeTest, DisassemblesDpp8Selectors) {
       0x000040CCu, // v204, dpp8:[0,0,1,0,0,0,0,0].
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->size(), 8);
   EXPECT_EQ(inst->mnemonic(), "v_fract_f32_dpp");
@@ -168,8 +218,8 @@ INSTANTIATE_TEST_SUITE_P(
         DecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", S_ENDPGM_GFX11, "s_endpgm", 4},
         DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", S_NOP, "s_nop", 4},
         DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", S_ENDPGM_GFX11, "s_endpgm", 4},
-        DecodeCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", S_NOP, "s_nop", 4},
-        DecodeCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", S_ENDPGM_GFX11, "s_endpgm", 4}),
+        DecodeCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", S_NOP, "s_nop", 4},
+        DecodeCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", S_ENDPGM_GFX11, "s_endpgm", 4}),
     [](const ::testing::TestParamInfo<DecodeCase> &info) {
       std::string name = info.param.arch_name;
       name += "_";
@@ -200,14 +250,14 @@ TEST(ScalarRegisterSelectorDecodeTest, Rdna1AndRdna2RejectReservedHole) {
     for (const auto &[words, expected_selector] :
          {std::pair{&lower, 123}, std::pair{&upper, 125}}) {
       std::unique_ptr<Instruction> inst;
-      ASSERT_NO_THROW(inst.reset(decoder->decode(words->data())));
+      inst.reset(decode_valid(*decoder, words->data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(inst->num_dst_operands(), 1);
       ASSERT_NE(inst->dst_operand(0), nullptr);
       EXPECT_EQ(inst->dst_operand(0)->encoding_value(), expected_selector);
     }
 
-    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(hole.data())), util::InvalidInst);
+    EXPECT_TRUE(decode_fails(*decoder, hole.data()));
   };
 
   validate(ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_lower, rdna1_hole, rdna1_upper);
@@ -223,40 +273,39 @@ TEST(OperandSelectorDecodeTest, Cdna1SdstRejectsReservedHole) {
   ASSERT_NE(decoder, nullptr);
   for (const auto &[word, expected_selector] : {std::pair{lower, 124}, std::pair{upper, 126}}) {
     std::unique_ptr<Instruction> inst;
-    ASSERT_NO_THROW(inst.reset(decoder->decode(&word)));
+    inst.reset(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->num_dst_operands(), 1);
     ASSERT_NE(inst->dst_operand(0), nullptr);
     EXPECT_EQ(inst->dst_operand(0)->encoding_value(), expected_selector);
   }
 
-  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(&hole)), util::InvalidInst);
+  EXPECT_TRUE(decode_fails(*decoder, &hole));
 }
 
 TEST(OperandSelectorDecodeTest, Cdna1RestrictedScalarSourceRejectsLiteralSelector) {
   cdna1::Operand valid(32, cdna1::OperandType::OPR_SSRC_NOLIT, 253);
-  EXPECT_NO_THROW(valid.validate_encoding());
+  EXPECT_TRUE(valid.validate_encoding().succeeded());
 
   cdna1::Operand invalid(32, cdna1::OperandType::OPR_SSRC_NOLIT, 255);
-  EXPECT_THROW(invalid.validate_encoding(), util::InvalidInst);
+  EXPECT_TRUE(invalid.validate_encoding().failed());
 }
 
 TEST(OperandSelectorDecodeTest, DirectSourceAndSmemOffsetRejectReservedSelectors) {
   constexpr auto vop1 = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 209, .vdst = 0});
-  auto gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(gfx1250_decoder, nullptr);
-  EXPECT_THROW(std::unique_ptr<Instruction>(gfx1250_decoder->decode(vop1.data())),
-               util::InvalidInst);
+  EXPECT_TRUE(decode_fails(*gfx1250_decoder, vop1.data()));
 
   constexpr auto smem =
       cdna1::build_smem(cdna1::kSLoadDwordSmem, {.soffset_en = 1, .soffset = 125});
   auto cdna1_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
   ASSERT_NE(cdna1_decoder, nullptr);
-  EXPECT_THROW(std::unique_ptr<Instruction>(cdna1_decoder->decode(smem.data())), util::InvalidInst);
+  EXPECT_TRUE(decode_fails(*cdna1_decoder, smem.data()));
 }
 
 TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMarkers) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto expect_rejected = [&](const auto &encoding) {
@@ -265,7 +314,7 @@ TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMark
       words[i] = encoding[i];
     words[encoding.size()] = 7;
     words[encoding.size() + 1] = 0;
-    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
   };
 
   for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
@@ -276,7 +325,7 @@ TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMark
 }
 
 TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto words_for = [](uint16_t selector) {
@@ -290,7 +339,7 @@ TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
     SCOPED_TRACE(selector);
     const auto words = words_for(selector);
     std::unique_ptr<Instruction> inst;
-    ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+    inst.reset(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->num_src_operands(), 3);
     ASSERT_NE(inst->src_operand(2), nullptr);
@@ -302,7 +351,7 @@ TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
        {uint16_t{209}, uint16_t{239}, uint16_t{249}, uint16_t{253}, uint16_t{255}}) {
     SCOPED_TRACE(selector);
     const auto words = words_for(selector);
-    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
   }
 
   for (const uint16_t selector : {uint16_t{0}, uint16_t{8}, uint16_t{129}, uint16_t{256}}) {
@@ -312,7 +361,7 @@ TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
                            {.vdst = 0, .src0 = 256, .src1 = 256, .src2 = selector});
     const std::array<uint32_t, 4> words{encoding[0], encoding[1], 0, 0};
     std::unique_ptr<Instruction> inst;
-    ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+    inst.reset(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_NE(inst->src_operand(2), nullptr);
     EXPECT_EQ(inst->src_operand(2)->encoding_value(), selector);
@@ -330,7 +379,7 @@ TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
       SCOPED_TRACE(static_cast<int>(selector));
       const auto words = build(selector);
       std::unique_ptr<Instruction> inst;
-      ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+      inst.reset(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(inst->num_src_operands(), 1);
       ASSERT_NE(inst->src_operand(0), nullptr);
@@ -340,19 +389,19 @@ TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
     for (const uint8_t selector : std::array<uint8_t, 4>{0, 126, 160, 192}) {
       SCOPED_TRACE(static_cast<int>(selector));
       const auto words = build(selector);
-      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+      EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
 
     for (const uint8_t marker : {uint8_t{254}, uint8_t{255}}) {
       SCOPED_TRACE(static_cast<int>(marker));
       const auto base = build(marker);
       const std::array<uint32_t, 3> words = {base[0], 7, 0};
-      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+      EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
   };
 
   validate(
-      ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+      ROCJITSU_CODE_ARCH_CDNA5, "cdna5",
       [](uint8_t selector) {
         return cdna5::build_sop1(cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
       },
@@ -383,7 +432,7 @@ TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
       {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", s_mov_b32_literal},
       {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", s_mov_b32_literal},
       {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", s_mov_b32_literal},
-      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", s_mov_b32_literal},
   };
 
   for (const auto &tc : cases) {
@@ -392,7 +441,7 @@ TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
     auto decoder = Decoder::create(tc.arch);
     ASSERT_NE(decoder, nullptr) << tc.arch_name;
     std::unique_ptr<Instruction> inst;
-    ASSERT_NO_THROW(inst.reset(decoder->decode(words))) << tc.arch_name;
+    inst.reset(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr) << tc.arch_name;
     ASSERT_EQ(inst->size(), sizeof(words)) << tc.arch_name;
     ASSERT_NE(inst->raw_encoding(), nullptr) << tc.arch_name;
@@ -406,7 +455,7 @@ TEST(SendmsgReturnDecodeTest, Rdna3Selector255DoesNotConsumeLiteral) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> inst(decoder->decode(&word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
   EXPECT_EQ(inst->size(), sizeof(word));
@@ -422,7 +471,7 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
   ASSERT_EQ(inst->num_dst_operands(), 3);
@@ -570,7 +619,7 @@ TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> inst(decoder->decode(&s_waitcnt_vmcnt1));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &s_waitcnt_vmcnt1));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_waitcnt");
   EXPECT_EQ(inst->disassemble(), "s_waitcnt vmcnt(1) expcnt(0) lgkmcnt(0)");
@@ -598,7 +647,7 @@ TEST(CdnaF16DeclaredLiteralDecodeTest, MasksExtensionToDeclaredOperandWidth) {
     };
     auto decoder = Decoder::create(tc.arch);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), tc.mnemonic);
 
@@ -751,7 +800,7 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_load_b64");
   // vaddr + the fieldless OPR_GPUMEM memory operand (saddr is null, so it
@@ -806,7 +855,7 @@ TEST_P(RdnaVopdDecodeSmokeTest, DecodesDualSlotForms) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << tc.arch_name;
 
-  std::unique_ptr<Instruction> inst(decoder->decode(tc.words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
   ASSERT_NE(inst, nullptr) << tc.arch_name << " " << tc.case_name;
   EXPECT_EQ(inst->mnemonic(), tc.expected_mnemonic);
   EXPECT_EQ(inst->size(), tc.expected_size_bytes);
@@ -887,8 +936,7 @@ TEST_P(InvalidVopdSlotDecodeTest, RejectsOpcodeOutsideProfileSlot) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << tc.arch_name;
 
-  EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
-      << tc.arch_name << " " << tc.case_name;
+  EXPECT_TRUE(decode_fails(*decoder, tc.words.data())) << tc.arch_name << " " << tc.case_name;
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -905,9 +953,9 @@ INSTANTIATE_TEST_SUITE_P(
                                           make_vopdxy_pair(14, 8)},
                       InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "invalid_y",
                                           make_vopdxy_pair(8, 14)},
-                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "invalid_x",
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", "invalid_x",
                                           make_vopdxy_pair(12, 8)},
-                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250",
                                           "invalid_y_defined_opcode", make_vopdxy_pair(8, 18)}),
     [](const ::testing::TestParamInfo<InvalidVopdSlotCase> &info) {
       std::string name = info.param.arch_name;
@@ -929,7 +977,7 @@ TEST_P(RdnaInvalidVopdDecodeSmokeTest, DoesNotClaimVopd3Encoding) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << tc.arch_name;
 
-  EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
+  EXPECT_TRUE(decode_fails(*decoder, tc.words.data()))
       << tc.arch_name << " should reserve the 0xCF VOPD3 prefix";
 }
 
@@ -993,7 +1041,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
 
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -1049,7 +1097,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskConsumesVccLo) {
 
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(kWords.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, kWords.data()));
   ASSERT_NE(inst, nullptr);
 
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -1127,7 +1175,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMerge) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr);
   const auto execute = [&](const std::array<uint32_t, 3> &inst_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(inst_words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst.get(), *wf);
   };
@@ -1306,6 +1354,36 @@ TEST(FunctionalSchedulingTest, SleepVarYieldsBeforeQuantumExpires) {
   expect_sleep_yields_before_quantum_expires(ROCJITSU_CODE_ARCH_RDNA4, kSleepVar);
 }
 
+TEST(FunctionalSchedulingTest, DebugActiveUsesFairQuantum) {
+  constexpr uint64_t kCodeAddress = 0x3000;
+
+  amdgpu::GpuMemory gpu_mem("functional_debug_mem");
+  amdgpu::L2Cache l2("functional_debug_l2");
+  for (uint32_t i = 0; i <= amdgpu::ComputeUnitCore::kDebugFunctionalQuantum; ++i)
+    gpu_mem.write32(kCodeAddress + i * sizeof(uint32_t), S_NOP);
+  gpu_mem.write32(kCodeAddress +
+                      (amdgpu::ComputeUnitCore::kDebugFunctionalQuantum + 1) * sizeof(uint32_t),
+                  S_ENDPGM_GFX9);
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("functional_debug_cu", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, kCodeAddress, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  cu->set_debug_active(true);
+  EXPECT_TRUE(cu->execute_quantum());
+  EXPECT_EQ(wf->pc,
+            kCodeAddress + amdgpu::ComputeUnitCore::kDebugFunctionalQuantum * sizeof(uint32_t));
+  EXPECT_FALSE(wf->is_halted());
+}
+
 // ---------------------------------------------------------------------------
 // MUBUF lds modifier test: verify that buffer_load_dword with the lds bit set
 // (bit 16 of dword 0) produces a disassembly string containing " lds".
@@ -1333,7 +1411,7 @@ TEST_P(MubufLdsModifierTest, LdsModifierInDisassembly) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> inst(decoder->decode(tc.words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words));
   ASSERT_NE(inst, nullptr) << "decode() returned nullptr for " << tc.arch_name;
   EXPECT_EQ(inst->mnemonic(), "buffer_load_dword");
 
@@ -1372,7 +1450,7 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
   EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243");
@@ -1391,7 +1469,7 @@ TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
   EXPECT_EQ(inst->disassemble(),
@@ -1421,7 +1499,7 @@ TEST(Cdna3DecodeTest, MfmaAccBitsSelectIndependentMultiplicandBanks) {
   ASSERT_NE(decoder, nullptr);
   for (const auto &tc : cases) {
     const uint32_t words[] = {0xD3E08088u, tc.high_word};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
 
@@ -1439,7 +1517,7 @@ TEST(Cdna3DecodeTest, MfmaAccCdPreservesInlineConstantSrc2) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
   EXPECT_EQ(inst->disassemble(), "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], 0");
@@ -1461,14 +1539,14 @@ TEST(Cdna2DecodeTest, MemoryAccBitSelectsAccumulatorDestination) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
   for (const auto &tc : cases) {
-    std::unique_ptr<Instruction> vgpr_inst(decoder->decode(tc.vgpr_words.data()));
+    std::unique_ptr<Instruction> vgpr_inst(decode_valid(*decoder, tc.vgpr_words.data()));
     ASSERT_NE(vgpr_inst, nullptr) << tc.mnemonic;
     ASSERT_EQ(vgpr_inst->mnemonic(), tc.mnemonic);
     const auto vgpr_dst = vgpr_inst->dst_operand(0)->to_register_ref();
     ASSERT_TRUE(vgpr_dst.has_value()) << vgpr_inst->disassemble();
     EXPECT_EQ(*vgpr_dst, (RegisterRef{RegClass::VGPR, 5, tc.width})) << vgpr_inst->disassemble();
 
-    std::unique_ptr<Instruction> accvgpr_inst(decoder->decode(tc.accvgpr_words.data()));
+    std::unique_ptr<Instruction> accvgpr_inst(decode_valid(*decoder, tc.accvgpr_words.data()));
     ASSERT_NE(accvgpr_inst, nullptr) << tc.mnemonic;
     ASSERT_EQ(accvgpr_inst->mnemonic(), tc.mnemonic);
     const auto accvgpr_dst = accvgpr_inst->dst_operand(0)->to_register_ref();
@@ -1485,9 +1563,9 @@ TEST(Gfx1250DecodeTest, FmamkF64ConsumesThreeDwords) {
       0xC1F00000u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_fmamk_f64_e32");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1503,9 +1581,9 @@ TEST(Gfx1250DecodeTest, FmaakF64ConsumesThreeDwords) {
       0xC1F00000u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_fmaak_f64_e32");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1519,9 +1597,9 @@ TEST(Gfx1250DecodeTest, Vop3True16DestinationUsesFullEightBitVgprIndex) {
       0x000000FFu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_and_b16");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1542,10 +1620,10 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
       0x00000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  std::unique_ptr<Instruction> saddr_inst(decode_valid(*decoder, saddr_words));
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "flat_load_b64 v[2:3], v1, s[6:7]");
@@ -1566,7 +1644,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
 
-  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  std::unique_ptr<Instruction> vector_only_inst(decode_valid(*decoder, vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
@@ -1590,10 +1668,10 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
       0x0000000Au,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
-  std::unique_ptr<Instruction> saddr_inst(decoder->decode(saddr_words));
+  std::unique_ptr<Instruction> saddr_inst(decode_valid(*decoder, saddr_words));
   ASSERT_NE(saddr_inst, nullptr);
   EXPECT_EQ(saddr_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(saddr_inst->disassemble(), "global_load_b64 v[2:3], v10, s[6:7]");
@@ -1614,7 +1692,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
 
-  std::unique_ptr<Instruction> vector_only_inst(decoder->decode(vector_only_words));
+  std::unique_ptr<Instruction> vector_only_inst(decode_valid(*decoder, vector_only_words));
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
@@ -1632,9 +1710,9 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
       0x0000000Au,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_store_b64");
   EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
@@ -1649,9 +1727,9 @@ TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
       0x02021805u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_cmp_gt_u32");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1673,7 +1751,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1701,7 +1779,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
         0xD3AD0024u | (format << 8),
         0x00024100u | (format << 29),
     };
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
 
@@ -1725,7 +1803,7 @@ TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1744,7 +1822,7 @@ TEST(AccVgprSrcCanonicalizationTest, MalformedRawSrcBelow256StaysInUnifiedRange)
     ASSERT_NE(decoder, nullptr);
     for (uint32_t raw : {0u, 5u, 128u, 255u}) {
       const uint32_t words[] = {0xD3D84003u, 0x18000000u | raw};
-      std::unique_ptr<Instruction> inst(decoder->decode(words));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
       ASSERT_NE(inst, nullptr);
       EXPECT_EQ(inst->mnemonic(), "v_accvgpr_read");
       ASSERT_EQ(inst->num_src_operands(), 1);
@@ -1765,7 +1843,7 @@ TEST(AccVgprSrcCanonicalizationTest, LegalRawSrcResolvesToUnifiedAccIndex) {
     ASSERT_NE(decoder, nullptr);
     for (uint32_t n : {0u, 1u, 63u}) {
       const uint32_t words[] = {0xD3D84003u, 0x18000000u | (256u + n)};
-      std::unique_ptr<Instruction> inst(decoder->decode(words));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
       ASSERT_NE(inst, nullptr);
       EXPECT_EQ(inst->mnemonic(), "v_accvgpr_read");
       ASSERT_EQ(inst->num_src_operands(), 1);
@@ -1776,4 +1854,40 @@ TEST(AccVgprSrcCanonicalizationTest, LegalRawSrcResolvesToUnifiedAccIndex) {
   }
 }
 
+TEST(Cdna4DecodeTest, RejectsVop3px2PrefixWithoutMfmaSuffix) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t unrelated_opcode[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AC0000u,
+      0x00000000u,
+  };
+  EXPECT_TRUE(decode_fails(*decoder, unrelated_opcode));
+
+  const uint32_t wrong_encoding[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD32D0000u,
+      0x00000000u,
+  };
+  EXPECT_TRUE(decode_fails(*decoder, wrong_encoding));
+}
+
+TEST(Cdna4DecodeTest, MfmaScaleF8f6f4AcceptsSecondVop3px2Suffix) {
+  const uint32_t words[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AE0000u,
+      0x04020100u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x64_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+}
 } // namespace
