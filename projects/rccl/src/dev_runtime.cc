@@ -385,6 +385,9 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
     symLsaMessage* msg = messages + r * maxSegments + segment;
     bool reuseLocal =
       (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    if (r != devr->lsaSelf && reuseLocal) {
+      INFO(NCCL_REG, "Symmetric window reusing system-memory handle rank %d segment %d", r, segment);
+    }
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
                                                      reuseLocal),
@@ -420,6 +423,33 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages,
                                             sizeof(symLsaMessage) * maxSegments),
                 ret, fail);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP reports imported host VMM handles as device memory. For symmetric
+  // layouts, propagate the owner's host classification so peer segments use
+  // the system-memory handle-reuse path.
+  if (ncclParamSymReuseSysmemHandles()) {
+    for (int segment = 0; segment < numSegments; segment++) {
+      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_HOST;
+      bool foundHost = false;
+      for (int r = 0; r < devr->lsaSize; r++) {
+        symLsaMessage* msg = messages + r * maxSegments + segment;
+        if (segment < segmentCounts[r] && ncclSymIsHostSegment(msg->type)) {
+          hostType = msg->type;
+          foundHost = true;
+          break;
+        }
+      }
+      if (foundHost) {
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment < segmentCounts[r]) {
+            messages[r * maxSegments + segment].type = hostType;
+          }
+        }
+      }
+    }
+  }
+#endif
 
   if (devr->lsaFlatBase == nullptr) {
     // Create on first need.
@@ -664,7 +694,15 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     size_t offset = 0;
     for (int segment = 0; segment < mem->numSegments; segment++) {
       CUmemLocationType locType = segmentTypes[segment];
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // Host-backed VMM mappings are DMA-BUF objects, not ordinary pageable or
+      // hipHostAlloc memory. Register every AMD VMM segment through GIN's
+      // NCCL_PTR_CUDA path so it obtains the segment DMA-BUF fd; ibv_reg_mr on
+      // the CPU mapping is rejected by bnxt_re with EFAULT.
+      int ptrType = NCCL_PTR_CUDA;
+#else
       int ptrType = ncclSymIsHostSegment(locType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+#endif
       NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->segmentSizes[segment],
                                     mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
