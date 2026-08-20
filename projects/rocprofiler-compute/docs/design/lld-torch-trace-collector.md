@@ -102,11 +102,10 @@ flowchart TD
 | `StackEntry` (`stack_entry.h`) | — | one frame: marker name + context string |
 | `ThreadState` (`marker_stack.h`) | `thread_state()`, `thread_local` | frame stack + debug-info guards owned by user scopes |
 | `RoctxObserverContext` (`record_function_callback.h`) | per op | flags for the range/leaf pushed and snapshot-frame count |
-| `ProcessState` (`process_state.h`) | `process_state()` | owns the four members below |
+| `ProcessState` (`process_state.h`) | `process_state()` | owns the three members below |
 | `Stats` (`stats.h`) | `process_state().stats` | atomic counters |
 | `InstallState` (`process_state.h`) | `process_state().install` | callback handle and installed flag, in a `synchronized_t` |
 | `SnapshotStore` (`snapshot_store.h`) | `process_state().snapshots` | sharded map (seqNr, threadId) → stack; each shard is a `synchronized_t` over that map plus its LRU list and index |
-| `CaptureBuffer` (`capture_buffer.h`) | `process_state().capture` | test-only buffer of emitted strings |
 
 ## Threading model
 
@@ -395,7 +394,6 @@ must tolerate the missing field: `_parse_function_backend` in
 | `install` / `uninstall` / `is_installed` | Manage the global callback |
 | `push_user_scope` / `pop_user_scope` | Emit a structural marker frame |
 | `dump_stats` | Return counters for debugging |
-| `start_capture` / `stop_capture` | Record emitted strings for tests |
 
 ## Build and packaging
 
@@ -435,7 +433,8 @@ must tolerate the missing field: `_parse_function_backend` in
 - **gtest** — snapshot store (save/consume, one-shot, LRU eviction, per-shard,
   concurrency, cross-thread key isolation), wire encoding round-trip, leaf
   labels, install/uninstall, scope balance, and real forward/backward runs on
-  GPU.
+  GPU. The gtest records `roctxRangePushA` arguments via link wrap; the installed
+  module does not.
 - **Counters** — `dump_stats()` surfaces push/pop balance, snapshot hit rate,
   and callback errors.
 
