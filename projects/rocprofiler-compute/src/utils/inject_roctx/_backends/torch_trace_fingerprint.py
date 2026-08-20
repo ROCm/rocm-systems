@@ -17,6 +17,19 @@ _SHARED_UTILS_HEADERS = (
     _NATIVE_TOOL_ROOT / "lib" / "utils" / "synchronized" / "synchronized.hpp",
     _NATIVE_TOOL_ROOT / "lib" / "utils" / "gsl_assert" / "gsl_assert.h",
 )
+_COLLECTOR_SOURCE_NAMES = (
+    "torch_trace_collector.cpp",
+    "torch_trace_collector_module.cpp",
+)
+
+
+def required_input_paths() -> tuple[Path, ...]:
+    """Collector sources, CMakeLists.txt, and shared utility headers."""
+    return (
+        *(_SO_SOURCE_DIR / name for name in _COLLECTOR_SOURCE_NAMES),
+        _SO_BUILDFILE,
+        *_SHARED_UTILS_HEADERS,
+    )
 
 
 def fingerprint_input_paths() -> tuple[Path, ...]:
