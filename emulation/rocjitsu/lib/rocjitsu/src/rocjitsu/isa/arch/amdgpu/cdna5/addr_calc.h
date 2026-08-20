@@ -18,6 +18,20 @@ struct VectorMemState;
 
 namespace rocjitsu::cdna5 {
 
+/// @brief Decoded CDNA5 buffer resource descriptor fields.
+struct BufferResource {
+  uint64_t base_address = 0;
+  uint64_t num_records = 0;
+  uint32_t raw_stride = 0;
+  uint32_t stride = 0;
+  uint8_t stride_scale = 0;
+  bool swizzle_enabled = false;
+  bool oob_select = false;
+  uint8_t type = 0;
+};
+
+BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd2, uint32_t srd3);
+
 /// @brief Sign-extend a CDNA5 24-bit IOFFSET field.
 inline int32_t signed_ioffset(uint32_t ioffset) { return static_cast<int32_t>(ioffset << 8) >> 8; }
 

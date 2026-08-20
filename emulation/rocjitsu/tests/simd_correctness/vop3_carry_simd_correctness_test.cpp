@@ -306,8 +306,7 @@ void run_rdna4_wave64(uint64_t exec) {
 void run_gfx1250_wave32(uint64_t exec) {
   for (const auto &c : kRdnaCases)
     check_case<32>("vop3_carry_simd_gfx1250_mem", "vop3_carry_simd_gfx1250_l2",
-                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_GFX1250, c, kRdna3Encoding,
-                   exec);
+                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_CDNA5, c, kRdna3Encoding, exec);
 }
 
 void check_rdna4_wave64_carry_in_oracle() {

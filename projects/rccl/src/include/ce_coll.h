@@ -11,6 +11,7 @@
 #include "nccl.h"
 #include "nccl_common.h"
 #include "bitops.h"
+#include "sym_kernels.h"
 
 // Memory operations per rank for different synchronization protocols
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
