@@ -6,12 +6,18 @@ import copy
 import math
 import shutil
 import textwrap
+from io import StringIO
 from typing import Any, Optional, TextIO
 
 import pandas as pd
+from rich.console import Console as RichConsole
+from rich.panel import Panel as RichPanel
+from rich.table import Table as RichTable
+from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
+from membw.models import MemBwAnalysisResult
 from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
@@ -842,36 +848,100 @@ def format_table_output(
     return content
 
 
-def _render_membw_guidance(membw_result: Any) -> str:  # noqa: ANN401
+def _max_line_width(rendered: str) -> int:
+    """Return the longest line width after stripping ANSI codes."""
+    stripped = strip_ansi(rendered)
+    if not stripped.strip():
+        return 0
+    return max(len(line) for line in stripped.splitlines())
+
+
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
     """Render membw guidance text to append below the memory chart."""
-    lines: list[str] = []
-
     active_count = sum(1 for block in membw_result.guidance_blocks if block)
-
     if active_count == 0:
-        if membw_result.availability == "unavailable":
-            lines.append(
-                "Memory Bandwidth Analysis: Unavailable "
-                f"({membw_result.availability_reason or 'no data'})."
-            )
-        elif membw_result.availability == "partial":
-            lines.append(
-                "Memory Bandwidth Analysis: Partial data "
-                f"({membw_result.availability_reason})."
-            )
-        else:
-            lines.append(
-                "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA)."
-            )
-    else:
-        lines.append("-" * 80)
-        lines.append("Memory Bandwidth Guided Analysis")
-        lines.append("-" * 80)
-        for block in membw_result.guidance_blocks:
-            lines.append(block)
-            lines.append("")
+        return _render_membw_status_line(membw_result)
+    return _render_membw_guidance_panel(
+        membw_result.guidance_blocks,
+        chart_width=chart_width,
+    )
 
-    return "\n".join(lines) + "\n"
+
+def _render_membw_status_line(
+    membw_result: MemBwAnalysisResult,
+) -> str:
+    """Render a single status line when no bottlenecks are active."""
+    if membw_result.availability == "unavailable":
+        return (
+            "Memory Bandwidth Analysis: Unavailable "
+            f"({membw_result.availability_reason or 'no data'}).\n"
+        )
+    if membw_result.availability == "partial":
+        return (
+            "Memory Bandwidth Analysis: Partial data "
+            f"({membw_result.availability_reason}).\n"
+        )
+    return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).\n"
+
+
+_GUIDANCE_PANEL_MIN_WIDTH = 100
+
+
+def _style_guidance_block(block: str) -> RichText:
+    """Apply Rich styling to a single guidance block."""
+    text = RichText(block.rstrip())
+    first_newline = block.find("\n")
+    if first_newline > 0:
+        text.stylize("bold indian_red", 0, first_newline)
+    text.highlight_regex(
+        r"  (Condition|Measured|Impact)\s*:",
+        style="dim",
+    )
+    return text
+
+
+def _render_membw_guidance_panel(
+    guidance_blocks: tuple[str, ...],
+    chart_width: int = 0,
+) -> str:
+    """Render active guidance blocks in a styled Rich panel."""
+    sections = [_style_guidance_block(block) for block in guidance_blocks if block]
+    if not sections:
+        return ""
+
+    panel_width = max(chart_width, _GUIDANCE_PANEL_MIN_WIDTH)
+    col_gap = 4
+    # 2 border + 2*2 padding = 6; minus column gap
+    col_width = (panel_width - 6 - col_gap) // 2
+
+    grid = RichTable.grid(padding=(1, col_gap))
+    grid.add_column(width=col_width)
+    grid.add_column(width=col_width)
+
+    for i in range(0, len(sections), 2):
+        left = sections[i]
+        right = sections[i + 1] if i + 1 < len(sections) else RichText()
+        grid.add_row(left, right)
+
+    panel = RichPanel(
+        grid,
+        title="[bold]Memory Bandwidth Guided Analysis[/bold]",
+        border_style="indian_red",
+        width=panel_width,
+        padding=(1, 2),
+    )
+
+    buf = StringIO()
+    console = RichConsole(
+        file=buf,
+        force_terminal=True,
+        width=panel_width,
+    )
+    console.print(panel)
+    return buf.getvalue()
 
 
 def show_all(
@@ -1059,17 +1129,18 @@ def show_all(
                 )
             elif is_gfx9(gpu_arch):
                 membw_result = getattr(first_run, "membw_result", None)
-                panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                        gpu_arch=gpu_arch,
-                        membw=membw_result,
-                    )
-                    + "\n"
+                chart_output = mem_chart_gfx9.plot_mem_chart(
+                    mem_chart_data,
+                    chart_title=heading,
+                    gpu_arch=gpu_arch,
+                    membw=membw_result,
                 )
+                panel_content += chart_output + "\n"
                 if membw_result is not None:
-                    panel_content += _render_membw_guidance(membw_result)
+                    panel_content += _render_membw_guidance(
+                        membw_result,
+                        chart_width=_max_line_width(chart_output),
+                    )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
