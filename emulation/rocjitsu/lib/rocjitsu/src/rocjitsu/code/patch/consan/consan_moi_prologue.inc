@@ -283,8 +283,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
 [[nodiscard]] bool append_moi_prologue_return(std::vector<uint32_t> &words,
                                               uint64_t prologue_text_offset,
                                               uint64_t original_entry_text_offset,
-                                              std::optional<uint16_t> pc_sgpr, rj_code_arch_t arch,
-                                              std::string_view prologue_name,
+                                              rj_code_arch_t arch, std::string_view prologue_name,
                                               std::vector<std::string> &errors) {
   const uint64_t branch_pc =
       prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -296,17 +295,18 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   // Large all-site transformations can place the entry prologue beyond a
   // SOPP branch's signed 16-bit dword range. A probe-local EXEC-save window is
   // dead at the selected probe sites, but that does not make it safe at kernel
-  // entry: it may still hold guest ABI input. RDNA-family VCC and SCC are not
-  // kernel-entry inputs, so use VCC for the absolute return and let the guest
-  // establish both special registers from its normal entry state afterward.
-  const std::optional<uint16_t> long_return_pc_sgpr =
-      is_rdna4_family_arch(arch) ? std::optional<uint16_t>(kRdna4VccLo) : pc_sgpr;
-  if (!long_return_pc_sgpr || *long_return_pc_sgpr > 126u || *long_return_pc_sgpr % 2u != 0u) {
+  // entry: it may still hold guest ABI input. VCC and SCC are not kernel-entry
+  // inputs on any admitted architecture, so use VCC for the absolute return
+  // and let the guest establish both special registers from its normal entry
+  // state afterward. This is the same entry-ABI contract used by
+  // emit_moi_local_indirect_kernel_entry_island().
+  const uint16_t long_return_pc_sgpr = scalar_operand_vcc_lo(arch);
+  if (long_return_pc_sgpr > 126u || long_return_pc_sgpr % 2u != 0u) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " branch target is out of range and has no valid long-return SGPR pair");
     return false;
   }
-  words.push_back(build_s_getpc_b64(*long_return_pc_sgpr, arch));
+  words.push_back(build_s_getpc_b64(long_return_pc_sgpr, arch));
   const uint64_t pc_after_getpc = branch_pc + sizeof(uint32_t);
   if (original_entry_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
@@ -316,7 +316,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, *long_return_pc_sgpr, delta, /*minimum_words=*/0u,
+  if (!append_pc_delta_builder(words, arch, long_return_pc_sgpr, delta, /*minimum_words=*/0u,
                                /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
@@ -329,7 +329,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
     return false;
   }
   words.push_back(*wait_pc);
-  words.push_back(build_s_setpc_b64(*long_return_pc_sgpr, arch));
+  words.push_back(build_s_setpc_b64(long_return_pc_sgpr, arch));
   return true;
 }
 
@@ -1085,8 +1085,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
   words.insert(words.end(), displaced_entry_words.begin(), displaced_entry_words.end());
 
-  if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset,
-                                  return_pc_sgpr, arch, "owner/epoch prologue", errors)) {
+  if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset, arch,
+                                  "owner/epoch prologue", errors)) {
     return std::nullopt;
   }
   return words;
@@ -1235,8 +1235,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
 
-  if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset,
-                                  return_pc_sgpr, arch, "private-epoch prologue", errors)) {
+  if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset, arch,
+                                  "private-epoch prologue", errors)) {
     return std::nullopt;
   }
   return words;

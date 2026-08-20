@@ -837,6 +837,59 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
   EXPECT_TRUE(contains_subsequence(words, expected_scalar->restore_words));
 }
 
+TEST(ConSanMoi, Cdna4PrivateEpochLongReturnDoesNotClobberEntryAbiSgprs) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  // Keep the guest entry and appended private-epoch prologue more than one
+  // signed SOPP branch range apart. The prologue spills s0:s4, including the
+  // incoming kernarg pointer, so its long return must not reuse that restored
+  // ordinary SGPR window as a PC temporary.
+  std::vector<uint32_t> text_words(40'000u, build_s_nop(0, kArch));
+  constexpr size_t kAccessWord = 30'000u;
+  text_words[kAccessWord] = 0xd81a0004u;
+  text_words[kAccessWord + 1u] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "private_epoch_long_return", /*vgpr_granulated=*/31u,
+                                 /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/0x7u,
+                                 /*group_segment_fixed_size=*/4u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.force_private_epoch = true;
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_exec_save_sgpr = 0u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  ASSERT_FALSE(words.empty());
+  EXPECT_FALSE(compute_sopp_branch_simm16(prologue->trampoline_offset +
+                                              (words.size() - 1u) * sizeof(uint32_t),
+                                          /*target_offset=*/0u));
+  const uint16_t vcc_lo = scalar_operand_vcc_lo(kArch);
+  EXPECT_NE(std::ranges::find(words, build_s_getpc_b64(vcc_lo, kArch)), words.end());
+  EXPECT_EQ(words.back(), build_s_setpc_b64(vcc_lo, kArch));
+  EXPECT_EQ(std::ranges::find(words, build_s_getpc_b64(/*sdst=*/0u, kArch)), words.end());
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto barrier = build_cdna4_s_barrier(kArch);
