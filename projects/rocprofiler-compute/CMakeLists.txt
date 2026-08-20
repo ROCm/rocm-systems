@@ -1195,6 +1195,13 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+# src/membw
+install(
+    DIRECTORY src/membw
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/pc_sampling
 install(
     DIRECTORY src/pc_sampling
