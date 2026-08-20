@@ -27,6 +27,7 @@ namespace rdna2 {
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 1;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -40,6 +41,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 2;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -53,6 +55,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 4;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -66,6 +69,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 8;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -79,6 +83,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 16;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -92,6 +97,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 1;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -105,6 +111,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 2;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -118,6 +125,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 4;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -131,6 +139,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 8;
   d->elem_size = 4;
   d->sign_extend = false;
@@ -144,6 +153,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
+  d->dst_selector = inst_.sdata;
   d->num_dwords = 16;
   d->elem_size = 4;
   d->sign_extend = false;
