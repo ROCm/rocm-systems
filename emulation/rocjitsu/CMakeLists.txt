@@ -59,6 +59,13 @@ if(
 endif()
 
 # HSA/KFD headers (local copies from rocr-runtime).
+#
+# This directory also carries `libdrm/drm.h`, which deliberately shadows the
+# host's `<libdrm/drm.h>` for every target it is attached to -- that is what
+# keeps `kfd_ioctl.h` on the vendored DRM UAPI instead of the build host's
+# libdrm. See that file. Dropping, reordering or narrowing this include
+# directory for a target silently hands it the host header back, and the
+# breakage only shows up on hosts whose libdrm is older than the vendored copy.
 set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
 )

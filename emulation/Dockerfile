@@ -20,14 +20,18 @@
 #                                            VM API + KMD interposer)
 #   /opt/mirage/lib/librocjitsu_hooks.so    (DBT HSA hooks)
 #   /opt/mirage/share/rocjitsu/configs/*.json
-# `mirage` searches `../lib` relative to its own binary, so
-# `/opt/mirage/bin/mirage` finds its sibling `/opt/mirage/lib/*.so`.
+# `mirage` searches `<prefix>/lib` beside its own binary before any
+# rocjitsu build it can reach by walking up, so `/opt/mirage/bin/mirage`
+# finds its sibling `/opt/mirage/lib/*.so`.
 #
-# WHY two builder stages: rocjitsu (cmake/ninja C++) and mirage (cargo
-# Rust) have NO build-time dependency on each other -- rocjitsu_sys loads
-# the rocjitsu library at runtime via dlopen, it does not link or bindgen
-# against it. BuildKit therefore builds `rocjitsu-builder` and
-# `mirage-builder` concurrently, then the final stage merges both.
+# WHY two builder stages: neither build product depends on the other --
+# rocjitsu_sys loads the rocjitsu library at runtime via dlopen, it does
+# not link or bindgen against it. The one build-time coupling is data,
+# not artifacts: mirage's `builtin/build.rs` reads `rocjitsu/configs/*.json`
+# (see the COPY in `mirage-builder`), which is why each stage copies the
+# sources it needs and neither waits on the other. BuildKit therefore
+# builds `rocjitsu-builder` and `mirage-builder` concurrently, then the
+# final stage merges both.
 #
 # Caching: cargo registry/git + the cargo target dir, and the cmake
 # FetchContent deps + cmake build tree, are all kept in BuildKit cache
@@ -109,9 +113,17 @@ FROM builder-base AS mirage-builder
 ARG CARGO_PROFILE
 ENV CARGO_PROFILE=${CARGO_PROFILE}
 
+# NOT a stray cross-project copy: `mirage/builtin/build.rs` resolves
+# `$CARGO_MANIFEST_DIR/../../rocjitsu/configs` and panics if a preset is
+# missing, so `cargo build` below needs the presets two levels above
+# /src/mirage/builtin -- i.e. exactly here. Copying only `configs/`
+# (not all of `rocjitsu/`) keeps this stage's cache valid when rocjitsu's
+# C++ sources change, and copying it before the workspace keeps the
+# rarely-edited input in the outer, longer-lived layer.
 COPY rocjitsu/configs /src/rocjitsu/configs
 
-# Whole mirage workspace (all crates live under mirage/).
+# The mirage workspace; every crate lives under mirage/, and the presets
+# copied above are its only build input from outside this directory.
 COPY mirage /src/mirage
 WORKDIR /src/mirage
 

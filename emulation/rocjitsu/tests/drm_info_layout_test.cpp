@@ -11,6 +11,20 @@
 #include <cstdint>
 
 #include "rocjitsu/base/rj_compiler.h"
+
+// This file is the one place that compares against the SYSTEM libdrm layout,
+// so the system `drm.h` must be the copy that `<libdrm/amdgpu_drm.h>`'s own
+// `#include "drm.h"` resolves to. `external_headers/hsa_headers/libdrm/drm.h`
+// shadows `<libdrm/drm.h>` with the vendored kernel UAPI for every translation
+// unit on HSA_INCLUDE_DIR -- which includes this one -- and both copies guard
+// on `_DRM_H_`, so anything above this line that reaches `kfd_ioctl.h` would
+// make the system header expand to nothing and quietly turn this test into a
+// comparison of the vendored structs with themselves. It would still pass.
+#ifdef _DRM_H_
+#error "a drm.h was already included: this test must see the system libdrm \
+layout, so nothing above this line may reach <libdrm/drm.h> or kfd_ioctl.h"
+#endif
+
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES
 #include <libdrm/amdgpu_drm.h>

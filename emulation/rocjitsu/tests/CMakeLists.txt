@@ -2819,18 +2819,20 @@ if(
 )
     # Stage the librocjitsu.so this build just produced into a stub ROCm root
     # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
-    # search locations (emulation/mirage/rocjitsu/src/lib.rs kmd_search_dirs),
+    # search locations (emulation/mirage/core/src/discovery.rs, module docs),
     # and the search is additive, so a stub root cannot shadow anything else.
     set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
     # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
-    # kmd_search_dirs (emulation/mirage/rocjitsu/src/lib.rs) probes
-    # <exe_dir>/../..{,/..}/rocjitsu/build first and only then <exe_dir>/../lib,
-    # with $ROCM_HOME/lib after both. Run in place from
-    # emulation/mirage/target/debug, the third of those probes resolves to
-    # emulation/rocjitsu/build -- the developer's own tree -- so ROCM_HOME never
-    # got a look in. Running the staged copy puts none of the rocjitsu/build
-    # probes on a real directory, and <exe_dir>/../lib is this build's staged
-    # librocjitsu.so.
+    # The search (emulation/mirage/core/src/discovery.rs search_dirs, with the
+    # rocjitsu build shapes from emulation/mirage/rocjitsu/src/lib.rs
+    # in_tree_relative_dirs) probes <prefix>/lib beside the binary first, then
+    # <exe_dir>/../..{,/..}/rocjitsu/build, and $ROCM_HOME/lib after both. Run
+    # in place from emulation/mirage/target/debug there is no <prefix>/lib, so
+    # the rocjitsu/build probes resolve to emulation/rocjitsu/build -- the
+    # developer's own tree -- and ROCM_HOME never gets a look in. Running the
+    # staged copy puts none of the rocjitsu/build probes on a real directory,
+    # and <prefix>/lib is this build's staged librocjitsu.so, which is why the
+    # staged copy is what the test runs.
     add_custom_command(
         OUTPUT
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
