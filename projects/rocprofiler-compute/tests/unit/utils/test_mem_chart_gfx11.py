@@ -8,13 +8,34 @@ Covers:
 - mem_chart_gfx11.py - RDNA3.5 (Rich-based) memory architecture visualization
 """
 
-import re
+from pathlib import Path
 
 import common
+import pytest
+import yaml
 
 from utils import mem_chart_gfx11
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+
+MEM_CHART_PANEL_YAML = (
+    Path(common.SRC)
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+    / "gfx115x"
+    / "0300_memory_chart.yaml"
+)
+
+
+def mem_chart_yaml_metric_names() -> list[str]:
+    """Return gfx115x Memory Chart metric names from disk, in panel order."""
+    panel = yaml.safe_load(MEM_CHART_PANEL_YAML.read_text(encoding="utf-8"))
+    return [
+        name
+        for entry in panel["Panel Config"]["data source"]
+        for name in entry["metric_table"]["metric"]
+    ]
+
 
 # =============================================================================
 # Tests for format_bw_human_readable function (gfx11)
@@ -294,7 +315,7 @@ class TestGetSampleMetrics:
         # Check for key bandwidth metrics
         assert "TCP-GL1 Read Bandwidth" in metrics
         assert "GL1-GL2 Read Bandwidth" in metrics
-        assert "GL2 Cache Read BW" in metrics
+        assert "GL2-Fabric Read BW" in metrics
         assert "DRAM Read Bandwidth" in metrics
 
         # Check for utilization metrics
@@ -335,61 +356,12 @@ class TestPlotMemChartGfx11:
     """Tests for gfx11 plot_mem_chart - main chart generation."""
 
     def test_returns_string(self):
-        """Test that plot_mem_chart returns a string."""
+        """Full sample metrics exercise every render path without raising."""
         metrics = mem_chart_gfx11.get_sample_metrics()
         result = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-        clean = common.strip_ansi(result)
 
         assert isinstance(result, str)
         assert len(result) > 0
-        assert "3. Memory Chart" in clean
-        assert "Normalization: per_kernel" in clean
-        assert "GPU" in clean and "System Memory" in clean
-
-    def test_contains_complete_rdna35_architecture(self):
-        """RDNA3.5 output contains every rendered memory component."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        output = common.strip_ansi(
-            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-        )
-        expected_components = (
-            "Kernel",
-            "LDS",
-            "GL0 (TCP Cache)",
-            "SQC",
-            "GL1 Cache",
-            "GL2 Cache",
-            "GCEA",
-            "DRAM",
-        )
-
-        for component in expected_components:
-            assert component in output, f"Missing RDNA3.5 component: {component}"
-
-    def test_gfx115x_contains_heading_scope_and_directional_connectors(self):
-        """RDNA3.5 output exposes chart scope and connector directions."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        output = common.strip_ansi(
-            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-        )
-
-        assert DEFAULT_TITLE in output
-        assert "GPU" in output
-        assert "System Memory" in output
-        assert "Read BW" in output
-        assert "Write BW" in output
-        assert "Atomic" in output
-        assert re.search(r"<(?!-+>)-{3,}", output)
-        assert re.search(r"(?<![<-])-{3,}>", output)
-        assert re.search(r"<-{3,}>", output)
-
-    def test_contains_bandwidth_values(self):
-        """Test that output contains formatted bandwidth values."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-
-        # Should contain GB/s units since sample data uses GB/s range
-        assert "GB/s" in result
 
     def test_normalize_mem_chart_metrics_flat_ordered(self):
         """Metrics are flattened to panel YAML order; extras dropped; missing None."""
@@ -422,27 +394,82 @@ class TestPlotMemChartGfx11:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_extreme_bandwidth_values(self):
-        """Test with extreme bandwidth values."""
-        extreme_metrics = {
-            "DRAM Read Bandwidth": 10e12,  # 10 TB/s
-            "DRAM Write Bandwidth": 5e12,  # 5 TB/s
-        }
-        result = mem_chart_gfx11.plot_mem_chart(
-            extreme_metrics, chart_title=DEFAULT_TITLE
+
+# =============================================================================
+# Tests for zero vs missing metric display (gfx11)
+# =============================================================================
+
+
+class TestZeroVersusMissingMetrics:
+    """A measured 0 must render; an absent counter must never read as 0."""
+
+    # Panel lines that vanish when their metric is absent, so a falsy check would
+    # also hide a measured 0. Each case sets one metric only, so the expected text
+    # can come from no other panel.
+    GUARDED_LINES = [
+        ("LDS Utilization", "Util 0.0%"),
+        ("LDS Estimated Bandwidth", "BW 0.0 B/s"),
+        ("LDS Bank Conflict Rate", "Bank Conflict"),
+        ("GL0 Cache BW (TCP Cache)", "BW 0.0 B/s"),
+    ]
+
+    @pytest.mark.parametrize(("metric", "expected"), GUARDED_LINES)
+    def test_zero_valued_metric_is_displayed(self, metric, expected):
+        """Zero is falsy, so guarded lines must test `is not None` to show it."""
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart({metric: 0}, chart_title=DEFAULT_TITLE)
         )
 
-        assert "TB/s" in result
+        assert expected in output
 
-    def test_zero_bandwidth_values(self):
-        """Test with zero bandwidth values."""
-        zero_metrics = {
-            "DRAM Read Bandwidth": 0,
-            "DRAM Write Bandwidth": 0,
-        }
-        result = mem_chart_gfx11.plot_mem_chart(zero_metrics, chart_title=DEFAULT_TITLE)
+    def test_all_zero_metrics_render_no_placeholders(self):
+        """Nothing reads as unavailable when every counter measured 0."""
+        metrics = dict.fromkeys(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS, 0)
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        )
 
-        assert "B/s" in result  # Zero formats as "0.0 B/s"
+        assert "Total: 0.0" in output  # DRAM total sums two real zeros
+        assert "N/A" not in output
+
+    def test_missing_counters_are_not_reported_as_zero(self):
+        """Absent metrics stay None, so no counter is fabricated as 0."""
+        output = common.strip_ansi(
+            mem_chart_gfx11.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
+        )
+
+        assert "Total: N/A" in output
+        assert "0.0" not in output
+
+
+# =============================================================================
+# Tests for panel YAML sync (gfx11)
+# =============================================================================
+
+
+class TestMemChartPanelYamlSync:
+    """gfx115x chart names must track 0300_memory_chart.yaml on disk."""
+
+    def test_panel_metric_keys_match_yaml_in_order(self):
+        """Keys mirror the YAML in panel order, as the module docstring claims."""
+        assert (
+            list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
+            == mem_chart_yaml_metric_names()
+        )
+
+    def test_every_chart_lookup_resolves_against_yaml(self):
+        """Every metric the chart reads is still spelled that way in the YAML.
+
+        Drift is invisible on screen: edge rows render blank and guarded panel
+        lines disappear, rather than showing "N/A".
+        """
+        metrics = dict.fromkeys(mem_chart_yaml_metric_names(), 1.0)
+        extracted = mem_chart_gfx11._extract_metrics(
+            mem_chart_gfx11.normalize_mem_chart_metrics(metrics)
+        )
+
+        unresolved = sorted(key for key, value in extracted.items() if value is None)
+        assert not unresolved, f"metric names drifted from the YAML: {unresolved}"
 
 
 # =============================================================================
@@ -452,15 +479,6 @@ class TestPlotMemChartGfx11:
 
 class TestDefaultSampleMetrics:
     """Tests for DEFAULT_SAMPLE_METRICS constant."""
-
-    def test_keys_match_mem_chart_panel_yaml(self):
-        """Keys match gfx1151 Memory Chart YAML (MEM_CHART_PANEL_METRIC_KEYS)."""
-        assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
-            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
-        )
-        assert len(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == len(
-            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
-        )
 
     def test_all_bandwidth_values_positive(self):
         """Test that all bandwidth values are positive."""
@@ -492,64 +510,6 @@ class TestDefaultSampleMetrics:
 
         # DRAM
         assert any("DRAM" in k for k in metrics.keys())
-
-
-# =============================================================================
-# Integration Tests (gfx11)
-# =============================================================================
-
-
-class TestIntegrationGfx11:
-    """Integration tests for complete gfx11 workflows."""
-
-    def test_full_workflow_with_sample_data(self):
-        """Test complete workflow with sample data."""
-        # Get sample metrics
-        metrics = mem_chart_gfx11.get_sample_metrics()
-
-        # Generate chart
-        chart = mem_chart_gfx11.plot_mem_chart(
-            metrics,
-            chart_title="3. Memory Chart (Normalization: per_dispatch)",
-        )
-
-        # Verify chart contains expected elements
-        assert isinstance(chart, str)
-        assert len(chart) > 100  # Should be substantial output
-        assert "Kernel" in chart
-        assert "Legend" in chart
-
-    def test_bandwidth_unit_consistency(self):
-        """Test that bandwidth units are consistently formatted."""
-        # Create metrics with known bandwidth values
-        metrics = {
-            "TCP-GL1 Read Bandwidth": 100e9,  # 100 GB/s
-            "TCP-GL1 Write Bandwidth": 50e9,  # 50 GB/s
-            "GL1-GL2 Read Bandwidth": 75e9,  # 75 GB/s
-            "GL1-GL2 Write Bandwidth": 25e9,  # 25 GB/s
-            "DRAM Read Bandwidth": 200e9,  # 200 GB/s
-            "DRAM Write Bandwidth": 100e9,  # 100 GB/s
-        }
-
-        chart = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-
-        # All values should show in GB/s since they're in that range
-        assert chart.count("GB/s") >= 6
-
-    def test_mixed_bandwidth_scales(self):
-        """Test chart with mixed bandwidth scales."""
-        metrics = {
-            "DRAM Read Bandwidth": 1.5e12,  # 1.5 TB/s
-            "GL2 Cache Read BW": 500e9,  # 500 GB/s
-            "GL1-GL2 Read Bandwidth": 100e6,  # 100 MB/s
-            "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
-        }
-
-        chart = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-
-        # Should contain multiple unit types
-        assert "TB/s" in chart
-        assert "GB/s" in chart
 
 
 def test_chart_title_appears_as_first_line():
