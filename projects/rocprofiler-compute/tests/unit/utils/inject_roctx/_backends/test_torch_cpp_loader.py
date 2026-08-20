@@ -567,9 +567,7 @@ def test_runtime_build_force_rebuild_discards_the_build_directory(
         lambda _n, _p: object(),
     )
 
-    result = inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, force_rebuild=True
-    )
+    result = inject_roctx_loader._try_runtime_build(_FAKE_TAG, force_rebuild=True)
 
     assert result is not None
     assert not stale.exists(), "force_rebuild must discard the stale build directory"
@@ -601,9 +599,7 @@ def test_runtime_build_returns_none_and_classifies_a_cmake_failure(
     )
 
     diagnostics: list[tuple[str, str]] = []
-    result = inject_roctx_loader._try_runtime_build(
-        _FAKE_TAG, diagnostics=diagnostics
-    )
+    result = inject_roctx_loader._try_runtime_build(_FAKE_TAG, diagnostics=diagnostics)
 
     assert result is None
     joined = " ".join(msg for _, msg in diagnostics).lower()
@@ -666,9 +662,7 @@ def test_explain_cmake_failure_never_recommends_installing_ninja():
 
 def test_rebuild_env_var_skips_prebuilt_and_forces_a_rebuild(monkeypatch):
     """REBUILD=1 routes directly to the runtime build, skipping the prebuilt tier."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     calls = []
     monkeypatch.setattr(
         inject_roctx_loader,
@@ -695,9 +689,7 @@ def test_rebuild_env_var_skips_prebuilt_and_forces_a_rebuild(monkeypatch):
 
 def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
     """Under REBUILD, a failing build yields ``None`` with no fallback."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
@@ -714,9 +706,7 @@ def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
 
 def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
     """The prebuilt tier short-circuits the default load path."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     calls = []
     sentinel = object()
@@ -740,9 +730,7 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
 
 def test_default_load_path_walks_prebuilt_then_runtime_build(monkeypatch):
     """Tiers are tried in order: prebuilt, then runtime build."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     calls = []
     monkeypatch.setattr(
@@ -792,9 +780,7 @@ def test_load_returns_module_or_none_no_raise():
 
 def test_load_result_records_successful_tier(monkeypatch):
     """``LoadResult.tier`` reports the name of the tier that returned a module."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     sentinel = object()
     monkeypatch.setattr(
@@ -813,9 +799,7 @@ def test_load_result_records_successful_tier(monkeypatch):
 
 def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
     """``LoadResult.tier`` is ``None`` when every tier returns ``None``."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
         inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
@@ -832,9 +816,7 @@ def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
 
 def test_load_returns_independent_diagnostics(monkeypatch):
     """Each ``load()`` call returns its own diagnostics list."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
         inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: object()
@@ -867,9 +849,7 @@ def test_safe_log_appends_to_provided_diagnostics():
 
 def test_load_result_carries_tier_and_diagnostics(monkeypatch):
     """``load()`` returns the tier scalar and a diagnostics list."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
         inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
@@ -887,9 +867,7 @@ def test_load_result_carries_tier_and_diagnostics(monkeypatch):
 
 def test_load_result_returns_python_tier_failure_trail(monkeypatch):
     """When every tier misses the trail includes the terminal fallback line."""
-    monkeypatch.setattr(
-        inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG
-    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(
         inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None

@@ -48,9 +48,7 @@ set(_py_minor "${Python3_VERSION_MINOR}")
 set(_ttc_torch_config_dir "")
 foreach(_ttc_site_packages IN LISTS Python3_SITEARCH Python3_SITELIB)
     if(EXISTS "${_ttc_site_packages}/torch/share/cmake/Torch/TorchConfig.cmake")
-        set(_ttc_torch_config_dir
-            "${_ttc_site_packages}/torch/share/cmake/Torch"
-        )
+        set(_ttc_torch_config_dir "${_ttc_site_packages}/torch/share/cmake/Torch")
         break()
     endif()
 endforeach()
@@ -67,10 +65,7 @@ if(NOT TORCH_FOUND)
     )
     return()
 endif()
-message(
-    STATUS
-    "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}"
-)
+message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 set(_torch_version "${Torch_VERSION}")
 
 if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
@@ -237,10 +232,7 @@ target_link_libraries(
 )
 target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
 # Official ROCm libtorch 2.10+ is CXX11 ABI.
-target_compile_definitions(
-    torch-trace-collector
-    PUBLIC _GLIBCXX_USE_CXX11_ABI=1
-)
+target_compile_definitions(torch-trace-collector PUBLIC _GLIBCXX_USE_CXX11_ABI=1)
 target_compile_options(
     torch-trace-collector
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
