@@ -262,9 +262,7 @@ def _try_runtime_build(
 ) -> Optional[types.ModuleType]:
     """Build the extension from the source tree and import the result."""
     missing_inputs = [
-        p.name
-        for p in torch_trace_fingerprint.required_input_paths()
-        if not p.exists()
+        p.name for p in torch_trace_fingerprint.required_input_paths() if not p.exists()
     ]
     if missing_inputs:
         _safe_log(
