@@ -32,10 +32,10 @@
 # effect. Its final `opt -O3` is an ungated whole-program inliner, a
 # materially different regime from the production library's cost-gated LTO --
 # this script also backend-compiles that .bc with
-# -Rpass-analysis=kernel-resource-usage (see
-# device_bitcode_resource_usage_to_csv.sh) and diffs it separately
-# (res_diff_bitcode_<Column>.{csv,png}), so a change that looks safe under
-# the production library alone doesn't get treated as validated everywhere.
+# -Rpass-analysis=kernel-resource-usage (see measure_device_bitcode() below)
+# and diffs it separately (res_diff_bitcode_<Column>.{csv,png}), so a change
+# that looks safe under the production library alone doesn't get treated as
+# validated everywhere.
 #
 # Usage:
 #   ./resource_usage_compare.sh [OPTIONS]
@@ -180,6 +180,68 @@ _find_build_config() {
   echo "$result"
 }
 
+# Backend-compile a device-bitcode artifact (DeviceBitcode.cmake's
+# librocshmem_device_<arch>.bc, produced by the `rocshmem_device_bitcode`
+# target -- ALL, so already built by the time this is called) directly with
+# -Rpass-analysis=kernel-resource-usage to get its resource-usage remarks.
+# This is not a re-optimization: DeviceBitcode.cmake's own pipeline (clang
+# -emit-llvm, llvm-link, opt -O3) never runs AMDGPU instruction selection, so
+# it can never emit these remarks itself -- that codegen normally only
+# happens later, at JIT time (rocshmem_hipmodule_init). Backend-compiling the
+# .bc here just reuses those same codegen decisions early, for reporting.
+#
+# The .bc has no debug info (llvm-link merges many TUs, opt -O3 runs with no
+# -g), so source_file/line in the output CSV are the placeholder
+# "<bitcode>"/0 for every row -- only mangled_name (and the resource columns)
+# are meaningful, which is fine since resource_usage_diff.py keys/compares by
+# (arch, build_config, mangled_name).
+measure_device_bitcode() {
+  local bc_file="$1" arch="$2" build_config="$3" commit="$4" out_csv="$5"
+
+  local clangxx
+  clangxx="$(command -v clang++)" || {
+    echo "error: clang++ not found in PATH (need a ROCm clang++ with AMDGPU backend support)" >&2
+    return 1
+  }
+
+  local workdir
+  workdir="$(mktemp -d /tmp/rocshmem-device-bitcode-XXXXXX)"
+  trap 'rm -rf "$workdir"' RETURN
+
+  local raw_log="$workdir/raw.log"
+  local summary_log="$workdir/resource_usage_summary.log"
+
+  echo "  [device-bitcode] backend-compiling $bc_file (mcpu=$arch) for resource-usage remarks..." >&2
+  "$clangxx" -target amdgcn-amd-amdhsa -mcpu="$arch" \
+    -Rpass-analysis=kernel-resource-usage \
+    -c "$bc_file" -o "$workdir/out.o" 2>"$raw_log" || {
+      echo "error: backend compile of $bc_file failed:" >&2
+      cat "$raw_log" >&2
+      return 1
+    }
+
+  # Normalize `remark: <unknown>:0:0: Function Name: X [-Rpass-analysis=...]`
+  # (no frontend source-location metadata on this direct backend-only
+  # invocation) into the `<file>:<line>:<col>: Key: value` shape
+  # resource_usage_to_csv.py expects.
+  sed -E \
+    -e 's/^remark: <unknown>:0:0:/<bitcode>:0:0:/' \
+    -e 's/ \[-Rpass-analysis=kernel-resource-usage\]$//' \
+    "$raw_log" | grep -E '<bitcode>:0:0:' > "$summary_log" || true
+
+  if [[ ! -s "$summary_log" ]]; then
+    echo "error: no kernel-resource-usage remarks found compiling $bc_file" >&2
+    echo "--- raw compiler output ---" >&2
+    cat "$raw_log" >&2
+    return 1
+  fi
+
+  python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
+    --log "$summary_log" \
+    --arch "$arch" --build-config "${build_config}-bitcode" --commit "$commit" \
+    --out "$out_csv" --top 0 >&2
+}
+
 # measure_commit <commit> -> prints the path to that commit's cached CSV
 measure_commit() {
   local commit="$1"
@@ -271,8 +333,7 @@ measure_commit() {
   local bc_file="$build_dir/librocshmem_device_${GPU_TARGET}.bc"
   local bitcode_csv="$cache_dir/res-${sha}-bitcode.csv"
   if [[ -f "$bc_file" ]]; then
-    "$TOOLS_DIR/device_bitcode_resource_usage_to_csv.sh" \
-      "$bc_file" "$GPU_TARGET" "$BUILD_CONFIG" "$sha" "$bitcode_csv" >&2
+    measure_device_bitcode "$bc_file" "$GPU_TARGET" "$BUILD_CONFIG" "$sha" "$bitcode_csv"
   else
     echo "  [$sha] note: no $bc_file -- skipping device-bitcode resource-usage measurement" >&2
   fi
