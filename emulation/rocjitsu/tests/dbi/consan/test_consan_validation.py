@@ -1972,6 +1972,15 @@ class ConSanValidationTest(unittest.TestCase):
             256,
         )
         self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1860
+        )
+        self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-tdm"][
+                "tensile_inner_timeout_seconds"
+            ],
+            1800,
+        )
+        self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),
         )
@@ -1991,6 +2000,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-decode-combined", 180),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
+                ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1860),
             )
             for target, workload, expected_timeout in cases:
                 with self.subTest(target=target, workload=workload):
@@ -4399,6 +4409,21 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "5.0")
         self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
         self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
+
+    def test_gfx1250_mxf4_tdm_uses_bounded_inner_timeout(self) -> None:
+        workload = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-mxf4gemm-tdm"]
+        )
+        command = validation._workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            "clean",
+            Path("/artifacts/benchmark.json"),
+        )
+        self.assertEqual(workload.run_timeout_seconds, 1860)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 1800)
+        self.assertEqual(command[command.index("--timeout-seconds") + 1], "1800")
 
     def test_bounded_tensile_smoke_resolves_therock_workspace_layout(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]

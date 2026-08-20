@@ -1530,6 +1530,14 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,
         },
+        # The complete 75-row configuration needs substantially longer than
+        # the Tensile helper's generic 55-second default under emulation.  A
+        # 600-second diagnostic reaches only 33 rows under Record/Replay, so
+        # keep the subprocess and its enclosing full row explicitly bounded.
+        "tensile-sk-mxf4gemm-tdm": {
+            "tensile_inner_timeout_seconds": 1800,
+            "run_timeout_seconds": 1860,
+        },
     },
 }
 

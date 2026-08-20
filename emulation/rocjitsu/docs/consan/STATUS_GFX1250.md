@@ -103,6 +103,32 @@ regressions reject that self-comparison for Record/Replay access and barrier
 dispatchers and for Sampled access dispatchers; the two full E2E artifacts
 above prove the corrected Record/Replay and Sampled behavior.
 
+### 2026-08-20 `007_sk_mxf4gemm_tdm` bounded replay refresh
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-mxf4-tdm-rr-inner600-c55a13a`
+reassesses the complete 75-row configuration through RocJitsu at source
+revision `c55a13a496` and hook SHA-256
+`0fe9aab79ab7a2d8b589ee232a263cde69c8fe6d336d87ba487324e02fc980a7`.
+The uninstrumented baseline passes all 75 exact rows in 232.01 seconds.  The
+Record/Replay leg runs to its diagnostic 600-second bound, completing 29
+exact rows and failing four.  Both PGR1 and PGR2 MT128x128 solutions fail for
+problem sizes `(120,120,1,1024)` and `(128,128,1,1024)`, so this current
+evidence supersedes the former PGR2-only candidate-145 localization.  Static
+instrumentation covers 2448/2448 accesses and 544/544 barrier members, but
+only 1/64 fences lowers; termination at the bound leaves no final analysis
+verdict.
+
+The preceding 55-second diagnostic
+`rebase-20260820-gfx1250-mxf4-tdm-rr-c55a13a` exposed a separate validation
+readiness issue: the runner's outer timeout did not replace the Tensile
+helper's generic inner default, cutting off baseline and Record/Replay alike.
+The target/workload manifest now declares a regression-tested 1800-second
+inner bound and 1860-second enclosing bound for the complete configuration.
+The longer bound is readiness for a future full run; it does not change the
+orange verdict because the current numerical failures occur well before the
+600-second diagnostic cutoff.
+
 ### 2026-08-20 D128-block clean refresh
 
 Artifact
@@ -556,7 +582,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current instrumentation is statically complete (2448 accesses, 272 barriers, 64 fences); PGR1 and PGR2 access/fence-only pass, but PGR2 access candidate 145 first corrupts results when barriers are enabled | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Record/Replay is localized to barrier/access composition around `ds_load_b128` at `0x257d8`, after barriers at `0x25790` and `0x2579c`; Inline Shadow remains bounded. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current 600-second run completes 29 exact rows and fails four: both PGR1 and PGR2 MT128x128 solutions fail for the first two problem sizes. Access and barrier lowering is complete at 2448/2448 and 544/544, but only 1/64 fences patches and no final analysis verdict is reached | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | The current failures supersede the former PGR2-only candidate-145 localization. The uninstrumented current baseline passes all 75 rows in 232.01 seconds. |
 | P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
