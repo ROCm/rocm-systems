@@ -109,6 +109,8 @@ FROM builder-base AS mirage-builder
 ARG CARGO_PROFILE
 ENV CARGO_PROFILE=${CARGO_PROFILE}
 
+COPY rocjitsu/configs /src/rocjitsu/configs
+
 # Whole mirage workspace (all crates live under mirage/).
 COPY mirage /src/mirage
 WORKDIR /src/mirage
