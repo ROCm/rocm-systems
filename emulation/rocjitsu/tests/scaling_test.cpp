@@ -24,8 +24,10 @@ RJ_DIAGNOSTIC_POP
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -131,7 +133,7 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-int main() {
+int main(int argc, char **argv) {
   struct Kernel {
     const char *name;
     uint32_t N;
@@ -149,7 +151,18 @@ int main() {
 
   constexpr int RUNS = 3;
 
-  for (uint32_t t = 1; t <= TOTAL_XCDS; ++t) {
+  // Thread counts come from argv when given, otherwise sweep 1..TOTAL_XCDS.
+  std::vector<uint32_t> thread_counts;
+  for (int i = 1; i < argc; ++i) {
+    auto v = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
+    if (v > 0)
+      thread_counts.push_back(v);
+  }
+  if (thread_counts.empty())
+    for (uint32_t t = 1; t <= TOTAL_XCDS; ++t)
+      thread_counts.push_back(t);
+
+  for (uint32_t t : thread_counts) {
     std::cout << t;
     for (auto &k : kernels) {
       // Take the median of RUNS.

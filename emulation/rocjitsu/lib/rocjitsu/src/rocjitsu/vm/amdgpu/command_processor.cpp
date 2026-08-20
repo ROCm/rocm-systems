@@ -2470,15 +2470,21 @@ void CommandProcessor::flush_gpu_caches() {
     cu->l1_scalar().invalidate_all();
   for (auto *l2 : l2_caches_)
     l2->flush_all();
-  for (auto *cu : cus_)
+  for (auto *cu : cus_) {
     cu->l1_vector().invalidate_all();
+    // A direct backing write may land on code, and the I$ is not coherent with
+    // data writes any more than the hardware one is.
+    cu->instruction_cache().invalidate_all();
+  }
 }
 
 void CommandProcessor::invalidate_gpu_caches() {
   for (auto *l2 : l2_caches_)
     l2->invalidate_all();
-  for (auto *cu : cus_)
+  for (auto *cu : cus_) {
     cu->l1_vector().invalidate_all();
+    cu->instruction_cache().invalidate_all();
+  }
 }
 
 void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx,

@@ -229,6 +229,25 @@ public:
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
 
+  /// @brief Instruction fetch - read a contiguous block (I$ line fill).
+  ///
+  /// @details Resolves the whole block in one pass instead of one lookup per
+  /// word, so a line fill costs a single page-stripe lock. Unlike read_block()
+  /// the caller must keep @p size within one page; an I$ line is aligned and
+  /// smaller than a page, so it always is.
+  /// @param addr Block start; must not cross a page boundary.
+  /// @param[out] dst Destination buffer of at least @p size bytes.
+  /// @param size Number of bytes to read.
+  /// @param vmid Owning process address space.
+  void fetch_block(uint64_t addr, uint8_t *dst, size_t size, uint32_t vmid = 0) const {
+    assert((addr & PAGE_MASK) + size <= PAGE_SIZE && "I$ line must not cross a page");
+    if (read_mapped(addr, dst, size, vmid))
+      return;
+    if (vmid > 0 && read_client_memory(addr, dst, size, vmid))
+      return;
+    simdojo::SparseMemory::read_block(addr, std::span<uint8_t>(dst, size));
+  }
+
   bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
     if (is_mapped(addr, vmid) || simdojo::SparseMemory::has_page(addr))
       return true;

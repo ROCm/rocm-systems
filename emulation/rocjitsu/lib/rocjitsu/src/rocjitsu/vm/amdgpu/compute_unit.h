@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -344,6 +345,9 @@ public:
   /// @brief Return the L1 Vector Cache (V$).
   L1VectorCache &l1_vector() { return l1_vector_; }
 
+  /// @brief Return the per-CU instruction cache (I$).
+  InstructionCache &instruction_cache() { return inst_cache_; }
+
   /// @brief Return the shared L2 cache.
   L2Cache *l2() const { return l2_; }
 
@@ -397,6 +401,7 @@ public:
     });
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
     l2_->flush_all(vmid);
   }
 
@@ -404,6 +409,7 @@ public:
     (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
@@ -796,6 +802,9 @@ protected:
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
+  InstructionCache inst_cache_;
+  /// @brief Whether the last issue bypassed the I$ for a debug session.
+  bool inst_cache_bypassed_ = false;
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
