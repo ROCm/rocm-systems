@@ -283,7 +283,7 @@ class TestPanelYamlGfx9:
         )
 
 
-def _make_node(
+def make_node(
     node_id: str,
     label: str,
     level: str,
@@ -311,7 +311,7 @@ def _make_node(
     )
 
 
-def _make_result(
+def make_result(
     nodes: tuple,
     guidance_blocks: tuple = (),
 ) -> MemBwAnalysisResult:
@@ -337,14 +337,14 @@ def render_gfx950_with_membw(membw):
 
 class TestMembwAnnotations:
     def test_utcl1_stall_shows_annotation(self):
-        child = _make_node(
+        child = make_node(
             "gl1_tcp_utcl1_stall",
             "TCP<-UTCL1",
             "GL1",
             "active",
             value=18.7,
         )
-        parent = _make_node(
+        parent = make_node(
             "gl1_tcp_stall",
             "TCP stall",
             "GL1",
@@ -352,41 +352,41 @@ class TestMembwAnnotations:
             value=25.0,
             children=(child,),
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(parent,)))
+        output = render_gfx950_with_membw(make_result(nodes=(parent,)))
         assert "[!] TCP<-UTCL1" in output
         assert "18.7%" in output
 
     def test_gl2_stall_shows_annotation(self):
-        gl2 = _make_node(
+        gl2 = make_node(
             "gl2_cache_efficiency",
             "L2 low hit rate",
             "GL2",
             "active",
             value=33.6,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(gl2,)))
+        output = render_gfx950_with_membw(make_result(nodes=(gl2,)))
         assert "[!] L2 low hit" in output
 
     def test_ea_stall_shows_annotation_in_data_fabric(self):
-        ea = _make_node(
+        ea = make_node(
             "ea_write_backpressure",
             "EA write stall",
             "EA",
             "active",
             value=10.7,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(ea,)))
+        output = render_gfx950_with_membw(make_result(nodes=(ea,)))
         assert "[!] EA write stall" in output
 
     def test_no_bottlenecks_no_stall_rows(self):
-        inactive = _make_node(
+        inactive = make_node(
             "gl1_tcp_stall",
             "TCP stall",
             "GL1",
             "inactive",
             value=5.0,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(inactive,)))
+        output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
         assert "[!]" not in output
         assert "Stall" not in output
 
@@ -402,34 +402,34 @@ class TestMembwAnnotations:
         assert baseline == with_none
 
     def test_stall_prefix_present_without_color(self):
-        ea = _make_node(
+        ea = make_node(
             "ea_hbm_read",
             "EA HBM read",
             "EA",
             "active",
             value=15.0,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(ea,)))
+        output = render_gfx950_with_membw(make_result(nodes=(ea,)))
         assert "[!] EA HBM read" in output
 
     def test_legend_includes_stall_when_active(self):
-        gl2 = _make_node(
+        gl2 = make_node(
             "gl2_back_pressure",
             "L2 back pressure",
             "GL2",
             "active",
             value=12.0,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(gl2,)))
+        output = render_gfx950_with_membw(make_result(nodes=(gl2,)))
         assert "Stall" in output
 
     def test_legend_excludes_stall_when_no_bottlenecks(self):
-        inactive = _make_node(
+        inactive = make_node(
             "gl2_back_pressure",
             "L2 back pressure",
             "GL2",
             "inactive",
             value=5.0,
         )
-        output = render_gfx950_with_membw(_make_result(nodes=(inactive,)))
+        output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
         assert "Stall" not in output
