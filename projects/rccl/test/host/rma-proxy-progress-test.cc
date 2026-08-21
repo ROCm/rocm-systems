@@ -431,4 +431,54 @@ TEST_F(RmaProxyProgressTest, Completion_ReturnsCredit) {
     EXPECT_EQ(destroy.calls, 1);
 }
 
+// ---------------------------------------------------------------------------
+// Test #4 -- credit boundary.
+//
+// The credit predicate is strict less-than: an op is never issued while
+// inflightRequests[target] == maxInflightRequests, and issue resumes the moment
+// a completion frees exactly one credit. Pins `<` vs `<=` in
+// ncclRmaProxyCanIssueRequest. Pool size is kept large so this exercises the
+// credit accounting, not pool exhaustion (that's Test #2).
+// ---------------------------------------------------------------------------
+TEST_F(RmaProxyProgressTest, CreditBoundary_IssueResumesWhenCreditFreed) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    ctx_->maxInflightRequests = 2;
+    net_.poolSize = 4;  // not the limiter here
+
+    // Two ops already in flight -> credit exactly at the boundary.
+    ncclRmaProxyDesc* head = PushInProgressPutSignal(peer, target, /*opSeq=*/1);
+    ncclRmaProxyDesc* second = PushInProgressPutSignal(peer, target, /*opSeq=*/2);
+    ASSERT_EQ(inflight_[target], 2u);
+
+    // A pending put waiting for a credit.
+    ncclRmaProxyDesc* pending = PushPendingPutSignal(peer, target);
+    const int baseIssue = net_.issueCalls;
+
+    // Part A: at the boundary (inflight == max), the pending op is NOT issued.
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, baseIssue);       // nothing new issued
+    EXPECT_EQ(cis_[peer], 0u);                    // consumer index not advanced
+    EXPECT_EQ(pending->putSignal.request, nullptr);
+    EXPECT_EQ(inflight_[target], 2u);
+
+    // Free exactly one credit by completing the in-progress head.
+    net_.completeRequest(head->putSignal.request);
+    EXPECT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
+              ncclSuccess);
+    ASSERT_EQ(inflight_[target], 1u);            // one credit returned
+
+    // Part B: with a credit available, the pending op issues.
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, baseIssue + 1);
+    EXPECT_NE(pending->putSignal.request, nullptr);
+    EXPECT_EQ(cis_[peer], 1u);                    // advanced by exactly one
+    EXPECT_EQ(inflight_[target], 2u);            // credit consumed again
+    // FIFO preserved: the still-in-flight op #2 remains the in-progress head,
+    // the newly-issued pending op is enqueued behind it.
+    EXPECT_EQ(InProgressHead(peer), second);
+    EXPECT_EQ(second->next, pending);
+}
+
 }  // namespace
