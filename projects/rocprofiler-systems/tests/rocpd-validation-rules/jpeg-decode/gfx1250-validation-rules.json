@@ -18,7 +18,8 @@
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL"
                 }
-            ]
+            ],
+            "min_rows": 0
         },
         {
             "min_rows": 0,
