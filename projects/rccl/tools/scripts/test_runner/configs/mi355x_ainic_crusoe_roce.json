@@ -380,7 +380,7 @@
     "autodetect": {
       "extends": "rccl_tests_base",
       "timeout": 600,
-      "description": "Out-of-the-box autodetect. NCCL_NET intentionally omitted (do NOT set to '').",
+      "description": "Out-of-the-box autodetect. NCCL_NET intentionally omitted (do NOT set to ''). DROPPED FROM SMOKE (still runs nightly): with NCCL_NET unset the autodetect path enters GIN/RMA IB init (ncclRmaInit -> ncclGinIbInitType -> ncclIbInitDevices) which aborts (SIGABRT / uncaught C++ exception) on this stack; suites that pin NCCL_NET (IB / IB-CAST / ROCM-IB) are unaffected. Re-add to smoke once the GIN/RMA init crash is fixed.",
       "tests": [
         {
           "name": "B8_allreduce_autodetect",
@@ -393,7 +393,7 @@
     "autodetect_off": {
       "extends": "rccl_tests_base",
       "timeout": 600,
-      "description": "AINIC forced OFF (RCCL_AINIC_ROCE=0); expect fallback to plain IB/RoCE.",
+      "description": "AINIC forced OFF (RCCL_AINIC_ROCE=0); expect fallback to plain IB/RoCE. DROPPED FROM SMOKE (still runs nightly): hits the same GIN/RMA IB init abort (ncclRmaInit -> ncclGinIbInitType -> ncclIbInitDevices, SIGABRT) as the autodetect suite. Re-add to smoke once the GIN/RMA init crash is fixed.",
       "env_variables": {
         "RCCL_AINIC_ROCE": "0"
       },
@@ -580,13 +580,11 @@
     },
     {
       "config": "autodetect",
-      "enabled": true,
-      "smoke": true
+      "enabled": true
     },
     {
       "config": "autodetect_off",
-      "enabled": true,
-      "smoke": true
+      "enabled": true
     },
     {
       "config": "rocmib_no_cts_offload",
