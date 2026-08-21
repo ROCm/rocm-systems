@@ -34,6 +34,8 @@ CASES = [
     ("orphaned_tail.cc", SPDX + ORPHANED_TAIL + "\n#include <cstdio>\n", 1),
     ("orphaned_tail.h", SPDX + ORPHANED_TAIL + "\n#ifndef X_H_\n#define X_H_\n#endif\n", 1),
     ("intact_block.cc", SPDX + "\n/* a normal block comment */\n#include <cstdio>\n", 0),
+    # .in build templates are out of scope even without a header.
+    ("skipped_template.py.in", '__version__ = "1.0"\n', 0),
 ]
 
 

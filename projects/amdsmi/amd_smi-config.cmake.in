@@ -1,6 +1,3 @@
-# Copyright Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 # - Config file for the amd_smi package
 # It defines the following variables
 #  AMD_SMI_INCLUDE_DIRS - include directories for amd_smi

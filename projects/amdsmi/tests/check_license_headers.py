@@ -54,6 +54,8 @@ EXCLUDE_PREFIX = (
     "docs/",
     "include/libdrm/",  # vendored DRM headers, other owners
     "src/nic/brcm-nic/",  # Broadcom-owned NIC implementation
+    "include/ras-decode/",  # vendored RAS decode headers, not maintained here
+    "include/ualoe_lib/",  # vendored UALoE library headers, not maintained here
 )
 EXCLUDE_EXACT = frozenset(
     {
@@ -72,9 +74,12 @@ EXCLUDE_EXACT = frozenset(
 
 
 def base_ext(rel: str) -> tuple[str, str]:
-    """(extension, basename) with a trailing ``.in`` template suffix removed."""
-    name = rel[:-3] if rel.endswith(".in") else rel
-    return os.path.splitext(name)[1], os.path.basename(name)
+    """(extension, basename) for ``rel``.
+
+    ``.in`` build templates keep their ``.in`` extension, so they are not
+    recognized as a source language and fall out of scope.
+    """
+    return os.path.splitext(rel)[1], os.path.basename(rel)
 
 
 def comment_leader(rel: str) -> str | None:
