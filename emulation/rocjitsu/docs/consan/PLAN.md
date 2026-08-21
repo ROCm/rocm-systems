@@ -15,6 +15,11 @@ structure.
 **Status: the device tier is operational; residual coverage and end-to-end
 qualification work remains**
 
+The latest fetched `origin/develop` is contained in the current branch. Keep
+that current-base property true at qualification checkpoints; a develop merge
+is not complete until its integration breakage is repaired and protected by
+focused regressions.
+
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 The end-to-end procedure and acceptance rules are defined in
@@ -52,7 +57,10 @@ or implementation choices.
    not prevent progress on other cells, but it remains an explicit exit item.
 5. For every defect or useful end-to-end idiom encountered, make the durable
    result a focused host-unit test, checked-in device test, or both. The
-   prototype fix supports that deliverable; it does not replace it.
+   prototype fix and a status-cell promotion support that deliverable; neither
+   replaces it. If an investigation genuinely cannot yield a focused checked-in
+   regression, record the concrete reason instead of silently losing the
+   evidence.
 6. Generalize every new and existing test by behavior rather than by its source
    architecture. Translate target-native device code as necessary and cover
    every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
@@ -64,9 +72,11 @@ or implementation choices.
 
 ### Remaining work
 
-1. Merge the latest `origin/develop` into this branch with a merge commit.
-   Repair every resulting build or test regression and add a focused host-unit
-   or device regression for each behavioral defect exposed by the integration.
+1. At each qualification checkpoint, fetch and merge any newer
+   `origin/develop` into this branch with a merge commit. Repair every resulting
+   build or test regression and add a focused host-unit or device regression
+   for each behavioral defect exposed by the integration before accepting the
+   checkpoint as current.
 2. Continue making both the conventional host-unit suite and the checked-in
    device suite comprehensive. Close meaningful gaps identified by the
    capability audit, [VALIDATION.md](VALIDATION.md), or Aorta. Device scenarios
@@ -83,8 +93,11 @@ or implementation choices.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in
-   device test, or both as appropriate. A prototype fix without durable test
+   device test, or both as appropriate. The test is the preparation-phase
+   deliverable; a prototype fix or ledger improvement without durable test
    coverage is incomplete, even when the corresponding end-to-end cell passes.
+   When no faithful reduction is possible, leave an explicit rationale in the
+   relevant plan or status ledger.
 5. Make a deliberate pass over all existing ConSan host and device tests to
    identify architecture-local tests whose underlying idea is cross-cutting.
    Transport each useful contract to every semantically applicable target,
@@ -120,7 +133,8 @@ or implementation choices.
 - The host-unit and device suites comprehensively cover the behavior required
   by the current end-to-end corpus, Aorta, and the target capability audit.
   Every fixed defect has a regression, and every device scenario remains
-  independent of prototype implementation details.
+  independent of prototype implementation details. Prototype fixes and status
+  promotions are not counted as preparation deliverables on their own.
 - The existing-test transport audit is complete. Every cross-cutting contract
   runs on each semantically applicable CDNA3/4/5 and RDNA3/4 target, or has a
   documented capability-based not-applicable disposition.
