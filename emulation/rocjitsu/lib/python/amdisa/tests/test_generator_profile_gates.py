@@ -2713,20 +2713,17 @@ def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
         assert source.count(simd_glue_include) == 1
 
 
-def test_single_isa_cndmask_qualifies_amdgpu_src_modifier(tmp_path):
-    args = SimpleNamespace(
-        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
-        gen_isas=True,
-        gen_dbt=False,
-        isa_output=str(tmp_path),
-        dbt_output=None,
+def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    vop3 = next(
+        encoding for encoding in spec.inst_encodings if encoding.enc_name == 'ENC_VOP3'
     )
+    cndmask = next(inst for inst in vop3.insts if inst.name == 'V_CNDMASK_B32')
 
-    _run_multi(args)
-
-    execute_shared = (tmp_path / 'shared' / 'execute_shared.h').read_text()
-    body = _shared_execute_body(
-        execute_shared, 'v_cndmask_b32_vop3', 'v_ctz_i32_b32_vop1'
+    body = generator._gen_execute_body(
+        cndmask, semantics.instructions[cndmask.name], vop3.enc_name
     )
 
     assert body.count('amdgpu::apply_vop3_b32_src_mod(') == 2
