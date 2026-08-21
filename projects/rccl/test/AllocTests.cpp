@@ -507,7 +507,139 @@ TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
         }
     );
 }
+
+// ncclCudaCalloc is the production entry point: with cuMem enabled it must
+// delegate zeroing to ncclCuMemAlloc (no redundant caller-side memset) while
+// reusing the pooled side stream inside an active scope.
+TEST(Alloc, CuMemCallocReusesPooledSideStream)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemCallocReusesPooledSideStream",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable())
+            {
+                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+            }
+
+            constexpr int    dev    = 0;
+            constexpr size_t kElems = 8192;
+
+            hipStream_t pooled = nullptr;
+            {
+                ncclSideStreamScope scope(dev);
+                ASSERT_EQ(getSideStream(&pooled), ncclSuccess);
+                ASSERT_NE(pooled, nullptr) << "Scope must pool a side stream";
+
+                unsigned char* ptr = nullptr;
+                ASSERT_EQ(ncclCudaCalloc(&ptr, kElems, /*manager=*/nullptr), ncclSuccess);
+                ASSERT_NE(ptr, nullptr);
+
+                hipStream_t afterCalloc = nullptr;
+                ASSERT_EQ(getSideStream(&afterCalloc), ncclSuccess);
+                EXPECT_EQ(afterCalloc, pooled)
+                    << "ncclCudaCalloc must reuse (not churn/replace) the pooled side stream";
+
+                std::vector<unsigned char> host(kElems, 0xAB);
+                ASSERT_EQ(hipMemcpy(host.data(), ptr, kElems, hipMemcpyDeviceToHost), hipSuccess);
+                for(size_t i = 0; i < kElems; ++i)
+                {
+                    ASSERT_EQ(host[i], 0u) << "ncclCudaCalloc buffer not zeroed at offset " << i;
+                }
+
+                ASSERT_EQ(ncclCudaFree(ptr, /*manager=*/nullptr), ncclSuccess);
+            }
+
+            hipStream_t afterScope = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&afterScope), ncclSuccess);
+            EXPECT_EQ(afterScope, nullptr)
+                << "No side stream may survive a cuMem-path scope into the collective phase";
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+
+// Repeated cuMem allocations inside one scope must not create/destroy side
+// streams per allocation; the pooled stream pointer stays stable throughout.
+TEST(Alloc, CuMemMultipleAllocsNoStreamChurn)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemMultipleAllocsNoStreamChurn",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable())
+            {
+                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+            }
+
+            constexpr int                    dev        = 0;
+            constexpr int                    kNumAllocs = 8;
+            constexpr size_t                 kElems     = 4096;
+            std::vector<unsigned char*>      ptrs(kNumAllocs, nullptr);
+
+            hipStream_t pooled = nullptr;
+            {
+                ncclSideStreamScope scope(dev);
+                ASSERT_EQ(getSideStream(&pooled), ncclSuccess);
+                ASSERT_NE(pooled, nullptr) << "Scope must pool a side stream";
+
+                for(int i = 0; i < kNumAllocs; ++i)
+                {
+                    ASSERT_EQ(ncclCudaCalloc(&ptrs[i], kElems, /*manager=*/nullptr), ncclSuccess)
+                        << "ncclCudaCalloc failed on iteration " << i;
+
+                    hipStream_t current = nullptr;
+                    ASSERT_EQ(getSideStream(&current), ncclSuccess);
+                    EXPECT_EQ(current, pooled)
+                        << "Pooled side stream must not churn on allocation " << i;
+                }
+
+                for(unsigned char* ptr : ptrs)
+                {
+                    ASSERT_EQ(ncclCudaFree(ptr, /*manager=*/nullptr), ncclSuccess);
+                }
+            }
+
+            hipStream_t afterScope = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&afterScope), ncclSuccess);
+            EXPECT_EQ(afterScope, nullptr)
+                << "Scope exit must destroy the pooled side stream after multiple allocs";
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
 #endif // ROCM_VERSION >= 70000
+
+// When cuMem is disabled, ncclCudaCalloc must still zero via hipExtMalloc +
+// caller-side memset (the non-cuMem branch retained in ncclCudaCallocDebug).
+TEST(Alloc, CudaCallocNonCuMemPathZeroes)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CudaCallocNonCuMemPathZeroes",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            ASSERT_EQ(ncclCuMemEnable(), 0) << "Test requires NCCL_CUMEM_ENABLE=0 (hipExtMalloc path)";
+
+            constexpr size_t kElems = 8192;
+            unsigned char* ptr      = nullptr;
+            ASSERT_EQ(ncclCudaCalloc(&ptr, kElems, /*manager=*/nullptr), ncclSuccess);
+            ASSERT_NE(ptr, nullptr);
+
+            std::vector<unsigned char> host(kElems, 0xAB);
+            ASSERT_EQ(hipMemcpy(host.data(), ptr, kElems, hipMemcpyDeviceToHost), hipSuccess);
+            for(size_t i = 0; i < kElems; ++i)
+            {
+                ASSERT_EQ(host[i], 0u) << "non-cuMem ncclCudaCalloc buffer not zeroed at offset " << i;
+            }
+
+            ASSERT_EQ(ncclCudaFree(ptr, /*manager=*/nullptr), ncclSuccess);
+        },
+        {{"NCCL_CUMEM_ENABLE", "0"}}
+    );
+}
 
 // When the device supports multiple priorities, the pool creates and returns
 // separate streams for the same device at each priority.
