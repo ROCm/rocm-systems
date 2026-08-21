@@ -19,6 +19,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_amdgpu
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
+    rocjitsu_plugin_throughput
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -510,6 +511,7 @@ add_executable(
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_inline_constant_correctness_test.cpp
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp

@@ -6,6 +6,7 @@
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
 
+#include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
@@ -38,6 +39,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
@@ -49,6 +51,11 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   test::ScopedTempFile file("rocjitsu-config-");
   file.write(json);
   return file;
+}
+
+std::vector<uint8_t> read_binary_file(const std::string &path) {
+  std::ifstream stream(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -879,6 +886,7 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
+  ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
   EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
@@ -1060,6 +1068,22 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
+
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
@@ -1092,7 +1116,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
             0xFEEDFACEu);
 }
 
-TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"rdna4"},
     "topology":{
@@ -1125,19 +1149,36 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf, 64);
   ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
+  ASSERT_EQ(wf->wf_size(), 64u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
   cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + 1, 43, 0x1234002Bu);
   cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
@@ -1149,9 +1190,11 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
-  EXPECT_EQ(restored_wf->exec(), 0xFULL);
+  EXPECT_EQ(restored_wf->exec(), 0xDEADBEEF0000000FULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_wf->kernel_wave_size(), 64u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 43), 0x1234002Bu);
   EXPECT_EQ(restored_cu->read_vgpr(
                 restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
             0x5678001Fu);
@@ -1205,6 +1248,22 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 32u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 32u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 32u * sizeof(uint32_t));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();

@@ -31,13 +31,21 @@ constexpr uint32_t kLegacyTtmpSgprBase = 108;
 
 flatbuffers::Offset<flatbuffers::Vector<uint8_t>>
 serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
-                     uint32_t base) {
-  const size_t register_bytes = static_cast<size_t>(cu.wf_size()) * sizeof(uint32_t);
+                     uint32_t base, uint32_t lane_count) {
+  if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
+    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+  const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
   const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
   uint8_t *serialized = nullptr;
   const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
-  cu.copy_raw_vgprs_to(base, cu.vgpr_allocation_block_size(),
-                       {reinterpret_cast<std::byte *>(serialized), block_bytes});
+  size_t offset_bytes = 0;
+  cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
+    if (lanes.size() < lane_count)
+      throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
+    std::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
+                serialized + offset_bytes);
+    offset_bytes += register_bytes;
+  });
   return offset;
 }
 
@@ -46,13 +54,34 @@ serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::Comp
 /// restore, rather than a merge, only while the destination begins entirely
 /// zeroed.
 void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
-                                            const flatbuffers::Vector<uint8_t> &stored) {
-  const size_t register_bytes = static_cast<size_t>(cu.wf_size()) * sizeof(uint32_t);
-  const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
-  const size_t copy_size = std::min<size_t>(stored.size(), block_bytes);
-  cu.restore_raw_vgprs_into_zeroed_storage(
-      base, cu.vgpr_allocation_block_size(),
-      {reinterpret_cast<const std::byte *>(stored.data()), copy_size});
+                                            const flatbuffers::Vector<uint8_t> &stored,
+                                            uint32_t stored_lane_count,
+                                            uint32_t architectural_wave_size) {
+  const auto bytes = std::span(reinterpret_cast<const std::byte *>(stored.data()), stored.size());
+  const uint32_t register_count = cu.vgpr_allocation_block_size();
+
+  uint32_t lane_count = stored_lane_count;
+  if (lane_count == 0) {
+    const uint32_t candidates[] = {architectural_wave_size, cu.vgpr_storage_lane_count(),
+                                   cu.wf_size()};
+    for (uint32_t candidate : candidates) {
+      const size_t candidate_bytes =
+          static_cast<size_t>(register_count) * candidate * sizeof(uint32_t);
+      if ((candidate == 32 || candidate == 64) && stored.size() == candidate_bytes) {
+        lane_count = candidate;
+        break;
+      }
+    }
+  }
+  if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
+    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+  const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
+  if (stored.size() != static_cast<size_t>(register_count) * register_bytes)
+    throw std::runtime_error("Invalid VGPR checkpoint payload size");
+  for (uint32_t reg = 0; reg < register_count; ++reg) {
+    cu.restore_raw_vgprs_into_zeroed_storage(
+        base + reg, 1, bytes.subspan(static_cast<size_t>(reg) * register_bytes, register_bytes));
+  }
 }
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
@@ -179,7 +208,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
-          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base);
+          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
           std::array<uint32_t, 16> ttmps{};
@@ -198,7 +227,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec);
+                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
+                                              w->kernel_wave_size(), w->wf_size());
           wf_offsets.push_back(wfs);
         }
 
@@ -308,13 +338,15 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
           uint32_t num_vgprs = cu->config().vgprs_per_wf;
 
+          const uint32_t wave_size =
+              wf_state->kernel_wave_size() == 0 ? cu->wf_size() : wf_state->kernel_wave_size();
           auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
-                                        num_sgprs, num_vgprs);
+                                        num_sgprs, num_vgprs, wave_size);
           if (!wf)
             throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 
           wf->set_exec_raw(wf_state->exec());
-          wf->set_vcc(wf_state->vcc());
+          wf->set_vcc_raw(wf_state->vcc());
           wf->set_m0(wf_state->m0());
           // Halted wavefronts are never saved (see save_checkpoint skip above),
           // so halted() is always false here. Keep the branch for future-proofing.
@@ -322,7 +354,6 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
-
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
@@ -365,7 +396,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s
           // zero-state postcondition satisfies the sparse restore helper's precondition.
           if (auto *vgprs = wf_state->vgprs())
-            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs);
+            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs,
+                                                   wf_state->vgpr_lane_count(), wf->wf_size());
         }
       }
     }

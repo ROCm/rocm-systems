@@ -44,9 +44,19 @@ class KfdProcess {
 public:
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
-    void *doorbell_page = nullptr;
+    /// @brief One live client mapping of the canonical doorbell backing.
+    struct DoorbellView {
+      void *page = nullptr;
+      uint64_t gpu_va = 0;
+    };
+
+    /// @brief Canonical shared backing retained for the process lifetime.
+    int doorbell_memfd = -1;
+    /// @brief Every client doorbell view still owned by the mapping layer.
+    std::vector<DoorbellView> doorbell_views;
+    /// @brief Stable driver-side alias used exclusively by the command processor.
+    void *doorbell_monitor_page = nullptr;
     size_t doorbell_page_size = 0;
-    uint64_t doorbell_gpu_va = 0;
     uint64_t next_doorbell_offset = 0;
     std::vector<uint32_t> free_doorbell_offsets;
     uint64_t scratch_backing_va = 0;
@@ -290,6 +300,8 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+
+    bool operator==(const HostExtent &) const = default;
   };
 
   /// @brief One inline host extent, spilling to dynamic storage only for split pages.
@@ -313,6 +325,7 @@ public:
         move_from(std::move(other));
       return *this;
     }
+    bool operator==(const HostExtentList &) const = default;
 
     [[nodiscard]] size_t size() const {
       if (std::holds_alternative<std::monostate>(storage_))
@@ -447,6 +460,8 @@ public:
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
+
+    bool operator==(const PageTableEntry &) const = default;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
