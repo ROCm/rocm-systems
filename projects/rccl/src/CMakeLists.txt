@@ -668,7 +668,7 @@ add_dependencies(copy_nccl_device_headers hipify_all)
 # when compiling files in hipify/src/transport/net_ib/.
 set(NET_IB_HIPIFY_DIR "${HIPIFY_DIR}/src/transport/net_ib")
 set(NET_IB_HEADER_SYMLINKS "")
-foreach(_hdr common gin p2p)
+foreach(_hdr common gin p2p multiseg)
   add_custom_command(
     OUTPUT  "${NET_IB_HIPIFY_DIR}/${_hdr}.h"
     DEPENDS "${NET_IB_HIPIFY_DIR}/${_hdr}_tmp.h"
