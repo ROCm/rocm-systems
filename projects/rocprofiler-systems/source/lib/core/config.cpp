@@ -1405,8 +1405,6 @@ configure_settings(bool _init)
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
-        if(_config->get_suppress_config()) continue;
-
         const auto expanded_filename = settings::format(filename, _config->get_tag());
 
         // Prevent Timemory's read() silently dropping JSON config files without proper
@@ -1422,6 +1420,14 @@ configure_settings(bool _init)
                             "configuration, pass it via --preset instead.",
                             expanded_filename, TIMEMORY_PROJECT_NAME));
         }
+
+        // Timemory parses config files during static init before main() (see
+        // timemory_library_constructor()->init_config()). Bad .json files fail to parse
+        // but Timemory error message is uninformative. Meanwhile, the suppress_config
+        // flag is always true in the launcher. So, to produce a proper diagnostic message
+        // for bad .json files, the above .json root check MUST stay above this 'continue'
+        // gate to run regardless of suppress_config flag.
+        if(_config->get_suppress_config()) continue;
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
