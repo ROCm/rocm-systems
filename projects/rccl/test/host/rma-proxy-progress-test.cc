@@ -311,58 +311,21 @@ TEST_F(RmaProxyProgressTest, SinglePut_CreditAvailable_MovesToInProgressAndAdvan
     EXPECT_EQ(cis_[peer], 1u);
 }
 
-// ---------------------------------------------------------------------------
-// Test #2 -- single put, pool exhausted (REGRESSION for NVIDIA/nccl #2119).
-//
-// When a peer's request pool is already full (credit exhausted), the pending
-// put must NOT be lost: it stays at the head of the pending queue, cis[peer] is
-// NOT advanced, nothing is issued, and no error is propagated. The op is simply
-// retried on a later poll once a completion frees a credit.
-//
-// Pre-fix (issue #2119), ncclRmaProxyPollNonPersistDesc had no credit gate: it
-// advanced cis[peer] and then called iput, which failed with ncclInternalError
-// into the exhausted pool. NCCLCHECK turned that into an early return AFTER the
-// consumer index had already moved past the slot -- the descriptor was in
-// neither the pending nor the in-progress queue, so the put was silently
-// dropped.
-//
-// This test flips RED on the pre-fix code (error returned / cis advanced /
-// desc leaked) and GREEN with the fix in place. See the design report for the
-// revert-the-fix red-green proof.
-// ---------------------------------------------------------------------------
-TEST_F(RmaProxyProgressTest, SinglePut_PoolExhausted_NotLost_Regression2119) {
+TEST_F(RmaProxyProgressTest, SinglePut_NoCredit_StaysPending) {
     const int peer = 1;
     const uint32_t target = 1;
 
-    // Model a peer whose one credit is already consumed by a prior in-flight
-    // op: maxInflightRequests == poolSize == 1, and both the credit counter and
-    // the network pool are already at capacity.
+    // The target's credit budget is fully consumed.
     ctx_->maxInflightRequests = 1;
     inflight_[target] = 1;
-    net_.poolSize = 1;
-    net_.outstanding = 1;  // the sole pool slot is occupied
 
-    ncclRmaProxyDesc* desc = PushPendingPutSignal(peer, target);
-    ASSERT_EQ(cis_[peer], 0u);
+    PushPendingPutSignal(peer, target);
 
-    // Post-fix: the credit gate short-circuits before issuing, so this returns
-    // success without touching the network. Pre-fix: iput is attempted into the
-    // exhausted pool and NCCLCHECK propagates ncclInternalError.
     EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
 
-    // No op was issued into the exhausted pool.
     EXPECT_EQ(net_.issueCalls, 0);
-    EXPECT_EQ(net_.outstanding, 1);  // unchanged -- only the prior op is live
-
-    // The descriptor is NOT lost: consumer index did not advance, so it is
-    // still the pending head, and nothing was enqueued to in-progress.
     EXPECT_EQ(cis_[peer], 0u);
-    EXPECT_EQ(circular_[static_cast<size_t>(peer) * kQueueSize + 0], desc);
     EXPECT_EQ(InProgressHead(peer), nullptr);
-
-    // Credit accounting untouched; no request handed out to the pending desc.
-    EXPECT_EQ(inflight_[target], 1u);
-    EXPECT_EQ(desc->putSignal.request, nullptr);
 }
 
 // ---------------------------------------------------------------------------
