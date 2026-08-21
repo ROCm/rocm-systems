@@ -88,7 +88,7 @@ class RecordedCaptureTests(unittest.TestCase):
     finding.
     """
 
-    FIXTURES = SCRIPT_DIR / "fixtures"
+    FIXTURES = SCRIPT_DIR.parent / "evals" / "fixtures"
 
     def _analyze(self, *names: str) -> arf.Finding:
         finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")

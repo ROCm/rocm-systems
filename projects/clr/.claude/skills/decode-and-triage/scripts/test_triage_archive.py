@@ -19,7 +19,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPT = SCRIPT_DIR / "triage_archive.sh"
-FIXTURE = SCRIPT_DIR / "fixtures" / "rocm_smi_vram.txt"
+FIXTURE = SCRIPT_DIR.parent / "evals" / "fixtures" / "rocm_smi_vram.txt"
 
 
 def _shell_function(name: str) -> str:
