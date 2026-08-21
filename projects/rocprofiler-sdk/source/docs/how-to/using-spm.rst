@@ -6,7 +6,9 @@
 
 ==================
 Using SPM
-==================
+*****************************
+Using SPM
+*****************************
 
 SPM (Streaming Performance Monitor) sampling service for GPU profiling is a profiling technique to periodically sample performance counters with GPU timestamp.
 
