@@ -223,6 +223,14 @@ class SharedSignalPool_t : private BaseShared {
   ~SharedSignalPool_t() { clear(); }
 
   SharedSignal* alloc();
+
+  /// @brief Placement-aware overload, matching PageAllocator<T>::alloc().  This
+  /// pool's blocks come from BaseShared's process-global allocator, bound to one
+  /// CPU agent's fine-grain kernarg system region, so agent_node_id == 0 is the
+  /// only placement it can honour; anything else throws.  A caller needing
+  /// another placement must own the allocation itself.
+  SharedSignal* alloc(int agent_node_id, int flags);
+
   void free(SharedSignal* ptr);
   void clear();
 
