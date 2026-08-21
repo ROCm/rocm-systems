@@ -32,9 +32,12 @@ tests/python/
 ├── integration_test.py     # runner: discovers functional/  (live hardware)
 ├── cli_unit_test.py        # runner: discovers cli/         (drives amd-smi CLI)
 ├── common/                 # shared runner + helpers (common.py, runcmd.py)
-├── unit/                   # pure-logic tests
-│   ├── system/             #   test_bdf.py, test_check_res.py
-│   └── gpu/                #   apu_metrics, gfx_activity_silence, ...
+├── unit/                   # no hardware required
+│   ├── system/             #   test_bdf.py, test_check_res.py, ...
+│   ├── gpu/                #   apu_metrics, gfx_activity_silence, ...
+│   └── mock/               #   suites that replace amdsmi or the CLI's imports
+│       ├── system/         #     output_file_stdin, ...
+│       └── gpu/            #     cli_metric_partition, vcn_busy_navi, ...
 ├── functional/             # hardware tests (require a live device + root)
 │   ├── gpu/  cpu/  nic/  ifoe/  system/
 └── cli/                    # exercise the installed `amd-smi` binary
@@ -48,7 +51,7 @@ graph TD
     A[tests/python] --> U[unit_tests.py]
     A --> I[integration_test.py]
     A --> C[cli_unit_test.py]
-    U -->|discovers| UU[unit/*/test_*.py<br/>no hardware]
+    U -->|discovers| UU[unit/**/test_*.py<br/>no hardware]
     I -->|discovers| FF[functional/*/test_*.py<br/>live device]
     C -->|discovers| CC[cli/test_*.py<br/>amd-smi binary]
     U -.imports.-> CM[common/common.py]
@@ -75,7 +78,14 @@ graph TD
 
 | Runner | Discovers | Hardware | Purpose |
 | :--- | :--- | :--- | :--- |
-| `unit_tests.py` | `unit/` | No | Pure logic: BDF parsing, formatting, static data |
+| `unit_tests.py` | `unit/` | No | BDF parsing, formatting, CLI logic against a stubbed C library |
+
+Within `unit/`, a test belongs in `unit/mock/<component>/` if it replaces `amdsmi` or
+a CLI module in `sys.modules`; everything else goes directly in `unit/<component>/`.
+Suites under `mock/` must inherit `common.common.ModuleIsolationMixin` and declare
+`ISOLATED_MODULES` (and `ISOLATED_PATH` when they extend `sys.path`), so a stub never
+outlives its suite — [unit/test_module_isolation.py](unit/test_module_isolation.py)
+enforces this.
 | `integration_test.py` | `functional/` | Yes | API calls against a live device |
 | `cli_unit_test.py` | `cli/` | Yes | Runs the installed `amd-smi` binary and checks its output |
 
@@ -184,10 +194,10 @@ sudo AMDSMI_PATH=/path/to/build/share/amd_smi ./integration_test.py -v
 
 ```text
 Available tests:
-    system.test_bdf.TestBDF.test_invalid_bdfs
-    system.test_bdf.TestBDF.test_valid_bdfs
-    system.test_check_res.TestCheckRes.test_check_res
-    gpu.test_apu_metrics.TestApuMetrics.test_metrics
+    unit.gpu.test_apu_metrics.TestAmdSmiApuMetrics.test_convert_apu_unit_scalar
+    unit.mock.gpu.test_vcn_busy_navi.TestVcnBusyNaviFallback.test_navi_vcn_busy_reads_sysfs
+    unit.system.test_bdf.TestAmdSmiPythonBDF.test_parse_bdf
+    unit.system.test_check_res.TestAmdSmiCheckRes.test_check_res
     ...
 ```
 

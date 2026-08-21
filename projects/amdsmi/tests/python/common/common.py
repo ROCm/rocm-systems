@@ -113,6 +113,19 @@ def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
     print(f"\nRefer to `{script} -h` for more details.", file=file)
 
 
+def _find_repo_root():
+    """Locate the amd-smi source checkout, or None when running from an install."""
+    for parent in pathlib.Path(__file__).resolve().parents:
+        if (parent / "amdsmi_cli").is_dir() and (parent / "CMakeLists.txt").is_file():
+            return str(parent)
+    return None
+
+
+# Source-tree root, so tests that load CLI modules under review do not each
+# hard-code a fragile chain of ".." segments that breaks whenever they move.
+REPO_ROOT = _find_repo_root()
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
@@ -179,6 +192,45 @@ ERROR_MAP = {str(member.value): f"AMDSMI_STATUS_{member.name}" for member in amd
 VERBOSITY_QUIET = 0  # -q / --quiet
 VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
+
+
+class ModuleIsolationMixin:
+    """Restores ``sys.modules``/``sys.path`` for suites that install stubs.
+
+    Set ``ISOLATED_MODULES`` to every name the suite writes into ``sys.modules``
+    and ``ISOLATED_PATH`` to any directory it prepends to ``sys.path``. Without
+    this a stub outlives its suite and shadows the real module for a sibling
+    test. Subclasses must raise ``SkipTest`` before calling ``super().setUpClass()``,
+    since unittest skips ``tearDownClass`` when ``setUpClass`` raises.
+    """
+
+    ISOLATED_MODULES = ()
+    ISOLATED_PATH = None
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._saved_modules = {name: sys.modules.get(name) for name in cls.ISOLATED_MODULES}
+        cls._path_added = bool(cls.ISOLATED_PATH) and cls.ISOLATED_PATH not in sys.path
+        if cls._path_added:
+            sys.path.insert(0, cls.ISOLATED_PATH)
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "_path_added", False) and cls.ISOLATED_PATH in sys.path:
+            sys.path.remove(cls.ISOLATED_PATH)
+        for name, module in getattr(cls, "_saved_modules", {}).items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+        super().tearDownClass()
+
+    @classmethod
+    def clear_isolated_modules(cls):
+        """Drop the isolated names so a stub wins over an already-cached import."""
+        for name in cls.ISOLATED_MODULES:
+            sys.modules.pop(name, None)
 
 
 def build_type_lists():
@@ -603,11 +655,14 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern:
         loader.testNamePatterns = [f"*{k_pattern}*"]
 
-    suite = loader.discover(
-        start_dir=os.path.join(top_level_dir, subdir),
-        pattern="test_*.py",
-        top_level_dir=top_level_dir,
-    )
+    start_dir = os.path.join(top_level_dir, subdir)
+    suite = loader.discover(start_dir=start_dir, pattern="test_*.py", top_level_dir=top_level_dir)
+
+    # An empty suite is "successful", so without this a mislaid or unpackaged
+    # test tree exits 0 and silently reports nothing. A -k miss is not an error.
+    if suite.countTestCases() == 0 and not k_pattern:
+        print(f"ERROR: no tests discovered under {start_dir}", file=sys.stderr)
+        sys.exit(2)
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.

@@ -106,6 +106,10 @@ GPU: 0
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
+- **Grouped the Python suites that replace `sys.modules` entries under `unit/mock/`**.  
+  - Suites that stand in a fake `amdsmi` package or CLI module now live in `unit/mock/<component>/`; tests that exercise the real library stay in `unit/<component>/`. `unit_tests.py` and its installed path are unchanged.
+  - Only the moved suites change id, so `-k` filters that target them cost an extra `mock.` segment (`unit.gpu.test_cli_metric_partition` becomes `unit.mock.gpu.test_cli_metric_partition`); filters for every other test are unaffected.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.

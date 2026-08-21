@@ -199,9 +199,15 @@ independently filterable via `--gtest_filter` wildcards.
 ### Mocked unit tests and fixtures
 
 Mocking is a *technique*, not a separate test level: a test that supplies canned input instead
-of touching hardware is still a **unit test**. Mocked and non-mocked unit tests therefore live
-side by side under `unit/<component>/`, organized by *what* they test rather than *how* they are
-isolated.
+of touching hardware is still a **unit test**. In C++ mocked and non-mocked unit tests therefore
+live side by side under `unit/<component>/`, organized by *what* they test rather than *how* they
+are isolated, and the technique shows up in the filename (`mock_<feature>_test.cc`).
+
+Python cannot do the same. Its mock suites replace entries in `sys.modules`, which is process-wide
+state that outlives the test unless it is restored, so they are grouped under `unit/mock/` where a
+single guard ([`unit/test_module_isolation.py`](../../tests/python/unit/test_module_isolation.py))
+can assert the whole tier cleans up after itself. The split is a containment boundary, not a
+separate test level — see [Python test structure](#python-test-structure).
 
 The cper suite shows both styles:
 
@@ -353,13 +359,22 @@ tests/python/
 │   ├── common.py                      # Common base class, device enumeration, error mapping, runner machinery
 │   └── runcmd.py                      # CLI subprocess wrapper
 │
-├── unit/                              # No hardware required — pure logic tests only
+├── unit/                              # No hardware required
 │   ├── __init__.py
+│   ├── test_module_isolation.py       # Guards that mock/ restores sys.modules and sys.path
 │   ├── gpu/
-│   │   ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
-│   │   └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)
-│   └── system/
-│       └── test_bdf.py                # BDF string parsing and formatting
+│   │   ├── test_apu_metrics.py        # APU metrics interface helpers (unit conversions, N/A parity)
+│   │   └── ...
+│   ├── system/
+│   │   ├── test_bdf.py                # BDF string parsing and formatting
+│   │   └── ...
+│   └── mock/                          # Suites that replace amdsmi or the CLI's imports
+│       ├── gpu/
+│       │   ├── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly
+│       │   └── ...
+│       └── system/
+│           ├── test_output_file_stdin.py  # --file overwrite prompt and its non-TTY guard
+│           └── ...
 │
 ├── functional/                        # Requires live hardware
 │   ├── __init__.py
@@ -595,9 +610,9 @@ shown in parentheses.
 
 | Old file (`tests/python_unittest/`) | New location (`tests/python/`) |
 | :--- | :--- |
-| `unit_tests.py` | `unit/<component>/test_<feature>.py` (e.g. `unit/system/test_bdf.py`, `unit/gpu/test_apu_metrics.py`) |
+| `unit_tests.py` | `unit/<component>/test_<feature>.py` (e.g. `unit/system/test_bdf.py`, `unit/gpu/test_apu_metrics.py`); suites that stub `sys.modules` live under `unit/mock/<component>/` |
 | `integration_test.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
-| `partition_metric_unit_test.py` | `unit/gpu/test_cli_metric_partition.py` |
+| `partition_metric_unit_test.py` | `unit/mock/gpu/test_cli_metric_partition.py` |
 | `cli_unit_test.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
