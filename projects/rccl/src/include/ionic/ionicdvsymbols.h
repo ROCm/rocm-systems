@@ -8,6 +8,7 @@
 struct ncclIonicdvSymbols {
   int (*ionicdv_internal_qp_set_gda)(struct ibv_qp* qp, bool enable_send, bool enable_recv);
   int (*ionicdv_internal_pd_set_udma_mask)(struct ibv_pd* ibpd, uint8_t udma_mask);
+  int (*ionicdv_internal_qp_set_puec_plane_route)(struct ibv_qp* qp, int plane_idx, struct ionic_dv_puec_route* route);
 };
 
 /* Constructs ionic direct verbs symbols per rdma-core linking or dynamic loading mode */

@@ -23,6 +23,8 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/reg.cc
     src/transport/net_ib_cast/scheduler.cc
     src/transport/net_ib_cast/gin.cc
+    src/transport/net_ib_cast/multiplane.h
+    src/transport/net_ib_cast/multiplane.cc
 )
 
 # The cast headers (common_cast.h, p2p_cast.h, etc.) live in this directory.

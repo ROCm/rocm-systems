@@ -17,4 +17,14 @@ enum ionicdv_reg_udma_mask {
   IONIC_UDMA_MASK_HIGH = 2
 };
 
+struct ionic_dv_puec_route {
+  union ibv_gid dgid;
+  union ibv_gid sgid;
+  uint32_t flow_label;
+  uint8_t hop_limit;
+  uint8_t sl;
+  uint8_t traffic_class;
+  uint32_t flags;
+};
+
 #endif  // NCCL_IONICDV_CORE_H_

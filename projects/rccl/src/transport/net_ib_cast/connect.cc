@@ -8,6 +8,7 @@
 #include "connect_cast.h"
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "multiplane.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -552,6 +553,32 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
   qpAttr.ah_attr.sl = rtrAttr->sl;
   qpAttr.ah_attr.src_path_bits = 0;
   qpAttr.ah_attr.port_num = rtrAttr->localIbPort;
+
+  // Multiplane: program per-plane PUEC routes if configured
+  bool multiplaneEnabled = false;
+  ibCastMultiplaneEnabled(&multiplaneEnabled);
+  if (multiplaneEnabled) {
+    NCCLCHECK(ibCastMultiplaneLoad());
+    union ibv_gid pipGids[MULTIPLANE_MAX_PIPS];
+    int nPips = 0;
+    NCCLCHECK(ibCastMultiplaneGetPipGids(&qpAttr.ah_attr.grh.dgid, pipGids, &nPips));
+    if (nPips > 0) {
+      // Replace dgid with loopback (local GID) — NIC firmware handles forwarding
+      qpAttr.ah_attr.grh.dgid = rtrAttr->localGid;
+      for (int i = 0; i < nPips; i++) {
+        struct ionic_dv_puec_route route = {};
+        route.dgid = pipGids[i];
+        memset(route.sgid.raw, 0, sizeof(union ibv_gid));
+        route.flow_label = qpAttr.ah_attr.grh.flow_label;
+        route.hop_limit = qpAttr.ah_attr.grh.hop_limit;
+        route.sl = qpAttr.ah_attr.sl;
+        route.traffic_class = qpAttr.ah_attr.grh.traffic_class;
+        route.flags = 0;
+        NCCLCHECK(wrap_ionicdv_qp_set_puec_plane_route(qp->qp, i, &route));
+      }
+    }
+  }
+
   TRACE(NCCL_NET, "NET/IB: %s: qpn=%u mtu=%d dst=%u ll=%u port=%u sl: %d tc: %d", __func__, qp->qp->qp_num,
         qpAttr.path_mtu, qpAttr.dest_qp_num, rtrAttr->linkLayer, qpAttr.ah_attr.port_num, qpAttr.ah_attr.sl,
         qpAttr.ah_attr.grh.traffic_class);
