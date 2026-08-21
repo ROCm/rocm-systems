@@ -8423,7 +8423,7 @@ class CodeGenerator:
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
-        When ``shared_plan`` is set (``--multi`` mode), universal instructions
+        When ``shared_plan`` is set, universal instructions
         are emitted into ``shared/<enc>.h/.cpp`` in the ``rocjitsu::amdgpu``
         namespace.  Per-ISA files include the shared header and emit
         ``using amdgpu::<ClassName>;`` aliases for universals, plus full
@@ -11067,8 +11067,8 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                # Portable SIMD probes can delegate even outside --multi mode,
-                # so this cannot be gated solely on shared_plan.
+                # Portable SIMD probes can delegate even without a shared
+                # plan, so this cannot be gated solely on shared_plan.
                 def _delegates_to_shared(i: Instruction) -> bool:
                     if not self.semantics or i.name not in self.semantics.instructions:
                         return False
@@ -11322,7 +11322,7 @@ class CodeGenerator:
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
-        # Shared execute templates are written by _run_multi after all ISAs
+        # Shared execute templates are written by the CLI after all ISAs
         # are processed, using the accumulated _shared_execute_bodies dict.
         # Individual ISA codegens just collect; they don't write.
 

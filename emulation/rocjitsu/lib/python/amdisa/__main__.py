@@ -150,14 +150,10 @@ def _detect_profile(isa_xml: str) -> str:
     return 'cdna'
 
 
-def _parse_isa_arg(
-    value: str, *, require_name: bool = False
-) -> tuple[str | None, str, str]:
+def _parse_isa_arg(value: str) -> tuple[str | None, str, str]:
     """Parse ``[NAME:]XML`` and resolve its ISA profile."""
     if ':' in value:
         name, xml_path = value.split(':', 1)
-    elif require_name:
-        raise ValueError(f'name:xml_path, got: {value}')
     else:
         name, xml_path = None, value
 
@@ -191,23 +187,16 @@ def _codegen_config(
     )
 
 
-def _run_multi(args) -> None:
-    """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
+def _run(args) -> None:
+    """Parse the input XMLs and generate the requested outputs."""
     specs = []
-    for entry in args.multi:
-        try:
-            name, xml_path, profile_key = _parse_isa_arg(entry, require_name=True)
-        except ValueError as error:
-            print(
-                f'error: --multi entry must be {error}',
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    for entry in args.isafiles:
+        name, xml_path, profile_key = _parse_isa_arg(entry)
         profile = _PROFILES[profile_key]()
         spec = Parser(xml_path, profile).parse()
         _apply_codegen_identity(spec, name)
         sem = derive_all_semantics(spec)
-        specs.append((name, spec, sem))
+        specs.append((name or spec.generated_dir_name, spec, sem))
 
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
@@ -255,10 +244,16 @@ def _run_multi(args) -> None:
 
     # DBT legalization tables and encoding translators.
     if args.gen_dbt:
+        if len(specs) < 2:
+            print(
+                'Skipping DBT generation: at least two ISAs are required.',
+                file=sys.stderr,
+            )
+            return
         dbt_output = args.dbt_output
         if not dbt_output:
             print(
-                'error: --dbt-output is required when generating DBT tables with --multi',
+                'error: --dbt-output is required when generating DBT tables',
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -299,29 +294,21 @@ def main() -> None:
         description='Parse a machine-readable AMD GPU ISA specification and generate C++ sources'
     )
     arg_parser.add_argument(
-        'isafile',
-        nargs='?',
-        default=None,
-        help='XML file with machine-readable AMD GPU ISA specification',
-    )
-    arg_parser.add_argument(
-        '--multi',
+        'isafiles',
         nargs='+',
-        metavar='NAME:XML',
-        help='Multi-ISA mode: parse all XMLs and generate shared execute() templates. '
-        'Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).',
+        metavar='[NAME:]XML',
+        help='Machine-readable AMD GPU ISA XML specifications. Each path may '
+        'have a generated identity prefix (e.g., cdna1:/path/to/cdna1.xml).',
     )
     arg_parser.add_argument(
         '--gen-isas',
         action='store_true',
-        default=True,
-        help='Generate ISA C++ files (decoders, encodings, execute bodies). Default.',
+        help='Generate ISA C++ files (decoders, encodings, execute bodies).',
     )
     arg_parser.add_argument(
         '--gen-dbt',
         action='store_true',
-        default=True,
-        help='Generate DBT legalization tables and encoding translators. Default.',
+        help='Generate DBT legalization tables and encoding translators.',
     )
     arg_parser.add_argument(
         '--isa-output', help='Output path for generated ISA C++ files'
@@ -337,33 +324,10 @@ def main() -> None:
         help='Output directory for DBT tables (defaults to --isa-output).',
     )
     args = arg_parser.parse_args()
-
-    # Multi-ISA mode.
-    if args.multi:
-        _run_multi(args)
-        return
-
-    if not args.isafile:
-        print('error: isafile required in single-ISA mode', file=sys.stderr)
-        sys.exit(1)
-
-    name, isa_file, profile_key = _parse_isa_arg(args.isafile)
-    profile = _PROFILES[profile_key]()
-    isa = Parser(isa_file, profile).parse()
-    _apply_codegen_identity(isa, name)
-    semantics = derive_all_semantics(isa)
-    config = _codegen_config(
-        args.isa_output,
-        include_root=args.include_root,
-        use_shared_execute_helpers=False,
-    )
-    if args.gen_isas:
-        emit_isa_properties(
-            args.isa_output,
-            [(name or isa.generated_dir_name, isa, semantics)],
-        )
-        code_gen = CodeGenerator(isa, args.isa_output, semantics, config=config)
-        code_gen.gen_all()
+    if not args.gen_isas and not args.gen_dbt:
+        args.gen_isas = True
+        args.gen_dbt = True
+    _run(args)
 
 
 if __name__ == '__main__':

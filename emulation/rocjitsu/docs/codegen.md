@@ -68,15 +68,14 @@ decode/encode functions and neutral field structs are auto-generated.
 ## CLI reference
 
 ```
-python -m amdisa [--multi NAME:XML ...] [--gen-isas] [--gen-dbt]
+python -m amdisa [--gen-isas] [--gen-dbt]
                  [--isa-output DIR] [--include-root DIR]
-                 [--dbt-output DIR] [[NAME:]XML]
+                 [--dbt-output DIR] [NAME:]XML ...
 ```
 
 | Option | Description |
 |---|---|
-| `[NAME:]XML` | Single-ISA mode. An optional name overrides the generated directory and C++ namespace while the XML determines the semantic profile |
-| `--multi NAME:XML ...` | Multi-ISA mode: parse all XMLs and generate shared execute templates |
+| `[NAME:]XML ...` | One or more ISA XMLs. An optional name overrides the generated directory and C++ namespace while the XML determines the semantic profile |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
@@ -84,7 +83,7 @@ python -m amdisa [--multi NAME:XML ...] [--gen-isas] [--gen-dbt]
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |
 
 When neither `--gen-isas` nor `--gen-dbt` is specified, both are
-generated.
+generated. DBT generation is skipped when only one ISA is provided.
 
 `--isa-output` controls where files are written. Generated include prefixes
 are derived from that path. If `--include-root` is provided, `--isa-output`
@@ -125,7 +124,6 @@ MRISA=../../shared/machine-readable-isa/isa
 CDNA5_MRISA=/path/to/cdna5-mrisa
 
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -148,7 +146,6 @@ find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated lib/rocjitsu/src/rocjit
 
 ```bash
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -171,7 +168,6 @@ find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
 
 ```bash
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -198,7 +194,7 @@ When modifying ISA semantics or adding instruction support:
    `lib/python/amdisa/codegen/execute/`, instruction classification in
    `lib/python/amdisa/semantics.py`, or compatibility inventory logic in
    `lib/python/amdisa/parser.py` as appropriate. Never edit generated C++.
-2. Regenerate with `scripts/generate-amdisa.sh` or `--multi` as shown above
+2. Regenerate with `scripts/generate-amdisa.sh` or the CLI as shown above
 3. If you regenerated manually, format the generated files with `clang-format`
    (the helper formats changed generated files for you)
 4. Stage ALL generated files before committing

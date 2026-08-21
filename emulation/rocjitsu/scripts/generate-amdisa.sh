@@ -98,7 +98,7 @@ export PYTHONPATH="$rocjitsu/lib/python${PYTHONPATH:+:$PYTHONPATH}"
 
 log "Running amdisa generator"
 "$python" -m amdisa \
-  --multi "${isa_entries[@]}" \
+  "${isa_entries[@]}" \
   --isa-output "$isa_out" \
   --dbt-output "$dbt_out"
 
