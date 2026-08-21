@@ -104,7 +104,7 @@ Binary instrumentation and call-stack sampling can be used independently or toge
 Command-line tools
 ====================
 
-ROCm Systems Profiler ships as a set of standalone executables, one per collection mode:
+ROCm Systems Profiler ships as a set of standalone executables, each oriented toward a different profiling workflow:
 
 .. list-table::
    :header-rows: 1
