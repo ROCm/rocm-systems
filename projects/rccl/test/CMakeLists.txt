@@ -358,6 +358,7 @@ if(BUILD_TESTS)
       IommuPassthrough_test.cpp
       MatchSubnet_test.cpp
       MiscTests.cpp
+      NetIbMultiSegmentUnitTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
@@ -879,6 +880,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
+      transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
