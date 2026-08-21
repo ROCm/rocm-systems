@@ -2128,13 +2128,24 @@ TEST_F(NetIbMPITest, SetNetAttrNoOp) {
 // transfer, and the same measurement has to notice it -- otherwise the verdict
 // on the plugin means nothing.
 //
-// What it does and does not see. A lock held across a progress call serializes
-// the call itself and shows up here immediately. A lock taken and released
-// around one, like the two acquisitions shimPollCq adds per poll_cq, does not:
-// measured at four and sixteen workers, with the ops shims installed and
-// without, the factor was 1.00 either way, because the critical section is a map
-// lookup next to a driver call. That leak is caught deterministically instead, by
-// FaultInjectionShimsAbsentUnlessRequested.
+// Both waits poll without sleeping, deliberately: the completion wait, and the
+// isend retry that waits for the receiver's FIFO slot. The harness backs off
+// 10 ms in either place, which is longer than everything being measured -- with
+// the backoff a transfer here costs 10 ms and the phase reports the poll interval
+// rather than the plugin, and nothing shorter than the interval can be seen at
+// all. Without it a transfer costs about 7 us, so contention has somewhere to
+// show up. The price is a core per waiting worker for the couple of seconds this
+// test runs, which is why the functional tests keep the sleeping waits.
+//
+// What it sees, measured on mia1 at two ranks: a healthy build reports 1.02 to
+// 1.16 at four workers and 1.65 to 2.11 at sixteen, the growth being the NIC and
+// the cores rather than a lock. With RCCL_IB_FAULT_INJECTION set, whose ops shims
+// take one process-global mutex per poll_cq, the same measurement reports 1.74 to
+// 1.94 and 5.39 to 6.20: separated from the healthy range with no overlap. The
+// budget stays at 0.6 x N so a loaded node cannot fail the suite, which means the
+// shims pass it -- they are gated deterministically by
+// FaultInjectionShimsAbsentUnlessRequested instead, and this test's own numbers
+// are the evidence it would see a lock that mattered.
 // =============================================================================
 TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
@@ -2153,8 +2164,11 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     AssertInitAndGetDevices(nullptr);
 
     // Small messages: the point is how many transfers overlap, not bandwidth.
+    // The loop polls for completion without sleeping, so a transfer costs what it
+    // costs -- tens of microseconds -- and enough of them are needed for a phase
+    // to be measurable against scheduling noise.
     static constexpr size_t kMsgSize = 256;
-    static constexpr int    kIters   = 100;
+    static constexpr int    kIters   = 5000;
     static constexpr int    kTimeoutMs = 60000;
     // Full serialization costs N times the single-worker time. Passing means
     // staying below 60% of that, which on healthy hardware measures near 1.
@@ -2192,10 +2206,10 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
             if (serialize && rank == 1) {
                 std::lock_guard<std::mutex> lock(serializeAll);
                 result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
-                                           kTimeoutMs);
+                                           kTimeoutMs, nullptr, /*busyPoll=*/true);
             } else {
                 result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
-                                           kTimeoutMs);
+                                           kTimeoutMs, nullptr, /*busyPoll=*/true);
             }
             if (!result.ok) return result;
         }

@@ -1034,10 +1034,18 @@ protected:
         return result;
     }
 
+    // isend returns success with a null request until the receiver's FIFO slot is
+    // available, so the caller has to retry. busyPoll retries without sleeping,
+    // for timing tests: with the backoff, waiting for the slot costs one poll
+    // interval and that interval, not the plugin, is what a measurement then
+    // reports.
     ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
-                                void* mhandle, void** request) {
+                                void* mhandle, void** request, bool busyPoll = false,
+                                int timeoutMs = kDefaultTimeoutMs) {
         ThreadResult result;
         int attempts = 0;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
         do {
             if (PostSend(sendComm, data, size, tag, mhandle, request) != ncclSuccess) {
                 result.ok = false;
@@ -1045,6 +1053,14 @@ protected:
                 return result;
             }
             if (*request != nullptr) break;
+            if (busyPoll) {
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    result.ok = false;
+                    result.msg = "isend kept returning a NULL request until the timeout";
+                    return result;
+                }
+                continue;
+            }
             if (++attempts >= kMaxRetryAttempts) {
                 result.ok = false;
                 result.msg = "isend returned a NULL request after retries";
@@ -1079,19 +1095,50 @@ protected:
         return result;
     }
 
+    // Same wait without the 10 ms backoff between polls. A small transfer
+    // completes in tens of microseconds, so the sleeping wait spends one full
+    // interval on every one of them: measurements built on it report the poll
+    // interval rather than anything the plugin did, and contention inside a
+    // plugin call disappears under it. Only timing tests should use this -- it
+    // burns a core per waiting worker, which is why the functional tests keep
+    // the sleeping version.
+    ThreadResult WorkerWaitBusy(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        int done = 0;
+        while (!done) {
+            if (TestRequest(request, &done, sizes) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "test failed while polling for completion";
+                return result;
+            }
+            if (done) break;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                result.ok = false;
+                result.msg = "request did not complete within the timeout";
+                return result;
+            }
+        }
+        return result;
+    }
+
     // One transfer on the worker's own connection, without touching buffer
     // contents. For GPU buffers, or when the caller verifies the payload itself.
     ThreadResult WorkerSendRecvRaw(int rank, ConnectionPair& pair, void* buffer, size_t size,
                                    int tag, void* mhandle, int timeoutMs = kDefaultTimeoutMs,
-                                   int* receivedSize = nullptr) {
+                                   int* receivedSize = nullptr, bool busyPoll = false) {
         void* request = nullptr;
-        ThreadResult result = (rank == 0)
-            ? WorkerPostRecv(pair.recvComm, buffer, size, tag, mhandle, &request)
-            : WorkerPostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
+        ThreadResult result =
+            (rank == 0)
+                ? WorkerPostRecv(pair.recvComm, buffer, size, tag, mhandle, &request)
+                : WorkerPostSend(pair.sendComm, buffer, size, tag, mhandle, &request, busyPoll,
+                                 timeoutMs);
         if (!result.ok) return result;
 
         int sizes[1] = {0};
-        result = WorkerWait(request, sizes, timeoutMs);
+        result = busyPoll ? WorkerWaitBusy(request, sizes, timeoutMs)
+                          : WorkerWait(request, sizes, timeoutMs);
         if (!result.ok) return result;
         if (receivedSize) *receivedSize = sizes[0];
         return result;
