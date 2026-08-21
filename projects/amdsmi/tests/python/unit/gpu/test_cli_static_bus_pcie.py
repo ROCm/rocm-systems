@@ -18,13 +18,12 @@ crashes and reports ``N/A`` in both human-readable and JSON output.
 import argparse
 import importlib.util
 import os
-import sys
-import types
 import unittest
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
+
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 
 class _FakeLibraryException(Exception):
@@ -32,50 +31,49 @@ class _FakeLibraryException(Exception):
         return str(self)
 
 
-def _install_fake_modules(pcie_static):
-    """Register a stub ``amdsmi`` package plus the sibling CLI modules.
+def _fake_modules(pcie_static):
+    """Build the stub ``amdsmi`` package plus the sibling CLI modules.
 
+    Returns the name -> module mapping for ``common.stub_modules``;
     ``pcie_static`` is returned verbatim from ``amdsmi_get_pcie_info``.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
-
-    interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
-    interface.amdsmi_get_pcie_info = lambda _handle: {"pcie_static": pcie_static}
-    exception.AmdSmiLibraryException = _FakeLibraryException
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
 
     def _raise_lib_exc(_handle):
         raise exception.AmdSmiLibraryException("mock: pci bandwidth unavailable")
 
-    # Bus info also fetches pci bandwidth for pcie_levels; keep it out of scope
-    # for these PCIe-speed/version-focused tests by having it degrade to N/A
-    # the same way the real library does when unsupported.
-    interface.amdsmi_get_gpu_pci_bandwidth = _raise_lib_exc
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        amdsmi_get_gpu_device_bdf=lambda _handle: "0000:00:00.0",
+        amdsmi_get_pcie_info=lambda _handle: {"pcie_static": pcie_static},
+        # Bus info also fetches pci bandwidth for pcie_levels; keep it out of scope
+        # for these PCIe-speed/version-focused tests by having it degrade to N/A
+        # the same way the real library does when unsupported.
+        amdsmi_get_gpu_pci_bandwidth=_raise_lib_exc,
+    )
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     # ``static.py`` imports these sibling names at load time; the bus path
     # never instantiates them (the test injects a fake helpers object).
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = object
-    sys.modules["amdsmi_helpers"] = helpers_mod
-
-    exceptions_mod = types.ModuleType("amdsmi_cli_exceptions")
-    exceptions_mod.AmdSmiInvalidParameterException = type(
-        "AmdSmiInvalidParameterException", (Exception,), {}
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=object)
+    exceptions_mod = fake_module(
+        "amdsmi_cli_exceptions",
+        AmdSmiInvalidParameterException=type("AmdSmiInvalidParameterException", (Exception,), {}),
     )
-    sys.modules["amdsmi_cli_exceptions"] = exceptions_mod
 
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi_helpers": helpers_mod,
+        "amdsmi_cli_exceptions": exceptions_mod,
+    }
 
 
 def _load_static_module():
     spec = importlib.util.spec_from_file_location("static_under_test", STATIC_PATH)
+    if spec is None or spec.loader is None:
+        raise unittest.SkipTest(f"amd-smi CLI static.py is not loadable ({STATIC_PATH})")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -181,9 +179,11 @@ class TestCliStaticBusPcieNA(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
-        cls.interface = _install_fake_modules(
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _fake_modules(
             {
                 "max_pcie_width": "N/A",
                 "max_pcie_speed": "N/A",
@@ -191,6 +191,8 @@ class TestCliStaticBusPcieNA(unittest.TestCase):
                 "slot_type": "N/A",
             }
         )
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.static_module = _load_static_module()
 
     def _run_bus(self, fmt):
@@ -229,9 +231,11 @@ class TestCliStaticBusPcieValid(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
-        cls.interface = _install_fake_modules(
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _fake_modules(
             {
                 "max_pcie_width": 16,
                 "max_pcie_speed": 16000,
@@ -239,6 +243,8 @@ class TestCliStaticBusPcieValid(unittest.TestCase):
                 "slot_type": "OAM",
             }
         )
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.static_module = _load_static_module()
 
     def _run_bus(self, fmt):
