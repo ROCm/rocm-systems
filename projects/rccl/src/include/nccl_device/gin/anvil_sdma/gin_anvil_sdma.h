@@ -28,7 +28,6 @@ NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
 
-
 NCCL_DEVICE_INLINE void* resolveRemotePeerVa(ncclGinAnvilSdmaGPUContext* rsCtx, ncclGinAnvilSdmaMemHandle* mh, int peer,
                                              size_t off) {
   ptrdiff_t stride = loadConst(&mh->vmmStride);
@@ -380,8 +379,8 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      cuda::memory_order ord, uint32_t* abortFlag) {
     (void)hasDescriptor;
     (void)descriptor;
     (void)ord;
@@ -425,25 +424,23 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
-                                      ncclGinWindow_t, size_t, size_t, bool,
-                                      ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t, ncclGinWindow_t, size_t, size_t,
+                                      bool, ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
     __builtin_trap();
   }
 };
 
 template <>
 struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool,
-                                      ncclGinDescriptorSmem*, uint32_t) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool, ncclGinDescriptorSmem*, uint32_t) {
     __builtin_trap();
   }
 };
 
 template <>
 struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool,
-                                      ncclGinDescriptorSmem*, cuda::memory_order, uint32_t*) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*, cuda::memory_order,
+                                      uint32_t*) {
     __builtin_trap();
   }
 };
