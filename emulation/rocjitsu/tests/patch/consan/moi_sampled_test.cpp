@@ -2471,34 +2471,37 @@ TEST(ConSanMoi, Gfx1250SampledAutomaticExecSaveUsesOwnerLocalWindow) {
   }));
 }
 
-TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsSafeGlobalExecWindow) {
+TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsLivenessDeadGlobalExecWindow) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kGlobalExecSaveSgpr = 80u;
   const auto access = build_cdna4_ds_store_b32(
       /*vaddr=*/0u, /*vdata=*/1u, /*byte_offset=*/0u, kArch);
   ASSERT_TRUE(access);
   std::vector<uint32_t> low_words(320u, build_s_nop(0u, kArch));
-  std::copy(access->begin(), access->end(), low_words.begin());
+  for (uint16_t sgpr = kGlobalExecSaveSgpr; sgpr < kGlobalExecSaveSgpr + 8u; ++sgpr)
+    low_words[sgpr - kGlobalExecSaveSgpr] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/sgpr, kArch);
+  std::copy(access->begin(), access->end(), low_words.begin() + 16u);
   low_words.back() = build_s_endpgm(kArch);
   std::vector<uint32_t> high_words(320u, build_s_nop(0u, kArch));
   std::copy(access->begin(), access->end(), high_words.begin());
-  // The high persistent dispatch pair is live across this owner's access,
-  // while the wider code-object-wide EXEC window remains dead and reusable.
   high_words[access->size()] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/96u, kArch);
   high_words[access->size() + 1u] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/97u, kArch);
   high_words.back() = build_s_endpgm(kArch);
   std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
       low_words, high_words, {}, /*vgpr_granulated=*/0u, /*function_is_kernel=*/true);
-  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 7u);
-  });
-  mutate_kernel_descriptor(bytes, "lds_helper", [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
-  });
+  for (std::string_view kernel : {"lds_probe", "lds_helper"}) {
+    mutate_kernel_descriptor(bytes, kernel, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+    });
+  }
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.moi_dispatch_id_sgpr = 96u;
+  options.automatic_moi_dispatch_id_sgprs = true;
   options.moi_owner_vgpr = 40u;
   options.moi_epoch_vgpr = 41u;
   options.moi_runtime_sample_stride = 2u;
@@ -2507,6 +2510,96 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsSafeGlobalExecWindow) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, kGlobalExecSaveSgpr);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+                                           patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+                                  }),
+            2u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind != ConSanResourceSiteKind::Access ||
+           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+  })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kGlobalExecSaveSgpr = 80u;
+  constexpr uint16_t kLocalExecSaveSgpr = 60u;
+  const auto access = build_cdna4_ds_store_b32(
+      /*vaddr=*/0u, /*vdata=*/1u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(access);
+  std::vector<uint32_t> low_words(320u, build_s_nop(0u, kArch));
+  std::copy(access->begin(), access->end(), low_words.begin());
+  low_words.back() = build_s_endpgm(kArch);
+  std::vector<uint32_t> high_words(320u, build_s_nop(0u, kArch));
+  std::copy(access->begin(), access->end(), high_words.begin());
+  // Both code-object-wide scalar windows overlap this owner's guest state. A
+  // prior EXEC placement therefore gives it a local window, after which
+  // dispatch placement must independently replace only the dispatch pair.
+  size_t high_cursor = access->size();
+  for (uint16_t sgpr = kGlobalExecSaveSgpr; sgpr < kGlobalExecSaveSgpr + 8u; ++sgpr)
+    high_words[high_cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/sgpr, kArch);
+  high_words[high_cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/96u, kArch);
+  high_words[high_cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/97u, kArch);
+  high_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      low_words, high_words, {}, /*vgpr_granulated=*/0u, /*function_is_kernel=*/true);
+  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  mutate_kernel_descriptor(bytes, "lds_helper", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto high_original =
+      std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(high_original, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.moi_dispatch_id_sgpr = 96u;
+  options.automatic_moi_dispatch_id_sgprs = true;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u;
+  // Another owner component may already have required a local EXEC window.
+  // That must not suppress the independent dispatch-only override below.
+  options.automatic_moi_partial_exec_save_sgprs = true;
+  options.moi_transient_sgpr_assignments.push_back(
+      {.descriptor_file_offset = high_original->descriptor_file_offset,
+       .exec_save_sgpr = kLocalExecSaveSgpr,
+       .owner_sgpr = std::nullopt,
+       .dispatch_id_sgpr = 96u,
+       .spill_backed = false,
+       .indirect_pc_sgpr = std::nullopt,
+       .indirect_scc_sgpr = std::nullopt,
+       .dispatch_key_sgpr = std::nullopt,
+       .call_return_sgpr = std::nullopt,
+       .visible_evidence_sgpr = std::nullopt,
+       .branch_only_scalar_spill = false,
+       .dynamic_stack_borrowed_sgpr = std::nullopt});
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -2522,7 +2615,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsSafeGlobalExecWindow) {
       &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
   ASSERT_NE(assignment, result.resolved_moi_transient_sgpr_assignments.end())
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(assignment->exec_save_sgpr, *result.resolved_moi_exec_save_sgpr);
+  EXPECT_EQ(assignment->exec_save_sgpr, kLocalExecSaveSgpr);
   EXPECT_FALSE(assignment->dispatch_id_sgpr);
   EXPECT_FALSE(assignment->spill_backed);
   EXPECT_EQ(std::ranges::count_if(result.patches,
@@ -2534,6 +2627,18 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsSafeGlobalExecWindow) {
                                   }),
             2u)
       << testing::PrintToString(result.warnings);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (plan.site_kind == ConSanResourceSiteKind::Access) {
+      EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
+          << consan_register_plan_reason_name(plan.reason) << " at " << plan.text_offset
+          << " owner "
+          << (plan.owner_descriptor_file_offsets.empty()
+                  ? 0u
+                  : plan.owner_descriptor_file_offsets.front())
+          << " scratch " << plan.scratch_vgpr.value_or(0u) << " current-vgprs "
+          << plan.current_vgpr_count << " required-vgprs " << plan.required_vgpr_count;
+    }
+  }
   EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
     return site.site_kind != ConSanResourceSiteKind::Access ||
            site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;

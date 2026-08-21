@@ -5062,23 +5062,61 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
     return false;
   }
 
-  // Dispatch placement runs before transient EXEC-save placement. Ask the
-  // existing component planner to prove a complete owner-local scalar ABI for
-  // any newly included full-pressure component. Do not infer that the global
-  // EXEC-save window is safe merely because dispatch placement excluded the
-  // component before its liveness was considered.
+  // Dispatch placement runs before transient EXEC-save placement. Record/Replay
+  // needs a complete owner-local scalar ABI for every newly included component.
+  // Sampled instead retains the independently proven EXEC window and overrides
+  // only a conflicting dispatch pair with its literal identity representation.
   const auto prior_assignments = options.moi_transient_sgpr_assignments;
   const auto prior_resolved_assignments = result.resolved_moi_transient_sgpr_assignments;
   const bool prior_partial_exec = options.automatic_moi_partial_exec_save_sgprs;
   options.moi_transient_sgpr_assignments.clear();
   result.resolved_moi_transient_sgpr_assignments.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
-  const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled && !prior_partial_exec;
+  const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled;
   if (!configure_automatic_moi_transient_sgpr_assignments(options, result, state, dispatch_only)) {
     options.moi_transient_sgpr_assignments = prior_assignments;
     result.resolved_moi_transient_sgpr_assignments = prior_resolved_assignments;
     options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
     return false;
+  }
+
+  if (dispatch_only) {
+    // EXEC and dispatch placement are independent proofs. Preserve every
+    // previously selected owner-local EXEC ABI and overlay only the dispatch
+    // representation derived above. Replacing the whole assignment here can
+    // resurrect a code-object-wide EXEC window that the owner had already
+    // rejected, silently dropping all sites in that component.
+    const auto dispatch_assignments = std::move(options.moi_transient_sgpr_assignments);
+    options.moi_transient_sgpr_assignments = prior_assignments;
+    for (const ConSanMoiTransientSgprAssignment &dispatch_assignment : dispatch_assignments) {
+      auto prior = std::ranges::find(options.moi_transient_sgpr_assignments,
+                                     dispatch_assignment.descriptor_file_offset,
+                                     &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+      if (prior == options.moi_transient_sgpr_assignments.end()) {
+        // A partial EXEC proof deliberately leaves an incompatible owner
+        // without an assignment. Dispatch-only planning starts from the
+        // global EXEC base, so admitting that newly synthesized assignment
+        // would resurrect the excluded owner with an unsafe transient
+        // window. Owners that safely use the global EXEC ABI remain eligible.
+        if (prior_partial_exec) {
+          const std::array owners{dispatch_assignment.descriptor_file_offset};
+          const auto owner_contexts = resolve_moi_scalar_owner_contexts(state, owners);
+          if (!owner_contexts || !moi_scalar_contexts_admit_reserved_window(
+                                     owner_contexts->summaries, *options.moi_exec_save_sgpr,
+                                     moi_exec_save_sgpr_count(options, state.arch), state.arch)) {
+            continue;
+          }
+        }
+        options.moi_transient_sgpr_assignments.push_back(dispatch_assignment);
+      } else {
+        prior->dispatch_id_sgpr = dispatch_assignment.dispatch_id_sgpr;
+      }
+    }
+    result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
+    // The dispatch-only proof must not reclassify a globally liveness-dead
+    // EXEC window as an owner-wide reserved window. The latter is deliberately
+    // stricter and would reject guest uses outside instrumentation sites.
+    options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
   }
 
   // The component planner connects all callers of shared text. It retains the

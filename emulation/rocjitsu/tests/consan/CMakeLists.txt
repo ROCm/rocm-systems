@@ -424,6 +424,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaStreamkTwoTile|cdna_streamk_two_tile|ConSanDeviceCdnaStreamkTwoTileTest"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
             "CdnaDenseSccRoutes|cdna_dense_scc_routes|ConSanDeviceCdnaDenseSccRoutesTest|no-record-replay"
+            "CdnaIndependentScalarProofs|cdna_sampled_independent_scalar_proofs|ConSanDeviceCdnaSampledIndependentScalarProofsTest|sampled-only"
             "CdnaB16SccRoute|cdna_b16_scc_route|ConSanDeviceCdnaB16SccRouteTest"
         )
     endif()
@@ -525,6 +526,12 @@ function(rj_add_consan_device_conformance_cases)
                 )
                     continue()
                 endif()
+                if(
+                    _workload_feature STREQUAL "sampled-only"
+                    AND NOT _mode_value STREQUAL "sampled"
+                )
+                    continue()
+                endif()
             endif()
 
             set(_common_environment
@@ -598,6 +605,23 @@ function(rj_add_consan_device_conformance_cases)
                     APPEND _incorrect_environment
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                )
+            endif()
+
+            if(
+                _workload_name STREQUAL "CdnaIndependentScalarProofs"
+                AND _mode_value STREQUAL "sampled"
+            )
+                # Exercise persistent dispatch identity together with the two
+                # independent scalar-pressure owners in this workload. One
+                # workgroup at offset zero remains selected by this stride.
+                list(
+                    APPEND _correct_environment
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                )
+                list(
+                    APPEND _incorrect_environment
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
                 )
             endif()
 
@@ -689,6 +713,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_streamk_two_tile|cdna_streamk_two_tile_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"
             "cdna_dense_scc_routes|cdna_dense_scc_routes_test.hip"
+            "cdna_sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
             "cdna_b16_scc_route|cdna_b16_scc_route_test.hip"
         )
     endif()
