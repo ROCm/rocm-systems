@@ -367,7 +367,7 @@ __global__ void kernelFlushDirty(PutHarness* h, uint64_t* dirty) {
   ginCtx.nRanks = 2;
   h->ctx.sdmaDirty = dirty;
   h->ctx.queueHandles = nullptr;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 

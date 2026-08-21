@@ -304,7 +304,7 @@ __global__ void kernelFlushQuiet(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 
@@ -428,7 +428,7 @@ __global__ void kernelFlushMultiDirty(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 
