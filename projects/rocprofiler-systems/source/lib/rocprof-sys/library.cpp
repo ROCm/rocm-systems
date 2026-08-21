@@ -697,6 +697,8 @@ rocprofsys_init_tooling_hidden(void)
             for(auto& sub : subscribers)
                 g_control_session->subscribe(std::move(sub));
 
+            rocprofiler_sdk::create_roctx_client();
+
             g_control_session->force_initial_pause();
         }
 
