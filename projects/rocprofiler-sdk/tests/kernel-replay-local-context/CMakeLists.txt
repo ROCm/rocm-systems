@@ -7,10 +7,13 @@
 # (counters every pass, ATT once).
 #
 # Combinations that are not exercised here, by design:
-#   - counters + PC sampling: Constraint5, they cannot be configured together
+#   - counters + PC sampling on the SAME pass: Constraint5 / MI2xx/MI3xx clock gating
 #   - counters + SPM: both use SQ hardware on the same dispatch
 #   - ATT + SPM: both inject AQL packets around the dispatch
 #   - 3-/4-way mixes inherit those conflicts
+#
+# counters then PC sampling on the LAST pass is exercised: the services stay in
+# separate contexts and never collect on the same replay pass.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -128,12 +131,19 @@ add_kr_lc_test(
     DISABLED
     ${IS_SPM_DISABLED})
 
-# PC sampling: local stop must succeed. Collection is agent-wide and currently ignores the
-# override (documented no-op).
+# PC sampling: local stop must succeed and stop collection on this agent.
 add_kr_lc_test(
     test-kernel-replay-local-context-pc-sampling-stop-after-0
     ENVIRONMENT
     "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1;ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON"
+    DISABLED
+    ${IS_PC_SAMPLING_DISABLED})
+
+# Counters on passes 0..N-2, PC sampling only on the last pass (never the same pass).
+add_kr_lc_test(
+    test-kernel-replay-local-context-counters-then-pc-sampling
+    ENVIRONMENT
+    "KR_LC_SERVICES=counters,pc-sampling;KR_LC_PASSES=4;KR_LC_PCS_PASS=3;ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON"
     DISABLED
     ${IS_PC_SAMPLING_DISABLED})
 

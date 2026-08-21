@@ -27,6 +27,7 @@
 
 #    include "lib/common/logging.hpp"
 #    include "lib/common/static_object.hpp"
+#    include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
@@ -253,6 +254,60 @@ get_agent_session(rocprofiler_agent_id_t agent_id)
             }
             return nullptr;
         });
+}
+
+bool
+replay_context_should_sample(const context::context* ctx, rocprofiler_agent_id_t agent_id)
+{
+    if(!ctx || !ctx->pc_sampler || ctx->pc_sampler->agent_sessions.count(agent_id) == 0)
+        return false;
+
+    if(auto override = kernel_replay::local_context_override({.handle = ctx->context_idx}))
+        return *override;
+
+    return ctx->pc_sampler->enabled.load();
+}
+
+namespace
+{
+std::shared_ptr<PCSAgentSession>
+get_shared_agent_session(rocprofiler_agent_id_t agent_id)
+{
+    return get_global_pc_sampling_sessions().rlock(
+        [agent_id](const auto& sessions) -> std::shared_ptr<PCSAgentSession> {
+            auto it = sessions.find(agent_id);
+            return (it != sessions.end()) ? it->second : nullptr;
+        });
+}
+
+rocprofiler_status_t
+set_replay_hardware_state(const std::shared_ptr<PCSAgentSession>& session, bool enabled)
+{
+    if(!session || !is_hsa_initialized().load()) return ROCPROFILER_STATUS_SUCCESS;
+    return enabled ? hsa::pc_sampling_session_start(session.get())
+                   : hsa::pc_sampling_session_stop(session.get());
+}
+}  // namespace
+
+rocprofiler_status_t
+reconcile_replay_context(rocprofiler_agent_id_t agent_id)
+{
+    auto session = get_shared_agent_session(agent_id);
+    if(!session) return ROCPROFILER_STATUS_SUCCESS;
+
+    const auto* ctx = context::get_registered_context(session->context_id);
+    return set_replay_hardware_state(session, replay_context_should_sample(ctx, agent_id));
+}
+
+rocprofiler_status_t
+restore_replay_context(rocprofiler_agent_id_t agent_id)
+{
+    auto session = get_shared_agent_session(agent_id);
+    if(!session) return ROCPROFILER_STATUS_SUCCESS;
+
+    const auto* ctx     = context::get_registered_context(session->context_id);
+    const bool  enabled = ctx && ctx->pc_sampler && ctx->pc_sampler->enabled.load();
+    return set_replay_hardware_state(session, enabled);
 }
 
 rocprofiler_status_t

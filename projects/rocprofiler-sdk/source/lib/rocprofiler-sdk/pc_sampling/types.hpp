@@ -37,6 +37,7 @@
 #endif
 
 #include <memory>
+#include <atomic>
 
 namespace rocprofiler
 {
@@ -68,6 +69,10 @@ struct PCSAgentSession
     rocprofiler_context_id_t context_id = {.handle = 0};
     // Client index from the context (tool's id)
     uint32_t client_idx = 0;
+    // Tracks the ROCr hardware state independently from the owning context's global enabled
+    // state. Kernel replay can temporarily start one agent while the context remains globally
+    // stopped, then restore the pre-replay state without affecting other agents.
+    std::atomic<bool> hardware_enabled{false};
 };
 
 // TODO static assertions

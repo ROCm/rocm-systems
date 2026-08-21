@@ -138,15 +138,18 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    positions a context once rather than re-issuing the same toggles every pass.
     ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
     ///    is restored once the loop completes. Global context state is never modified.
-    ///  - A local start only undoes a prior local stop; it cannot promote a context that is
-    ///    globally inactive (its service/callback thread may already be stopped).
+    ///  - A local start only undoes a prior local stop for dispatch-scoped services; it cannot
+    ///    promote a globally inactive counter, SPM, or tracing context (its callback thread may
+    ///    already be stopped). A configured PC-sampling context is the exception: it may remain
+    ///    globally stopped and be started for one agent on a selected pass.
     ///  - Coverage varies by service. Kernel dispatch tracing and dispatch thread trace
     ///    observe a local stop only: they skip a dispatch whose context is forced off, and
     ///    have no means to add a context that is not already collecting. Dispatch counter
     ///    collection and SPM consult the override on every dispatch (and likewise refuse to
-    ///    promote a globally stopped context). PC sampling is agent-wide and device counting
-    ///    is not dispatch-scoped, so neither consults the override at all -- a call naming
-    ///    such a context reports success but has no effect.
+    ///    promote a globally stopped context). PC sampling is agent-wide; kernel replay applies
+    ///    the override to the replaying agent only, flushing and stopping hardware before a
+    ///    counter pass so the two services never run on the same pass (MI2xx/MI3xx clock-gating
+    ///    hang). Device counting is not dispatch-scoped and does not consult the override.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */

@@ -220,8 +220,8 @@ TEST(kernel_replay_local_context, last_write_wins_in_arm_window)
 
 // Per-service consumer models used at dispatch time. Dispatch counters and SPM AND the override
 // with the global enabled flag (local start cannot promote a globally stopped context); ATT skips
-// only when forced off; PC sampling is agent-wide and ignores the override (a local stop is a
-// recorded no-op).
+// only when forced off; PC sampling consults the override on the replaying agent so it can stay
+// globally stopped during counter passes and run only on a later pass.
 TEST(kernel_replay_local_context, simulated_service_consumers)
 {
     const rocprofiler_context_id_t counters{10};
@@ -239,8 +239,10 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
         if(auto ov = lc::local_context_override(id); ov && !*ov) return false;
         return true;
     };
-    const auto pcs_runs = [](rocprofiler_context_id_t) {
-        return true;  // agent-wide; does not consult the override
+    // Mirrors pc_sampling::replay_context_should_sample: override wins, else global enabled.
+    const auto pcs_runs = [](rocprofiler_context_id_t id, bool globally_on) {
+        if(auto ov = lc::local_context_override(id)) return *ov;
+        return globally_on;
     };
 
     std::vector<bool> counters_ran{};
@@ -264,13 +266,13 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
         counters_ran.push_back(dispatch_enabled(counters, true));
         att_ran.push_back(att_runs(att));
         spm_ran.push_back(dispatch_enabled(spm, true));
-        pcs_ran.push_back(pcs_runs(pcs));
+        pcs_ran.push_back(pcs_runs(pcs, true));
     }
 
     EXPECT_EQ(counters_ran, (std::vector<bool>{true, true, true, true}));
     EXPECT_EQ(att_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(spm_ran, (std::vector<bool>{true, false, false, false}));
-    EXPECT_EQ(pcs_ran, (std::vector<bool>{true, true, true, true}));
+    EXPECT_EQ(pcs_ran, (std::vector<bool>{true, false, false, false}));
 }
 
 // Local start must not resurrect a globally-stopped dispatch service: the override is ANDed with

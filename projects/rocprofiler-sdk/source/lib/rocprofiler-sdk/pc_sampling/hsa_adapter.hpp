@@ -45,6 +45,12 @@ generate_marker_packet_for_kernel(
     const tracing::external_correlation_id_map_t& external_correlation_ids,
     const rocprofiler_dispatch_id_t               dispatch_id);
 
+rocprofiler_status_t
+pc_sampling_session_start(PCSAgentSession* session);
+
+rocprofiler_status_t
+pc_sampling_session_stop(PCSAgentSession* session);
+
 void
 pc_sampling_service_start(context::pc_sampling_service* service);
 

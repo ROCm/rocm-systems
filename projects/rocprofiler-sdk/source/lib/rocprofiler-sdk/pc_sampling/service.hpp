@@ -76,6 +76,15 @@ is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id);
 PCSAgentSession*
 get_agent_session(rocprofiler_agent_id_t agent_id);
 
+bool
+replay_context_should_sample(const context::context* ctx, rocprofiler_agent_id_t agent_id);
+
+rocprofiler_status_t
+reconcile_replay_context(rocprofiler_agent_id_t agent_id);
+
+rocprofiler_status_t
+restore_replay_context(rocprofiler_agent_id_t agent_id);
+
 rocprofiler_status_t
 flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id);
 

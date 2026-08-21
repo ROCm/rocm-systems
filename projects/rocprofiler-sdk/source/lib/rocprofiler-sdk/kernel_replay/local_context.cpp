@@ -43,11 +43,15 @@ record_override(rocprofiler_context_id_t context_id, bool active)
     // Legal only inside a replay loop (tl_control set) and during the PASS PHASE_ENTER window
     // (armed). A stray call outside either fails and records nothing.
     if(tl_control == nullptr || !tl_toggles_armed) return ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
-    // Only contexts globally active when the loop began may be toggled: a local start must not
-    // promote a globally-stopped context (its service/callback thread is stopped), and there is
-    // nothing to stop for one either. Reject and record nothing otherwise. (C3)
+    // Dispatch-scoped services must already be globally active because their callbacks and worker
+    // state are owned by start_context(). PC sampling is the exception: it is configured per
+    // agent, and kernel replay must keep it globally stopped while counters run, then temporarily
+    // start only the replaying agent for a selected pass.
     if(tl_control->pre_active.count(context_id.handle) == 0)
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+    {
+        const auto* ctx = context::get_registered_context(context_id);
+        if(!ctx || !ctx->pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+    }
     tl_control->overrides[context_id.handle] = active;
     return ROCPROFILER_STATUS_SUCCESS;
 }

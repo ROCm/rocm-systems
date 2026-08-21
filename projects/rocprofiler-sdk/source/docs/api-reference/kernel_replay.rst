@@ -104,10 +104,17 @@ Replay does **not** replace dispatch counting. Typical pattern:
 4. In the dispatch-counting callback, select the counter config for that pass.
 5. Clear the thread-local pass index on PASS ``PHASE_EXIT``.
 
-To run PC sampling or thread trace on only some passes, put those services on their own contexts and
-stop or start them with the localized callbacks during PASS ``PHASE_ENTER``. Do not call the global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
-leak into non-replayed dispatches.
+To run PC sampling on a later pass than dispatch counters, put PC sampling on its own context,
+leave that context **globally stopped**, and locally start it on the last pass after locally
+stopping counters. Kernel replay will start sampling on the replaying agent only. Do **not** run
+both on the same pass: dispatch counting re-enables clock gating around the kernel, which can hang
+MI2xx/MI3xx if PC sampling is live.
+
+Do not call the global ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside
+the replay loop: that would leak into non-replayed dispatches.
+
+See ``samples/kernel_replay/`` for working tools, including
+``kernel-replay-counters-then-pc-sampling``.
 
 Doxygen
 -------

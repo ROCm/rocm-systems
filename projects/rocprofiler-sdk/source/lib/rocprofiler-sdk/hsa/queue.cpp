@@ -1018,12 +1018,22 @@ WriteInterceptor(const void* packets,
             // routing that connects the tool's PASS toggle callbacks (writers, via
             // replay_local_start/stop_context) to the services that read it at dispatch (via
             // kernel_replay::local_context_override). It lives for the whole loop and is torn down
-            // when the guard exits; global context state is never touched. It captures the contexts
-            // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
-            // those and a local start cannot promote a globally-stopped context
-            // (local_context.hpp).
+            // when the guard exits; global context state is never touched. Dispatch-scoped
+            // services may only toggle contexts that were active at loop start. A configured
+            // PC-sampling context may be promoted agent-locally even if it was globally stopped.
             auto local_ctx_tls_guard =
                 kernel_replay::scoped_local_context_control{context::get_active_contexts()};
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+            const auto replay_agent_id = queue.get_agent().get_rocp_agent()->id;
+            // PC sampling is agent-wide rather than dispatch-scoped. Restore its global context
+            // state on every exit path, including a throwing tool callback.
+            const auto pcs_restore_guard = common::scope_destructor{[replay_agent_id]() {
+                const auto status = pc_sampling::restore_replay_context(replay_agent_id);
+                ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+                    << "kernel replay: failed to restore PC sampling after replay";
+            }};
+#endif
 
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
@@ -1035,6 +1045,15 @@ WriteInterceptor(const void* packets,
                 auto pass_state = kernel_replay::pass_context_state_t{};
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+                // Apply the tool's sticky local override to this agent before dispatch-counting
+                // instrumentation is selected. Stopping PC sampling also flushes its ROCr/trap
+                // buffers, so counters and PC sampling never own the PM hardware simultaneously.
+                const auto pcs_status = pc_sampling::reconcile_replay_context(replay_agent_id);
+                ROCP_FATAL_IF(pcs_status != ROCPROFILER_STATUS_SUCCESS)
+                    << "kernel replay: failed to switch PC sampling at a pass boundary";
+#endif
 
                 process_packet_batch(packets_arr,
                                      1,

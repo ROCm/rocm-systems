@@ -139,10 +139,18 @@ Semantics:
 - **Scoped to the replay loop.** Each context's pre-replay active or inactive state is in effect
   again once the loop completes. Global context state is never modified, and only the replaying
   thread observes the overrides.
+- **PC sampling may start from globally stopped.** Dispatch counters, SPM, and tracing cannot be
+  promoted from a globally stopped context. PC sampling can: configure it, leave it globally
+  stopped during counter passes, then locally start it on a later pass. Kernel replay applies that
+  override to the **replaying agent only**.
+- **Do not collect PC samples on the same pass as dispatch counters.** Dispatch counting turns
+  clock gating back on around the kernel; PC sampling on MI2xx/MI3xx requires it off. Overlapping
+  them can hang the GPU.
 
 Kernel dispatch tracing honors the overrides by dropping disabled contexts from the pass's tracing
-data, so their timestamp records are skipped. Counter collection, PC sampling, SPM, and thread trace
-consult the same override map at dispatch time. See
+data, so their timestamp records are skipped. Counter collection, SPM, and thread trace consult the
+override at dispatch time. PC sampling consults the override when kernel replay starts or stops the
+agent session around each pass (and flushes on stop). See
 [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
 for how the override map is scoped.
 
@@ -242,4 +250,6 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
 | Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_start_context()`, `replay_local_stop_context()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
+| PC sampling per-pass agent switch | `source/lib/rocprofiler-sdk/pc_sampling/service.cpp` | `reconcile_replay_context()`, `restore_replay_context()` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |
+| Samples | `samples/kernel_replay/` | `basic_client.cpp`, `counters_client.cpp`, `counters_then_pc_sampling_client.cpp`, `opt_out_client.cpp` |

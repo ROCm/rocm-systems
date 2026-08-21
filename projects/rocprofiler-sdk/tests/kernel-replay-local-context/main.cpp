@@ -43,7 +43,11 @@ constexpr int kBlock = 67;
 __global__ void
 bump(int* x)
 {
-    if(threadIdx.x == 0) atomicAdd(x, 1);
+    // Busy enough for host-trap PC sampling to observe the last replay pass.
+    volatile unsigned acc = 0;
+    for(int i = 0; i < 64 * 1024; ++i)
+        acc += static_cast<unsigned>(i + threadIdx.x);
+    if(threadIdx.x == 0 && acc != ~0u) atomicAdd(x, 1);
 }
 
 int

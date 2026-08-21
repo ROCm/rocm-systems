@@ -35,6 +35,9 @@
  *                     again (re-enable after a local stop). <0 = never local-start.
  *                     A local start cannot promote a globally-stopped context.
  *   KR_LC_KEEP        comma list of services that are never locally started/stopped
+ *   KR_LC_PCS_PASS    if set, counters run on passes [0, pass) and PC sampling runs only
+ *                     on that pass. The PC-sampling context is configured but left globally
+ *                     stopped so it never overlaps dispatch counting.
  */
 
 #include <rocprofiler-sdk/agent.h>
@@ -59,6 +62,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -93,6 +97,7 @@ std::set<std::string>   g_keep{};
 int64_t                 g_passes        = 4;
 int64_t                 g_stop_pass     = 1;
 int64_t                 g_start_pass    = -1;
+int64_t                 g_pcs_pass      = -1;
 rocprofiler_kernel_id_t g_target_kernel = UINT64_MAX;
 
 std::atomic<int> g_counter_records{0};
@@ -169,6 +174,36 @@ maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
 {
     if(ctx.handle == 0 || kept(name)) return;
     if(!p) return;
+
+    if(g_pcs_pass >= 0)
+    {
+        const bool is_pcs      = std::string_view{name} == "pc-sampling";
+        const bool is_counters = std::string_view{name} == "counters";
+        if(static_cast<int64_t>(p->current_pass) != g_pcs_pass) return;
+        if(is_pcs && p->replay_local_start_context_cb)
+        {
+            auto st = p->replay_local_start_context_cb(ctx);
+            if(st == ROCPROFILER_STATUS_SUCCESS)
+                g_local_starts.fetch_add(1);
+            else
+                fprintf(stderr,
+                        "[lc] local_start(%s) failed: %s\n",
+                        name,
+                        rocprofiler_get_status_string(st));
+        }
+        if(is_counters && p->replay_local_stop_context_cb)
+        {
+            auto st = p->replay_local_stop_context_cb(ctx);
+            if(st == ROCPROFILER_STATUS_SUCCESS)
+                g_local_stops.fetch_add(1);
+            else
+                fprintf(stderr,
+                        "[lc] local_stop(%s) failed: %s\n",
+                        name,
+                        rocprofiler_get_status_string(st));
+        }
+        return;
+    }
 
     if(g_start_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_start_pass)
     {
@@ -483,7 +518,7 @@ configure_pcs()
         fprintf(stderr, "PC sampling unavailable\n");
         return false;
     }
-    RC(rocprofiler_start_context(g_pcs_ctx));
+    if(g_pcs_pass < 0) RC(rocprofiler_start_context(g_pcs_ctx));
     return true;
 }
 
@@ -511,6 +546,7 @@ tool_init(rocprofiler_client_finalize_t, void*)
     g_passes     = env_i64("KR_LC_PASSES", 4);
     g_stop_pass  = env_i64("KR_LC_STOP_PASS", 1);
     g_start_pass = env_i64("KR_LC_START_PASS", -1);
+    g_pcs_pass   = env_i64("KR_LC_PCS_PASS", -1);
 
     RC(rocprofiler_create_context(&g_replay_ctx));
     RC(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
@@ -548,6 +584,8 @@ tool_fini(void*)
 
     auto check_exact = [&](const char* name, bool keep, int got) {
         int want = keep ? static_cast<int>(g_passes) : expected_dispatch_records();
+        if(g_pcs_pass >= 0 && std::string_view{name} == "counters")
+            want = static_cast<int>(g_pcs_pass);
         fprintf(stderr, "[lc] %s records=%d expected=%d keep=%d\n", name, got, want, keep);
         if(got != want)
         {
@@ -580,22 +618,33 @@ tool_fini(void*)
     if(wants("pc-sampling"))
     {
         fprintf(stderr,
-                "[lc] pc-sampling samples=%d local_starts=%d local_stops=%d "
-                "(agent-wide service; local start/stop is a no-op for collection)\n",
+                "[lc] pc-sampling samples=%d local_starts=%d local_stops=%d pcs_pass=%ld\n",
                 g_pcs_samples.load(),
                 g_local_starts.load(),
-                g_local_stops.load());
-        const bool should_stop  = g_stop_pass >= 0 && !kept("pc-sampling");
-        const bool should_start = g_start_pass >= 0 && !kept("pc-sampling");
-        if(should_stop && g_local_stops.load() < 1)
+                g_local_stops.load(),
+                static_cast<long>(g_pcs_pass));
+        if(g_pcs_pass >= 0)
         {
-            fprintf(stderr, "[lc] FAIL: pc-sampling local_stop was not invoked successfully\n");
-            ok = false;
+            if(g_local_starts.load() < 1)
+            {
+                fprintf(stderr, "[lc] FAIL: pc-sampling local_start was not invoked successfully\n");
+                ok = false;
+            }
         }
-        if(should_start && g_local_starts.load() < 1)
+        else
         {
-            fprintf(stderr, "[lc] FAIL: pc-sampling local_start was not invoked successfully\n");
-            ok = false;
+            const bool should_stop  = g_stop_pass >= 0 && !kept("pc-sampling");
+            const bool should_start = g_start_pass >= 0 && !kept("pc-sampling");
+            if(should_stop && g_local_stops.load() < 1)
+            {
+                fprintf(stderr, "[lc] FAIL: pc-sampling local_stop was not invoked successfully\n");
+                ok = false;
+            }
+            if(should_start && g_local_starts.load() < 1)
+            {
+                fprintf(stderr, "[lc] FAIL: pc-sampling local_start was not invoked successfully\n");
+                ok = false;
+            }
         }
     }
 

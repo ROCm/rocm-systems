@@ -125,9 +125,13 @@ Localized context control
 
 During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_local_start_context_cb`` /
 ``replay_local_stop_context_cb``. Use them to enable or disable other contexts for that pass
-(for example counters every pass, PC sampling once) without calling global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context``, which would leak into non-replayed
-dispatches.
+without calling global ``rocprofiler_start_context`` / ``rocprofiler_stop_context``, which would
+leak into non-replayed dispatches.
+
+Dispatch counters and PC sampling **cannot collect on the same pass**. On MI2xx/MI3xx, PC sampling
+needs clock gating off while dispatch counting turns it back on around the kernel. The supported
+pattern is counters on passes ``0..N-2`` and PC sampling on pass ``N-1``, with PC sampling
+configured but left globally stopped until that last pass.
 
 Overrides are sticky across passes and scoped to the replay loop. See
 :ref:`kernel-replay-callback-api` for the contract.
@@ -135,10 +139,12 @@ Overrides are sticky across passes and scoped to the replay loop. See
 In-tree examples
 ================
 
+* ``samples/kernel_replay/`` — user-facing tools: basic replay, per-pass counter groups, counters
+  then PC sampling, per-dispatch opt-out.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
   out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
 * ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts
-  across passes.
+  across passes, including counters then PC sampling on the last pass.
 * ``source/lib/rocprofiler-sdk/kernel_replay/tests/`` — unit tests for configure, local context,
   and snap/restore.
 

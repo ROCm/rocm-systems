@@ -249,53 +249,66 @@ generate_marker_packet_for_kernel(
     return rocprofiler::hsa::rocprofiler_packet(marker_pkt);
 }
 
+rocprofiler_status_t
+pc_sampling_session_start(PCSAgentSession* agent_session)
+{
+    if(!agent_session || !agent_session->hsa_agent.has_value())
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    bool expected = false;
+    if(!agent_session->hardware_enabled.compare_exchange_strong(expected, true))
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
+    if(pc_sampling_table_->hsa_ven_amd_pcs_start_fn(agent_session->hsa_pc_sampling) !=
+       HSA_STATUS_SUCCESS)
+    {
+        agent_session->hardware_enabled.store(false);
+        ROCP_ERROR << "HSA runtime failed to start PC sampling on the agent "
+                   << agent_session->agent->id.handle << "\n";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+pc_sampling_session_stop(PCSAgentSession* agent_session)
+{
+    if(!agent_session || !agent_session->hsa_agent.has_value())
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    bool expected = true;
+    if(!agent_session->hardware_enabled.compare_exchange_strong(expected, false))
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
+    if(pc_sampling_table_->hsa_ven_amd_pcs_stop_fn(agent_session->hsa_pc_sampling) !=
+       HSA_STATUS_SUCCESS)
+    {
+        agent_session->hardware_enabled.store(true);
+        ROCP_ERROR << "HSA runtime failed to stop PC sampling on the agent "
+                   << agent_session->agent->id.handle << "\n";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    // Flush internal PC sampling buffers (ROCr + 2nd level trap handler buffers) before another
+    // replay pass can reprogram performance-monitoring hardware.
+    return flush_internal_agent_buffers(agent_session);
+}
+
 void
 pc_sampling_service_start(context::pc_sampling_service* service)
 {
-    auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
     for(const auto& [_, agent_session] : service->agent_sessions)
-    {
-        // If the agent has been hidden by the ROCR_VISIBLE_DEVICES, no need to start PC sampling.
-        // Please check `pc_sampling_service_finish_configuration` for more information.
-        if(!agent_session->hsa_agent.has_value()) continue;
-
-        if(pc_sampling_table_->hsa_ven_amd_pcs_start_fn(agent_session->hsa_pc_sampling) !=
-           HSA_STATUS_SUCCESS)
-        {
-            // Two concurrent calls to the pc_sampling::start_service are invoked on the same
-            // service. The "faster" one succeeds and starts the PC sampling service on the HSA
-            // level. Although the "slower fails", the service is started.
-            ROCP_ERROR << "HSA runtime failed to start PC sampling on the agent "
-                       << agent_session->agent->id.handle << "\n";
-        }
-    }
+        pc_sampling_session_start(agent_session.get());
 }
 
 void
 pc_sampling_service_stop(context::pc_sampling_service* service)
 {
-    auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
     for(const auto& [_, agent_session] : service->agent_sessions)
-    {
-        // If the agent has been hidden by the ROCR_VISIBLE_DEVICES, no need to stop PC sampling.
-        // Please check `pc_sampling_service_finish_configuration` for more information.
-        if(!agent_session->hsa_agent.has_value()) continue;
-
-        if(pc_sampling_table_->hsa_ven_amd_pcs_stop_fn(agent_session->hsa_pc_sampling) !=
-           HSA_STATUS_SUCCESS)
-        {
-            // Two concurrent calls to the pc_sampling::stop_serivce are invoked on the same
-            // service. The "faster" one succeeds and stops the PC sampling service on the HSA
-            // level. Although the "slower fails", the service is stopped. The "slower" continues,
-            // while the "faster" tries flushing the ROCr's buffer below.
-            ROCP_ERROR << "HSA runtime failed to stop PC sampling on the agent "
-                       << agent_session->agent->id.handle << "\n";
-            continue;
-        };
-
-        // Flush internal PC sampling buffers (ROCr + 2nd level trap handler buffers)
-        flush_internal_agent_buffers(agent_session.get());
-    }
+        pc_sampling_session_stop(agent_session.get());
 }
 
 void
