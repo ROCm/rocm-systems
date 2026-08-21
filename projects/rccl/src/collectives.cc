@@ -233,14 +233,15 @@ RCCL_PARAM_DECLARE(ForceCeAllReduce);
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
                                     bool ceAllReduceAllowed) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and the per-tier
-  // thresholds, so it may claim the full range regardless of CE eligibility -- ddaFabricArch1250
-  // forces this branch unconditionally. On other arches, yield to DDA whenever CE won't actually
-  // service this call; yielding on message size alone left comms without CE's prerequisites (e.g.
-  // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
-  // kernel across the whole 4 MiB+ range that DDA still wins.
+  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (arch ddaVmmMax, else RCCL_DDA_THRESHOLD)
+  // and the per-tier thresholds, so it may claim the full range regardless of CE eligibility --
+  // ddaFabricArch1250 forces this branch unconditionally. On other arches, yield to DDA whenever
+  // CE won't actually service this call; yielding on message size alone left comms without CE's
+  // prerequisites (e.g. gfx950 with symmetricSupport off) with no DDA and no CE, falling back to
+  // the generic ring/tree kernel across the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
+  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+         rcclDdaEnabled(comm, msgBytes, rcclDdaVmmThreshold(comm, ncclFuncAllReduce));
 }
 
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
