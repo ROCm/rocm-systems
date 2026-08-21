@@ -66,13 +66,18 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
 }
 
 // ================================================================================================
-hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
+hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, int deviceId) {
   guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
-  int dev = ihipGetDevice();
-  if (dFunc_[dev] == nullptr) {
-    dFunc_[dev] = BuildKernel(hmod);
+  if (deviceId < 0 || static_cast<size_t>(deviceId) >= dFunc_.size()) {
+    return hipErrorInvalidDevice;
   }
-  *hfunc = asHipFunction(dFunc_[dev]);
+
+  if (dFunc_[deviceId] == nullptr) {
+    dFunc_[deviceId] = BuildKernel(hmod);
+  }
+
+  *hfunc = asHipFunction(dFunc_[deviceId]);
+
   return hipSuccess;
 }
 

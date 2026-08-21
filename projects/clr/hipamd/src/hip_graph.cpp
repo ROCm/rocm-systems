@@ -68,16 +68,12 @@ inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
   return hipSuccess;
 }
 
-hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
-                                  hip::GraphNode* const* pDependencies, size_t numDependencies,
-                                  const hipKernelNodeParams* pNodeParams,
-                                  const ihipExtKernelEvents* pNodeEvents = nullptr,
-                                  bool capture = true, int coopKernel = 0, int devId = -1,
-                                  int globalWorkSizeX_remainder = 0,
-                                  int globalWorkSizeY_remainder = 0,
-                                  int globalWorkSizeZ_remainder = 0,
-                                  dim3 clusterDim = {1, 1, 1},
-                                  uint32_t launchFlags = 0) {
+hipError_t ihipGraphAddKernelNode(
+    hip::GraphNode** pGraphNode, hip::Graph* graph, hip::GraphNode* const* pDependencies,
+    size_t numDependencies, const hipKernelNodeParams* pNodeParams,
+    const ihipExtKernelEvents* pNodeEvents = nullptr, bool capture = true, int coopKernel = 0,
+    int devId = -1, int globalWorkSizeX_remainder = 0, int globalWorkSizeY_remainder = 0,
+    int globalWorkSizeZ_remainder = 0, dim3 clusterDim = {0, 0, 0}, uint32_t launchFlags = 0) {
   if (!hip::Graph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
@@ -89,6 +85,11 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  if (hipError_t status =
+          ihipResolveGraphClusterDimensions(func, deviceId, pNodeParams->gridDim, &clusterDim);
+      status != hipSuccess) {
+    return status;
+  }
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
@@ -301,11 +302,11 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   nodeParams.kernelParams = kernelParams;
   nodeParams.sharedMemBytes = sharedMemBytes;
 
-  status = ihipGraphAddKernelNode(
-      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-      s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0, s->DeviceId(),
-      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
-      {1, 1, 1}, flags);
+  status =
+      ihipGraphAddKernelNode(&pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                             s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0,
+                             s->DeviceId(), globalWorkSizeX_remainder, globalWorkSizeY_remainder,
+                             globalWorkSizeZ_remainder, {0, 0, 0}, flags);
 
   if (status != hipSuccess) {
     return status;
@@ -388,7 +389,7 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
   }
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  dim3 clusterDim = {1, 1, 1};
+  dim3 clusterDim = {0, 0, 0};
   int coopKernel = 0;
 
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {

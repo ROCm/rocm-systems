@@ -710,6 +710,7 @@ namespace hip {
 hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
                             hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
+                            bool clusterDimsSpecified = false,
                             const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
@@ -749,8 +750,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   }
 
   amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
-                                     clusterDim.x, clusterDim.y, clusterDim.z);
+                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0, clusterDim.x,
+                                     clusterDim.y, clusterDim.z, clusterDimsSpecified);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }

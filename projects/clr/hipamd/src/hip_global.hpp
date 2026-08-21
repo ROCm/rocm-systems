@@ -37,7 +37,7 @@ class Function {
   Function(const std::string& name, FatBinaryInfo** modules = nullptr);
   ~Function();
 
-  hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod);
+  hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, int deviceId);
   bool IsValidDynFunc(const void* hfunc);
   hipError_t GetStatFunc(hipFunction_t* hfunc, int deviceId);
   hipError_t GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
