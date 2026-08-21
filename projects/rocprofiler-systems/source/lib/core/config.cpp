@@ -534,9 +534,6 @@ configure_settings(bool _init)
 
     auto _config = *get_config_impl();
 
-    // rocpd is the default output format; perfetto must be explicitly enabled
-    auto _default_perfetto_v = false;
-
     auto _system_backend = rocprofsys::get_env(env_vars::PERFETTO_BACKEND_SYSTEM, false);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::LOG_LEVEL,
@@ -585,8 +582,9 @@ configure_settings(bool _init)
         get_env<size_t>(env_vars::NUM_THREADS, 1), "threading", "performance", "sampling",
         "parallelism", "advanced");
 
+    // rocpd is the default output format; perfetto must be explicitly enabled
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
-                              "Enable perfetto backend for tracing", _default_perfetto_v,
+                              "Enable perfetto backend for tracing", false,
                               "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
