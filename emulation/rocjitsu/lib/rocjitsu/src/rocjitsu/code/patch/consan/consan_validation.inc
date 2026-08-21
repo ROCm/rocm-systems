@@ -3333,6 +3333,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     const size_t transaction_count = exact_cas_count / 2u;
     std::vector<uint32_t> capture_low;
     std::vector<uint32_t> capture_high;
+    const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
     std::optional<uint16_t> expected_dispatch_sgpr = result.resolved_moi_dispatch_id_sgpr;
     std::optional<uint16_t> expected_dispatch_vgpr = result.resolved_moi_dispatch_id_vgpr;
     if (!patch.persistent_dispatch_id_private_offset &&
@@ -3371,29 +3372,48 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       }
     } else if (patch.persistent_dispatch_id_private_offset) {
       expected_dispatch_sgpr.reset();
+      std::optional<uint16_t> owner_reload_sgpr;
+      bool saw_owner_assignment = false;
+      bool inconsistent_owner_assignments = false;
       for (uint64_t owner : patch.owner_descriptor_file_offsets) {
         const auto assignment =
             std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
                               &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-        if (assignment == result.resolved_moi_transient_sgpr_assignments.end() ||
-            !assignment->indirect_pc_sgpr ||
-            (expected_dispatch_sgpr && *expected_dispatch_sgpr != *assignment->indirect_pc_sgpr)) {
+        if (assignment == result.resolved_moi_transient_sgpr_assignments.end())
+          continue;
+        const std::optional<uint16_t> reload_sgpr =
+            assignment->indirect_pc_sgpr
+                ? assignment->indirect_pc_sgpr
+                : (!assignment->spill_backed
+                       ? std::optional<uint16_t>(assignment->exec_save_sgpr + 12u)
+                       : std::nullopt);
+        if (saw_owner_assignment && reload_sgpr != owner_reload_sgpr) {
           expected_dispatch_sgpr.reset();
+          inconsistent_owner_assignments = true;
           break;
         }
-        expected_dispatch_sgpr = assignment->indirect_pc_sgpr;
+        saw_owner_assignment = true;
+        owner_reload_sgpr = reload_sgpr;
       }
-      // A code-object-wide non-spill Inline window has no per-owner
-      // assignment record. Its indirect PC pair is the fixed +12:+13 pair
-      // within that window, and private dispatch reload deliberately reuses
-      // the same dead body-local state.
-      if (!expected_dispatch_sgpr && result.resolved_moi_transient_sgpr_assignments.empty() &&
-          result.resolved_moi_exec_save_sgpr) {
+      if (saw_owner_assignment) {
+        const bool every_owner_has_assignment =
+            std::ranges::all_of(patch.owner_descriptor_file_offsets, [&](uint64_t owner) {
+              return std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                                       &ConSanMoiTransientSgprAssignment::descriptor_file_offset) !=
+                     result.resolved_moi_transient_sgpr_assignments.end();
+            });
+        if (!inconsistent_owner_assignments && every_owner_has_assignment)
+          expected_dispatch_sgpr = owner_reload_sgpr;
+      } else if (!inconsistent_owner_assignments && result.resolved_moi_exec_save_sgpr) {
+        // An unrelated owner-local assignment does not replace this patch's
+        // code-object-wide non-spill Inline window. Its indirect PC pair is
+        // the fixed +12:+13 pair within that window, and private dispatch
+        // reload deliberately reuses the same dead body-local state.
         expected_dispatch_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 12u);
       }
     }
     if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
-      expected_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
+      expected_dispatch_vgpr = owner_dispatch_vgpr;
     if (expected_dispatch_sgpr) {
       capture_low.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
@@ -3431,15 +3451,23 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
         count_pattern(*expected_dispatch_high_store) != transaction_count ||
         count_pattern(capture_low) < transaction_count ||
         count_pattern(capture_high) < transaction_count) {
+      const auto optional_register = [](std::optional<uint16_t> value) {
+        return value ? std::to_string(*value) : std::string("none");
+      };
       errors.emplace_back(
           "ConSan final validation found invalid versioned exact-shadow publication semantics: "
-          "decoded_cas=" +
-          std::to_string(decoded_cas_count) + " exact_cas=" + std::to_string(exact_cas_count) +
-          " transactions=" + std::to_string(transaction_count) +
+          "anchor=" +
+          std::to_string(patch.anchor_offset) + " scratch=v" + std::to_string(scratch) +
+          " decoded_cas=" + std::to_string(decoded_cas_count) + " exact_cas=" +
+          std::to_string(exact_cas_count) + " transactions=" + std::to_string(transaction_count) +
           " dispatch_low_stores=" + std::to_string(count_pattern(*expected_dispatch_low_store)) +
           " dispatch_high_stores=" + std::to_string(count_pattern(*expected_dispatch_high_store)) +
           " capture_low=" + std::to_string(count_pattern(capture_low)) +
           " capture_high=" + std::to_string(count_pattern(capture_high)) +
+          " expected_dispatch_sgpr=" + optional_register(expected_dispatch_sgpr) +
+          " expected_dispatch_vgpr=" + optional_register(expected_dispatch_vgpr) +
+          " owner_dispatch_vgpr=" + optional_register(owner_dispatch_vgpr) +
+          " owner_count=" + std::to_string(patch.owner_descriptor_file_offsets.size()) +
           " legacy_swap=" + std::to_string(decoded_legacy_swap));
     }
   }

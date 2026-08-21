@@ -4490,6 +4490,96 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
             1u);
 }
 
+TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwner) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object();
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto fixed = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(fixed, original.kernels().end());
+  ASSERT_NE(dynamic, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const auto fixed_access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
+           std::ranges::find(patch.owner_descriptor_file_offsets, fixed->descriptor_file_offset) !=
+               patch.owner_descriptor_file_offsets.end();
+  });
+  ASSERT_NE(fixed_access, result.patches.end()) << testing::PrintToString(result.patches);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_GE(*result.resolved_moi_dispatch_id_sgpr, 12u);
+  ConSanResult with_component_assignment = result;
+  const auto private_reload =
+      std::ranges::find_if(with_component_assignment.patches, [&](const ConSanPatchInfo &patch) {
+        return patch.kind == fixed_access->kind &&
+               patch.anchor_offset == fixed_access->anchor_offset;
+      });
+  ASSERT_NE(private_reload, with_component_assignment.patches.end());
+  private_reload->persistent_dispatch_id_private_offset = 0u;
+  // The already-emitted capture names the original dispatch pair. Reinterpret
+  // that same pair as the fixed +12:+13 reload window used by a private-
+  // dispatch body, without changing the instruction semantics under test.
+  with_component_assignment.resolved_moi_exec_save_sgpr =
+      static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr - 12u);
+  const auto fixed_assignment = std::ranges::find(
+      with_component_assignment.resolved_moi_transient_sgpr_assignments,
+      fixed->descriptor_file_offset, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(fixed_assignment,
+            with_component_assignment.resolved_moi_transient_sgpr_assignments.end());
+  fixed_assignment->exec_save_sgpr = *with_component_assignment.resolved_moi_exec_save_sgpr;
+  fixed_assignment->spill_backed = false;
+  fixed_assignment->indirect_pc_sgpr.reset();
+  const std::vector<std::string> component_validation_errors =
+      validate_consan_modified_elf(bytes, with_component_assignment);
+  EXPECT_TRUE(std::ranges::none_of(component_validation_errors, [](const std::string &error) {
+    return error.find("versioned exact-shadow publication semantics") != std::string::npos;
+  })) << testing::PrintToString(component_validation_errors);
+
+  // A heterogeneous object can instead have component-local scalar state
+  // only elsewhere while this owner continues to use the code-object-wide
+  // window. Such an unrelated assignment must not hide this body's
+  // s[EXEC+12:EXEC+13] private-dispatch reload from final validation.
+  ConSanResult with_unrelated_assignment = with_component_assignment;
+  std::erase_if(with_unrelated_assignment.resolved_moi_transient_sgpr_assignments,
+                [&](const ConSanMoiTransientSgprAssignment &assignment) {
+                  return assignment.descriptor_file_offset == fixed->descriptor_file_offset;
+                });
+  if (with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.empty()) {
+    with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.push_back(
+        {.descriptor_file_offset = dynamic->descriptor_file_offset,
+         .exec_save_sgpr = *result.resolved_moi_exec_save_sgpr,
+         .owner_sgpr = std::nullopt,
+         .dispatch_id_sgpr = std::nullopt,
+         .spill_backed = false,
+         .indirect_pc_sgpr = std::nullopt,
+         .indirect_scc_sgpr = std::nullopt,
+         .dispatch_key_sgpr = std::nullopt,
+         .call_return_sgpr = std::nullopt,
+         .visible_evidence_sgpr = std::nullopt,
+         .branch_only_scalar_spill = false,
+         .dynamic_stack_borrowed_sgpr = std::nullopt});
+  }
+  ASSERT_FALSE(with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.empty());
+  const std::vector<std::string> validation_errors =
+      validate_consan_modified_elf(bytes, with_unrelated_assignment);
+  EXPECT_TRUE(std::ranges::none_of(validation_errors, [](const std::string &error) {
+    return error.find("versioned exact-shadow publication semantics") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgprs) {
   const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object(
       /*full_sampled_pressure=*/false, /*dynamic_flat_group_load=*/false,
@@ -6828,6 +6918,60 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
     return error.find("partially overlapping patch ranges") != std::string::npos;
   })) << testing::PrintToString(validation_errors);
+}
+
+TEST(ConSanMoi, Cdna4FarEntryRelayChainsIndirectIslandInsideItsPrefix) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kLargeTextWords = 33'000u;
+  // The nearest nine-word dense-relay host begins at word six, so its eight-
+  // word indirect island starts at word seven and overlaps the final word of
+  // the seven-word owner/epoch entry prologue.
+  constexpr size_t kFirstAccessWord = 15u;
+  constexpr uint32_t kAccessCount = 136u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2u, /*vdata=*/3u, (index % 64u) * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    std::ranges::copy(*access, text_words.begin() + kFirstAccessWord + 2u * index);
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "cdna4_far_entry_prefix_island");
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->anchor_offset, 0u);
+  EXPECT_EQ(prologue->original_size, 7u * sizeof(uint32_t));
+  std::vector<uint64_t> entry_island_offsets;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
+      entry_island_offsets.push_back(patch.anchor_offset);
+  }
+  const auto entry_island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset < prologue->original_size;
+  });
+  ASSERT_NE(entry_island, result.patches.end()) << testing::PrintToString(entry_island_offsets);
+  EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, entry_island->trampoline_offset);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
+                               &ConSanSiteDispositionRecord::lowering_outcome),
+            kAccessCount)
+      << testing::PrintToString(result.site_dispositions);
 }
 
 TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {

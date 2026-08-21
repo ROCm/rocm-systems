@@ -2571,18 +2571,24 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     uint64_t prologue_return_target = kernel.entry_text_offset;
     const auto original_kernel =
         std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
+    const auto is_chainable_entry_patch = [](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+             patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
+             patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+             patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord ||
+             patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord ||
+             // A far access may already have relocated an ordinary entry
+             // instruction into its local indirect island. Chaining the
+             // prologue to that island's body preserves both the guest
+             // instruction and the previously selected access route.
+             patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+    };
     auto composed_entry_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-          const bool chainable_instrumentation =
-              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
-              patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord ||
-              patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
-          return chainable_instrumentation && patch.anchor_offset == kernel.entry_text_offset &&
-                 patch.original_size != 0u && patch.trampoline_size != 0u &&
-                 original_kernel != result.kernels.end() &&
+          return is_chainable_entry_patch(patch) &&
+                 patch.anchor_offset == kernel.entry_text_offset && patch.original_size != 0u &&
+                 patch.trampoline_size != 0u && original_kernel != result.kernels.end() &&
                  kernel_owns_patch(*original_kernel, patch);
         });
     bool chains_existing_entry_trampoline =
@@ -2659,16 +2665,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                 kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
             const auto prefix_patch =
                 std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-                  const bool chainable_instrumentation =
-                      patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
-                      patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-                      patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
-                      patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
-                      patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord ||
-                      patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
-                  return chainable_instrumentation && patch.anchor_offset == displaced_offset &&
-                         patch.original_size != 0u && patch.trampoline_size != 0u &&
-                         original_kernel != result.kernels.end() &&
+                  return is_chainable_entry_patch(patch) &&
+                         patch.anchor_offset == displaced_offset && patch.original_size != 0u &&
+                         patch.trampoline_size != 0u && original_kernel != result.kernels.end() &&
                          kernel_owns_patch(*original_kernel, patch);
                 });
             if (prefix_patch != result.patches.end()) {
