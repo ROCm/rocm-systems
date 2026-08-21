@@ -270,8 +270,10 @@ inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
 
   if (dim == 16 && K >= 32) {
     uint32_t block_elems = elems_per_group / 2;
-    if (data_bits == 8)
-      block_elems = 8;
+    // CDNA5 K=128 dense WMMA uses 16-element K blocks. Do not change the
+    // pre-existing K=64 family, which uses the default 16-element blocks too.
+    if (data_bits == 8 && K == 128)
+      block_elems = 16;
     if (data_bits == 4 && K == 128)
       block_elems = 16;
     if (block_elems != 0) {
@@ -525,14 +527,6 @@ struct SwmmacIndexLoc {
 
 inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bits, uint32_t row,
                                        uint32_t compressed_k, uint32_t index_entries) {
-  // CDNA5 K=128 8-bit sparse A follows the ordinary 16x64 8-bit layout.
-  // Its index fields occupy the same physical lane/slot as the corresponding
-  // compressed A element.
-  if (M == 16 && K == 128 && elem_bits == 8 && index_entries == 32) {
-    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
-    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
-    return {lane, slot};
-  }
   // RDNA4 K=32 SWMMAC uses the gfx12 builtin layout: each row's 16 sparse
   // 2-bit entries are split across two lanes. f16/bf16 split by pairs of
   // K-groups; fp8/bf8/iu8 split linearly by the low/high K=16 block.
@@ -565,11 +559,6 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 inline InputLoc swmmac_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t compressed_k,
                                    uint32_t elem_bits) {
-  if (M == 16 && K == 128 && elem_bits == 8) {
-    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
-    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
-    return wmma_packed_input_loc(lane, slot, elem_bits);
-  }
   if (M == 16 && K == 32) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -606,8 +595,10 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
 inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t dense_k,
                                    uint32_t elem_bits) {
   if (N == 16 && K == 128 && elem_bits == 8) {
-    const uint32_t lane = col + 16u * ((dense_k >> 4) & 1u);
-    const uint32_t slot = (dense_k & 15u) + 16u * (dense_k >> 5);
+    // K=128 SWMMAC keeps the sparse instruction's 32-element B ordering;
+    // it is not the dense K=128 WMMA operand layout.
+    const uint32_t lane = col + 16u * ((dense_k >> 5) & 1u);
+    const uint32_t slot = (dense_k & 31u) + 32u * (dense_k >> 6);
     return wmma_packed_input_loc(lane, slot, elem_bits);
   }
   if (N == 16 && K == 32) {
