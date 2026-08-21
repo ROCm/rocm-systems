@@ -300,17 +300,17 @@ CTest names make the pairing visible, for example `...Reduction.Correct` and
 selected across all applicable architectures. One pair/backend application is
 ten rows: correct and incorrect under the baseline and four ConSan flavors.
 The 18 common pairs contribute 1,080 rows across the five RocJitsu targets plus
-physical `gfx950`. The non-rectangular target extensions contribute 330 rows,
+physical `gfx950`. The non-rectangular target extensions contribute 360 rows,
 the physical module-load reduction contributes four rows, and the physical
-health check contributes one, for 1,415 total.
+health check contributes one, for 1,445 total.
 
 The per-configuration arithmetic is:
 
 | Configuration | Pairs | Rows |
 | --- | ---: | ---: |
-| RocJitsu `gfx942` | 22 | 220 |
-| RocJitsu `gfx950` | 25 | 250 |
-| Physical `gfx950` | 25 | 255, including four module-load rows and health |
+| RocJitsu `gfx942` | 23 | 230 |
+| RocJitsu `gfx950` | 26 | 260 |
+| Physical `gfx950` | 26 | 265, including four module-load rows and health |
 | RocJitsu `gfx1100` | 21 | 210 |
 | RocJitsu `gfx1201` | 23 | 230 |
 | RocJitsu `gfx1250` | 25 | 250 |
@@ -334,15 +334,17 @@ artificially slower or to fill a time quota.
   sampled less often without materially reducing behavioral or architecture
   coverage.
 
-The current 1,415-test matrix passes in **360.952 seconds (6m00.952s)** on this
-host at `-j64`. Bash process accounting reports **1,606.244 seconds
-(26m46.244s)** aggregate CPU: 704.250s user and 901.994s system. CTest's
-summed test duration is 1,956.91s. Use wall-clock latency for the budget and
-retain CPU time as a separate capacity metric.
+The current 1,445-test matrix passes in **403.77 seconds (6m43.77s)** on this
+host at `-j64`; CTest's summed test duration is 1,835.59s. The most recent full
+process-level CPU accounting predates the latest 30-row extension: the
+1,415-test matrix consumed **1,606.244 seconds (26m46.244s)** aggregate CPU,
+704.250s user and 901.994s system. Refresh that separate capacity metric on the
+next process-accounted full run rather than presenting CTest's summed duration
+as CPU time.
 
 This measurement supersedes the earlier 67.91-second result, which allowed
 all physical gfx950 processes to compete for one GPU and eventually reproduced
-a GPU memory fault. All 255 physical rows now share the target-scoped
+a GPU memory fault. All 265 physical rows now share the target-scoped
 `consan_physical_gfx950` CTest resource lock. The five simulator targets still
 run concurrently with each other and with the one active physical row; a
 different physical target would use its own lock rather than creating a global

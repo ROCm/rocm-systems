@@ -48,7 +48,7 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. This is
-1,140 simulator cases and 245 physical cases at the current workload count.
+1,180 simulator cases and 265 physical cases at the current workload count.
 
 The initial target-capability disposition is:
 
@@ -60,7 +60,7 @@ The initial target-capability disposition is:
 | Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA4/CDNA5, including address/destination aliasing. |
 | Multi-owner helpers, multidimensional dispatch identity, and dynamic private stacks | Covered on all five targets. |
 | Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by the atomic-arrival workload. |
-| CDNA5 cluster barriers and ordered LDS atomics | Tracked extension gap; the common suite exercises ordinary workgroups and a global arrival atomic. |
+| CDNA5 clustered dispatch and transfer | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, and multicast. Store-from-LDS, wider fragments, scale-WMMA, and larger clusters remain extensions. |
 | Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are now covered on every architecture where ConSan admits them. |
 
 “Tracked gap” is preferable to a fixture that merely recognizes the current
