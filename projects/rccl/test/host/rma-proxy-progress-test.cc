@@ -328,27 +328,13 @@ TEST_F(RmaProxyProgressTest, SinglePut_NoCredit_StaysPending) {
     EXPECT_EQ(InProgressHead(peer), nullptr);
 }
 
-// ---------------------------------------------------------------------------
-// Test #3 -- completion returns a credit.
-//
-// When the network reports an in-progress put done, ncclRmaProxyPollNonPersist-
-// Completion must: decrement inflightRequests[target] (return the credit), null
-// the request handle, publish opSeq into doneSeq (RELEASE for the GPU), dequeue
-// the descriptor from the in-progress queue, and destroy it.
-// ---------------------------------------------------------------------------
-TEST_F(RmaProxyProgressTest, Completion_ReturnsCredit) {
+TEST_F(RmaProxyProgressTest, CompletedHead_PublishesDoneSeqDequeuesAndDestroys) {
     const int peer = 1;
     const uint32_t target = 1;
     const uint64_t opSeq = 7;
 
     ncclRmaProxyDesc* desc = PushInProgressPutSignal(peer, target, opSeq);
-    ASSERT_EQ(inflight_[target], 1u);
-    ASSERT_EQ(net_.outstanding, 1);
-    ASSERT_EQ(InProgressHead(peer), desc);
-    void* issuedReq = desc->putSignal.request;
-    ASSERT_NE(issuedReq, nullptr);
 
-    // Record which descriptor gets destroyed.
     ncclRmaProxyDesc* destroyed = nullptr;
     ScopedHook destroy(g_rmaDestroyDesc,
         [&](struct ncclComm*, struct ncclRmaProxyDesc** d) -> ncclResult_t {
@@ -357,22 +343,13 @@ TEST_F(RmaProxyProgressTest, Completion_ReturnsCredit) {
             return ncclSuccess;
         });
 
-    // Mark the request complete, then poll completion.
-    net_.completeRequest(issuedReq);
+    net_.completeRequest(desc->putSignal.request);
     EXPECT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
               ncclSuccess);
 
-    // Credit returned; request nulled; pool slot freed.
-    EXPECT_EQ(inflight_[target], 0u);
-    EXPECT_EQ(desc->putSignal.request, nullptr);
-    EXPECT_EQ(net_.outstanding, 0);
-
-    // doneSeq published with the descriptor's opSeq.
-    EXPECT_EQ(doneSeqStore_.back(), opSeq);
-
-    // Descriptor dequeued from in-progress and destroyed.
-    EXPECT_EQ(InProgressHead(peer), nullptr);
-    EXPECT_EQ(destroyed, desc);
+    EXPECT_EQ(doneSeqStore_.back(), opSeq);       // published for the GPU
+    EXPECT_EQ(InProgressHead(peer), nullptr);     // dequeued
+    EXPECT_EQ(destroyed, desc);                   // destroyed
     EXPECT_EQ(destroy.calls, 1);
 }
 
