@@ -46,3 +46,8 @@ export NCCL_PROFILER_PLUGIN=proxytrace
 
 On communicator destroy, RCCL calls `ncclProfilerProxyTraceDump` if exported by
 the loaded profiler library. `ncclCommDump` uses the same hook.
+
+The dump goes through NCCL's debug logger at `WARN` level, one line per proxy
+operation, so **`NCCL_DEBUG` must be set** (`WARN` or more verbose) or the output is
+discarded. Proxy operations only exist for inter-node traffic, so a single-node run
+has nothing to report.
