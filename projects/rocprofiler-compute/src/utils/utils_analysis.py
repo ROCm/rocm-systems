@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils import csv_compression
+from utils import csv_compression, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -588,7 +588,9 @@ def process_ml_api_trace_output(
 def validate_workload(path: str) -> None:
     """Validate workload directory contains readable, non-empty profiling output."""
     workload_dir = Path(path)
-    pmc_perf_path = csv_compression.compressed_name(workload_dir / "pmc_perf.csv")
+    pmc_perf_path = csv_compression.compressed_name(
+        workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    )
 
     # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():

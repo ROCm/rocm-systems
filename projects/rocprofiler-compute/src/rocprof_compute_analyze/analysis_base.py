@@ -441,7 +441,9 @@ class OmniAnalyze_Base:
         Args:
             workload_dir: Path to the workload directory
         """
-        pmc_perf = csv_compression.compressed_name(workload_dir / "pmc_perf.csv")
+        pmc_perf = csv_compression.compressed_name(
+            workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        )
         results_glob = f"results_*.csv{csv_compression.GZIP_SUFFIX}"
         result_files = sorted(workload_dir.glob(results_glob))
 

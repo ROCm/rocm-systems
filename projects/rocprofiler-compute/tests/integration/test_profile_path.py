@@ -88,7 +88,7 @@ def test_path_rocpd(
     assert code == 0
 
     # Validate merged pmc_perf.csv.gz content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv.gz")
+    assert common.check_file_pattern("Counter_Name", common.pmc_perf_path(workload_dir))
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

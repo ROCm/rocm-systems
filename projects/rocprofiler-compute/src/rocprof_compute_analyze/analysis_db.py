@@ -554,7 +554,7 @@ class db_analysis(OmniAnalyze_Base):
 
         for workload_path in self._runs.keys():
             pmc_perf = csv_compression.compressed_name(
-                Path(workload_path) / "pmc_perf.csv"
+                Path(workload_path) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
             )
             if not pmc_perf.exists():
                 continue

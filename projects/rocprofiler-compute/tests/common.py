@@ -12,6 +12,8 @@ from pathlib import Path
 from threading import Thread
 from unittest.mock import Mock
 
+from utils import csv_compression, schema
+
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
 SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
@@ -66,6 +68,24 @@ def check_file_pattern(pattern, file_path):
     with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def pmc_perf_path(workload_dir):
+    """Path of the merged counter intermediate analyze writes and reads back."""
+    name = f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    return csv_compression.compressed_name(Path(workload_dir) / name)
+
+
+def write_gzip_csv(path, text):
+    """Write text to a gzip CSV through the interface the source uses."""
+    with csv_compression.open_gzip_csv_write(path) as f:
+        f.write(text)
+    return Path(path)
+
+
+def write_pmc_perf(workload_dir, text):
+    """Write the merged counter intermediate into workload_dir."""
+    return write_gzip_csv(pmc_perf_path(workload_dir), text)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
