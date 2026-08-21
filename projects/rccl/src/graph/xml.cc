@@ -1038,6 +1038,11 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
                 NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
                 NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
                 NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
+                // The target is a GPU by construction (it comes from the accelerator enumeration
+                // above), so record its class here rather than letting it be inferred from the
+                // target's sysfs PCI class: a GPU reported at a non-zero PCI function may alias an
+                // unrelated PCI device at that BDF, which would misclassify the XGMI peer.
+                NCCLCHECK(xmlSetAttr(nvlNode, "tclass", PCI_ACCELERATOR_CLASS));
               }
             }
           }
@@ -1064,6 +1069,9 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
               NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
               NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
               NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+              // See the amd_smi path above: the target's class is known from the enumeration and
+              // must not be inferred from the sysfs PCI class of its (possibly aliased) BDF.
+              NCCLCHECK(xmlSetAttr(nvlNode, "tclass", PCI_ACCELERATOR_CLASS));
             }
           }
         }

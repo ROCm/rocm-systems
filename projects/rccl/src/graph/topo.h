@@ -116,9 +116,15 @@ struct ncclTopoLinkList {
 #define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
 
 #define GCN_ARCH_NAME_LEN 16
-#define NCCL_TOPO_MLOPART_MASK (0x3) // lower 2 bits: bit[0]=enabled, bit[1]=partition index
+// The MLOPart partition index is overlaid on the DEV node's busId. These bits must sit above
+// the 36-bit PCI busId (domain[35:20] bus[19:12] device[11:4] function[3:0], see int64ToBusId)
+// and below NCCL_TOPO_GPU_LOCAL_RANK_SHIFT: the PCI function number is not always 0, e.g. AMD
+// compute partitions (XCP) expose sibling devices as functions .0/.1 of the same PCI device.
+#define NCCL_TOPO_MLOPART_SHIFT (36)
+#define NCCL_TOPO_MLOPART_MASK (((int64_t)0x3) << NCCL_TOPO_MLOPART_SHIFT) // bit[36]=enabled, bit[37]=partition index
 #define NCCL_TOPO_MLOPART_DEV_MAX (2) // max DEV nodes per physical GPU (one per uGPU partition)
-#define NCCL_TOPO_MLOPART(mloPart) ((((int64_t)(mloPart) << 1) | 0x1) & NCCL_TOPO_MLOPART_MASK)
+#define NCCL_TOPO_MLOPART(mloPart) \
+  (((((int64_t)(mloPart) << 1) | 0x1) << NCCL_TOPO_MLOPART_SHIFT) & NCCL_TOPO_MLOPART_MASK)
 #define NCCL_TOPO_MLOPART_BUSID(busId, mloPart) \
   ((mloPart) != NCCL_TOPO_UNDEF ? ((busId) | NCCL_TOPO_MLOPART(mloPart)) : (busId))
 
