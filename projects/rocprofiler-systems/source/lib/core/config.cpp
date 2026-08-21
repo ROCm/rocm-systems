@@ -584,8 +584,8 @@ configure_settings(bool _init)
 
     // rocpd is the default output format; perfetto must be explicitly enabled
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
-                              "Enable perfetto backend for tracing", false,
-                              "backend", "perfetto");
+                              "Enable perfetto backend for tracing", false, "backend",
+                              "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
                               "[DEPRECATED] The new default option is to use data from "
