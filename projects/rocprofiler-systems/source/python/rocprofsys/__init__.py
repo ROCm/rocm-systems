@@ -5,7 +5,7 @@
 from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
-__copyright__ = "Copyright 2025, Advanced Micro Devices, Inc."
+__copyright__ = "Copyright 2026, Advanced Micro Devices, Inc."
 __license__ = "MIT"
 __version__ = "@PROJECT_VERSION@"
 __maintainer__ = "AMD ROCm"
