@@ -55,6 +55,10 @@ _PROFILES = {
     'cdna5': Cdna5Profile,
 }
 
+_PROFILE_ALIASES = {
+    'rdna3_5': 'rdna3.5',
+}
+
 
 def _collect_shared_execute_body_variants(specs, plan):
     """Collect candidate shared execute bodies from each ISA.
@@ -146,22 +150,62 @@ def _detect_profile(isa_xml: str) -> str:
     return 'cdna'
 
 
+def _parse_isa_arg(
+    value: str, *, require_name: bool = False
+) -> tuple[str | None, str, str]:
+    """Parse ``[NAME:]XML`` and resolve its ISA profile."""
+    if ':' in value:
+        name, xml_path = value.split(':', 1)
+    elif require_name:
+        raise ValueError(f'name:xml_path, got: {value}')
+    else:
+        name, xml_path = None, value
+
+    profile_key = _PROFILE_ALIASES.get(name, name) if name else None
+    if profile_key not in _PROFILES:
+        profile_key = _detect_profile(xml_path)
+    return name, xml_path, profile_key
+
+
+def _apply_codegen_identity(spec, name: str | None) -> None:
+    """Use an explicit CLI name for generated paths and C++ namespaces."""
+    if name is None:
+        return
+    identity = name.replace('.', '_')
+    spec.generated_dir_name = identity
+    spec.cpp_namespace = identity
+
+
+def _codegen_config(
+    isa_output: str | None,
+    *,
+    include_root: str | None = None,
+    use_shared_execute_helpers: bool = True,
+) -> CodegenConfig:
+    if isa_output is None:
+        return CodegenConfig(use_shared_execute_helpers=use_shared_execute_helpers)
+    return CodegenConfig.for_output(
+        isa_output,
+        include_root=include_root,
+        use_shared_execute_helpers=use_shared_execute_helpers,
+    )
+
+
 def _run_multi(args) -> None:
     """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
     specs = []
     for entry in args.multi:
-        if ':' not in entry:
+        try:
+            name, xml_path, profile_key = _parse_isa_arg(entry, require_name=True)
+        except ValueError as error:
             print(
-                f'error: --multi entry must be name:xml_path, got: {entry}',
+                f'error: --multi entry must be {error}',
                 file=sys.stderr,
             )
             sys.exit(1)
-        name, xml_path = entry.split(':', 1)
-        profile_key = name.replace('.', '_')
-        if profile_key not in _PROFILES:
-            profile_key = _detect_profile(xml_path)
         profile = _PROFILES[profile_key]()
         spec = Parser(xml_path, profile).parse()
+        _apply_codegen_identity(spec, name)
         sem = derive_all_semantics(spec)
         specs.append((name, spec, sem))
 
@@ -180,7 +224,10 @@ def _run_multi(args) -> None:
         emit_isa_properties(args.isa_output, specs)
         body_variants = _collect_shared_execute_body_variants(specs, plan)
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
-        config = CodegenConfig(unshared_execute_keys=unshared_keys)
+        config = _codegen_config(
+            args.isa_output, include_root=getattr(args, 'include_root', None)
+        )
+        config.unshared_execute_keys = unshared_keys
         if unshared_keys:
             print(
                 f'Keeping {len(unshared_keys)} arch-dependent shared execute '
@@ -280,6 +327,11 @@ def main() -> None:
         '--isa-output', help='Output path for generated ISA C++ files'
     )
     arg_parser.add_argument(
+        '--include-root',
+        help='Compiler include root used to spell generated include paths. '
+        'Absolute paths are emitted when omitted.',
+    )
+    arg_parser.add_argument(
         '--dbt-output',
         metavar='DIR',
         help='Output directory for DBT tables (defaults to --isa-output).',
@@ -295,12 +347,21 @@ def main() -> None:
         print('error: isafile required in single-ISA mode', file=sys.stderr)
         sys.exit(1)
 
-    profile_key = _detect_profile(args.isafile)
+    name, isa_file, profile_key = _parse_isa_arg(args.isafile)
     profile = _PROFILES[profile_key]()
-    isa = Parser(args.isafile, profile).parse()
+    isa = Parser(isa_file, profile).parse()
+    _apply_codegen_identity(isa, name)
     semantics = derive_all_semantics(isa)
-    config = CodegenConfig()
+    config = _codegen_config(
+        args.isa_output,
+        include_root=args.include_root,
+        use_shared_execute_helpers=False,
+    )
     if args.gen_isas:
+        emit_isa_properties(
+            args.isa_output,
+            [(name or isa.generated_dir_name, isa, semantics)],
+        )
         code_gen = CodeGenerator(isa, args.isa_output, semantics, config=config)
         code_gen.gen_all()
 

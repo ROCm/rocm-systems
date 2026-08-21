@@ -14,7 +14,7 @@ XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen.py` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
@@ -43,8 +43,9 @@ rocm-systems/shared/machine-readable-isa/isa/
 
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen.py` |
-| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
+| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
+| ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
@@ -68,23 +69,33 @@ decode/encode functions and neutral field structs are auto-generated.
 
 ```
 python -m amdisa [--multi NAME:XML ...] [--gen-isas] [--gen-dbt]
-                 [--isa-output DIR] [--dbt-output DIR] [isafile]
+                 [--isa-output DIR] [--include-root DIR]
+                 [--dbt-output DIR] [[NAME:]XML]
 ```
 
 | Option | Description |
 |---|---|
+| `[NAME:]XML` | Single-ISA mode. An optional name overrides the generated directory and C++ namespace while the XML determines the semantic profile |
 | `--multi NAME:XML ...` | Multi-ISA mode: parse all XMLs and generate shared execute templates |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
+| `--include-root DIR` | Compiler include root used to spell relocatable generated includes |
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |
 
 When neither `--gen-isas` nor `--gen-dbt` is specified, both are
 generated.
 
-<!-- \NPI new ISA family: add a `<isa>:$MRISA/amdgpu_isa_<isa>.xml` entry to \
-     each manual `--multi` invocation below and to the supported-ISA list in \
-     scripts/generate-amdisa.sh. -->
+`--isa-output` controls where files are written. Generated include prefixes
+are derived from that path. If `--include-root` is provided, `--isa-output`
+must be beneath it and includes are emitted relative to it. Otherwise, absolute
+include paths are emitted so that a relative output path does not depend on the
+generator's working directory.
+
+The recognized profile names include `cdna1` through `cdna5`, `rdna1` through
+`rdna4`, and both `rdna3.5` and `rdna3_5`. An unrecognized explicit name is
+treated as a custom generated identity; its semantic profile is detected from
+the XML.
 
 ## Regenerating everything
 
@@ -126,6 +137,7 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
+  --include-root lib/rocjitsu/src \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
 find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated lib/rocjitsu/src/rocjitsu/code/dbt/generated \
@@ -148,7 +160,8 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
-  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
+  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
+  --include-root lib/rocjitsu/src
 
 find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i {} +

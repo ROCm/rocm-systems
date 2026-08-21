@@ -4,6 +4,8 @@
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
 from pathlib import Path
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +16,13 @@ from amdisa.codegen._generator import (
     _SourceImplUnit,
 )
 from amdisa.codegen.config import CodegenConfig
-from amdisa.__main__ import _detect_profile
+from amdisa.codegen.cpp_file import CppFile
+from amdisa.__main__ import (
+    _apply_codegen_identity,
+    _codegen_config,
+    _detect_profile,
+    _parse_isa_arg,
+)
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
@@ -419,6 +427,21 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
+
+
+def test_isa_properties_codegen_uses_source_arch_for_custom_identity(tmp_path):
+    specs = [
+        (
+            'gfx1250',
+            SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile()),
+            None,
+        )
+    ]
+
+    output = emit_isa_properties(str(tmp_path), specs).read_text()
+
+    assert 'case ROCJITSU_CODE_ARCH_CDNA5:' in output
+    assert '.max_addressable_vgprs_per_wf = 1024,' in output
 
 
 def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
@@ -1020,6 +1043,96 @@ class TestCdna5Profile:
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
         xml.write_text('<Spec />')
         assert _detect_profile(str(xml)) == 'cdna5'
+
+    def test_parse_single_isa_arg_with_profile(self):
+        assert _parse_isa_arg('cdna5:/tmp/isa.xml') == (
+            'cdna5',
+            '/tmp/isa.xml',
+            'cdna5',
+        )
+
+    def test_parse_single_isa_arg_without_profile(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
+        xml.write_text('<Spec />')
+        assert _parse_isa_arg(str(xml)) == (None, str(xml), 'cdna5')
+
+    @pytest.mark.parametrize('name', ['rdna3.5', 'rdna3_5'])
+    def test_parse_single_isa_arg_accepts_rdna3_5_aliases(self, name):
+        assert _parse_isa_arg(f'{name}:/tmp/isa.xml') == (
+            name,
+            '/tmp/isa.xml',
+            'rdna3.5',
+        )
+
+    def test_explicit_name_controls_codegen_identity(self):
+        spec = SimpleNamespace(
+            arch_name='cdna5',
+            generated_dir_name='cdna5',
+            cpp_namespace='cdna5',
+        )
+
+        _apply_codegen_identity(spec, 'gfx1250')
+
+        assert spec.arch_name == 'cdna5'
+        assert spec.generated_dir_name == 'gfx1250'
+        assert spec.cpp_namespace == 'gfx1250'
+
+    def test_codegen_include_paths_derive_from_isa_output(self):
+        config = _codegen_config(
+            'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated',
+            include_root='lib/rocjitsu/src',
+        )
+
+        assert config.include_base == 'rocjitsu/isa/arch/amdgpu/custom'
+        assert (
+            config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+        assert (
+            config.shared_generated_include_base
+            == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+
+    def test_explicit_codegen_prefix_remains_independent_of_output(self):
+        config = CodegenConfig(generated_include_base='stable/generated')
+
+        assert config.generated_include('rdna4', 'vop3.h') == (
+            'stable/generated/rdna4/vop3.h'
+        )
+
+    def test_relative_output_generated_include_preprocesses(
+        self, tmp_path, monkeypatch
+    ):
+        compiler = shutil.which('c++')
+        if compiler is None:
+            pytest.skip('C++ preprocessor is unavailable')
+
+        monkeypatch.chdir(tmp_path)
+        config = CodegenConfig.for_output('relative')
+        CppFile(
+            'vop3',
+            'relative',
+            True,
+            [],
+            [],
+            ['inline int value() { return 1; }'],
+            'rdna4',
+        ).gen_code()
+        CppFile(
+            'vop3_exec',
+            'relative',
+            False,
+            [(config.generated_include('rdna4', 'vop3.h'), False)],
+            [],
+            ['int use() { return value(); }'],
+            'rdna4',
+        ).gen_code()
+
+        subprocess.run(
+            [compiler, '-E', 'relative/rdna4/vop3_exec.cpp'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_test_encoding_uses_primary_decode_key(self):
         generator = object.__new__(CodeGenerator)

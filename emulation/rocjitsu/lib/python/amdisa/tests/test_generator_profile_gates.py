@@ -4435,6 +4435,15 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' not in cdna4_vop3
 
 
+def test_generated_pseudo_scalar_users_include_dependency(
+    amdgpu_generated_root: Path,
+):
+    for source in amdgpu_generated_root.glob('*/*_exec*.cpp'):
+        text = source.read_text()
+        include = '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"'
+        assert (include in text) == ('pseudo_scalar::' in text), source
+
+
 def test_generated_vop3_dot2_true16_uses_true16_helpers(
     rdna4_generated_root: Path,
 ):

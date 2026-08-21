@@ -8192,9 +8192,9 @@ inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    const uint32_t src0_value = apply_vop3_b32_src_mod(
+    const uint32_t src0_value = amdgpu::apply_vop3_b32_src_mod(
         amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), inst.inst_.abs, inst.inst_.neg, 0);
-    const uint32_t src1_value = apply_vop3_b32_src_mod(
+    const uint32_t src1_value = amdgpu::apply_vop3_b32_src_mod(
         amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), inst.inst_.abs, inst.inst_.neg, 1);
     sdwa::write_lane<false>(
         inst, wf, inst.vdst, lane,

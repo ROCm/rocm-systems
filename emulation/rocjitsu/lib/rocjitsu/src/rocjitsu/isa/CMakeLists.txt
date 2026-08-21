@@ -13,8 +13,23 @@ rj_add_object_library(rocjitsu_isa
 set(RJ_AMDGPU_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated")
 
 function(rj_add_split_amdgpu_isa_library arch)
+    set(options NO_BUILTIN)
+    set(one_value_args GENERATED_ROOT INCLUDE_BASE)
+    cmake_parse_arguments(ARG "${options}" "${one_value_args}" "" ${ARGN})
+
+    if(ARG_GENERATED_ROOT)
+        set(_generated_root "${ARG_GENERATED_ROOT}")
+    else()
+        set(_generated_root "${RJ_AMDGPU_GENERATED_DIR}")
+    endif()
+    if(ARG_INCLUDE_BASE)
+        set(_include_base "${ARG_INCLUDE_BASE}")
+    else()
+        set(_include_base "rocjitsu/isa/arch/amdgpu")
+    endif()
+
     set(_target rocjitsu_isa_${arch})
-    set(_generated_dir "${RJ_AMDGPU_GENERATED_DIR}/${arch}")
+    set(_generated_dir "${_generated_root}/${arch}")
 
     file(GLOB _model_sources CONFIGURE_DEPENDS "${_generated_dir}/*.cpp")
     list(FILTER _model_sources EXCLUDE REGEX "_exec.*\\.cpp$")
@@ -41,20 +56,29 @@ function(rj_add_split_amdgpu_isa_library arch)
     )
     target_link_libraries(${_target} INTERFACE ${_target}_model ${_target}_exec)
 
-    rj_add_isa_target_provider(
-        ${_target}
-        HEADER rocjitsu/isa/arch/amdgpu/${arch}/target_provider.h
-        BUILTIN
-    )
+    if(ARG_NO_BUILTIN)
+        rj_add_isa_target_provider(
+            ${_target}
+            HEADER ${_include_base}/${arch}/target_provider.h
+        )
+    else()
+        rj_add_isa_target_provider(
+            ${_target}
+            HEADER ${_include_base}/${arch}/target_provider.h
+            BUILTIN
+        )
+    endif()
     rj_add_isa_target_provider(
         ${_target}_model
-        HEADER rocjitsu/isa/arch/amdgpu/${arch}/model_target_provider.h
+        HEADER ${_include_base}/${arch}/model_target_provider.h
     )
-    set_property(
-        GLOBAL
-        APPEND
-        PROPERTY RJ_BUILTIN_AMDGPU_ISA_MODEL_PROVIDERS ${_target}_model
-    )
+    if(NOT ARG_NO_BUILTIN)
+        set_property(
+            GLOBAL
+            APPEND
+            PROPERTY RJ_BUILTIN_AMDGPU_ISA_MODEL_PROVIDERS ${_target}_model
+        )
+    endif()
 endfunction()
 
 add_subdirectory(arch/amdgpu/cdna1)

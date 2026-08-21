@@ -5186,8 +5186,8 @@ class CodeGenerator:
                             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
                             '    if (!(exec & (1ULL << lane)))\n'
                             '      continue;\n'
-                            f'    const uint32_t src0_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
-                            f'    const uint32_t src1_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
+                            f'    const uint32_t src0_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
+                            f'    const uint32_t src1_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
@@ -8178,6 +8178,8 @@ class CodeGenerator:
     def _can_force_shared_simd_probe(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
+        if not self.config.use_shared_execute_helpers:
+            return False
         if inst is None or self._requires_arch_local_execute(inst, enc_name):
             return False
         if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
@@ -10973,6 +10975,17 @@ class CodeGenerator:
                     'RegisterAccess' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 )
+                uses_pseudo_scalar = any(
+                    'pseudo_scalar::' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                )
+                if uses_pseudo_scalar:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h',
+                            False,
+                        )
+                    )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -11067,7 +11080,7 @@ class CodeGenerator:
                 if has_shared:
                     cpp_includes.append(
                         (
-                            self.config.generated_include('shared', 'execute_shared.h'),
+                            self.config.shared_generated_include('execute_shared.h'),
                             False,
                         )
                     )
@@ -11396,6 +11409,7 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
             }
             result: list[tuple[str, bool]] = []
             for include, system in cpp_includes:
