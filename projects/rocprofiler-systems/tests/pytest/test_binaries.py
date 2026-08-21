@@ -74,6 +74,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
     "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "domains.gpu.unified_memory_profiling",
+    "ROCPROFSYS_USE_HIPFILE": "domains.gpu.hipfile",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",

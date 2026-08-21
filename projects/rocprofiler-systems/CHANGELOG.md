@@ -48,6 +48,21 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   package installations automatically include this support. A `rocshmem` example
   demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
 
+### Added
+
+- hipFile GPU-direct storage I/O telemetry. A background sampler queries
+  hipFile's in-process statistics API and reports per-GPU I/O counters (read/write
+  bytes, total/fastpath/fallback/unaligned operation counts, errors, and
+  read/write bandwidth) in both Perfetto and RocPD outputs. The counters are
+  cumulative and the bandwidths are normalized to wall-clock time over the
+  sampling interval, matching the conventions of the existing AMD SMI PCIe, XGMI,
+  and AI NIC metrics. Select metrics with `ROCPROFSYS_HIPFILE_METRICS` and GPUs
+  with `ROCPROFSYS_SAMPLING_GPUS`. Build with `-DROCPROFSYS_USE_HIPFILE=ON`
+  (optional; disabled automatically when hipFile is not found) and enable at run
+  time with `ROCPROFSYS_USE_HIPFILE=ON` (requires a target application that uses
+  hipFile). See
+  [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+
 ### Changed
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
