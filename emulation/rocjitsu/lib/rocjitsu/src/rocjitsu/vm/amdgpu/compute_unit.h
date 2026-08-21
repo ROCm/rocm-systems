@@ -34,11 +34,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -86,6 +89,7 @@ inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
 
   /// @brief Configuration for a compute unit.
@@ -120,13 +124,14 @@ public:
   /// @param num_vgprs Number of vector registers to allocate.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
+                         uint32_t wave_size = 0);
 
   /// @brief Activate a specific idle wavefront slot.
   /// @details Used by checkpoint restoration when hardware slot identity is
   /// execution state. Returns nullptr when the requested slot is invalid or busy.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                            uint32_t num_vgprs);
+                            uint32_t num_vgprs, uint32_t wave_size = 0);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -174,11 +179,14 @@ public:
   /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
 
-  /// @brief Check whether this CU has no active wavefronts.
-  /// @retval true No wavefronts are actively executing.
-  /// @retval false At least one wavefront is active.
-  /// @warning NOT thread-safe (see has_active_wfs()): engine-thread only.
-  virtual bool is_idle() const { return !has_active_wfs(); }
+  /// @brief Thread-safe scheduling for debugger resume from an ioctl thread.
+  virtual void schedule_work_async() = 0;
+
+  /// @brief Check whether this CU has no runnable wavefronts.
+  /// @retval true No wavefront can currently execute.
+  /// @retval false At least one wavefront can execute.
+  /// @warning NOT thread-safe (see has_runnable_wfs()): engine-thread only.
+  virtual bool is_idle() const { return !has_runnable_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
   ///
@@ -186,6 +194,56 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  struct TrapHandlerConfig {
+    uint64_t tba = 0;
+    uint64_t tma = 0;
+    bool debug_enabled = false;
+  };
+
+  /// @brief Resolve the KFD trap handler for a wave's process and GPU.
+  using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
+  void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
+
+  /// @brief Handle an architected scalar message issued by trap-handler code.
+  using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
+  void set_sendmsg_handler(SendmsgHandler cb) { sendmsg_handler_ = std::move(cb); }
+  bool handle_sendmsg(Wavefront &wf, uint32_t message) {
+    return sendmsg_handler_ && sendmsg_handler_(wf, message);
+  }
+
+  /// @brief Notify KFD after configured TBA code returns with STATUS.HALT.
+  using TrapCompletionHandler = std::function<void(Wavefront &wf)>;
+  void set_trap_completion_handler(TrapCompletionHandler cb) {
+    trap_completion_handler_ = std::move(cb);
+  }
+  void notify_trap_complete(Wavefront &wf) {
+    if (trap_completion_handler_)
+      trap_completion_handler_(wf);
+  }
+
+  /// @brief Callback after a single-stepped wave executes one instruction.
+  using SingleStepHandler = std::function<bool(Wavefront &wf)>;
+
+  void set_single_step_handler(SingleStepHandler cb) { single_step_handler_ = std::move(cb); }
+
+  using WatchpointHandler = std::function<bool(Wavefront &wf, uint64_t address, uint32_t bytes,
+                                               bool is_write, bool is_atomic)>;
+
+  void set_watchpoint_handler(WatchpointHandler cb) { watchpoint_handler_ = std::move(cb); }
+
+  using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
+  void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
+
+  using MemoryViolationHandler =
+      std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
+  void set_memory_violation_handler(MemoryViolationHandler cb) {
+    memory_violation_handler_ = std::move(cb);
+  }
+  using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
+  void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
+  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+  bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -234,7 +292,8 @@ public:
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
   /// and the CP is notified via notify_wg_complete.
-  void release_wf(uint32_t dispatch_id, uint32_t wg_id);
+  void release_wf(uint32_t dispatch_id, uint32_t wg_id,
+                  Wavefront::CpCompletionNotice notice = Wavefront::CpCompletionNotice::Send);
 
   /// @brief Roll back a committed-but-never-run workgroup on a dispatch error.
   /// @details Used to unwind an already-committed cluster peer when a later peer in
@@ -410,13 +469,34 @@ public:
   ///   shared partition engine thread (CP and its CUs share one partition, asserted in
   ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
       if (!w->is_halted())
         return true;
     return false;
   }
 
+  /// @brief Check whether any wavefront can currently make forward progress.
+  /// @details A debug-halted wave occupies its slot (so @ref has_active_wfs
+  /// stays true and the wave is not retired) but cannot run, so it must not
+  /// keep the CU's event loop spinning. Idle detection uses this instead of
+  /// @ref has_active_wfs so the engine can quiesce while a wave is stopped at
+  /// a breakpoint. @retval true At least one non-halted, non-debug-halted wave.
+  bool has_runnable_wfs() const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    for (const auto &w : wfs_)
+      if (!w->is_halted() && !w->debug_paused())
+        return true;
+    return false;
+  }
+
+  template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
+    WaveStateGuard lock(*this);
+    return std::forward<F>(fn)();
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
       if (!w->is_halted() && w->process_id() == process_id)
         return true;
@@ -469,6 +549,18 @@ public:
   /// Raw VM/storage writes deliberately bypass this hook.
   void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
+    if (wf)
+      lane_mask &= wf->vgpr_write_mask();
+    if (wf && lane_mask != 0 && byte_mask != 0)
+      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+  }
+
+  /// @brief Report a scalar-lane VGPR write without applying vector write masks.
+  /// @details V_WRITELANE ignores EXEC and DPP destination masks, including
+  /// when a Wave64 wave selects lanes 32--63.
+  void notify_scalar_lane_vgpr_write(
+      const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+      uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (wf && lane_mask != 0 && byte_mask != 0)
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
@@ -488,6 +580,9 @@ public:
   virtual void
   notify_vgpr_write_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                            uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
+
+  /// @brief Return the wavefront currently owning a physical VGPR.
+  virtual const Wavefront *vgpr_owner(uint32_t reg_idx) const = 0;
 
   /// @brief Read a vector register lane from the physical VGPR file.
   /// @details VM/storage-level scalar lane accessor. The concrete
@@ -581,6 +676,9 @@ public:
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
 
+  /// @brief Number of physically stored lanes in each VGPR.
+  virtual uint32_t vgpr_storage_lane_count() const = 0;
+
   /// @brief Raw typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
   /// (@c raw_vgpr_data), which erases the wavefront-size template parameter. The
@@ -672,6 +770,45 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  /// @brief Hold the wave-state lock, then notify the CP once it is released.
+  /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
+  /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running
+  /// under this lock must not reach back into the CP and take hw_queue_mutex_ --
+  /// a wave hitting s_endpgm on the engine thread would otherwise close an AB-BA
+  /// cycle against a concurrent dispatch or DESTROY_QUEUE. release_wf() therefore
+  /// queues its completions instead of sending them, and the outermost guard
+  /// delivers them here, after the lock is dropped and in the same order.
+  class WaveStateGuard {
+  public:
+    explicit WaveStateGuard(ComputeUnitCore &cu) : cu_(cu), lock_(cu.wave_state_mutex_) {
+      ++cu_.wave_state_depth_;
+    }
+    WaveStateGuard(const WaveStateGuard &) = delete;
+    WaveStateGuard &operator=(const WaveStateGuard &) = delete;
+    ~WaveStateGuard() {
+      const bool outermost = --cu_.wave_state_depth_ == 0;
+      lock_.unlock();
+      if (outermost)
+        cu_.flush_wg_completions();
+    }
+
+  private:
+    ComputeUnitCore &cu_;
+    std::unique_lock<std::recursive_mutex> lock_;
+  };
+
+  /// @brief Send the workgroup completions queued under the wave-state lock.
+  /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
+  void flush_wg_completions();
+
+  mutable std::recursive_mutex wave_state_mutex_;
+  /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
+  /// @details Only ever touched under @ref wave_state_mutex_, so the value
+  /// belongs to whichever thread currently owns it.
+  unsigned wave_state_depth_ = 0;
+  /// @brief Workgroups that finished while the wave-state lock was held.
+  /// @details Drained by @ref flush_wg_completions once the lock is dropped.
+  std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -687,6 +824,15 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  TrapHandlerResolver trap_handler_resolver_;
+  SendmsgHandler sendmsg_handler_;
+  TrapCompletionHandler trap_completion_handler_;
+  SingleStepHandler single_step_handler_;
+  WatchpointHandler watchpoint_handler_;
+  IllegalInstHandler illegal_inst_handler_;
+  MemoryViolationHandler memory_violation_handler_;
+  AluExceptionHandler alu_exception_handler_;
+  std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
@@ -746,6 +892,12 @@ inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
 }
+inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t message) {
+  return raw_cu().handle_sendmsg(wf, message);
+}
+inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
+  raw_cu().notify_trap_complete(wf);
+}
 inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
   return raw_cu().read_sgpr(reg_idx);
 }
@@ -773,7 +925,8 @@ public:
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
       last_quantum_executed_ = 0;
-      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+      const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : kFunctionalQuantum;
+      for (uint32_t i = 0; i < quantum && step(); ++i) {
         ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
@@ -804,11 +957,21 @@ public:
     // any simulation worker starts, when it has exclusive access to the queues. A
     // cross-partition call during execution would be an executing_ data race plus
     // an unsynchronized event-queue push.
-    if (executing_ || !this->engine() || !this->has_active_wfs())
+    //
+    // Runnable, not merely active: a wave the debugger has stopped is still
+    // resident on this CU, so scheduling work for it would spin the engine
+    // against a wave that cannot retire an instruction until the debugger
+    // resumes it.
+    if (executing_ || !this->engine() || !this->has_runnable_wfs())
       return;
     executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
     this->schedule_event(&tick_event_, now + 1);
+  }
+
+  void schedule_work_async() override {
+    if (this->engine())
+      this->engine()->schedule_event_now(&resume_event_);
   }
 
 private:
@@ -825,14 +988,18 @@ private:
         if (execute_quantum())
           this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
       }};
+  // Cross-thread debugger resumes first enter this event. Its handler runs on
+  // the CU partition and can safely update executing_ through schedule_work().
+  simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
+                               [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
   uint64_t last_quantum_executed_ = 0;
   bool executing_ = false;
 };
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.
 ///
-/// @details The Isa trait provides WF_SIZE which sets the VectorReg element
-/// count, so each VGPR holds one uint32_t lane per wavefront thread.
+/// @details The physical VGPR element uses the architecture's maximum lane
+/// count, avoiding unreachable upper-half storage on Wave32-only targets.
 /// Pre-allocates all wavefront slots as IsaWavefront<Isa> instances.
 ///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
@@ -840,7 +1007,8 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
-  using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+  static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
+  using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
   static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
       Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : ACC_VGPR_OFFSET + Isa::MAX_ACC_VGPRS_PER_WF;
   static constexpr uint32_t MAX_VGPRS_PER_BLOCK =
@@ -893,6 +1061,10 @@ public:
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
+    return reg_idx < vgpr_to_wave_.size() ? vgpr_to_wave_[reg_idx] : nullptr;
+  }
+
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
     std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
   }
@@ -935,22 +1107,26 @@ protected:
   int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count); }
 
   /// @brief Return allocated VGPRs to the free pool.
-  void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
+  void free_vgprs(uint32_t base) override {
+    vgpr_file_.free(base);
+    fill_vgpr_to_wave(base, vgprs_per_block_, nullptr);
+  }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
   void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
                               ComputeUnitCore::RawVgprVisitor visitor) const override {
-    static_assert(sizeof(Vgpr) == Isa::WF_SIZE * sizeof(uint32_t),
+    static_assert(sizeof(Vgpr) == Isa::WF_SIZE_MAX * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
     vgpr_file_.for_each(base, count, [&](const Vgpr &reg) {
       visitor(context,
-              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE)});
+              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE_MAX)});
     });
   }
 
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+  uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
 
 protected:
   /// @brief Execute one instruction on the given wavefront.

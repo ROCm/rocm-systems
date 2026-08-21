@@ -209,6 +209,7 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
+    CollImplInfoTests.cpp
     BroadcastTests.cpp
     DoneEventOrderingTests.cpp
     GatherTests.cpp
@@ -305,6 +306,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestTDM.cpp
@@ -454,6 +456,7 @@ if(BUILD_TESTS)
       ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
@@ -463,8 +466,10 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
+      PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
@@ -476,6 +481,7 @@ if(BUILD_TESTS)
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
+      transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -507,9 +513,11 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
-    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
+    # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
+    # executable's dynamic symbols.
     target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
@@ -659,6 +667,8 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      RmaExternalPluginPutSignalMPITests.cpp
+      plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
       ce/CeMPITests.cpp
@@ -671,9 +681,18 @@ if(BUILD_TESTS)
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
+      DdaAllReduceMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
+    # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process
+    # via STATIC_PLUGIN (dlopen(NULL))
+    target_link_options(rccl-UnitTestsMPI PRIVATE
+      "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+      "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can

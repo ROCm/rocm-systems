@@ -34,6 +34,8 @@ RJ_DIAGNOSTIC_POP
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -81,6 +83,31 @@ TEST(InterposerDupTest, DupKeepsKfdRoutingAfterPrimaryClose) {
   EXPECT_TRUE(kfd_version_ok(dup_fd));
 
   EXPECT_EQ(close(dup_fd), 0);
+}
+
+TEST(InterposerDupTest, ProcMapsNamesRemoteKfdMarker) {
+  // The marker only exists on the remote path: RemoteDriver::open() creates it,
+  // and in local mode there is no RemoteDriver at all. $ROCJITSU_INVOCATION_DIR
+  // is set for every rocjitsu-launched process regardless of backend, so gate on
+  // the daemon socket actually being there instead -- otherwise this skips
+  // nothing under a plain `rocjitsu --config ... --` run and fails for a reason
+  // that is not a defect.
+  const char *invocation_dir = getenv("ROCJITSU_INVOCATION_DIR");
+  if (invocation_dir == nullptr || *invocation_dir == '\0')
+    GTEST_SKIP() << "remote backend required";
+  if (access((std::string(invocation_dir) + "/daemon.sock").c_str(), F_OK) != 0)
+    GTEST_SKIP() << "remote backend required";
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+
+  std::ifstream maps("/proc/self/maps");
+  ASSERT_TRUE(maps.is_open());
+  std::string contents((std::istreambuf_iterator<char>(maps)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/dev/kfd"), std::string::npos);
+  EXPECT_EQ(contents.find("rocjitsu_remote_kfd"), std::string::npos);
+
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // fcntl(F_DUPFD_CLOEXEC) is the dup path libdrm uses; it must also preserve KFD
@@ -175,6 +202,26 @@ TEST(InterposerDupTest, Dup3RoutesKfdAndRejectsSameFd) {
 
   EXPECT_EQ(close(target), 0);
   EXPECT_EQ(close(pipefd[1]), 0);
+}
+
+TEST(InterposerDupTest, VforkChildCloseKeepsParentKfdRoutable) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  pid_t child = vfork();
+  ASSERT_NE(child, -1);
+  if (child == 0) {
+    close(kfd);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // Overwriting the primary KFD fd number via dup2 while a dup keeps the backend
@@ -452,6 +499,14 @@ namespace {
 // callers open /dev/kfd first.
 int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
 
+bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
+  drm_amdgpu_info query{};
+  query.return_pointer = reinterpret_cast<uint64_t>(device);
+  query.return_size = sizeof(*device);
+  query.query = AMDGPU_INFO_DEV_INFO;
+  return ioctl(drm_fd, DRM_IOCTL_AMDGPU_INFO, &query) == 0;
+}
+
 // Create an mmap-able, sized stand-in for a dmabuf export fd. PRIME_FD_TO_HANDLE
 // fstats the fd for the BO size and later MAP mmaps it, so the fd must be a real
 // sized, mappable object; a memfd satisfies both without a KFD allocation.
@@ -496,6 +551,23 @@ int64_t monotonic_deadline_after(std::chrono::nanoseconds delay) {
 }
 
 } // namespace
+
+TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm, &device));
+  EXPECT_EQ(device.device_id, 30112u);
+  EXPECT_EQ(device.cu_active_number, 256u);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
 
 TEST(InterposerSyncobjTest, VmTimelineWaitObservesSynchronousMapAndUnmap) {
   int kfd = open_kfd();

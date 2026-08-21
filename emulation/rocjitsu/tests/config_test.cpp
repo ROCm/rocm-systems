@@ -6,6 +6,7 @@
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
 
+#include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
@@ -38,6 +39,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
@@ -51,17 +53,27 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   return file;
 }
 
+std::vector<uint8_t> read_binary_file(const std::string &path) {
+  std::ifstream stream(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
-  // CDNA4 config: 8 XCDs, 4 SEs per XCD, 8 CUs per SE, 2 IODs.
+  // MI350X physical geometry: 8 XCDs, 4 SEs per XCD, 9 CUs per SE, 2 IODs.
+  // The part exposes 256 active CUs through simd_count but has capacity for 288.
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
-  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
+  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -87,10 +99,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna4.device.num_shader_arrays_per_engine,
                                          rdna4.device.num_shader_arrays_per_engine),
             4u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines *
-                                          rdna4.device.num_shader_arrays_per_engine,
-                                      rdna4.device.num_cu_per_sh),
-            64u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.simd_count, rdna4.device.simd_per_cu), 64u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
                                                         rdna4.device.revision_id),
             0x51u);
@@ -136,10 +145,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna3.device.num_shader_arrays_per_engine,
                                          rdna3.device.num_shader_arrays_per_engine),
             6u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines *
-                                          rdna3.device.num_shader_arrays_per_engine,
-                                      rdna3.device.num_cu_per_sh),
-            96u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.simd_count, rdna3.device.simd_per_cu), 96u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
                                                         rdna3.device.revision_id),
             0x1u);
@@ -173,10 +179,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna35.device.num_shader_arrays_per_engine,
                                          rdna35.device.num_shader_arrays_per_engine),
             2u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.num_shader_engines *
-                                          rdna35.device.num_shader_arrays_per_engine,
-                                      rdna35.device.num_cu_per_sh),
-            32u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.simd_count, rdna35.device.simd_per_cu), 32u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
                                                         rdna35.device.revision_id),
             0xc1u);
@@ -862,7 +865,7 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
       {"name":"xcd0","type":"xcd","children":[
@@ -883,6 +886,7 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
+  ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
   EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
@@ -1064,6 +1068,22 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
+
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
@@ -1096,7 +1116,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
             0xFEEDFACEu);
 }
 
-TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"rdna4"},
     "topology":{
@@ -1129,19 +1149,36 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf, 64);
   ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
+  ASSERT_EQ(wf->wf_size(), 64u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
   cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + 1, 43, 0x1234002Bu);
   cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
@@ -1153,9 +1190,11 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
-  EXPECT_EQ(restored_wf->exec(), 0xFULL);
+  EXPECT_EQ(restored_wf->exec(), 0xDEADBEEF0000000FULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_wf->kernel_wave_size(), 64u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 43), 0x1234002Bu);
   EXPECT_EQ(restored_cu->read_vgpr(
                 restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
             0x5678001Fu);
@@ -1166,7 +1205,7 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
 
 TEST(CheckpointTest, SaveAndRestoreHwregState) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{
       "root":{
         "name":"soc","type":"soc",
@@ -1210,6 +1249,22 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 32u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 32u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 32u * sizeof(uint32_t));
+
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
@@ -1219,6 +1274,134 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
   EXPECT_TRUE(restored_wf->fp16_ovfl());
+}
+
+// The checkpoint record carries the architectural registers and the TTMPs but
+// none of the trap/debug state around them, so a wave captured mid-handler
+// would restore without the EXEC restore or the privileged STATUS write that
+// leaving the handler performs. Refusing beats resuming the application with
+// the trap handler's state installed.
+TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna5"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  // A plain running wave still checkpoints.
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  wf->set_in_trap_handler(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config),
+               std::runtime_error);
+  wf->set_in_trap_handler(false);
+
+  wf->set_debug_halted(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_halted(false);
+
+  wf->set_debug_suspended(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_suspended(false);
+
+  // The runtime's own pause is not a debugger stop. A queue throttled to
+  // queue_percentage 0 carries none of the trap or debugger state the refusals
+  // above exist to protect, so it must stay checkpointable -- this is the one
+  // assertion that tells debug_stopped() apart from debug_paused().
+  wf->set_runtime_suspended(true);
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
+  wf->set_runtime_suspended(false);
+}
+
+// wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the
+// grid dimensions needed to unflatten one into the other live in the dispatch
+// packet, which is not part of a checkpoint. A restored wave that lost the
+// coordinate publishes the wrong workgroup in TTMP8/9/10 at trap entry and can
+// no longer be matched to its own CWSR record.
+TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  // A flat id that is not any of the coordinates, so restoring wg_id into them
+  // would not pass either.
+  auto *wf = cu->dispatch_wf(/*wg_id=*/9, /*pc=*/0x1000, cu->config().sgprs_per_wf,
+                             cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_wg_coord(3, 5, 7);
+
+  test::ScopedTempFile checkpoint("rocjitsu-wg-coord-checkpoint-");
+  ASSERT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), 1u);
+  const auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->wg_id(), 9u);
+  EXPECT_EQ(restored_wf->wg_coord(), (std::array<uint32_t, 3>{3, 5, 7}));
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
