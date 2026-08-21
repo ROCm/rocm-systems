@@ -2,10 +2,11 @@ namespace rocjitsu {
 
 /// Default maximum additional ELF storage one ConSan transformation may
 /// materialize, including alignment padding. Dense production code objects can
-/// require one out-of-line body per admitted access. Complete Inline coverage
-/// of qualified generated operator libraries requires about 376 MiB, so retain
-/// a bounded 384 MiB default while leaving process-wide ceilings independent.
-inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{384} * 1024 * 1024;
+/// require one out-of-line body per admitted access. Qualified generated
+/// operator libraries require up to about 385 MiB for complete Inline or
+/// Record/Replay coverage, so retain a bounded 400 MiB default while leaving
+/// process-wide ceilings independent.
+inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{400} * 1024 * 1024;
 
 enum class ConSanPatchedImageGrowthLimitKind : uint8_t {
   AbsoluteBytes,
