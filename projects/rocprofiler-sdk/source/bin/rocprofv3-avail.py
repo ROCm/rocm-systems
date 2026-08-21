@@ -24,7 +24,6 @@
 
 import atexit
 import contextlib
-import ctypes
 import os
 import argparse
 import sys
@@ -34,47 +33,6 @@ def remove_file(path):
     """Drop a listing that was never published, whatever ended the process."""
     with contextlib.suppress(OSError):
         os.unlink(path)
-
-
-def output_filename(avail, output_path, output_file):
-    """Resolve the listing path through the same formatter the tool library uses
-    for every other artifact, so naming and directory creation stay consistent."""
-    # the library aborts rather than returning when the path is unusable, so
-    # diagnose what is visible from here first. Only a literal path that already
-    # exists can be checked: placeholders are expanded by the library, and a
-    # caller with the privilege to override the permissions passes either way.
-    if output_path is not None and os.path.exists(output_path):
-        if not os.path.isdir(output_path):
-            avail.fatal_error(f"Output directory is not a directory: {output_path}")
-        if not os.access(output_path, os.W_OK, effective_ids=True):
-            avail.fatal_error(f"Output directory is not writable: {output_path}")
-
-    try:
-        resolve = avail.get_library().list_avail_output_filename
-    except AttributeError:
-        avail.fatal_error(
-            f"{avail.loadLibrary.libname} does not provide list_avail_output_filename"
-        )
-
-    resolve.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.c_size_t,
-    ]
-    resolve.restype = ctypes.c_int
-
-    path = os.fsencode(output_path) if output_path else None
-    name = os.fsencode(output_file) if output_file else None
-
-    # resolving creates the directory, so a path too long for this buffer could
-    # not have been created either and there is nothing to gain from retrying
-    buffer = ctypes.create_string_buffer(4096)
-    length = resolve(path, name, buffer, len(buffer))
-    if length < 0 or length >= len(buffer):
-        avail.fatal_error("Could not resolve the list-avail output path")
-
-    return os.fsdecode(buffer.value)
 
 
 def format_help(formatter, w=120, h=40):
@@ -204,13 +162,13 @@ def parse_arguments(args=None):
     # no short forms: -d already means --device here, unlike in rocprofv3
     parser.add_argument(
         "--output-file",
-        help="write the listing to this file name instead of stdout",
+        help="write the listing to a file with this name instead of stdout",
         type=str,
         default=None,
     )
     parser.add_argument(
         "--output-directory",
-        help="write the listing under this directory instead of stdout",
+        help="write the listing to a file in this directory instead of stdout",
         type=str,
         default=None,
     )
@@ -678,10 +636,16 @@ def main(argv=None):
     except OSError as error:
         avail.fatal_error(f"Could not load the rocprofv3-avail library: {error}")
 
+    # either option redirects the listing to a file: --output-file names it and
+    # --output-directory places it, as -o and -d do for every rocprofv3 artifact
+    write_to_file = args.output_file is not None or args.output_directory is not None
+
     stream = None
     try:
-        if args.output_file is not None or args.output_directory is not None:
-            filename = output_filename(avail, args.output_directory, args.output_file)
+        if write_to_file:
+            filename = avail.get_list_avail_output_filename(
+                args.output_directory, args.output_file
+            )
             # a truncated listing looks complete, so build it out of the way and
             # rename it into place only once every section has been written. The
             # pid keeps concurrent runs sharing an output file off each other
