@@ -10,6 +10,8 @@
 
 #include "nccl.h"
 
+#include <cstdint>
+
 struct ncclComm;
 
 // IPC path (single node, fixed kDdaNranks ranks).
@@ -39,5 +41,12 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+
+// Total CTAs (grid blocks) each DDA allreduce launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
 
 #endif

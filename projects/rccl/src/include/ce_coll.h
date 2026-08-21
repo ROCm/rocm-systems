@@ -11,6 +11,7 @@
 #include "nccl.h"
 #include "nccl_common.h"
 #include "bitops.h"
+#include "sym_kernels.h"
 
 // Memory operations per rank for different synchronization protocols
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
@@ -190,4 +191,9 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
+
+// Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
+// (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce
+// launches; for host-side impl-selection reporting. Returns 0 if chunkElems==0.
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems);
 #endif /* NCCL_CE_COLL_H_ */

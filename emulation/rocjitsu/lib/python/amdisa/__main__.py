@@ -12,6 +12,7 @@ import xml.etree.ElementTree as elem_tree
 from amdisa import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
@@ -45,7 +46,7 @@ _PROFILES = {
     'cdna1': Cdna1Profile,
     'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
+    'cdna4': Cdna4Profile,
     'rdna1': Rdna1Profile,
     'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
