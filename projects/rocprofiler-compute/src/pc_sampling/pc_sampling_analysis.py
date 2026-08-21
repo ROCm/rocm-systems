@@ -45,6 +45,12 @@ NORMALIZED_RECORD_COLUMNS = [
     "inst_type",
 ]
 
+# exec_mask is constructed as object instead of inferred: one sample without a
+# mask promotes the column to float64, which rounds any mask above 2**53 (a full
+# wave64 lands on 1.8446744073709552e+19) and makes the popcount in
+# _aggregate_active_thread_percent raise on a float.
+NORMALIZED_RECORD_DTYPES = {"exec_mask": object}
+
 SOURCE_LINE_MISSING = "N/A"
 
 
@@ -123,12 +129,13 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "inst_type": record.get("inst_type"),
         })
 
-    records_df = pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
-    if not records_df.empty:
-        records_df["exec_mask"] = pd.Series(
-            [row["exec_mask"] for row in rows], dtype=object
+    return pd.DataFrame({
+        column: pd.Series(
+            [row[column] for row in rows],
+            dtype=NORMALIZED_RECORD_DTYPES.get(column),
         )
-    return records_df
+        for column in NORMALIZED_RECORD_COLUMNS
+    })
 
 
 def aggregate_pc_sample_records(
