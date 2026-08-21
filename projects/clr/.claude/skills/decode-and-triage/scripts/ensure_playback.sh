@@ -39,7 +39,7 @@ resolve_repo_root() {
 resolve_clr_root() {
   local repo candidates=()
   [[ -n "${CLR_ROOT:-}" ]] && candidates+=("$CLR_ROOT")
-  candidates+=("$(cd "$SKILL_DIR/../../../../../" 2>/dev/null && pwd || true)")
+  candidates+=("$(cd "$SKILL_DIR/../../../" 2>/dev/null && pwd || true)")
   repo="$(resolve_repo_root)"
   [[ -n "$repo" ]] && candidates+=("$repo/projects/clr")
   [[ -n "$repo" ]] && candidates+=("$repo/rocm-systems/projects/clr")

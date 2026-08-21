@@ -149,7 +149,7 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 ## Agent tooling
 
-Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
+Optional Cursor/agent skill: [.claude/skills/decode-and-triage/SKILL.md](../../../.claude/skills/decode-and-triage/SKILL.md).
 **Linux:** full workflow via `triage_archive.sh` (native replay, optional Docker replay, auto-build).
 **Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
 requires Linux or WSL2. Docker replay uses the image HRR stack by default; set

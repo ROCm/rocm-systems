@@ -27,14 +27,14 @@ manifest preflight, and finding output.
 **Run from:** any working directory. On Linux, invoke by absolute path:
 
 ```bash
-<rocm-systems>/projects/clr/hipamd/src/hrr/skills/decode-and-triage/scripts/triage_archive.sh \
+<rocm-systems>/projects/clr/.claude/skills/decode-and-triage/scripts/triage_archive.sh \
   --archive <path-to>/capture.hrr/pid-<pid>
 ```
 
 On Windows, invoke by absolute path:
 
 ```powershell
-<rocm-systems>\projects\clr\hipamd\src\hrr\skills\decode-and-triage\scripts\triage_archive.ps1 `
+<rocm-systems>\projects\clr\.claude\skills\decode-and-triage\scripts\triage_archive.ps1 `
   --archive <path-to>\capture.hrr\pid-<pid>
 ```
 
@@ -122,7 +122,7 @@ When the HIP app runs on a Remote Desktop machine without Cursor, copy the four
 standalone script files and run them directly:
 
 ```
-projects\clr\hipamd\src\hrr\skills\decode-and-triage\scripts\
+projects\clr\.claude\skills\decode-and-triage\scripts\
   triage_archive.ps1
   ensure_playback.ps1
   analyze_replay_finding.py

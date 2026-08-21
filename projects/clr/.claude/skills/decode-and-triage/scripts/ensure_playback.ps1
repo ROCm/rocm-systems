@@ -85,7 +85,7 @@ function Resolve-ClrRoot {
         }
     }
 
-    # Walk up 5 levels from skill dir (decode-and-triage → skills → hrr → hipamd → clr)
+    # Walk up from the skill dir (decode-and-triage → skills → .claude → clr)
     $candidate = $SkillDir
     for ($i = 0; $i -lt 5; $i++) {
         if (-not $candidate) { break }          # stop before Split-Path "" errors
