@@ -210,7 +210,7 @@ Profile types:
 Selecting output formats
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Prior to ROCm 7.14, output format was specified using individual flags or environment variables directly. The ``--output-format`` flag (available in ``rocprof-sys-run`` and ``rocprof-sys-sample``) now selects which output format(s) to produce in a single, intuitive option. The selection is authoritative: only the formats you name are produced.
+Starting in ROCm 7.14, the `--output-format` option (in `rocprof-sys-run` and `rocprof-sys-sample`) selects which output format(s) to produce in a single option. The selection is authoritative: only the formats you name are produced. The existing individual flags and environment variables remain available; use either `--output-format` or those flags on the same command line, not both.
 
 .. list-table::
    :header-rows: 1
