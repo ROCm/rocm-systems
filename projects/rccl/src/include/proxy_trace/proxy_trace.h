@@ -80,8 +80,10 @@ struct ProxyTraceExtraInfo {
   uint32_t totalBytes{0};
   uint32_t chunkSize{0};
   inline std::string str() const {
-    return "[fu,pr,pa,tb,ck]:" + std::to_string(funcIdx) + "," + std::to_string(protocol) + "," +
-           std::to_string(pattern) + "," + std::to_string(totalBytes) + "," + std::to_string(chunkSize);
+    std::ostringstream os;
+    os << "[fu,pr,pa,tb,ck]:" << funcIdx << "," << protocol << "," << pattern << "," << totalBytes << ","
+       << chunkSize;
+    return os.str();
   }
 };
 

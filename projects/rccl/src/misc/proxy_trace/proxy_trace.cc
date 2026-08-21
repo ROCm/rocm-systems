@@ -11,7 +11,7 @@
 #else
 #include "debug.h"
 #endif
-#include <cstdio>
+#include <iomanip>
 #include <map>
 
 constexpr int32_t kFinishedProxyOpItems = 32;
@@ -112,7 +112,9 @@ void facebook_rccl::ProxyTraceOp::computeStatus() {
 
 std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::string result = "commDump for commHash:" + std::to_string(commHash) + "\n";
+  std::ostringstream headerOs;
+  headerOs << "commDump for commHash:" << commHash << "\n";
+  std::string result = headerOs.str();
   std::map<std::string, std::string> sortedDumpStrMap;
   for (auto& opCountMap : activeOps.at(commHash)) {
     for (auto& proxyOpMap : opCountMap.second) {
@@ -130,9 +132,9 @@ std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
 std::string facebook_rccl::ProxyTrace::dump() {
   std::lock_guard<std::mutex> lock(mutex_);
   std::string result = "commDump for all active ops ";
-  char mapSizeBuf[64];
-  snprintf(mapSizeBuf, sizeof(mapSizeBuf), "mapSizeMB:%.2f\n", getMapSizeMB());
-  result += mapSizeBuf;
+  std::ostringstream mapSizeOs;
+  mapSizeOs << "mapSizeMB:" << std::fixed << std::setprecision(2) << getMapSizeMB() << "\n";
+  result += mapSizeOs.str();
 
   // maps serialized key to serliazed proxyOp; sorted by key
   std::map<std::string, std::string> sortedDumpStrMap;
