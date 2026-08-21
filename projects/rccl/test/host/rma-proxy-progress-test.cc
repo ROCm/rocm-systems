@@ -536,4 +536,25 @@ TEST_F(RmaProxyProgressTest, GroupCompletion_PartialThenFull_StaysInProgressUnti
     EXPECT_EQ(destroyCalls, 1);
 }
 
+// A completion reported by the network while no inflight credit is accounted
+// for the target must be rejected -- the underflow guard returns
+// ncclInternalError (and WARNs) rather than decrementing the credit counter
+// below zero.
+TEST_F(RmaProxyProgressTest, Completion_NoInflightCredit_ReturnsErrorWithoutUnderflow) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    ncclRmaProxyDesc* desc = PushInProgressPutSignal(peer, target);
+
+    // Drop the credit the helper accounted so the network reports a completion
+    // the proxy has no record of -- the underflow precondition.
+    inflight_[target] = 0;
+
+    net_.completeRequest(desc->putSignal.request);
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
+              ncclInternalError);
+    EXPECT_EQ(inflight_[target], 0u);          // guard prevents underflow
+}
+
 }  // namespace
