@@ -9,6 +9,8 @@
 #
 # categories.h: rocprofsys_category_t, used internally by the category/trait
 # system (source/lib/core/categories.hpp) and by the Python profiler bindings.
+# Not installed: rocprofsys_category_t is an implementation detail, not part of
+# the public ABI.
 #
 # annotation.h: rocprofsys_annotation_t, the payload type for annotated regions
 # and progress points (rocprof-sys-causal-api, rocprofsys_push_category_region).
@@ -25,10 +27,7 @@ add_library(
     ALIAS rocprofiler-systems-common-api-library
 )
 
-set(_common_api_headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/categories.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/annotation.h
-)
+set(_common_api_headers ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/annotation.h)
 
 target_include_directories(
     rocprofiler-systems-common-api-library

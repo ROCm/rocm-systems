@@ -115,7 +115,6 @@ WARN_LOGFILE           = doc/warnings.log
 #---------------------------------------------------------------------------
 INPUT                  = ../../README.md \
                          ../../source/lib/rocprof-sys-common-api/rocprofiler-systems/annotation.h \
-                         ../../source/lib/rocprof-sys-common-api/rocprofiler-systems/categories.h \
                          ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal_api.h \
                          ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal.h
 INPUT_ENCODING         = UTF-8

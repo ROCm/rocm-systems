@@ -13,7 +13,6 @@
 #endif
 
 #include "rocprofiler-systems/annotation.h"
-#include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/causal_api.h"
 
 #include <atomic>
@@ -58,12 +57,6 @@ extern "C"
     void rocprofsys_pop_trace(const char* name) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_push_region(const char*) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_pop_region(const char*) ROCPROFSYS_PUBLIC_API;
-    int  rocprofsys_push_category_region(rocprofsys_category_t, const char*,
-                                         rocprofsys_annotation_t*,
-                                         size_t) ROCPROFSYS_PUBLIC_API;
-    int  rocprofsys_pop_category_region(rocprofsys_category_t, const char*,
-                                        rocprofsys_annotation_t*,
-                                        size_t) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_push_category_region_python(const char*, rocprofsys_annotation_t*,
                                                 size_t) ROCPROFSYS_PUBLIC_API;
     int  rocprofsys_pop_category_region_python(const char*, rocprofsys_annotation_t*,
