@@ -1956,11 +1956,10 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   amd::Coord3D size = cmd.size();
 
   if (!p2pAllowed) {
-    // force-drain this vgpu's compute engine
-    // so data is valid before the staged cross-device read.
+    // Force-drain this vGPU's compute engine so data is valid before the staged cross-device read.
     GpuEvent drainEvt;
-    eventBegin(MainEngine);
-    eventEnd(MainEngine, drainEvt, true);
+    drainEvt.id_ = queue(MainEngine).submit(/*forceFlush=*/true);
+    drainEvt.engineId_ = MainEngine;
     waitForEvent(&drainEvt);
   }
   bool result = false;
