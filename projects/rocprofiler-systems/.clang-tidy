@@ -108,15 +108,15 @@ Checks: >
 
 CheckOptions:
   - key: readability-function-size.LineThreshold
-    value: '100'
+    value: "100"
   - key: readability-function-size.StatementThreshold
-    value: '50'
+    value: "50"
   - key: readability-function-size.BranchThreshold
-    value: '10'
+    value: "10"
   - key: readability-function-size.NestingThreshold
-    value: '3'
+    value: "3"
   - key: readability-function-size.ParameterThreshold
-    value: '4'
+    value: "4"
 
   # --- Namespaces
   - key: readability-identifier-naming.NamespaceCase
@@ -140,17 +140,17 @@ CheckOptions:
   - key: readability-identifier-naming.TypeAliasCase
     value: lower_case
   - key: readability-identifier-naming.TypeAliasSuffix
-    value: '_t'
+    value: "_t"
   - key: readability-identifier-naming.TypedefCase
     value: lower_case
   - key: readability-identifier-naming.TypedefSuffix
-    value: '_t'
+    value: "_t"
 
   # --- Abstract/interface classes: require an "_interface" suffix
   - key: readability-identifier-naming.AbstractClassCase
     value: lower_case
   - key: readability-identifier-naming.AbstractClassSuffix
-    value: '_interface'
+    value: "_interface"
 
   # --- Functions / methods
   - key: readability-identifier-naming.FunctionCase
@@ -186,15 +186,15 @@ CheckOptions:
   - key: readability-identifier-naming.MemberCase
     value: lower_case
   - key: readability-identifier-naming.PrivateMemberPrefix
-    value: 'm_'
+    value: "m_"
   - key: readability-identifier-naming.ProtectedMemberPrefix
-    value: 'm_'
+    value: "m_"
   - key: readability-identifier-naming.PublicMemberCase
     value: lower_case
   - key: readability-identifier-naming.ClassConstantCase
     value: lower_case
   - key: readability-identifier-naming.ClassConstantPrefix
-    value: 'k_'
+    value: "k_"
   # NOTE: ClassMemberCase/Prefix applies to ALL static data members
   # regardless of access specifier (public/protected/private) -- clang-tidy
   # has no PrivateStaticMember/ProtectedStaticMember/PublicStaticMember
@@ -221,15 +221,15 @@ CheckOptions:
   - key: readability-identifier-naming.StaticVariableCase
     value: lower_case
   - key: readability-identifier-naming.StaticVariablePrefix
-    value: 's_'
+    value: "s_"
   - key: readability-identifier-naming.StaticConstantCase
     value: lower_case
   - key: readability-identifier-naming.StaticConstantPrefix
-    value: 'k_'
+    value: "k_"
   - key: readability-identifier-naming.GlobalVariableCase
     value: lower_case
   - key: readability-identifier-naming.GlobalVariablePrefix
-    value: 'g_'
+    value: "g_"
   - key: readability-identifier-naming.GlobalConstantCase
     value: UPPER_CASE
   - key: readability-identifier-naming.GlobalConstantPointerCase
@@ -237,7 +237,7 @@ CheckOptions:
   - key: readability-identifier-naming.GlobalPointerCase
     value: lower_case
   - key: readability-identifier-naming.GlobalPointerPrefix
-    value: 'g_'
+    value: "g_"
   - key: readability-identifier-naming.GlobalFunctionCase
     value: lower_case
 
@@ -247,7 +247,7 @@ CheckOptions:
   - key: readability-identifier-naming.ConstexprVariableCase
     value: lower_case
   - key: readability-identifier-naming.ConstexprVariablePrefix
-    value: 'k_'
+    value: "k_"
 
   # --- Templates
   - key: readability-identifier-naming.TemplateParameterCase
@@ -259,7 +259,7 @@ CheckOptions:
   - key: readability-identifier-naming.TemplateTemplateParameterCase
     value: CamelCase
   - key: readability-identifier-naming.TemplateParameterIgnoredRegexp
-    value: 'expr-type|::type|^_.*'
+    value: "expr-type|::type|^_.*"
 
   # --- Macros
   - key: readability-identifier-naming.MacroDefinitionCase
@@ -267,4 +267,12 @@ CheckOptions:
 
   # --- Misc: ignore main-like functions (main, wmain, ...)
   - key: readability-identifier-naming.IgnoreMainLikeFunctions
-    value: '1'
+    value: "1"
+
+  # --- identifier lenght
+  - key: readability-identifier-length.MinimumBindingNameLength
+    value: "3"
+  - key: readability-identifier-length.MinimumExceptionNameLength
+    value: "3"
+  - key: readability-identifier-length.MinimumLoopCounterNameLength
+    value: "3"
