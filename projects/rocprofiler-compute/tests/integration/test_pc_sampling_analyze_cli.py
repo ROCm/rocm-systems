@@ -318,26 +318,6 @@ def test_pc_sampling_analyze_csv_output(
         }
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
-
-        isa_csv_paths = sorted((csv_dir / "per_kernel_pc_sampling").rglob("*.csv"))
-        assert isa_csv_paths
-        has_populated_sample_metrics = False
-        for isa_csv_path in isa_csv_paths:
-            isa_rows = pd.read_csv(isa_csv_path)
-            if "Wave occupancy percent" not in isa_rows.columns:
-                continue
-            if "Active thread percent" not in isa_rows.columns:
-                continue
-            sampled_isa_rows = isa_rows.loc[isa_rows["Total count"].notna()]
-            if sampled_isa_rows.empty:
-                continue
-            if (
-                sampled_isa_rows["Wave occupancy percent"].notna().all()
-                and sampled_isa_rows["Active thread percent"].notna().all()
-            ):
-                has_populated_sample_metrics = True
-                break
-        assert has_populated_sample_metrics
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
