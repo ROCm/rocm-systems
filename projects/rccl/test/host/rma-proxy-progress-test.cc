@@ -297,6 +297,43 @@ protected:
         return raw;
     }
 
+    // Allocate a PutSignalGroup descriptor with all `targets.size()` ops
+    // already issued to the network (live FakeNet requests) and enqueue it on
+    // `peer`'s in-progress queue. nIssued == nOps, nCompleted == 0, so the
+    // group is awaiting completion. Gives the desc a doneSeq slot (sentinel
+    // != opSeq) so publication of opSeq on full completion is observable.
+    ncclRmaProxyDesc* PushInProgressPutGroup(int peer,
+                                             std::vector<uint32_t> targets,
+                                             uint64_t opSeq = 1) {
+        auto d = std::make_unique<ncclRmaProxyDesc>();
+        std::memset(d.get(), 0, sizeof(ncclRmaProxyDesc));
+        d->rmaDescType = ncclRmaDescTypePutSignalGroup;
+        d->rmaDescState = ncclRmaDescStateInProgress;
+        d->opSeq = opSeq;
+
+        doneSeqStore_.push_back(~opSeq);  // sentinel distinct from opSeq
+        d->doneSeq = &doneSeqStore_.back();
+
+        groupOpsStore_.emplace_back(targets.size());
+        std::vector<ncclRmaPutSignalOp>& ops = groupOpsStore_.back();
+        for (size_t i = 0; i < targets.size(); i++) {
+            ops[i].targetRank = static_cast<int>(targets[i]);
+            ops[i].signal.op = 0;
+            ops[i].request = nullptr;
+            EXPECT_EQ(net_.issue(targets[i], &ops[i].request), ncclSuccess);
+            inflight_[targets[i]]++;
+        }
+        d->putSignalGroup.nOps = static_cast<int>(targets.size());
+        d->putSignalGroup.ops = ops.data();
+        d->putSignalGroup.nIssued = static_cast<int>(targets.size());
+        d->putSignalGroup.nCompleted = 0;
+
+        ncclIntruQueueEnqueue(&inProgress_[peer], d.get());
+        ncclRmaProxyDesc* raw = d.get();
+        descs_.push_back(std::move(d));
+        return raw;
+    }
+
     ncclRmaProxyDesc* InProgressHead(int peer) {
         return ncclIntruQueueHead(&inProgress_[peer]);
     }
@@ -445,6 +482,58 @@ TEST_F(RmaProxyProgressTest, GroupPut_PartialCredit_StaysPendingUntilCreditFrees
     EXPECT_EQ(net_.issueCalls, 3);                 // remaining op now issued
     EXPECT_EQ(InProgressHead(peer), desc);         // fully issued -> in-progress
     EXPECT_EQ(cis_[peer], 1u);                      // CI advanced exactly once
+}
+
+// A group in-progress with several ops completes incrementally: while ops are
+// still outstanding, completion polling makes no progress on the group -- it
+// stays at the head of the in-progress queue, is not destroyed, and its doneSeq
+// is not yet published. Only once the final op completes (nCompleted == nOps)
+// does the poll dequeue, publish doneSeq, and destroy the group.
+TEST_F(RmaProxyProgressTest, GroupCompletion_PartialThenFull_StaysInProgressUntilAllOpsComplete) {
+    const int peer = 1;
+    const uint32_t target = 1;
+    const uint64_t opSeq = 5;
+
+    ncclRmaProxyDesc* desc = PushInProgressPutGroup(peer, {target, target, target}, opSeq);
+
+    int destroyCalls = 0;
+    ncclRmaProxyDesc* destroyed = nullptr;
+    ScopedHook destroy(g_rmaDestroyDesc,
+        [&](struct ncclComm*, struct ncclRmaProxyDesc** d) -> ncclResult_t {
+            destroyed = *d;
+            *d = nullptr;
+            ++destroyCalls;
+            return ncclSuccess;
+        });
+
+    // Poll with no ops complete: group stays put, nothing published/destroyed.
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(InProgressHead(peer), desc);
+    EXPECT_EQ(destroyCalls, 0);
+    EXPECT_EQ(doneSeqStore_.back(), ~opSeq);
+
+    // Complete the first op only: still partial -> no progress on the group.
+    net_.completeRequest(desc->putSignalGroup.ops[0].request);
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(InProgressHead(peer), desc);
+    EXPECT_EQ(destroyCalls, 0);
+    EXPECT_EQ(doneSeqStore_.back(), ~opSeq);
+
+    // Complete the second op: two of three done, still not fully done.
+    net_.completeRequest(desc->putSignalGroup.ops[1].request);
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(InProgressHead(peer), desc);
+    EXPECT_EQ(destroyCalls, 0);
+    EXPECT_EQ(doneSeqStore_.back(), ~opSeq);
+
+    // Complete the final op: nCompleted == nOps -> group is fully done, so the
+    // poll publishes doneSeq, dequeues, and destroys it.
+    net_.completeRequest(desc->putSignalGroup.ops[2].request);
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(doneSeqStore_.back(), opSeq);       // published for the GPU
+    EXPECT_EQ(InProgressHead(peer), nullptr);     // dequeued
+    EXPECT_EQ(destroyed, desc);                   // destroyed
+    EXPECT_EQ(destroyCalls, 1);
 }
 
 }  // namespace
