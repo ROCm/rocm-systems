@@ -700,7 +700,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
                                patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
                               (patch.original_size == 2u * sizeof(uint32_t) ||
                                patch.original_size == 3u * sizeof(uint32_t));
-    const bool is_moi_body = patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+    const bool is_moi_body = (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+                              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
                              patch.original_size >= sizeof(uint32_t) &&
                              patch.original_size % sizeof(uint32_t) == 0u;
     if ((!is_lds_body && !is_flat_body && !is_moi_body) ||
