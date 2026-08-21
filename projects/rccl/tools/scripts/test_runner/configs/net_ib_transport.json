@@ -1015,9 +1015,92 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder, filling the shared per-device MR cache with registrations of many sizes",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
           "name": "NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: the same transfer loop at one worker and at all of them, so a lock held across a progress call shows up as time that scales with the worker count. Skips below four workers",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        },
+        {
+          "name": "NetIB_MultiThread_LargeTransfer",
+          "description": "Concurrent 16 MB transfers keep several large registrations live on one device",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the insert, lookup and eviction paths of the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_MixedSizeBarrage",
+          "description": "Concurrent workers walk 1 B to 64 MB, exercising alignment and chunking under bandwidth pressure",
+          "test_filter": "NetIbMPITest.MixedSizeBarrage"
+        },
+        {
+          "name": "NetIB_MultiThread_TagZeroReuse",
+          "description": "Every worker reuses tag 0 on its own connection, so a misrouted completion shows up as a data mismatch",
+          "test_filter": "NetIbMPITest.TagZeroReuse"
+        },
+        {
+          "name": "NetIB_MultiThread_RequestSlotExhaustion",
+          "description": "Concurrent workers hold 32 requests each in flight on one NIC and verify slot recycling",
+          "test_filter": "NetIbMPITest.RequestSlotExhaustion"
+        },
+        {
+          "name": "NetIB_MultiThread_RapidRecvPostDrain",
+          "description": "Concurrent post-and-drain batches, so recycling holds up while other communicators drain",
+          "test_filter": "NetIbMPITest.RapidRecvPostDrain"
+        },
+        {
+          "name": "NetIB_MultiThread_FifoPressure",
+          "description": "N slow receivers against N tight senders, with the backpressure assertion kept per connection",
+          "test_filter": "NetIbMPITest.FifoPressureSenderFast"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check taken around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
+          "name": "NetIB_MultiThread_GpuMemoryTransfer",
+          "description": "Concurrent GPU-buffer registrations drive the peer-memory path into the shared MR cache",
+          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
+        }
+      ]
+    },
+    "net_ib_multithread_multiqp": {
+      "extends": "net_ib_multithread_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_MultiQpSplitData",
+          "description": "Concurrent workers multiply the QPs in flight per device while each checks its own split payloads",
+          "test_filter": "NetIbMPITest.MultiQpSplitDataStress"
+        }
+      ]
+    },
+    "net_ib_multithread_multiqp_nosplit": {
+      "extends": "net_ib_multithread_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_MultiQpNoSplit",
+          "description": "Same concurrent sweep on the nDataQps path",
+          "test_filter": "NetIbMPITest.MultiQpNoSplitStress"
         }
       ]
     },
@@ -1032,6 +1115,14 @@
     "net_ib_multithread_independent_16": {
       "extends": "net_ib_multithread_independent",
       "command_args": "--net_ib_nthreads=16"
+    },
+    "net_ib_multithread_multiqp_4": {
+      "extends": "net_ib_multithread_multiqp",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "net_ib_multithread_multiqp_nosplit_4": {
+      "extends": "net_ib_multithread_multiqp_nosplit",
+      "command_args": "--net_ib_nthreads=4"
     },
     "cast_wrr_split_long_interval": {
       "extends": "cast_base",
@@ -1359,6 +1450,18 @@
       "name": "NET IB - Multithread Independent Connections (16)",
       "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Multi-QP Split (4)",
+      "description": "4 worker threads/rank with 4 QPs per connection and data split across QPs",
+      "config": "net_ib_multithread_multiqp_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Multi-QP NoSplit (4)",
+      "description": "4 worker threads/rank with 4 QPs per connection on the nDataQps path",
+      "config": "net_ib_multithread_multiqp_nosplit_4",
       "enabled": true
     },
     {

@@ -1221,6 +1221,61 @@ protected:
         return result;
     }
 
+    // One transfer plus host-side payload check: the sender fills a seeded
+    // pattern, the receiver clears its buffer first and verifies afterwards. A
+    // distinct seed per worker turns any cross-connection delivery into a data
+    // failure rather than a silent pass.
+    ThreadResult WorkerSendRecvPattern(int rank, ConnectionPair& pair, void* buffer, size_t size,
+                                       int tag, void* mhandle, int seed,
+                                       int timeoutMs = kDefaultTimeoutMs) {
+        if (rank == 0) {
+            memset(buffer, 0, size);
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
+        }
+
+        int received = 0;
+        ThreadResult result = WorkerSendRecvRaw(rank, pair, buffer, size, tag, mhandle,
+                                               timeoutMs, &received);
+        if (!result.ok) return result;
+
+        if (rank == 0) {
+            if (received != (int)size) {
+                result.ok = false;
+                result.msg = "received size mismatch";
+                return result;
+            }
+            if (size > 0
+                && !verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) {
+                result.ok = false;
+                result.msg = "data validation failed";
+            }
+        }
+        return result;
+    }
+
+    // Composite: allocate a host buffer, register it, run one seeded transfer,
+    // and release both. Covers the common single-transfer worker body.
+    ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
+                                    int seed, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        void* buffer = malloc(size ? size : 1);
+        if (!buffer) {
+            result.ok = false;
+            result.msg = "malloc failed";
+            return result;
+        }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        result = WorkerRegister(comm, buffer, size ? size : 1, NCCL_PTR_HOST, &mhandle);
+        if (!result.ok) return result;
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+    }
+
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
         commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
@@ -1335,6 +1390,10 @@ protected:
     // the receive buffer is cleared to.
     static constexpr int kWorkerSeedBase   = 55;
     static constexpr int kWorkerSeedStride = 100001;
+    static int WorkerSeed(int threadIdx, int seq) {
+        return kWorkerSeedBase + threadIdx * kWorkerSeedStride + seq;
+    }
+
     // Plugin-visible indices of physical (non-merged) devices. devices() also
     // reports virtual NICs created by earlier tests, and a deduped 1-device vNIC
     // reuses an existing physical index, so dedupe on vProps.devs[0].
@@ -1516,6 +1575,19 @@ protected:
         return physical[slotIdx % physical.size()];
     }
 
+    // Bounded rendezvous for workers that must all reach a point before any of
+    // them moves on, which the start gates cannot express: they only synchronize
+    // entry into the body. Bounded so a worker that failed earlier cannot hang
+    // its siblings; the caller reports the timeout as its own failure.
+    static bool WorkerRendezvous(std::atomic<int>& arrived, int expected, int pollIterations) {
+        arrived.fetch_add(1, std::memory_order_release);
+        for (int poll = 0; poll < pollIterations; poll++) {
+            if (arrived.load(std::memory_order_acquire) >= expected) return true;
+            usleep(kPollIntervalUs);
+        }
+        return false;
+    }
+
     // Mirrors the normal rccl-tests -t execution model: contexts and
     // communicators are established by the main thread, then workers drive
     // independent comms concurrently. MPI is used only between phases.
@@ -1624,6 +1696,76 @@ protected:
     // The threaded branch has to match whichever its serial body does, or it
     // quietly covers less.
     enum class SweepRegistration { Once, PerSize };
+
+    // Threaded size sweep: every worker walks the list on its own connection with
+    // a per-worker payload seed, so a transfer delivered on the wrong connection
+    // fails verification. Wraps the run in an RDMA resource leak check.
+    void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
+                              const std::vector<size_t>& sizes, int repeats,
+                              const char* label,
+                              SweepRegistration registration = SweepRegistration::Once) {
+        const int rank = MPIEnvironment::world_rank;
+        size_t maxSize = 1;
+        for (size_t size : sizes) maxSize = std::max(maxSize, size);
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            policy, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(maxSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                const bool perSize = (registration == SweepRegistration::PerSize);
+
+                void* wholeMhandle = nullptr;
+                if (!perSize) {
+                    result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &wholeMhandle);
+                    if (!result.ok) return result;
+                }
+                NetMHandleWorkerGuard wholeGuard(wholeMhandle,
+                                                 NetMHandleWorkerDeleter(net_, comm));
+
+                // One pattern for this worker across the whole sweep. Varying it per
+                // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
+                // the same byte -- and workers walk the ladder independently, so in a
+                // sweep that mixes sizes a 256-byte send misrouted into another
+                // worker's 1-byte receive would be clamped and then pass both the size
+                // and the payload check. The tag and the expected size identify the
+                // step; the payload identifies the worker.
+                const int workerPattern = WorkerSeed(threadIdx, 0);
+                int tag = 0;
+                for (size_t size : sizes) {
+                    void* sizeMhandle = nullptr;
+                    if (perSize) {
+                        result = WorkerRegister(comm, buffer, size, NCCL_PTR_HOST, &sizeMhandle);
+                        if (!result.ok) return result;
+                    }
+                    // Released at the end of this size, so the next one registers
+                    // again, as the serial body does.
+                    NetMHandleWorkerGuard sizeGuard(sizeMhandle,
+                                                    NetMHandleWorkerDeleter(net_, comm));
+                    void* mhandle = perSize ? sizeMhandle : wholeMhandle;
+
+                    for (int repeat = 0; repeat < repeats; repeat++) {
+                        const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
+                                                                 : kDefaultTimeoutMs;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle,
+                                                       workerPattern, timeout);
+                        if (!result.ok) return result;
+                        tag++;
+                    }
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
+    }
 
     // ===============================================================
     // Stress test infrastructure

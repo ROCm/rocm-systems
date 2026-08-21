@@ -196,6 +196,43 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -2791,6 +2828,12 @@
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
       "enabled": true
     },
     {

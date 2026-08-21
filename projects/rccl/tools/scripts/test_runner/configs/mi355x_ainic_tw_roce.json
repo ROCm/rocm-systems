@@ -173,6 +173,16 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "A17_NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms contend on the shared per-device MR cache.",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount.",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
           "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
