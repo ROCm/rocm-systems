@@ -138,7 +138,7 @@ jobs:
         run: |
           mkdir -p sarif-results
           ./codeql/codeql database analyze codeqldb \
-            security-extended "$AMD_SUITE" \
+            codeql/cpp-queries:codeql-suites/cpp-security-extended.qls "$AMD_SUITE" \
             --format=sarifv2.1.0 \
             --sarif-category "/language:${{ matrix.language }}" \
             --output=sarif-results/cpp.sarif
