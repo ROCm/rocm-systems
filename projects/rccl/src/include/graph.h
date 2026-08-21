@@ -239,5 +239,25 @@ ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm);
 ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs);
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes,
                                  int numPipeOps, float* time);
+// Per-architecture DDA/CE/Ring dispatch threshold table.
+// All arrays indexed by ncclFunc_t: [Broadcast, Reduce, AllGather, ReduceScatter, AllReduce, ...].
+// DDA dda* fields use total message bytes for AR/AG; rsShardBytes (per-rank) for RS.
+struct rcclArchThresholds {
+  // DDA tier upper bounds, per collective. gfx1250 uses fabric LL/LL128/VMM;
+  // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
+  size_t ddaLLMax[8];     // DDA LL tier:    0 .. ddaLLMax[func]
+  size_t ddaLL128Max[8];  // DDA LL128 tier: ddaLLMax[func]+1 .. ddaLL128Max[func]
+  size_t ddaVmmMax[8];    // DDA VMM/IPC cap: ddaLL128Max[func]+1 .. ddaVmmMax[func]
+
+  // CE AllReduce eligible window (total bytes, single-node, recv-registered only)
+  size_t ceArMin;
+  size_t ceArMax;
+
+  // Single-node Ring fallback protocol cutoffs (bytes per rank, indexed by ncclFunc_t).
+  // 0 = no cutoff for that collective (stays SIMPLE).
+  size_t llCutoff[8];    // below -> NCCL_PROTO_LL
+  size_t ll128Cutoff[8]; // below -> NCCL_PROTO_LL128 (when LL128 enabled)
+};
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
 int rcclGetTuningIndexForArch(const char* gfxarch);
 #endif

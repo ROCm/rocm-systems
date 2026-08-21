@@ -238,11 +238,18 @@ constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
 constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
 constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 
-// Returns true when the DDA fast path should be attempted for a collective.
-// Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
-// the user-configurable RCCL_DDA_THRESHOLD env var.
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0,
-                    size_t gfx1250Default = 0);
+// gfx942 DDA-IPC cap for AllReduce / AllGather / ReduceScatter when no arch
+// threshold table is attached (unit tests). Production gfx942 uses ddaVmmMax.
+constexpr size_t kDdaGfx942ThresholdBytes = 8388608; // 8 MiB
+
+// DDA VMM/IPC size cap for this collective: archThresholds->ddaVmmMax when
+// present, else gfx942's 8 MiB fallback, else 0 (rcclDdaEnabled uses env).
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
+
+// Returns true when the DDA fast path should be attempted for this arch/size.
+// `threshold` is the per-collective cap (ddaVmmMax or AlltoAll constant).
+// 0 falls back to RCCL_DDA_THRESHOLD.
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);

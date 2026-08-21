@@ -143,6 +143,25 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
         info->protocol = NCCL_PROTO_SIMPLE;
       }
     }
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") &&
+             comm->nNodes == 1 &&
+             (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather ||
+              info->func == ncclFuncReduceScatter)) {
+    // gfx1250 single-node Ring fallback protocol selection.
+    // Cutoffs in archThresholds are TBD from sweep data (AICOMRCCL-1756); zeros = stay SIMPLE.
+    if (comm->archThresholds != nullptr) {
+      const size_t ll    = comm->archThresholds->llCutoff[info->func];
+      const size_t ll128 = comm->archThresholds->ll128Cutoff[info->func];
+      if (ll > 0 && sizePerRank <= ll) {
+        info->protocol = NCCL_PROTO_LL;
+#if defined(ENABLE_LL128)
+      } else if (comm->topo->ll128Enabled && ll128 > 0 && sizePerRank <= ll128) {
+        info->protocol = NCCL_PROTO_LL128;
+#endif
+      } else {
+        info->protocol = NCCL_PROTO_SIMPLE;
+      }
+    }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
               info->func == ncclFuncAllReduce || info->func == ncclFuncBroadcast || info->func == ncclFuncReduce)) {
@@ -645,24 +664,24 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+  if (comm->archThresholds) return comm->archThresholds->ddaVmmMax[func];
+  if (IsArchMatch(comm->archName, "gfx942")) return kDdaGfx942ThresholdBytes;
+  return 0;
+}
+
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
-  size_t threshold;
   if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
+    // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
     if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
-    }
   } else {
     return false;
   }
+  if (threshold == 0) threshold = static_cast<size_t>(rcclParamDdaThreshold());
   return threshold > 0 && totalBytes <= threshold;
 }
 
@@ -929,18 +948,21 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  const size_t arDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncAllReduce]    : (size_t)rcclParamDdaLLThreshold();
+  const size_t arDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncAllReduce] : (size_t)rcclParamDdaLL128Threshold();
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
+          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && msgBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && msgBytes <= arDdaLL128Max &&
           ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
@@ -1048,16 +1070,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  const size_t agDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncAllGather]    : (size_t)rcclParamDdaLLThreshold();
+  const size_t agDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncAllGather] : (size_t)rcclParamDdaLL128Threshold();
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
+      if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && msgSize <= agDdaLL128Max &&
           ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
@@ -1224,15 +1248,18 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
   // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  const size_t rsDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncReduceScatter]    : (size_t)rcclParamDdaLLThreshold();
+  const size_t rsDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncReduceScatter] : (size_t)rcclParamDdaLL128Threshold();
+  if ((!symEligible || ddaFabricArch) &&
+      rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
-      if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
+      if (rcclParamDdaLL() && rsShardBytes <= rsDdaLLMax &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && rsShardBytes <= rsDdaLL128Max &&
           ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
