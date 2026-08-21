@@ -171,8 +171,8 @@ TEST_F(GinAnvilIpcDeviceTest, IpcFlatAtomicAddSys64) {
 using nccl::gin::anvil::detail::anvilCtxValid;
 using nccl::gin::anvil::detail::effectiveChannel;
 using nccl::gin::anvil::detail::markSdmaDirty;
-using nccl::gin::anvil::detail::anvilSignalPtrOrDummy;
 using nccl::gin::anvil::detail::remoteSignalAddr;
+using nccl::utility::loadConst;
 using nccl::gin::anvil::detail::useSdmaFusedSignal;
 using nccl::gin::anvil::detail::fenceBeforeSignal;
 
@@ -250,15 +250,15 @@ __global__ void kernelAnvilCtxValid(bool* outValid, bool* outSignalNonNull) {
   good.layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
   outValid[2] = anvilCtxValid(&good);
 
-  outSignalNonNull[0] = (anvilSignalPtrOrDummy(nullptr, 0) != nullptr);
-  outSignalNonNull[1] = (anvilSignalPtrOrDummy(&good, 0) != nullptr);
+  outSignalNonNull[0] = !anvilCtxValid(nullptr);
+  outSignalNonNull[1] = (loadConst(&good.signals) == nullptr);
 
   good.signals = nullptr;
-  outSignalNonNull[2] = (anvilSignalPtrOrDummy(&good, 0) != nullptr);
+  outSignalNonNull[2] = (loadConst(&good.signals) == nullptr);
 
   uint64_t sigs[2] = {0, 0};
   good.signals = sigs;
-  outSignalNonNull[3] = (anvilSignalPtrOrDummy(&good, 1) == sigs + 1);
+  outSignalNonNull[3] = (loadConst(&good.signals) + 1 == sigs + 1);
 
   outSignalNonNull[4] = (remoteSignalAddr(&good, 0, 0) == nullptr);
 }
