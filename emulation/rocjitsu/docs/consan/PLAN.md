@@ -1,204 +1,111 @@
 # ConSan Work Plan
 
-This document tracks the three major tasks required to turn ConSan from a
+This document tracks the remaining work required to turn ConSan from a
 multi-architecture prototype into a maintainable, reviewable sanitizer. The
 target set is CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3
 (`gfx1100`), and RDNA4 (`gfx1201`).
 
-The three tasks reinforce one another. The checked-in device tier supplies the
-regression safety needed to finish `gfx950` and restructure the implementation;
-the `gfx950` work supplies realistic reductions for that tier; and the
-production rewrite must make the cross-architecture tests exercise shared code
-rather than five loosely related implementations.
+The work now has two phases. First, finish the behavioral safety net and freeze
+a trustworthy current-tip validation baseline. Then use that evidence to
+replace the prototype without preserving its accidental architecture-specific
+structure.
 
-## 1. Establish a checked-in device-conformance tier
+## 1. Preparation work
 
-**Status: common tier implemented; capability-specific expansion remains**
+**Status: the device tier is operational; residual coverage and end-to-end
+qualification work remains**
 
-The detailed remaining test work, including the required correct/incorrect
-pairing for every scenario, is tracked in
-[PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
+The checked-in device-conformance tier, its behavioral coverage, and its
+remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
+The end-to-end procedure and acceptance rules are defined in
+[VALIDATION.md](VALIDATION.md), with current target evidence in
+[STATUS_CDNA4.md](STATUS_CDNA4.md) and
+[STATUS_GFX1250.md](STATUS_GFX1250.md).
 
-### Problem
+This phase is preparation for the production replacement, not an attempt to
+perfect the prototype indefinitely. **Its primary deliverable is the test
+suites, not the fixes made to the prototype along the way.** The host-unit and
+checked-in device suites are the durable asset that will make the section 2
+replacement automatically iterable. They must preserve behavior that matters
+to users, expose current target limitations precisely, and distinguish a safe
+new abstraction from a regression without depending on the prototype's layout
+or implementation choices.
 
-ConSan currently has a large host-test suite and separate end-to-end validation
-campaigns. Host tests efficiently cover decoding, semantic analysis,
-instrumentation planning, instruction emission, resource allocation, and the
-MOI models, but they cannot establish that the complete hook, code-object,
-dispatch, device-execution, and reporting path works.
+### Remaining work
 
-The end-to-end workloads in [VALIDATION.md](VALIDATION.md) provide that stronger
-evidence, but their models and assets are too large to check into this tree and
-are expensive to run under emulation. Consequently, they cannot be the routine
-cross-architecture regression gate for day-to-day development. This makes it
-too easy to improve one architecture while silently regressing another.
+1. Merge the latest `origin/develop` into this branch with a merge commit.
+   Repair every resulting build or test regression and add a focused host-unit
+   or device regression for each behavioral defect exposed by the integration.
+2. Continue making both the conventional host-unit suite and the checked-in
+   device suite comprehensive. Close meaningful gaps identified by the
+   capability audit, [VALIDATION.md](VALIDATION.md), or Aorta. Device scenarios
+   must use adjacent correct/incorrect behavioral pairs and assert exact
+   workload and diagnostic outcomes rather than prototype layout.
+3. Work both current validation ledgers:
+   [STATUS_CDNA4.md](STATUS_CDNA4.md) and
+   [STATUS_GFX1250.md](STATUS_GFX1250.md). Across engine columns, prioritize
+   Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow.
+   Within that ordering, lift the floor horizontally: resolve red cells before
+   orange, orange before yellow, and yellow before green. Once every applicable
+   cell is green, make a fresh global pass over all green cells rather than
+   relying on accumulated historical evidence.
+4. Treat every end-to-end investigation as an opportunity to create a fast,
+   clean regression. Reduce the relevant compiler, instruction, resource,
+   control-flow, or synchronization idiom into a host-unit test, a checked-in
+   device test, or both as appropriate. A prototype fix without durable test
+   coverage is incomplete, even when the corresponding end-to-end cell passes.
+5. Make a deliberate pass over all existing ConSan host and device tests to
+   identify architecture-local tests whose underlying idea is cross-cutting.
+   Transport each useful contract to every semantically applicable target,
+   adapting the device code and target-native instruction forms as needed.
+   Do not stop at historical `gfx950`-to-`gfx942` ports: consider CDNA3/4/5 and
+   RDNA3/4 for every behavior, and record a capability-based reason for each
+   target where the contract is not applicable.
+6. Stay tactical about latency. If a reproducer is abnormally slow, first ask
+   whether the slowness itself is a defect that can be debugged or reduced.
+   Avoid repeated long waits that provide no new information; defer a slow cell
+   when another priority cell offers a faster path to useful coverage, while
+   keeping the deferred cell explicit in its status ledger.
+7. Use a two-speed test cadence. During tight iteration, favor targeted host
+   tests and the parallel RocJitsu configurations. If serialized physical
+   `gfx950` rows dominate device-suite latency, omit them temporarily and
+   accept the bounded risk of a short-lived physical-only regression. Run the
+   physical tier at regular checkpoints, after changes that plausibly affect
+   native behavior, and as part of every full qualification pass.
+8. Run the complete checked-in device matrix periodically in one CTest
+   invocation and keep it fully green on RocJitsu `gfx942`, `gfx950`,
+   `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
+   whole-suite timing after the latest tranche and keep it within the documented
+   5--20-minute `-j64` heuristic on the reference host.
+9. Produce a `gfx950` counterpart to
+   [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md), based on fresh
+   correctness, coverage, fault-detection, overhead, containment, and
+   implementation-complexity evidence for all four modes.
 
-The existing `ConSanGfx*Sim` tests are the beginning of the missing middle tier,
-but their coverage is uneven and reflects architecture bring-up history more
-than a systematic device contract.
+### Exit criteria
 
-### Proposed approach
+- The branch includes the latest `origin/develop`, and all integration breakage
+  is repaired with focused regression coverage.
+- The host-unit and device suites comprehensively cover the behavior required
+  by the current end-to-end corpus, Aorta, and the target capability audit.
+  Every fixed defect has a regression, and every device scenario remains
+  independent of prototype implementation details.
+- The existing-test transport audit is complete. Every cross-cutting contract
+  runs on each semantically applicable CDNA3/4/5 and RDNA3/4 target, or has a
+  documented capability-based not-applicable disposition.
+- Every applicable cell in both the CDNA4 and gfx1250 ledgers is green under the
+  stated Record/Replay-first and lift-the-floor strategy, followed by a fresh
+  global revalidation of all green cells at one reviewed revision.
+- One reviewed revision passes the entire checked-in simulator/physical device
+  matrix. Faster simulator-focused iteration is permitted, but the physical
+  `gfx950` tier and post-run health checks pass at regular milestones and at
+  final qualification.
+- The checked-in `gfx950` empirical study records the behavior and tradeoffs the
+  production implementation must preserve.
 
-Create a first-class **device-conformance** tier made from small, checked-in,
-self-checking device programs. These tests must use production code-object
-interception and ConSan instrumentation, execute actual target device code, and
-validate application output, instrumentation coverage, completeness, and
-diagnostics. They should require no external model, data set, or prebuilt
-artifact.
+## 2. Replace the prototype with a production-grade implementation
 
-The same scenarios should run through RocJitsu for every supported architecture
-and run natively whenever matching physical hardware is available. Simulator
-and physical execution are two backends for the same test contract, not two
-unrelated suites. Emulation provides portable integration coverage; native
-execution remains necessary for runtime- and hardware-owned behavior.
-
-The observable contract must survive the Part 3 replacement. Device tests
-therefore assert exact workload results and semantic sanitizer outcomes, not
-prototype mechanisms such as patch counts, chosen registers, helper layouts,
-instruction sequences, or code-cave placement.
-
-The common cross-target suite should cover at least:
-
-- clean execution and preservation of an exact workload oracle;
-- racy and ordered native-LDS and group-FLAT accesses;
-- exact overlap, adjacent non-overlap, and multidimensional ownership;
-- workgroup barriers and deliberately broken barrier ordering;
-- atomic release/acquire communication and deliberately broken atomic ordering;
-- shared helpers, multiple execution owners, and nontrivial control flow;
-- register pressure, forced spills, zero-EXEC paths, and live-register
-  preservation;
-- dynamic private stacks and private/group segment growth;
-- expected access, barrier, atomic, and fence coverage;
-- required diagnostics, forbidden diagnostics, overflow, and dynamic
-  completeness; and
-- post-instrumentation health on physical devices.
-
-Run the semantic core under the SuperCollider flavor and all three MOI engines:
-Record/Replay, Sampled, and Inline Shadow. Do so wherever the capability
-contract says the combination applies. Add small target-specific extensions
-for real semantic differences, such as CDNA
-singleton barriers, RDNA4 split barriers, `gfx1250` cluster barriers and
-ordered LDS atomics, target-specific LDS widths, and native VGLOBAL forms.
-Equal semantic coverage matters; equal raw test counts do not.
-
-Make registration table-driven. Each scenario should declare its applicable
-targets and engines, expected coverage and diagnostic outcome, target-specific
-requirements, and the end-to-end workload or regression from which it was
-reduced. Audit this manifest against the typed capability contract so that a
-new supported form cannot silently lack device coverage.
-
-When end-to-end validation exposes a defect, reduce it to the smallest device
-fixture that retains the relevant compiler, resource, control-flow, or
-synchronization shape. Add that fixture on every semantically applicable
-target, not just the architecture where the defect was found.
-
-### Cross-architecture exploration strategy
-
-Performing five independent end-to-end workload explorations would consume too
-much time and would tend to produce five different test suites. Instead, do the
-primary exploration on the three architectures that give the most useful
-initial spread:
-
-- CDNA5 / `gfx1250`;
-- RDNA4 / `gfx1201` (`gfx12`); and
-- CDNA4 / `gfx950`.
-
-Abstract the device-level properties discovered there and generalize them to
-RDNA3 / `gfx1100` and CDNA3 / `gfx942`. This is not a one-way mapping: useful
-reductions should be cross-pollinated across all architectures whenever their
-semantics apply, including between CDNA and RDNA. Architecture-specific
-exceptions must be justified by the capability contract rather than by the
-origin of the test.
-
-### Completion criteria
-
-- A documented, bounded device-conformance command runs every supported target
-  through RocJitsu without external workload repositories.
-- The matching native suite runs on any locally available supported device.
-- Every common semantic capability and every target extension has an explicit
-  device-test disposition: covered, not applicable, or a tracked gap.
-- Tests fail if the intended kernel is not patched, coverage is incomplete, an
-  oracle changes, or diagnostics differ from the declared contract.
-- The suite is small enough to run routinely while developing ConSan.
-- End-to-end campaigns remain the final qualification authority; the new tier
-  does not claim to replace them.
-
-## 2. Finish the basic `gfx950` prototype
-
-**Status: active**
-
-### Problem
-
-`gfx950` support has substantial implementation and historical validation
-evidence, but it is not yet a reliable current-tip prototype across the four
-ConSan modes. The present compact physical baseline passes five of nine tests;
-Inline Shadow forced spill, barrier forced spill, atomic forced spill, and
-dynamic-stack Inline Shadow currently cause deterministic GPU memory-access
-faults. Their RocJitsu counterparts pass, which also demonstrates why both
-physical and simulated device coverage are required.
-
-Historical artifacts are useful diagnostic evidence but do not establish the
-state of the current branch. The `gfx950` workload matrix must be reassessed
-and fixed on the current source and hook.
-
-### Proposed approach
-
-1. Reproduce and isolate the four compact physical failures. Determine whether
-   each fault originates in instruction lowering, spill layout, private/group
-   segment growth, kernel-descriptor rewriting, dispatch metadata, or runtime
-   integration. Convert every fix into a shared simulator/native
-   device-conformance regression.
-2. Establish clean, current-tip baselines for the registered `gfx950`
-   workloads before instrumentation. Record exact source, build, runtime, hook,
-   device, command, timeout, and oracle provenance.
-3. Qualify each workload under the SuperCollider flavor and all three MOI
-   engines: Record/Replay, Sampled, and Inline Shadow.
-4. For every workload/mode cell, require the workload oracle, intended
-   code-object identity, nonzero applicable instrumentation, static and dynamic
-   coverage accounting, expected diagnostics, bounded execution and memory,
-   containment, cleanup, and post-run GPU health.
-5. Exercise reviewed fault cases in addition to clean runs. A mode is not
-   qualified merely because it preserves clean output; its claimed detection
-   behavior and known limitations must also be demonstrated.
-6. Measure overhead only after correctness and completeness are established.
-   Treat rejection, timeout, GPU fault, silent non-instrumentation, and
-   incomplete coverage as distinct outcomes rather than collapsing them into a
-   generic failure.
-7. Update the `gfx950` status ledger from fresh artifacts. Do not promote a
-   workload cell using evidence from a different revision, architecture, or
-   instrumentation profile.
-8. Produce a `gfx950` counterpart to
-   [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md). Base its comparison
-   of the four modes on fresh, reproducible `gfx950` correctness, coverage,
-   fault-detection, overhead, containment, and implementation-complexity
-   evidence rather than carrying over conclusions from `gfx1201`.
-
-Start with the compact reproductions and checked-in HIP workloads, then proceed
-through the portable hip-moi cases and the larger workloads registered by
-`consan_validation.py`. Prefer fixes in shared semantic, resource, and runtime
-layers; introduce a `gfx950` special case only when the ISA or ABI genuinely
-requires one.
-
-### Completion criteria
-
-- All compact `gfx950` physical device-conformance tests pass without a GPU
-  fault and leave the device healthy.
-- The checked-in simulator and physical suites agree wherever they exercise the
-  same contract, with documented exceptions for simulator limitations.
-- Every registered `gfx950` end-to-end workload has a fresh result for all four
-  modes.
-- Supported cells meet the correctness, coverage, fault, containment, resource,
-  timeout, and provenance requirements in [VALIDATION.md](VALIDATION.md).
-- A checked-in `gfx950` empirical study, with generated supporting results where
-  appropriate, documents the evidence and derives target-specific guidance
-  comparable in scope to the existing `gfx1201` study.
-- Any remaining unsupported cell has a precise, reproducible technical reason
-  and a reduced checked-in regression when possible.
-
-## 3. Replace the prototype with a production-grade implementation
-
-**Status: planned; begin incrementally once the device-conformance safety net is
-usable**
+**Status: planned; begin after the preparation baseline is frozen**
 
 ### Problem
 
@@ -305,13 +212,12 @@ the missing capability is general rather than creating a ConSan-only copy.
 
 ## Execution order
 
-1. Establish the common device-conformance manifest and close the current
-   compact `gfx950` physical failures.
-2. Reduce findings from `gfx1250`, `gfx1201`, and `gfx950` workload exploration
-   into portable device tests, then generalize and cross-pollinate them to
-   `gfx1100` and `gfx942`.
-3. Complete the current-tip `gfx950` four-mode end-to-end qualification.
-4. Use the resulting multi-architecture safety net to replace prototype layers
-   incrementally, deleting superseded code as each production layer lands.
-5. Re-run the full device matrix continuously and the expensive end-to-end
-   campaigns at qualification milestones.
+1. Finish the preparation exit criteria: one green and timed whole-device
+   matrix, reduced regressions for newly fixed defects, a bounded current-tip
+   `gfx950` four-mode campaign, and the `gfx950` empirical study.
+2. Freeze the behavioral, capability, and target-specific invariants that the
+   replacement must preserve.
+3. Replace prototype layers incrementally, deleting each superseded path in the
+   same series that introduces its production replacement.
+4. Run the full checked-in matrix continuously and repeat the expensive
+   end-to-end campaigns at qualification milestones.

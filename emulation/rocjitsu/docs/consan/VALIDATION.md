@@ -40,7 +40,7 @@ require that the intended code object was instrumented, that semantic evidence
 is complete, and that diagnostics match the declared clean or racy outcome.
 They do not assert patch counts, instruction encodings, code-cave use, helper
 layout, register allocation, or any other implementation choice. This lets the
-same suite remain an oracle while Part 3 replaces the implementation.
+same suite remain an oracle during the production replacement.
 
 Every fixture runs as an uninstrumented baseline and under SuperCollider,
 Record/Replay, Sampled, and Inline Shadow. The common matrix is registered for

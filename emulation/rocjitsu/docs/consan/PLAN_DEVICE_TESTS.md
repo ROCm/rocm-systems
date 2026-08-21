@@ -11,8 +11,7 @@ developer working on one GPU serious confidence that a change has not regressed
 any supported architecture. Its coverage must be distilled from the concrete
 workloads and low-level idioms in the current [VALIDATION.md](VALIDATION.md)
 campaign and the Aorta suite, while remaining small, deterministic, free of
-external model assets, and independent of the prototype implementation that
-Part 3 will replace.
+external model assets, and independent of the implementation being replaced.
 
 Every semantic scenario must provide an adjacent correct/incorrect behavioral
 pair: the correct workload proves exact results and the absence of a
@@ -78,7 +77,7 @@ The pair must differ only in the semantic property under test. Diagnostic
 checks must describe the race or ordering violation, not implementation details
 such as patch counts, generated instructions, helper layout, selected
 registers, spill strategy, or code-cave placement. This contract is intended to
-survive the Part 3 replacement of the prototype implementation.
+survive the production replacement of the prototype implementation.
 
 Baseline execution remains useful for both variants: it proves that the code
 object launches and that the independent control oracle works. An
@@ -186,7 +185,7 @@ behavioral tier now adds B96/B128, group-FLAT, forced spilling, atomic handoff,
 repeated dispatch, matrix instructions, and clustered transfer. Older fixtures
 that inspect the current report ABI, patch layout, register plan, or generated
 code remain useful implementation tests, but do not substitute for these
-behavior-first contracts that can survive the Part 3 replacement.
+behavior-first contracts that can survive the production replacement.
 
 ### Coverage gaps
 
@@ -678,6 +677,6 @@ to make the wall clock longer.
   pipeline, resource-pressure, object-shape, and bounded-capacity classes above,
   with a documented E2E owner for each abstraction.
 - The suite remains checked in, bounded, free of external workload assets, and
-  independent of the prototype implementation that Part 3 will replace.
+  independent of the implementation being replaced.
 - The single whole-matrix CTest invocation passes with no expected-failure
   exemptions, including for issues that predated this device-test work.
