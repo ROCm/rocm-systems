@@ -301,6 +301,43 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# hipFile (GPU-direct storage I/O stats)
+#
+# ----------------------------------------------------------------------------------------#
+
+# hipFile telemetry is optional and off unless the package is found. When it is built,
+# the backend links libhipfile through the hip::hipfile imported target (a DT_NEEDED
+# dependency), matching how the profiler consumes amd_smi and other ROCm libraries.
+# The collector's unit tests do not participate in that: they drive a mock wrapper with
+# test-local fake structs, so they build and run with this option OFF.
+set(ROCPROFSYS_BUILD_HIPFILE OFF CACHE INTERNAL "Build hipFile stats support" FORCE)
+if(ROCPROFSYS_USE_HIPFILE)
+    find_package(
+        hipfile
+        ${rocprofiler_systems_FIND_QUIETLY}
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH}
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH}
+    )
+    if(hipfile_FOUND)
+        set(ROCPROFSYS_BUILD_HIPFILE
+            ON
+            CACHE INTERNAL
+            "Build hipFile stats support"
+            FORCE
+        )
+        message(STATUS "hipFile stats support enabled (headers: ${hipfile_INCLUDE_DIRS})")
+    else()
+        message(
+            STATUS
+            "hipFile stats support disabled: hipfile package not found. Set "
+            "-Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add the install prefix to "
+            "CMAKE_PREFIX_PATH."
+        )
+    endif()
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # Profiler Hub
 #
 # ----------------------------------------------------------------------------------------#
