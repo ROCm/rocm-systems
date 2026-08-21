@@ -29,6 +29,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include "rocshmem/rocshmem_common.hpp"
+
 #include "constants.hpp"
 #include "containers/free_list_impl.hpp"
 #include "log.hpp"
