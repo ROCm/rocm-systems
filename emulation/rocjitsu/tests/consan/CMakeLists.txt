@@ -421,6 +421,7 @@ function(rj_add_consan_device_conformance_cases)
             APPEND _device_workloads
             "CdnaMfmaPipeline|cdna_mfma_pipeline|ConSanDeviceCdnaMfmaPipelineTest"
             "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
+            "CdnaStreamkTwoTile|cdna_streamk_two_tile|ConSanDeviceCdnaStreamkTwoTileTest"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
         )
     endif()
@@ -566,14 +567,17 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
-                _workload_name STREQUAL "Gfx950LargeLdsPipeline"
+                (
+                    _workload_name STREQUAL "Gfx950LargeLdsPipeline"
+                    OR _workload_name STREQUAL "CdnaStreamkTwoTile"
+                )
                 AND _mode_value STREQUAL "record-replay"
             )
-                # This workload deliberately carries hundreds of static LDS
-                # sites. A static site/address-group table reserves hundreds
-                # of MiB and makes report validation dominate the test. The
-                # dynamic log retains every executed access for this bounded
-                # fixture while keeping the checked-in device test cheap.
+                # These workloads deliberately carry many static LDS sites.
+                # A static site/address-group table reserves hundreds of MiB
+                # and makes report validation dominate the test. The dynamic
+                # log retains every executed access for these bounded
+                # fixtures while keeping the checked-in device tests cheap.
                 list(
                     APPEND _correct_environment
                     "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
@@ -671,6 +675,7 @@ function(rj_add_consan_device_fixture_targets target)
             APPEND _device_workload_sources
             "cdna_mfma_pipeline|cdna_mfma_pipeline_test.hip"
             "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
+            "cdna_streamk_two_tile|cdna_streamk_two_tile_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"
         )
     endif()

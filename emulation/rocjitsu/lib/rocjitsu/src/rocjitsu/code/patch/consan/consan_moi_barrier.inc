@@ -650,6 +650,75 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   return words;
 }
 
+[[nodiscard]] std::optional<uint64_t>
+find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
+                                                 const ConSanResult &result, rj_code_arch_t arch,
+                                                 size_t barrier_count) {
+  if (barrier_count == 0u)
+    return std::nullopt;
+
+  std::unordered_set<uint64_t> access_anchors;
+  uint64_t first_access_body = std::numeric_limits<uint64_t>::max();
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::InlineMoiExactShadowStore &&
+        patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore &&
+        patch.kind != ConSanPatchKind::InlineMoiAccessRecordStore &&
+        patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore) {
+      continue;
+    }
+    access_anchors.insert(patch.anchor_offset);
+    if (patch.trampoline_size != 0u)
+      first_access_body = std::min(first_access_body, patch.trampoline_offset);
+  }
+
+  uint64_t access_island_begin = std::numeric_limits<uint64_t>::max();
+  uint64_t access_island_end = 0u;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
+        !access_anchors.contains(patch.anchor_offset)) {
+      continue;
+    }
+    access_island_begin = std::min(access_island_begin, patch.trampoline_offset);
+    access_island_end = std::max(
+        access_island_end, patch.trampoline_offset + static_cast<uint64_t>(patch.trampoline_size));
+  }
+
+  const uint64_t required_island_bytes =
+      barrier_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
+  const auto is_reserved_nop_range = [&](uint64_t candidate_begin) {
+    bool all_reserved_nops = candidate_begin + required_island_bytes <= text.size();
+    for (uint64_t offset = candidate_begin;
+         all_reserved_nops && offset < candidate_begin + required_island_bytes;
+         offset += sizeof(uint32_t)) {
+      uint32_t word = 0;
+      std::memcpy(&word, text.data() + offset, sizeof(word));
+      all_reserved_nops = word == build_s_nop(0, arch);
+    }
+    return all_reserved_nops;
+  };
+
+  // Current access placement puts barrier islands first: early
+  // synchronization sites are more likely to reach the start of a large
+  // generated object, while sorted access relays follow them.
+  if (access_island_begin != std::numeric_limits<uint64_t>::max() &&
+      access_island_begin >= required_island_bytes) {
+    const uint64_t candidate_begin = access_island_begin - required_island_bytes;
+    if (is_reserved_nop_range(candidate_begin))
+      return candidate_begin;
+  }
+
+  // Accept the older trailing reservation layout as well so independently
+  // composed exact-shadow producers remain compatible.
+  if (first_access_body != std::numeric_limits<uint64_t>::max() &&
+      first_access_body >= required_island_bytes &&
+      first_access_body - required_island_bytes >= access_island_end) {
+    const uint64_t candidate_begin = first_access_body - required_island_bytes;
+    if (is_reserved_nop_range(candidate_begin))
+      return candidate_begin;
+  }
+  return std::nullopt;
+}
+
 void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  const ConSanOptions &options, rj_code_arch_t arch,
                                                  MoiResourcePlanningState &resource_state,
@@ -1052,57 +1121,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                       kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
   patches.reserve(planned_candidates.size() * 2u);
-  constexpr uint64_t kIndirectIslandWords = 7u;
+  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   const uint64_t indirect_island_bytes = kIndirectIslandWords * sizeof(uint32_t);
-  std::optional<uint64_t> barrier_island_begin;
-  if (options.moi_exec_save_sgpr) {
-    uint64_t first_access_body = std::numeric_limits<uint64_t>::max();
-    uint64_t access_island_begin = std::numeric_limits<uint64_t>::max();
-    uint64_t access_island_end = 0u;
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
-          patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-          patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-          patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) {
-        first_access_body = std::min(first_access_body, patch.trampoline_offset);
-      } else if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland) {
-        access_island_begin = std::min(access_island_begin, patch.trampoline_offset);
-        access_island_end =
-            std::max(access_island_end,
-                     patch.trampoline_offset + static_cast<uint64_t>(patch.trampoline_size));
-      }
-    }
-    const uint64_t required_island_bytes = planned_candidates.size() * indirect_island_bytes;
-    const auto is_reserved_nop_range = [&](uint64_t candidate_begin) {
-      bool all_reserved_nops = candidate_begin + required_island_bytes <= old_text.size();
-      for (uint64_t offset = candidate_begin;
-           all_reserved_nops && offset < candidate_begin + required_island_bytes;
-           offset += sizeof(uint32_t)) {
-        uint32_t word = 0;
-        std::memcpy(&word, old_text.data() + offset, sizeof(word));
-        all_reserved_nops = word == build_s_nop(0, arch);
-      }
-      return all_reserved_nops;
-    };
-    // Keep barrier islands first: early synchronization sites are more likely
-    // to be near the start of a large generated object, while sorted access
-    // islands retain the same monotonic anchor-to-island mapping after them.
-    if (access_island_begin != std::numeric_limits<uint64_t>::max() &&
-        access_island_begin >= required_island_bytes) {
-      const uint64_t candidate_begin = access_island_begin - required_island_bytes;
-      if (is_reserved_nop_range(candidate_begin))
-        barrier_island_begin = candidate_begin;
-    }
-    // Accept the older trailing reservation layout as well so independently
-    // composed exact-shadow producers remain compatible.
-    if (!barrier_island_begin && first_access_body != std::numeric_limits<uint64_t>::max() &&
-        first_access_body >= required_island_bytes &&
-        first_access_body - required_island_bytes >= access_island_end) {
-      const uint64_t candidate_begin = first_access_body - required_island_bytes;
-      if (is_reserved_nop_range(candidate_begin))
-        barrier_island_begin = candidate_begin;
-    }
-  }
+  const std::optional<uint64_t> barrier_island_begin =
+      options.moi_exec_save_sgpr ? find_record_replay_reserved_barrier_island_begin(
+                                       old_text, result, arch, planned_candidates.size())
+                                 : std::nullopt;
   if (barrier_island_begin) {
     local_indirect_allocator.reserve(
         *barrier_island_begin,
@@ -2341,6 +2365,15 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
+  if (options.moi_exec_save_sgpr) {
+    const auto reserved_barrier_island_begin = find_record_replay_reserved_barrier_island_begin(
+        old_text, result, arch, selected_candidates.size());
+    if (reserved_barrier_island_begin) {
+      indirect_allocator.reserve(
+          *reserved_barrier_island_begin,
+          static_cast<uint32_t>(selected_candidates.size() * kMoiRecordReplayIndirectIslandWords));
+    }
+  }
   std::vector<ConSanPatchInfo> patches;
   for (const PlannedBarrierRecord &planned : selected_candidates) {
     const BarrierRecordCandidate &candidate = planned.candidate;
