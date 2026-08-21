@@ -38,14 +38,10 @@ __launch_bounds__(512)
     // cudaMemcpyAsync launch overhead on ROCm.
     const size_t copyCount = count * NRANKS;
     copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
-    barrier.syncOnSameBlockIdx<
-        true /* hasPreviousMemAccess */,
-        true /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
     // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
-    barrier.syncOnSameBlockIdx<
-        false /* hasPreviousMemAccess */,
-        true /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   }
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {

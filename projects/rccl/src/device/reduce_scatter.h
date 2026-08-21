@@ -89,57 +89,57 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     }
   }
 #ifdef ENABLE_WARP_SPEED
-    int warp = threadIdx.x / WARP_SIZE;
-    ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
+  int warp = threadIdx.x / WARP_SIZE;
+  ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
 #else
-    ncclRing* ring = &ncclShmem.channel.ring;
+  ncclRing* ring = &ncclShmem.channel.ring;
 #endif
-    int const* ringRanks = ring->userRanks;
-    const int nranks = ncclShmem.comm.nRanks;
-    size_t count;
-    size_t gridOffset;
-    size_t channelCount;
-    size_t chunkCount;
+  int const* ringRanks = ring->userRanks;
+  const int nranks = ncclShmem.comm.nRanks;
+  size_t count;
+  size_t gridOffset;
+  size_t channelCount;
+  size_t chunkCount;
 #ifdef ENABLE_WARP_SPEED
-    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &gridOffset, &channelCount,
-                    &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &gridOffset, &channelCount,
+                  &chunkCount);
 #else
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &gridOffset, &channelCount, &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &gridOffset, &channelCount, &chunkCount);
 #endif
-    size_t offset;
-    size_t dataOffset;
-    uint32_t nelem;
-    int rankDest;
+  size_t offset;
+  size_t dataOffset;
+  uint32_t nelem;
+  int rankDest;
 
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(tid, nthreads, &ring->prev,
-                                                                                 &ring->next, work->sendbuff,
-                                                                                 work->recvbuff, work->redOpArg, 0,
-                                                                                 work->connIndex, work->connIndex);
+  Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(tid, nthreads, &ring->prev, &ring->next,
+                                                                               work->sendbuff, work->recvbuff,
+                                                                               work->redOpArg, 0, work->connIndex,
+                                                                               work->connIndex);
 
-    for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
-      nelem = min(chunkCount, channelCount - elemOffset);
+  for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
+    nelem = min(chunkCount, channelCount - elemOffset);
 
-      dataOffset = gridOffset + elemOffset;
+    dataOffset = gridOffset + elemOffset;
         /////////////// begin ReduceScatter steps ///////////////
         // step 0: push data to next GPU
-      rankDest = ringRanks[nranks - 1];
-      offset = dataOffset + rankDest * count;
-      prims.send(offset, nelem);
+    rankDest = ringRanks[nranks - 1];
+    offset = dataOffset + rankDest * count;
+    prims.send(offset, nelem);
         // k-2 steps: reduce and copy to next GPU
-      for (int j = 2; j < nranks; ++j) {
-        rankDest = ringRanks[nranks - j];
-        offset = dataOffset + rankDest * count;
-        prims.recvReduceSend(offset, nelem);
-      }
+    for (int j = 2; j < nranks; ++j) {
+      rankDest = ringRanks[nranks - j];
+      offset = dataOffset + rankDest * count;
+      prims.recvReduceSend(offset, nelem);
+    }
 
         // step k-1: reduce this buffer and data, which will produce the final result
-      rankDest = ringRanks[0];
-      offset = dataOffset + rankDest * count;
-      prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
-    }
+    rankDest = ringRanks[0];
+    offset = dataOffset + rankDest * count;
+    prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
+  }
 }
 } // namespace
 
