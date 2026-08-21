@@ -81,8 +81,11 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
 [[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanResult &result,
                                                             const ConSanOptions &options) {
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
-  const uint32_t total_budget = std::min(options.max_patches, layout.sampled_watchpoint_capacity);
-  return std::min(total_budget, sampled_qualified_atomic_sequence_count(result, options));
+  const uint32_t patch_budget = options.max_patches_is_expert_limit
+                                    ? options.max_patches
+                                    : std::numeric_limits<uint32_t>::max();
+  return std::min({patch_budget, layout.sampled_watchpoint_capacity,
+                   sampled_qualified_atomic_sequence_count(result, options)});
 }
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
@@ -103,11 +106,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   };
 
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
-  const uint32_t total_budget = std::min(options.max_patches, layout.sampled_watchpoint_capacity);
   const uint32_t reserved_atomic_slots = sampled_reserved_atomic_island_count(result, options);
-  const uint32_t max_candidates = total_budget - reserved_atomic_slots;
-  if (max_candidates == 0) {
-    if (total_budget == 0) {
+  const uint32_t max_access_record_slots =
+      layout.sampled_watchpoint_capacity - reserved_atomic_slots;
+  if (max_access_record_slots == 0) {
+    if (layout.sampled_watchpoint_capacity == 0) {
       result.warnings.emplace_back(
           "ConSan MOI sampled probe requires room for the report header and one sampled entry");
     }
@@ -160,6 +163,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         "ConSan MOI sampled probe found no native LDS or likely group flat load/store candidate");
     return;
   }
+  const size_t max_access_patch_count =
+      options.max_patches_is_expert_limit
+          ? std::min<size_t>(options.max_patches - reserved_atomic_slots, candidates.size())
+          : candidates.size();
+  if (max_access_patch_count == 0)
+    return;
 
   uint32_t sampled_filter_candidate_count = 0;
   uint32_t sampled_filter_range_count = 0;
@@ -174,7 +183,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   uint32_t window_bank_count = 1;
   if (sampled_filter_range_count != 0) {
-    const uint32_t available_per_range = max_candidates / sampled_filter_range_count;
+    const uint32_t available_per_range = max_access_record_slots / sampled_filter_range_count;
     while (window_bank_count < 8u && window_bank_count * 2u <= available_per_range)
       window_bank_count *= 2u;
   }
@@ -471,6 +480,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   uint32_t sampled_candidate_index = 0;
   uint32_t next_record_index = 0;
   bool capacity_limited = false;
+  bool patch_limited = false;
   MoiSpillManagers spill_managers;
   std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>> private_layout_by_descriptor;
   uint64_t planned_anchor_end = 0;
@@ -478,6 +488,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const uint32_t current_sample_index = sampled_candidate_index++;
     if (current_sample_index % options.moi_sample_stride != options.moi_sample_offset)
       continue;
+    if (planned_patches.size() == max_access_patch_count) {
+      patch_limited = true;
+      break;
+    }
 
     const ConSanMoiCandidate &candidate = *candidate_ptr;
     const bool use_dense_call = dense_entry_islands.contains(candidate_ptr);
@@ -491,7 +505,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     const uint32_t range_count = static_cast<uint32_t>(access_ranges->size());
     const uint32_t required_slots = range_count * window_bank_count;
-    if (required_slots > max_candidates - next_record_index) {
+    if (required_slots > max_access_record_slots - next_record_index) {
       capacity_limited = true;
       continue;
     }
@@ -804,7 +818,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_end = candidate.text_offset + placement->original_size;
     next_record_index += required_slots;
-    if (next_record_index == max_candidates)
+    if (next_record_index == max_access_record_slots)
       break;
   }
 
@@ -826,7 +840,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  if ((capacity_limited || next_record_index == max_candidates) &&
+  if ((capacity_limited || patch_limited || next_record_index == max_access_record_slots) &&
       sampled_filter_candidate_count > planned_patches.size()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled probe limited sampled patches to " +

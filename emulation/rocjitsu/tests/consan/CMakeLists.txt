@@ -416,6 +416,7 @@ function(rj_add_consan_device_conformance_cases)
         "ContinuousBatching|continuous_batching|ConSanDeviceContinuousBatchingTest"
         "VglobalCachePublication|vglobal_cache_publication|ConSanDeviceVglobalCachePublicationTest|atomics"
         "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
+        "SampledMultiRangeBudget|sampled_multi_range_budget|ConSanDeviceSampledMultiRangeBudgetTest|sampled-only"
     )
     if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
         list(
@@ -631,6 +632,17 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
+                _workload_name STREQUAL "SampledMultiRangeBudget"
+                AND _mode_value STREQUAL "sampled"
+            )
+                # This contract distinguishes the two selected instrumentation
+                # sites from the multiple banked report slots consumed by
+                # each dual-address LDS instruction.
+                list(APPEND _correct_environment "RJ_CONSAN_MAX_PATCHES=2")
+                list(APPEND _incorrect_environment "RJ_CONSAN_MAX_PATCHES=2")
+            endif()
+
+            if(
                 _workload_name STREQUAL "CdnaClobberingLdsReduction"
                 AND _mode_value STREQUAL "inline-shadow"
             )
@@ -801,6 +813,7 @@ function(rj_add_consan_device_fixture_targets target)
         "continuous_batching|continuous_batching_test.hip"
         "vglobal_cache_publication|vglobal_cache_publication_test.hip"
         "group_flat_wide|group_flat_wide_test.hip"
+        "sampled_multi_range_budget|sampled_multi_range_budget_test.hip"
     )
     if(target STREQUAL "gfx942" OR target STREQUAL "gfx950")
         list(

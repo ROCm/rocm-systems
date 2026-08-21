@@ -176,7 +176,9 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_generation = 7;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
-  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  // Keep this exact-encoding fixture on its deliberate one-bank path. Banked
+  // multi-range budget behavior has a separate cross-target contract below.
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1);
 
   const auto result = try_patch_consan(bytes, options);
 
@@ -753,7 +755,7 @@ TEST(ConSanMoi, DirectSampledProbeSnapshotsOverlappingLoadAddress) {
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
   options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1);
 
   const auto result = try_patch_consan(bytes, options);
 
@@ -4977,7 +4979,9 @@ TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {
   options.moi_epoch_vgpr = 12;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(32);
-  options.max_patches = 32;
+  // max_patches counts instrumented sites, not the 16 banked report slots
+  // consumed by each two-range site.
+  options.max_patches = 2;
   options.moi_runtime_sample_stride = 4;
   options.moi_runtime_sample_offset = 1;
 
@@ -5012,6 +5016,110 @@ TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {
   // Each of the load's two address ranges checks both ranges from the prior
   // store. This covers transposes whose conflicting pair crosses range ordinals.
   EXPECT_EQ(count_subsequence(patched_words, *atomic_snapshot), 4u);
+}
+
+TEST(ConSanMoi, SampledMultiRangeReportSlotsDoNotConsumePatchBudgetAcrossTargets) {
+  constexpr std::array<rj_code_arch_t, 5> targets = {
+      ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5,
+      ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4};
+  for (rj_code_arch_t arch : targets) {
+    SCOPED_TRACE(arch);
+    std::vector<uint32_t> words(1200u, build_s_nop(0u, arch));
+    const auto install = [&](const auto &first, const auto &second) {
+      std::copy(first.begin(), first.end(), words.begin());
+      std::copy(second.begin(), second.end(), words.begin() + 500u);
+    };
+    switch (arch) {
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      install(
+          cdna3::build_ds(cdna3::kDsWrite2B32Ds,
+                          {.offset0 = 1u, .offset1 = 2u, .addr = 0u, .data0 = 1u, .data1 = 2u}),
+          cdna3::build_ds(cdna3::kDsWrite2B32Ds,
+                          {.offset0 = 3u, .offset1 = 4u, .addr = 3u, .data0 = 4u, .data1 = 5u}));
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      install(
+          cdna4::build_ds(cdna4::kDsWrite2B32Ds,
+                          {.offset0 = 1u, .offset1 = 2u, .addr = 0u, .data0 = 1u, .data1 = 2u}),
+          cdna4::build_ds(cdna4::kDsWrite2B32Ds,
+                          {.offset0 = 3u, .offset1 = 4u, .addr = 3u, .data0 = 4u, .data1 = 5u}));
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      install(
+          cdna5::build_vds(cdna5::kDsStore2addrB32Vds,
+                           {.offset0 = 1u, .offset1 = 2u, .addr = 0u, .data0 = 1u, .data1 = 2u}),
+          cdna5::build_vds(cdna5::kDsStore2addrB32Vds,
+                           {.offset0 = 3u, .offset1 = 4u, .addr = 3u, .data0 = 4u, .data1 = 5u}));
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      install(
+          rdna3::build_ds(rdna3::kDsStore2addrB32Ds,
+                          {.offset0 = 1u, .offset1 = 2u, .addr = 0u, .data0 = 1u, .data1 = 2u}),
+          rdna3::build_ds(rdna3::kDsStore2addrB32Ds,
+                          {.offset0 = 3u, .offset1 = 4u, .addr = 3u, .data0 = 4u, .data1 = 5u}));
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      install(
+          rdna4::build_vds(rdna4::kDsStore2addrB32Vds,
+                           {.offset0 = 1u, .offset1 = 2u, .addr = 0u, .data0 = 1u, .data1 = 2u}),
+          rdna4::build_vds(rdna4::kDsStore2addrB32Vds,
+                           {.offset0 = 3u, .offset1 = 4u, .addr = 3u, .data0 = 4u, .data1 = 5u}));
+      break;
+    default:
+      FAIL() << "unexpected target";
+    }
+    words.back() = build_s_endpgm(arch);
+
+    std::vector<uint8_t> bytes;
+    switch (arch) {
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      bytes = make_cdna3_lds_code_object(words, "sampled_multirange_budget_cdna3");
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      bytes = make_cdna4_lds_code_object(words, "sampled_multirange_budget_cdna4");
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      bytes = make_gfx1250_code_object(words, "sampled_multirange_budget_cdna5");
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      bytes = make_rdna3_lds_code_object(words, "sampled_multirange_budget_rdna3");
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      bytes = make_rdna4_lds_code_object(words, "sampled_multirange_budget_rdna4");
+      break;
+    default:
+      FAIL() << "unexpected target";
+    }
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.scratch_vgpr = 20u;
+    options.moi_owner_vgpr = 40u;
+    options.moi_epoch_vgpr = 41u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(32u);
+    options.max_patches = 2u;
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result))
+        << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+    std::vector<const ConSanPatchInfo *> accesses;
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+          patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
+        accesses.push_back(&patch);
+    }
+    ASSERT_EQ(accesses.size(), 2u) << testing::PrintToString(result.warnings);
+    EXPECT_EQ(accesses[0]->sampled_access_range_count, 2u);
+    EXPECT_EQ(accesses[1]->sampled_access_range_count, 2u);
+    EXPECT_EQ(accesses[0]->sampled_window_bank_count, 8u);
+    EXPECT_EQ(accesses[1]->sampled_window_bank_count, 8u);
+    EXPECT_EQ(accesses[0]->sampled_first_slot, 0u);
+    EXPECT_EQ(accesses[1]->sampled_first_slot, 16u);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
 }
 
 TEST(ConSanMoi, DirectSampledProbeWarnsWhenReportCapacityLimitsPatches) {
