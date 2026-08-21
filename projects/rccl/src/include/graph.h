@@ -256,10 +256,6 @@ struct rcclArchThresholds {
   size_t ceArMin;
   size_t ceArMax;
 
-  // Single-node Ring fallback protocol cutoffs (bytes per rank, indexed by ncclFunc_t).
-  // 0 = no cutoff for that collective (stays SIMPLE).
-  size_t llCutoff[RCCL_DDA_FUNC_COUNT];    // below -> NCCL_PROTO_LL
-  size_t ll128Cutoff[RCCL_DDA_FUNC_COUNT]; // below -> NCCL_PROTO_LL128 (when LL128 enabled)
 };
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
 int rcclGetTuningIndexForArch(const char* gfxarch);

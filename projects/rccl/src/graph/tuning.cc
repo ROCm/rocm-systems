@@ -1744,8 +1744,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
   .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
-  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -1755,8 +1754,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
-  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -1766,8 +1764,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
-  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
