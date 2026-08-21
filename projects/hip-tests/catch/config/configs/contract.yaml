@@ -140,22 +140,22 @@ contract:
     tags: [device_identity]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForFloatChannel:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForByteChannel:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullMaxWidth_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullDescriptor_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ZeroSizedDescriptor_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_InvalidDevice_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image]
   Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected:
     <<: *level_0
     tags: [peer_query]
@@ -188,7 +188,7 @@ contract:
     tags: [peer_access]
   Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableTwiceThenDisable_RoundTripsWhenAvailable:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, multigpu]
   Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes:
     <<: *level_0
     tags: [peer_copy]
@@ -824,13 +824,13 @@ contract:
     tags: [multi_device_launch]
   Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_CooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu]
   Contract_MultiDeviceLaunch_HipExtLaunchMultiKernelMultiDevice_ExtMultiKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu]
   Contract_MultiDeviceLaunch_HipModuleLaunchCooperativeKernelMultiDevice_ModuleCooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu]
   Contract_DriverLaunchEx_HipLaunchKernelExC_Default_WritesExpectedValue:
     <<: *level_0
     tags: [driver_launch_ex]
@@ -1067,85 +1067,85 @@ contract:
     tags: [driver_pitched_memory]
   Contract_ArrayMemory_HipMallocArray_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image]
   Contract_ArrayMemory_HipMemcpy2DToArray_AndBack_RoundTripsBytes:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image]
   Contract_ArrayMemory_HipFreeArray_Default_Succeeds:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image]
   Contract_ArrayMemory_HipArrayGetInfo_Default_ReturnsDescriptorIfAvailable:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image]
   Contract_ArrayCopy_HipMemcpyToArray_AndFromArray_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image]
   Contract_ArrayCopy_HipMemcpyHtoA_AndAtoH_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image]
   Contract_ArrayCopy_HipMemcpy2DToArrayAsync_Memcpy2DToFromArrayAsync_VisibleAfterSync:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image]
   Contract_ArrayCopy_HipMemcpyToArray_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image]
   Contract_ArrayCopy_HipMemcpy2DFromArrayAsync_InvalidKind_IsRejected:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image]
   Contract_ArrayCopyExt_HipMemcpyDtoA_ThenAtoH_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpyAtoA_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpyHtoAAsync_NullSource_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpyDtoA_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpyAtoD_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_InvalidKind_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_ArrayCopyExt_HipMemcpyHtoAAsync_ThenAtoHAsync_VisibleAfterSync:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image]
   Contract_DriverArray_HipArrayCreate_2D_ReturnsUsableArray:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsAndFormat:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_DriverArray_HipArrayCreate_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_DriverArray_HipArray3DGetDescriptor_Default_RoundTripsDepthAndFlags:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image]
   Contract_MipmappedArray_HipMallocMipmappedArray_MallocAndGetLevel_ReturnsLevelArray:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image]
   Contract_MipmappedArray_HipMipmappedArrayCreate_Default_DriverCreateGetLevelDestroy:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image]
   Contract_MipmappedArray_HipGetMipmappedArrayLevel_GetLevelOutOfRange_IsRejected:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image]
   Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Default_IsQueryable:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image]
   Contract_ManagedMemory_HipMallocManaged_Default_ReturnsUsablePointer:
     <<: *level_0
     tags: [managed_memory]
@@ -1328,103 +1328,103 @@ contract:
     tags: [driver_copy3d]
   Contract_Array3D_HipMalloc3DArray_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image]
   Contract_Array3D_HipMemcpy3D_ToArrayAndBack_RoundTripsBytes:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image]
   Contract_Array3D_HipFreeArray_Default_Succeeds:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image]
   Contract_Texture_HipCreateTextureObject_CreateAndDestroyLinearResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Texture_HipGetTextureObjectResourceDesc_GetResourceDesc_RoundTripsLinearResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Texture_HipGetTextureObjectTextureDesc_GetTextureDesc_RoundTripsReadMode:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Texture_HipCreateTextureObject_CreateAndDestroyArrayResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Texture_HipGetChannelDesc_Default_MatchesArrayFormat:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Surface_HipCreateSurfaceObject_CreateAndDestroyArrayResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Surface_HipGetChannelDesc_Default_RoundTripsArrayResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_Texture_HipGetTextureObjectResourceViewDesc_GetResourceViewDesc_RoundTripsArrayResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image]
   Contract_DriverTexture_HipTexObjectCreate_AndDestroyLinearResource_Succeeds:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_DriverTexture_HipTexObjectGetResourceDesc_Default_RoundTripsLinearResource:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_DriverTexture_HipTexObjectGetTextureDesc_Default_RoundTripsFlags:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_DriverTexture_HipTexObjectGetResourceDesc_CreateAndGetResourceDesc_ArrayResource:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_DriverTexture_HipTexObjectGetResourceViewDesc_Default_IsQueryableWhenSupported:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_DriverTexture_HipTexObjectCreate_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image]
   Contract_TextureReference_HipTexRefSetAddressMode_NvidiaUnsupported_IsSkipped:
     <<: *level_0
     tags: [texture_reference]
   Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMode_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image]
   Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image]
   Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image]
   Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image]
   Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAnisotropy_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image]
   Contract_TextureReferenceSymbol_HipGetTextureReference_NvidiaUnsupported_IsSkipped:
     <<: *level_0
     tags: [texture_reference_symbol]
   Contract_TextureReferenceSymbol_HipGetTextureReference_Default_ResolvesSymbol:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipBindTexture_BindUnbindLinearMemory_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipBindTexture2D_Default_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipBindTextureToArray_Default_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipTexRefSetAddress_ModuleTexRef_AddressAndArrayRoundTrip:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipTexRefGetMipmapFilterMode_MipmapParameterGetters_ReturnInvalidValue:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipTexRefSetMipmapFilterMode_MipmapParameterSetters_WriteAndReject:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleTexRef_MipmappedArrayRoundTrip:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRefSetAddress2D_IsAccepted:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image]
   Contract_Context_HipDeviceGet_Default_ReturnsHandleForOrdinalZero:
     <<: *level_0
     tags: [context]
