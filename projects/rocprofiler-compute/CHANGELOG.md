@@ -14,6 +14,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile mode retains per-process rocpd databases and native counter CSVs under ``out/{pass}/`` instead of converting them to ``results_*.csv.gz``.
 * Analyze mode merges profile artifacts from ``out/`` into ``pmc_perf.csv``.
 
+* Regenerated MI350 golden workloads (``vcopy``, ``no_roof``, ``vcopy_iteration_multiplexing``) to the ``out/{pass}/`` artifact layout.
+
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
   * Each edge now reports the traffic measured at the interface it represents.
@@ -27,6 +29,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the ``--retain-rocpd-output`` profile option. Per-process ``.db`` files are retained automatically under ``out/``.
 * Removed intermediate ``results_*.csv.gz`` generation during profiling and profile-side native counter injection into rocpd databases.
+* Removed analyze-mode support for legacy ``results_*.csv.gz`` workloads, including the ``concat_result_csvs`` join path.
 
 ### Optimized
 

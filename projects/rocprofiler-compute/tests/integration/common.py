@@ -25,6 +25,7 @@ import pytest
 import yaml
 from common import SUPPORTED_ARCHS
 
+from utils import rocpd_data
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -193,6 +194,29 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
     return output_dir
 
 
+def profile_artifact_files(output_dir):
+    """Return searchable profile artifact paths under ``out/``."""
+    out_dir = Path(output_dir) / rocpd_data.OUT_DIR
+    if not out_dir.is_dir():
+        return []
+    return sorted(
+        path
+        for path in out_dir.rglob("*")
+        if path.is_file() and path.suffix in (".csv", ".gz", ".db")
+    )
+
+
+def load_profile_counter_df(output_dir):
+    """Load counter rows from ``pmc_perf.csv`` or ``out/`` profile artifacts."""
+    pmc_perf = Path(output_dir) / "pmc_perf.csv"
+    if pmc_perf.is_file() and pmc_perf.stat().st_size > 0:
+        return pd.read_csv(pmc_perf)
+    rows = list(rocpd_data.iter_workload_rows(output_dir))
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
 def check_csv_files(output_dir, num_devices, num_kernels):
     """Check profiling output csv files for expected
     number of entries (based on kernel invocations)
@@ -205,35 +229,28 @@ def check_csv_files(output_dir, num_devices, num_kernels):
         dict: dictionary housing file contents as pandas dataframe
               (excludes PMC files - those are validated internally)
     """
-    files_in_workload = os.listdir(output_dir)
+    workload_path = Path(output_dir)
+    pass_paths = rocpd_data.pass_dirs(workload_path)
+    pmc_perf = workload_path / "pmc_perf.csv"
+    has_pmc_perf = pmc_perf.is_file() and pmc_perf.stat().st_size > 0
 
-    # Profile counter artifacts are gzip; pmc_perf.csv and the other analyze
-    # inputs stay plain.
-    def is_csv(name):
-        if name.startswith("results_"):
-            return name.endswith(".csv.gz")
-        return name.endswith(".csv")
-
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv.gz)
-    has_separate = any(
-        f.startswith("pmc_perf_") and is_csv(f) for f in files_in_workload
-    )
-    has_results = any(f.startswith("results_") and is_csv(f) for f in files_in_workload)
-
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv.gz from profile mode"
+    assert pass_paths or has_pmc_perf, (
+        "Expected out/{pass}/ profile artifacts or pmc_perf.csv from profile mode"
     )
 
-    # Validate row counts for PMC files (but don't add to return dict)
-    for file in files_in_workload:
-        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and is_csv(file):
-            df = pd.read_csv(output_dir + "/" + file)
-            err_msg = (
-                f"PMC file {file} has insufficient rows: "
-                f"{len(df.index)} < {num_kernels}"
-            )
-            assert len(df.index) >= num_kernels, err_msg
+    if pass_paths:
+        row_count = sum(1 for _ in rocpd_data.iter_workload_rows(workload_path))
+        err_msg = (
+            f"Profile artifacts have insufficient counter rows: "
+            f"{row_count} < {num_kernels}"
+        )
+        assert row_count >= num_kernels, err_msg
+    else:
+        df = pd.read_csv(pmc_perf)
+        err_msg = (
+            f"pmc_perf.csv has insufficient rows: {len(df.index)} < {num_kernels}"
+        )
+        assert len(df.index) >= num_kernels, err_msg
 
     # Check and return non-PMC files
     return check_non_pmc_files(output_dir, num_devices, num_kernels)
@@ -256,8 +273,8 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
 
     # Load non-PMC files into return dict
     for file in files_in_workload:
-        # Skip PMC files, already validated above
-        if file.startswith("pmc_perf_") or file.startswith("results_"):
+        # Skip merged PMC output and profile artifact tree
+        if file == "pmc_perf.csv" or file == rocpd_data.OUT_DIR:
             continue
 
         if file.endswith(".csv"):

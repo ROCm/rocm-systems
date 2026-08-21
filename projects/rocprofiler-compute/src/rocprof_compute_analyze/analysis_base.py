@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import csv
 import re
 import sqlite3
 import sys
@@ -377,67 +376,6 @@ class OmniAnalyze_Base:
             )
 
     @demarcate
-    def concat_result_csvs(self, result_files: list[Path], output_file: Path) -> None:
-        """Vertically concatenate rocpd ``results_*.csv.gz`` files into one CSV.
-
-        Every file shares the long-form header rocpd writes, so the header is
-        taken from the first non-empty file and the remaining rows are appended.
-
-        Args:
-            result_files: The results_*.csv.gz files to concatenate
-            output_file: Destination CSV, written plain
-        """
-        console_warning(
-            "Reading intermediate results_*.csv.gz files is deprecated and "
-            "will be removed in a future release."
-        )
-
-        rows_written = 0
-        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
-            writer = None
-            for file in result_files:
-                # Only the read can fail on compression; output_file is plain.
-                try:
-                    with csv_compression.open_gzip_csv_read(file) as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader, None)
-                        if header is None:
-                            console_warning(f"Skipping empty {file}")
-                            continue
-                        if "Counter_Name" not in header:
-                            output_file.unlink(missing_ok=True)
-                            console_error(
-                                f"{file} is not in the supported rocpd format. "
-                                "Please re-profile this workload with a current "
-                                "release."
-                            )
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-                            rows_written += 1
-                except csv_compression.CORRUPT_CSV_ERRORS as e:
-                    # Drop the partial pmc_perf.csv built from earlier files.
-                    output_file.unlink(missing_ok=True)
-                    console_error(
-                        f"{file} is truncated or corrupt: {e}\n"
-                        "A profile run killed mid-write leaves this behind; "
-                        "re-run 'rocprof-compute profile' to regenerate the "
-                        "workload."
-                    )
-
-        # A header-only pmc_perf.csv would be reused by later analyze runs.
-        if rows_written == 0:
-            output_file.unlink(missing_ok=True)
-            console_error(
-                f"No counter data in results_*.csv.gz under {output_file.parent}.\n"
-                f"Please re-run 'rocprof-compute profile'."
-            )
-
-        console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
-
-    @demarcate
     def merge_profile_artifacts(self, workload_dir: Path, output_file: Path) -> None:
         """Merge per-process profile artifacts into one plain CSV."""
         try:
@@ -464,10 +402,8 @@ class OmniAnalyze_Base:
         console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Build pmc_perf.csv from profile artifacts or legacy results CSVs."""
+        """Build pmc_perf.csv from profile artifacts under ``out/``."""
         pmc_perf = workload_dir / "pmc_perf.csv"
-        results_glob = f"results_*.csv{csv_compression.GZIP_SUFFIX}"
-        result_files = sorted(workload_dir.glob(results_glob))
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
@@ -475,15 +411,18 @@ class OmniAnalyze_Base:
             console_log(f"Merging profile artifacts for {workload_dir}...")
             self.merge_profile_artifacts(workload_dir, pmc_perf)
             console_log(f"Created {pmc_perf}")
-        elif result_files:
-            console_log(f"Joining {results_glob} for {workload_dir}...")
-            self.concat_result_csvs(result_files, pmc_perf)
-            console_log(f"Created {pmc_perf}")
+        elif sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        ):
+            console_error(
+                f"Legacy results_*.csv.gz found in {workload_dir}.\n"
+                "These workloads are no longer supported; re-run "
+                "'rocprof-compute profile' to regenerate them."
+            )
         else:
             console_error(
                 f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv, {rocpd_data.OUT_DIR}/ artifacts, "
-                f"or {results_glob}\n"
+                f"Expected: pmc_perf.csv or {rocpd_data.OUT_DIR}/ artifacts.\n"
                 f"Please run 'rocprof-compute profile' first."
             )
 
@@ -529,7 +468,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join results_*.csv source files into pmc_perf.csv if needed
+            # Merge out/ profile artifacts into pmc_perf.csv if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)

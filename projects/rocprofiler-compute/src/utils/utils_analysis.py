@@ -590,18 +590,25 @@ def validate_workload(path: str) -> None:
     workload_dir = Path(path)
     pmc_perf_path = workload_dir / "pmc_perf.csv"
 
-    # Find PMC data files (merged or separate)
+    if rocpd_data.pass_dirs(workload_dir):
+        return
+
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
-    elif rocpd_data.pass_dirs(workload_dir):
-        return
     else:
-        # read_csv infers gzip from the .gz suffix.
-        files_to_check = sorted(
-            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
-        )
+        files_to_check = []
 
     if not files_to_check:
+        legacy_results = sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        )
+        if legacy_results:
+            console_error(
+                "analysis",
+                "Legacy results_*.csv.gz workloads are no longer supported.\n"
+                "Re-run 'rocprof-compute profile' to regenerate the workload.",
+            )
+            return
         console_error("analysis", "No profiling data found.")
         return
 

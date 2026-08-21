@@ -400,12 +400,6 @@ Raw performance counter data produced by the underlying
 * Analyze merges those artifacts into a single ``pmc_perf.csv`` when you run
   ``rocprof-compute analyze``.
 
-.. note::
-
-   Workloads profiled before this release may still carry ``results_*.csv.gz``
-   files. Analyze accepts those until the workload is re-profiled.
-
-
 .. _filtering:
 
 Filtering

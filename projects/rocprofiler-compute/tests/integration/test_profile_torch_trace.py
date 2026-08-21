@@ -382,12 +382,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_results_files = sorted(
-        Path(workload_dir_baseline).glob("results_*.csv.gz")
-    )
-    baseline_df = pd.concat(
-        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
-    )
+    baseline_df = integration_common.load_profile_counter_df(workload_dir_baseline)
     baseline_kernel_duration_total = (
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
@@ -406,12 +401,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_results_files = sorted(
-        Path(workload_dir_with_flag).glob("results_*.csv.gz")
-    )
-    with_flag_df = pd.concat(
-        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
-    )
+    with_flag_df = integration_common.load_profile_counter_df(workload_dir_with_flag)
     with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )
@@ -630,8 +620,7 @@ def test_torch_trace_deep_tensor_wraps_overhead(
             elapsed = time.time() - start
             assert returncode == 0, "torch-trace profiling run failed"
 
-            results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-            df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
+            df = integration_common.load_profile_counter_df(workload_dir)
             kernel_duration_total = (
                 df["End_Timestamp"].max() - df["Start_Timestamp"].min()
             )
