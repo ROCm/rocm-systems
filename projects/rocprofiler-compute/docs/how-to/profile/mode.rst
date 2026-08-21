@@ -952,8 +952,8 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 
    $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
-Native collector
-----------------
+Torch trace collector
+---------------------
 
 Torch trace is collected by ``torch_trace_collector``, a C++ extension built for one
 combination of Python and PyTorch versions. The copy installed with ROCm Compute
