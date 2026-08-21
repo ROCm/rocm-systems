@@ -47,7 +47,12 @@
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
+#include <xmmintrin.h>
 #define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
+// Drain the write combining buffers.  See StoreRelaxed().
+#define ROCR_WC_DRAIN() _mm_sfence()
+#else
+#define ROCR_WC_DRAIN() std::atomic_thread_fence(std::memory_order_release)
 #endif
 
 namespace rocr {
@@ -84,6 +89,27 @@ hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+
+  if (IsDeviceResidentValue()) {
+    // The value word is in device memory, written through a write combining
+    // aperture.  A relaxed store can still sit in a write combining buffer when
+    // a later store to a different aperture - a queue doorbell, typically - has
+    // become visible, so the command processor can see the doorbell before the
+    // value.  Same hazard, and same fence, as the device memory ring buffer
+    // stores; unconditional here because this store is not per-dispatch, where
+    // those sites test needsPcieOrdering().
+    //
+    // Not PcieWcFlush(): its body ends in a readback, which on a device resident
+    // word is the host bus read this placement exists to remove, and it would be
+    // paid on every store.
+    //
+    // This is the ONLY host write site drained.  StoreRelease() fences BEFORE
+    // its store and emits nothing after it, and SharedSignal::CopyPrep() writes
+    // a destination block's header with plain stores; neither is reachable with
+    // a device resident target today, and a caller that makes one reachable must
+    // close it.
+    ROCR_WC_DRAIN();
+  }
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
