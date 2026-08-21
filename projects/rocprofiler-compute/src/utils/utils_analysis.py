@@ -5,7 +5,7 @@ import math
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,9 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_counter_defs import UNIT_COUNTER
+
+if TYPE_CHECKING:
+    from utils.jax_hlo import JaxKernelSourceMap
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
@@ -82,6 +85,9 @@ class KernelStats:
     min_duration_ns: Optional[float] = None
     max_duration_ns: Optional[float] = None
     kernel_id: Optional[int] = None
+    # HLO operator and "file:line" source; None when unresolved.
+    operator: Optional[str] = None
+    source: Optional[str] = None
 
 
 @dataclass
@@ -109,6 +115,9 @@ class CallTreeNode:
     total_duration_ms: float = 0.0
     invocation_ids: set[str] = field(default_factory=set)
     args_invocations: dict[str, set[str]] = field(default_factory=dict)
+    args: str = ""
+    # "file:line" of an HLO-operator node; empty otherwise.
+    source: str = ""
     min_dispatch_ns: Optional[float] = None
     max_dispatch_ns: Optional[float] = None
     mean_dispatch_ns: Optional[float] = None
@@ -305,6 +314,7 @@ def format_operator_args(
 
 def build_call_trees(
     df: pd.DataFrame,
+    kernel_source_map: Optional["JaxKernelSourceMap"] = None,
 ) -> dict[str, CallTreeNode]:
     """Build per-source-location call trees from a consolidated ML API trace DataFrame.
 
@@ -313,6 +323,9 @@ def build_call_trees(
 
     Each kernel entry is stored as a ``KernelStats`` record.
     Full kernel names are used; shortening is left to the display layer.
+
+    When ``kernel_source_map`` is provided, each resolved kernel is placed under
+    HLO-operator nodes and annotated with its operator and source location.
     """
     required = {"Operator_Name", "Kernel_Name"}
     if df.empty or not required.issubset(df.columns):
@@ -387,13 +400,33 @@ def build_call_trees(
             if leaf_invocation is not None:
                 invocations.add(leaf_invocation)
 
-        if kernel_name not in current_node.kernels:
+        operator = None
+        source = None
+        target_node = current_node
+        if kernel_source_map is not None:
+            resolved = kernel_source_map.resolve(op_path, kernel_name)
+            if resolved is not None:
+                operator = resolved.operator
+                source = resolved.source
+                for segment in resolved.operator_path.split("/"):
+                    if not segment:
+                        continue
+                    if segment not in target_node.children:
+                        target_node.children[segment] = CallTreeNode(name=segment)
+                    target_node = target_node.children[segment]
+                target_node.source = source or target_node.source
+                if not target_node.args and resolved.shape:
+                    target_node.args = resolved.shape
+
+        if kernel_name not in target_node.kernels:
             kernel_id = None
             kernel_id_value = getattr(row, "Kernel_ID", None) if has_kernel_id else None
             if pd.notna(kernel_id_value):
                 kernel_id = int(kernel_id_value)
-            current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
-        kstats = current_node.kernels[kernel_name]
+            target_node.kernels[kernel_name] = KernelStats(
+                kernel_id=kernel_id, operator=operator, source=source
+            )
+        kstats = target_node.kernels[kernel_name]
         kstats.launches += 1
         kstats.total_duration_ns += duration_ns
         if duration_ns > 0:
@@ -420,9 +453,46 @@ def write_ml_api_trace_consolidated_csv(
     console_log(f"Saved consolidated trace to {output_file}")
 
 
+def write_kernel_source_map_csv(
+    call_trees: dict[str, CallTreeNode],
+    ml_api_trace_path: Path,
+) -> None:
+    """Write resolved kernels to kernel_source_map.csv.
+
+    One row per resolved kernel. Does nothing when no kernel was resolved.
+    """
+    rows: list[dict[str, Any]] = []
+
+    def walk(node: CallTreeNode, op_parts: list[str]) -> None:
+        for kernel_name, kstats in node.kernels.items():
+            if not kstats.operator:
+                continue
+            rows.append({
+                "Function": "/".join(op_parts),
+                "Kernel_Name": kernel_name,
+                "Operator": kstats.operator,
+                "Source": kstats.source or "",
+            })
+        for child_name, child in node.children.items():
+            walk(child, op_parts + [child_name])
+
+    for root in call_trees.values():
+        walk(root, [])
+
+    if not rows:
+        return
+
+    output_file = ml_api_trace_path / "kernel_source_map.csv"
+    pd.DataFrame(rows).drop_duplicates().sort_values(
+        ["Function", "Kernel_Name"], ignore_index=True
+    ).to_csv(output_file, index=False)
+    console_log(f"Saved kernel source map to {output_file}")
+
+
 def build_call_trees_with_kernel_ids(
     consolidated_df: pd.DataFrame,
     kernel_top_df: pd.DataFrame,
+    kernel_source_map: Optional["JaxKernelSourceMap"] = None,
 ) -> dict[str, CallTreeNode]:
     """Attach Kernel_ID values and build call trees from consolidated trace rows."""
     kernel_name_to_id = {
@@ -432,7 +502,7 @@ def build_call_trees_with_kernel_ids(
     consolidated_with_ids["Kernel_ID"] = (
         consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
     )
-    return build_call_trees(consolidated_with_ids)
+    return build_call_trees(consolidated_with_ids, kernel_source_map=kernel_source_map)
 
 
 @dataclass

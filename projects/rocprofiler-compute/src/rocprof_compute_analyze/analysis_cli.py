@@ -4,12 +4,14 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
+from utils.jax_hlo import JaxKernelSourceMap, build_jax_kernel_source_map
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
@@ -19,6 +21,7 @@ from utils.utils_analysis import (
     decode_marker_name,
     get_matrix_ops_type,
     process_ml_api_trace_output,
+    write_kernel_source_map_csv,
     write_ml_api_trace_consolidated_csv,
 )
 from utils.utils_common import validate_roofline_csv
@@ -34,6 +37,11 @@ _ML_API_ANALYSIS_CLI_OPTIONS = {
         "filter_attr": "triton_operator",
         "list_attr": "list_triton_operators",
         "label": "Triton",
+    },
+    "jax": {
+        "filter_attr": "jax_operator",
+        "list_attr": "list_jax_operators",
+        "label": "JAX",
     },
 }
 
@@ -263,6 +271,19 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
     @staticmethod
+    def _jax_kernel_source_map(
+        workload_path: str, backend: str
+    ) -> Optional[JaxKernelSourceMap]:
+        """Build the HLO kernel->operator/source map for the JAX backend.
+
+        Returns None for other backends and when no HLO dump is present.
+        """
+        if backend != "jax":
+            return None
+        source_map = build_jax_kernel_source_map(Path(workload_path) / "hlo_dump")
+        return None if source_map.is_empty() else source_map
+
+    @staticmethod
     def _filter_by_backend(consolidated_df: pd.DataFrame, backend: str) -> pd.DataFrame:
         """Return the rows attributed to ``backend``.
 
@@ -295,10 +316,14 @@ class cli_analysis(OmniAnalyze_Base):
             tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
 
+        kernel_source_map = self._jax_kernel_source_map(workload_path, backend)
         call_trees = build_call_trees_with_kernel_ids(
             consolidated_df=backend_df,
             kernel_top_df=kernel_top_df,
+            kernel_source_map=kernel_source_map,
         )
+        if kernel_source_map is not None:
+            write_kernel_source_map_csv(call_trees, ml_api_trace_path)
         tty.list_ml_operators(workload_path, call_trees, framework_label=label)
 
     def apply_operator_filter(
@@ -425,7 +450,13 @@ class cli_analysis(OmniAnalyze_Base):
         if matched_df is None or matched_df.empty:
             return
 
-        call_trees = build_call_trees(matched_df)
+        workload_path = args.path[0][0]
+        kernel_source_map = self._jax_kernel_source_map(workload_path, backend)
+        call_trees = build_call_trees(matched_df, kernel_source_map=kernel_source_map)
+        if kernel_source_map is not None:
+            write_kernel_source_map_csv(
+                call_trees, Path(workload_path) / "ml_api_trace"
+            )
 
         pattern_list = parse_operator_patterns(args, cli["filter_attr"])
         matched_operators = matched_df["Operator_Name"].dropna().unique()
