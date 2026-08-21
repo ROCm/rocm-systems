@@ -2338,7 +2338,11 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
     if (isValid) {
       int numSegments = 0;
-      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize,
+      // The proxy registers the complete user registration, not just the
+      // collective's current send/receive subrange. Count segments over that
+      // same range so multi-segment registration cannot stop after a partial prefix.
+      size_t regSize = regRecord->endAddr - regRecord->begAddr;
+      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, regSize, (CUdeviceptr*)&base, &baseSize,
                                          &numSegments));
       if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
