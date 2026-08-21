@@ -26,14 +26,12 @@ namespace profiler_hub
 
 namespace
 {
-// DESIGN DECISION (gap #2, 2026-07-20): the per-track nesting_model assignment. Region
-// (cpu_thread) is the ONLY track whose overlapping intervals are a genuine synchronous
-// call tree (HIP->HSA API nesting) -> `stack`, so its events carry a containment parent.
-// Every other track's overlaps are concurrency, not containment (a kernel dispatch
-// overlapping another is not its child; memory copies, streams, PMC/memory-activity
-// samples likewise) -> `lane`, parent always no-parent. Per draft principle #4/#6.
-// Open for Anthony review — see design/draft_api_2026-06-22.md §4-6,
-// design/gap_analysis_current_vs_design_2026-07-23.md.
+// The per-track nesting_model assignment. Region (cpu_thread) is the ONLY track whose
+// overlapping intervals are a genuine synchronous call tree (HIP->HSA API nesting) ->
+// `stack`, so its events carry a containment parent. Every other track's overlaps are
+// concurrency, not containment (a kernel dispatch overlapping another is not its child;
+// memory copies, streams, PMC/memory-activity samples likewise) -> `lane`, parent always
+// no-parent.
 // schema_version is stored as "3" (v3) or "4.0.0"/"4.1.0" (v4); the leading integer is
 // the major version. Returns -1 when there is no leading digit so the caller can fall
 // through to the metadata-less detection path rather than guess a version.
@@ -72,8 +70,8 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 {
-    // VERSION DISPATCH (task 002B; hardened task 064): the read backend is selected ONCE
-    // here, off the AUTHORITATIVE rocpd_metadata.schema_version VALUE, so every
+    // Version dispatch: the read backend is selected ONCE here, off the AUTHORITATIVE
+    // rocpd_metadata.schema_version VALUE, so every
     // m_read_statements->foo() call site downstream stays schema-agnostic and there is no
     // per-call schema sniffing. Detection is binary: major version 4 (covers BOTH v4.0 =
     // "4.0.0" AND v4.1 = "4.1.0") selects the v4 backend, 3 selects v3. Reading the
@@ -2037,8 +2035,8 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
 // private {row_id, type} and delegate to the timeline_event_t overloads above -- the
 // exact internal bridge the region case of get_event_info already uses (see the
 // get_arguments call there). The decode lives entirely inside the reader, so event_id_t
-// opacity (task 028) is preserved: no public type/row_id accessor is added, and the
-// consumer only ever holds the opaque handle. resolve_event_metadata reads only
+// opacity is preserved: no public type/row_id accessor is added, and the consumer only
+// ever holds the opaque handle. resolve_event_metadata reads only
 // unique_identifier.{id,type}, so this minimal event is sufficient; types with no stack
 // or source context (sample / pmc_event) fall through to the empty-return semantics of
 // the delegates.
@@ -2087,8 +2085,8 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
 // Opaque-handle overload: build a minimal timeline_event_t from the handle's private
 // {row_id, type} and delegate to the timeline_event_t overload above -- the same internal
 // bridge as get_call_stack(event_id_t). The decode lives entirely inside the reader, so
-// event_id_t opacity (task 028) is preserved: no public type/row_id accessor is added,
-// and the consumer only ever holds the opaque handle. resolve_event_metadata reads only
+// event_id_t opacity is preserved: no public type/row_id accessor is added, and the
+// consumer only ever holds the opaque handle. resolve_event_metadata reads only
 // unique_identifier.{id,type}, so this minimal event is sufficient; types with no
 // arguments (sample / pmc_event) fall through to the empty-return semantics of the
 // delegate.
@@ -2304,9 +2302,8 @@ interval_event_type_for(reader_types::track_type_t t)
         case reader_types::track_type_t::memory:
             return reader_types::event_type_t::memory_allocate;
         case reader_types::track_type_t::kernel_dispatch_pmc:
-            // DESIGN DECISION (task 035, 2026-07-20, owner-approved Option A): a kd_pmc
-            // interval row is really identified by the PAIR (kernel_dispatch_id, pmc_id)
-            // -- both v3 and v4 kd_pmc interval SQL SELECT K.id (a
+            // A kd_pmc interval row is really identified by the PAIR (kernel_dispatch_id,
+            // pmc_id) -- both v3 and v4 kd_pmc interval SQL SELECT K.id (a
             // rocpd_kernel_dispatch.id), not a rocpd_pmc_event.id. event_id_t carries
             // only (type, row_id), so we type the handle as kernel_dispatch and let it
             // resolve through the kernel_dispatch detail path (correct name/ts/te + KD
@@ -2573,16 +2570,12 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     // regardless of any time-window filter applied afterwards. Cache peak concurrency on
     // the track so height consumers can read it via get_tracks() (Optiq
     // level->max_lane migration target).
-    // DESIGN DECISION (deviation, 2026-07-23): computing layout over the FULL track
-    // before any window filter is deliberate — it keeps lanes/levels stable across pans
-    // and zooms. Open for Anthony review — see
-    // design/gap_analysis_current_vs_design_2026-07-23.md §3.1/A.2.
     const auto max_lane = detail::compute_interval_layout(events, nesting_for(qi.type));
     auto       tit      = m_track_info_utility.find(track_id);
     if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
 
-    // DESIGN DECISION (2026-07-22, task 039): Optional time-window filter uses OVERLAP,
-    // not containment. An interval bar is kept iff its extent [ev.start, ev.end]
+    // Optional time-window filter uses OVERLAP, not containment. An interval bar is kept
+    // iff its extent [ev.start, ev.end]
     // intersects the window [lo, hi]; it is dropped only when it lies entirely outside
     // (ends before lo, or starts after hi). Boundary-inclusive (< / >, so a bar merely
     // touching an edge is kept). This matches the two existing overlap conventions in
@@ -2932,22 +2925,18 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const size_t lo = filter.time_window.start.value_or(0);
     const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
-    // DESIGN DECISION (gap #3, 2026-07-28): flow SOURCE. Edges are sourced from
-    // stack_id (+ parent_stack_id for lineage), NOT the draft_api_2026-06-22 §6/§9.3
-    // correlation_id column. Rationale is measured, not owner-signed-off (029/030 recon
-    // on real captures): correlation_id is populated only 0-0.86% of the time (an
-    // external id pushed via roctx — 8/935 events on the measured capture, all
+    // Flow SOURCE. Edges are sourced from stack_id (+ parent_stack_id for lineage), NOT
+    // the correlation_id column. correlation_id is populated only 0-0.86% of the time (an
+    // external id pushed via roctx -- 8/935 events on the measured capture, all
     // group-size-1, 0 cross-track pairs), so flows sourced from it would yield a nearly
     // empty cross-track graph, whereas the stack_id clique yields 100% clean cross-track
-    // pairs. Adopts recommendation (i) of design/flow_source_correction_2026-07-15.md.
-    // rec (ii) is only PARTIALLY adopted: this builder makes an UNDIRECTED stack_id
-    // clique with a heuristic direction (see the direction block below), grouped by
-    // flow_id = stack_id; it does NOT implement the stricter directed
-    // parent_stack_id->ancestor, cross-track-ONLY model — the region/sibling sets can
-    // still include same-track edges. Reversible. Open for Anthony review (the correction
-    // doc is an un-ratified proposal) — design/draft_api_2026-06-22.md §6/§9.3,
-    // design/flow_source_correction_2026-07-15.md,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // pairs. This builder makes an UNDIRECTED stack_id clique with a heuristic direction
+    // (see the direction block below), grouped by flow_id = stack_id; it does NOT
+    // implement a stricter directed, cross-track-ONLY model -- the region/sibling sets
+    // can still include same-track edges. Reversible.
+    //
+    // Direction is a heuristic; the stricter directed cross-track-only model remains
+    // under consideration, so this behaviour is provisional.
 
     // De-duplicate each unordered endpoint pair to ONE directed edge. The same-type sets
     // (region->region, kd/mc/ma siblings) emit both (a,b) and (b,a); cross-type sets emit
@@ -2971,13 +2960,11 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
             const auto key = (a < b) ? std::make_pair(a, b) : std::make_pair(b, a);
             if(!seen.insert(key).second) continue;
 
-            // DESIGN DECISION (gap #3, 2026-07-20): direction. Prefer parent_stack_id
-            // lineage — the endpoint whose stack_id equals the other's parent_stack_id is
-            // the parent (src). The clique join constrains both endpoints to the SAME
-            // stack_id, so this only fires on a self-parent row and in practice yields to
-            // the start-ts fallback (earlier start = src; ties broken by handle order for
-            // determinism). Reversible. Open for Anthony review — design/draft_api §5-6,
-            // design/gap_analysis_current_vs_design_2026-07-23.md.
+            // Direction. Prefer parent_stack_id lineage — the endpoint whose stack_id
+            // equals the other's parent_stack_id is the parent (src). The clique join
+            // constrains both endpoints to the SAME stack_id, so this only fires on a
+            // self-parent row and in practice yields to the start-ts fallback (earlier
+            // start = src; ties broken by handle order for determinism). Reversible.
             reader_types::event_id_t src{};
             reader_types::event_id_t dst{};
             if(r.dest_parent.has_value() && *r.dest_parent == r.stack_id)
@@ -3002,20 +2989,16 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
                 dst = key.second;
             }
 
-            // DESIGN DECISION (gap #3, 2026-07-20): flow_id groups a causal chain. All
-            // edges of one stack_id clique share flow_id = that stack_id, so a multi-hop
-            // lineage is recoverable by grouping on flow_id and sorting by src start.
-            // Reversible. Open for Anthony review — design/draft_api §5-6,
-            // design/gap_analysis_current_vs_design_2026-07-23.md.
+            // flow_id groups a causal chain. All edges of one stack_id clique share
+            // flow_id = that stack_id, so a multi-hop lineage is recoverable by grouping
+            // on flow_id and sorting by src start. Reversible.
             flows.push_back(reader_types::flow_edge_t{
                 src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
     };
 
-    // DESIGN DECISION (gap #3, 2026-07-20): kind is fixed by each set's endpoint-type
-    // pairing (order-independent, so orientation never changes it). Reversible mapping.
-    // Open for Anthony review — design/draft_api_2026-06-22.md §5-6,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // kind is fixed by each set's endpoint-type pairing (order-independent, so
+    // orientation never changes it). Reversible mapping.
     using et = reader_types::event_type_t;
     using fk = reader_types::flow_kind_t;
     run(m_read_statements->region_to_kernel_dispatch_flows(),
@@ -3074,8 +3057,7 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
                                     const reader_types::time_window_t&           window,
                                     uint32_t max_edges)
 {
-    // The tracks param speaks the opaque track_id_t (task 056 — the 4th/final public
-    // track-id consumer to adopt it, completing draft principle #3). Membership is tested
+    // The tracks param speaks the opaque track_id_t. Membership is tested
     // opaque-id-to-opaque-id against track_info_t::id, so no .value unwrap is needed
     // here.
     auto edges = get_flows({});
@@ -3131,12 +3113,10 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
         const auto& gs = geom[e.source];
         const auto& gd = geom[e.dest];
 
-        // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): window overlap uses the
-        // edge's full temporal extent [min(src.start,dst.start), max(src.end,dst.end)]
-        // (conservative superset of the src.end->dst.start arrow), included iff it
-        // intersects the window; empty window = no filter. Reversible. Open for Anthony
-        // review — see design/draft_api_2026-06-22.md §6,
-        // design/gap_analysis_current_vs_design_2026-07-23.md.
+        // Window overlap uses the edge's full temporal extent
+        // [min(src.start,dst.start), max(src.end,dst.end)] (conservative superset of the
+        // src.end->dst.start arrow), included iff it intersects the window; empty window
+        // = no filter. Reversible.
         if(has_window)
         {
             const auto elo = std::min(gs.start, gd.start);
@@ -3144,11 +3124,9 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
             if(elo > whi || ehi < wlo) continue;
         }
 
-        // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): an edge is kept iff AT
-        // LEAST ONE endpoint sits on a listed track, so a cross-track arrow with one
-        // endpoint off-screen still surfaces its visible half; empty tracks = all.
-        // Reversible. Open for Anthony review — see design/draft_api_2026-06-22.md §6,
-        // design/gap_analysis_current_vs_design_2026-07-23.md.
+        // An edge is kept iff AT LEAST ONE endpoint sits on a listed track, so a
+        // cross-track arrow with one endpoint off-screen still surfaces its visible half;
+        // empty tracks = all. Reversible.
         if(!track_set.empty())
         {
             bool touches = false;
@@ -3168,14 +3146,10 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
         filtered.push_back(e);
     }
 
-    // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): decimation keeps the
-    // highest arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
-    // (source, dest) handle order so an identical window yields an identical ranking
-    // (stable across pans); max_edges==0 = uncapped. This answers draft §10's open
-    // "decimation contract" question (renderer LOD depends on it) with a reversible
-    // default — the primary Anthony-review decision. Open for Anthony review — see
-    // design/draft_api_2026-06-22.md §6, §10,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // Decimation keeps the highest arrow-span-latency (dst.start - src.end, clamped at 0)
+    // edges, tie-broken by (source, dest) handle order so an identical window yields an
+    // identical ranking (stable across pans); max_edges == 0 = uncapped. This ranking is
+    // a reversible default, and the decimation contract itself remains provisional.
     if(max_edges == 0 || filtered.size() <= max_edges) return filtered;
 
     auto latency = [&](const reader_types::flow_edge_t& e) -> reader_types::timestamp_t {
@@ -3282,11 +3256,11 @@ reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
 // Unified event detail
 // ============================================================================
 
-// DESIGN DECISION (gap#4, 2026-07-20): full-replace of the seven typed get_*_details
-// public methods with this one collapsed path (draft §7). The typed methods survive as
-// private impl helpers, reused here to reuse their SQL + FK resolution; only their public
-// surface is gone. Optiq is the sole consumer and migrates to get_event_info. Revisit
-// if a second consumer needs the rich typed structs back on the public API.
+// Full-replace of the seven typed get_*_details public methods with this one collapsed
+// path. The typed methods survive as private impl helpers, reused here to reuse their SQL
+// + FK resolution; only their public surface is gone. Optiq is the sole consumer and
+// migrates to get_event_info. Revisit if a second consumer needs the rich typed structs
+// back on the public API.
 std::optional<reader_types::event_info_t>
 reader_t::impl::get_event_info(const reader_types::event_id_t& id)
 {
@@ -3295,13 +3269,12 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
     reader_types::event_info_t detail;
     detail.id = id;
 
-    // DESIGN DECISION (gap#4, 2026-07-20): property-key naming = the source struct's
-    // field name, snake_case; region call-arguments are keyed by the argument's own name.
-    // Values are typed (unsigned counts/ids/addresses -> uint64_t, counter value ->
-    // double, args
-    // -> string). Optional-field policy: an absent std::optional scalar or a null linked
-    // entity is OMITTED from the bag (not emitted as monostate/nullptr_t), applied
-    // uniformly. Revisit if a consumer needs presence-vs-absence disambiguation.
+    // Property-key naming = the source struct's field name, snake_case; region
+    // call-arguments are keyed by the argument's own name. Values are typed (unsigned
+    // counts/ids/addresses -> uint64_t, counter value -> double, args -> string).
+    // Optional-field policy: an absent std::optional scalar or a null linked entity is
+    // OMITTED from the bag (not emitted as monostate/nullptr_t), applied uniformly.
+    // Revisit if a consumer needs presence-vs-absence disambiguation.
     auto push_u = [&](std::string key, size_t v) {
         detail.properties.push_back({ std::move(key), static_cast<uint64_t>(v) });
     };
@@ -3353,12 +3326,12 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
             push_u("grid_size_z", d->grid_size_z);
             push_opt_u("private_segment_size", d->private_segment_size);
             push_opt_u("group_segment_size", d->group_segment_size);
-            // DESIGN DECISION (gap#4, 2026-07-20): linked entities collapse to their
-            // integer id (kernel_symbol_id, code_object_id, node_id, process_id,
-            // thread_id, ...), NOT the resolved sub-struct -- a deliberate collapse loss;
-            // the consumer does a follow-up lookup by id. Entities the detail row does
-            // not carry (kd agent/ stream/queue) are simply absent under the omit policy.
-            // Revisit if consumers need the resolved entity inline.
+            // Linked entities collapse to their integer id (kernel_symbol_id,
+            // code_object_id, node_id, process_id, thread_id, ...), NOT the resolved
+            // sub-struct -- a deliberate collapse loss; the consumer does a follow-up
+            // lookup by id. Entities the detail row does not carry (kd agent/
+            // stream/queue) are simply absent under the omit policy. Revisit if consumers
+            // need the resolved entity inline.
             if(d->kernel_symbol_info)
                 push_u("kernel_symbol_id", d->kernel_symbol_info->id);
             if(d->code_object_info) push_u("code_object_id", d->code_object_info->id);
@@ -3417,11 +3390,10 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
         }
         case event_type_t::sample:
         {
-            // DESIGN DECISION (task 052, draft §7): a sample-typed id is
-            // unambiguously a counter sample -- get_scalar_track (counter arm) is
-            // the sole event_type_t::sample mint site. Its §7 detail is the counter
-            // name (from the track) + value (from scalar_detail()); it is a point
-            // event so te stays nullopt. build_pmc_event_data sources value +
+            // A sample-typed id is unambiguously a counter sample -- get_scalar_track
+            // (counter arm) is the sole event_type_t::sample mint site. Its detail is
+            // the counter name (from the track) + value (from scalar_detail()); it is a
+            // point event so te stays nullopt. build_pmc_event_data sources value +
             // timestamp + track from the one scalar_detail row.
             auto rows =
                 m_read_statements
