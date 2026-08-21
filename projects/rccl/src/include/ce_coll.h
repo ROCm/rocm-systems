@@ -20,7 +20,6 @@
 
 // Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
 // and the reduced output goes to the user recvbuff)
-#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -29,12 +28,6 @@
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
 #endif
-
-// Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
-// value, so every runtime offset must stay within it.
-inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_MAX_MSG_BYTES / (size_t)nRanks;
-}
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
 // (rank * slotChunkBytes) while the reduce kernel addresses them in elements
@@ -86,6 +79,7 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  size_t ceArMaxBytes;   // resolved at init: env var > arch table ceArMax
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.

@@ -3868,7 +3868,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
-      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      // comm->ceColl.ceArMaxBytes total bytes.
       bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
@@ -3890,9 +3890,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
-          // msgsize needs to be less than or equal to NCCL_CE_AR_MAX_MSG_BYTES
+          // msgsize needs to be less than or equal to comm->ceColl.ceArMaxBytes
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() ||
+          if (totalBytes > comm->ceColl.ceArMaxBytes || !rcclParamForceCeAllReduce() ||
               !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {

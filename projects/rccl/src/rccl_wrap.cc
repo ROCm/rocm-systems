@@ -55,6 +55,7 @@ RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+RCCL_PARAM(CeArMaxMsgBytes,  "CE_AR_MAX_MSG_BYTES", -1);  // -1 = use ceArMax from arch table
 
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
@@ -860,17 +861,17 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
     return false;
   }
 
-  // Total message must fit within the pre-allocated staging buffer.
+  // Total message must fit within the pre-allocated staging buffer (ceArMaxBytes set at init).
   size_t msgBytes = count * ncclTypeSize(datatype);
   if (force) {
-    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
-           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+    if (msgBytes > comm->ceColl.ceArMaxBytes) {
+      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > ceArMaxBytes (%zu)",
+           msgBytes, comm->ceColl.ceArMaxBytes);
       return false;
     }
   }
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+  if (msgBytes > comm->ceColl.ceArMaxBytes) {
+    WARN("Skipping CE AllReduce: msgBytes (%zu) > ceArMaxBytes (%zu)", msgBytes, comm->ceColl.ceArMaxBytes);
     return false;
   }
 
