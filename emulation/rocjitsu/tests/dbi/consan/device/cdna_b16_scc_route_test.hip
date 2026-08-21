@@ -63,38 +63,41 @@ __global__ __launch_bounds__(kThreadCount) void cdna_b16_scc_route_for_consan(De
   const uint32_t synchronize = state->synchronize;
 
   uint32_t branch_marker = 0u;
-  asm volatile("s_cmp_eq_u32 %3, %3\n\t"
-               "ds_write_b16 %1, %2 offset:0\n\t"
-               "ds_write_b16 %1, %2 offset:2\n\t"
-               "ds_write_b16 %1, %2 offset:4\n\t"
-               "ds_write_b16 %1, %2 offset:6\n\t"
-               "ds_write_b16 %1, %2 offset:8\n\t"
-               "ds_write_b16 %1, %2 offset:10\n\t"
-               "ds_write_b16 %1, %2 offset:12\n\t"
-               "ds_write_b16 %1, %2 offset:14\n\t"
-               "ds_write_b16 %1, %2 offset:16\n\t"
-               "ds_write_b16 %1, %2 offset:18\n\t"
-               "ds_write_b16 %1, %2 offset:20\n\t"
-               "ds_write_b16 %1, %2 offset:22\n\t"
-               "ds_write_b16 %1, %2 offset:24\n\t"
-               "ds_write_b16 %1, %2 offset:26\n\t"
-               "ds_write_b16 %1, %2 offset:28\n\t"
-               "ds_write_b16 %1, %2 offset:30\n\t"
-               "ds_write_b16 %1, %2 offset:32\n\t"
-               "ds_write_b16 %1, %2 offset:34\n\t"
-               "s_cbranch_scc0 1f\n\t"
-               "v_mov_b32 %0, 0xb1000001\n\t"
-               "s_branch 2f\n\t"
-               "1: v_mov_b32 %0, 0xb1000000\n\t"
-               "2:\n\t"
-               // Keep the accesses outside direct SOPP reach of their
-               // appended probes, forcing the dense dispatcher path.
-               ".rept 36000\n\t"
-               "s_mov_b32 s20, s20\n\t"
-               ".endr\n\t"
-               : "=&v"(branch_marker)
-               : "v"(warmup_address), "v"(value), "s"(synchronize)
-               : "s20", "memory");
+  asm volatile( // Keep the guest SCC false while a matching dense-route
+                // comparison is true, so either value leaking across the
+                // instrumented stores is observable at the consumer.
+      "s_cmp_lg_u32 %3, %3\n\t"
+      "ds_write_b16 %1, %2 offset:0\n\t"
+      "ds_write_b16 %1, %2 offset:2\n\t"
+      "ds_write_b16 %1, %2 offset:4\n\t"
+      "ds_write_b16 %1, %2 offset:6\n\t"
+      "ds_write_b16 %1, %2 offset:8\n\t"
+      "ds_write_b16 %1, %2 offset:10\n\t"
+      "ds_write_b16 %1, %2 offset:12\n\t"
+      "ds_write_b16 %1, %2 offset:14\n\t"
+      "ds_write_b16 %1, %2 offset:16\n\t"
+      "ds_write_b16 %1, %2 offset:18\n\t"
+      "ds_write_b16 %1, %2 offset:20\n\t"
+      "ds_write_b16 %1, %2 offset:22\n\t"
+      "ds_write_b16 %1, %2 offset:24\n\t"
+      "ds_write_b16 %1, %2 offset:26\n\t"
+      "ds_write_b16 %1, %2 offset:28\n\t"
+      "ds_write_b16 %1, %2 offset:30\n\t"
+      "ds_write_b16 %1, %2 offset:32\n\t"
+      "ds_write_b16 %1, %2 offset:34\n\t"
+      "s_cbranch_scc1 1f\n\t"
+      "v_mov_b32 %0, 0xb1000001\n\t"
+      "s_branch 2f\n\t"
+      "1: v_mov_b32 %0, 0xb1000000\n\t"
+      "2:\n\t"
+      // Keep the accesses outside direct SOPP reach of their
+      // appended probes, forcing the dense dispatcher path.
+      ".rept 36000\n\t"
+      "s_mov_b32 s20, s20\n\t"
+      ".endr\n\t"
+      : "=&v"(branch_marker)
+      : "v"(warmup_address), "v"(value), "s"(synchronize)
+      : "s20", "memory");
 
   state->branch_marker[tid] = branch_marker;
   for (uint32_t index = 0u; index < kAccessCount; ++index)

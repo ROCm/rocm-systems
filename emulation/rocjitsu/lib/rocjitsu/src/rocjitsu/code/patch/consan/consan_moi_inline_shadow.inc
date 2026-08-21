@@ -1361,9 +1361,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         dispatcher_words.push_back(
             build_s_lshr_b32(jump_sgprs.pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      const auto append_tagged_scc_restore = [&](std::vector<uint32_t> &words) {
-        if (!key_encodes_scc)
+      const auto append_route_scc_restore = [&](std::vector<uint32_t> &words) {
+        if (!key_encodes_scc) {
+          const auto restore = instrumentation::build_s_cmp_lg_u32(
+              jump_sgprs.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+          if (!restore)
+            return false;
+          words.push_back(*restore);
           return true;
+        }
         const uint16_t bitcmp_opcode =
             arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
         const auto normalize = instrumentation::build_s_cselect_b32(
@@ -1413,7 +1419,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           dispatcher_words.push_back(*compare_entry);
         }
         std::vector<uint32_t> matched_words;
-        if (!append_tagged_scc_restore(matched_words)) {
+        if (!append_route_scc_restore(matched_words)) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not normalize its dense entry-host SCC key");
           return;
@@ -1477,7 +1483,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
 
         std::vector<uint32_t> matched_words;
-        if (!append_tagged_scc_restore(matched_words)) {
+        if (!append_route_scc_restore(matched_words)) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not normalize its dense route SCC key");
           return;

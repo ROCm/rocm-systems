@@ -1603,13 +1603,13 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_offset);
     if (!fwd) {
       const auto reserved_fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
-      const auto special_state = moi_special_state_sgprs(options);
+      const auto indirect_state = moi_indirect_jump_sgprs(candidate_options);
       std::vector<uint32_t> island_words;
       const bool reserved_island_valid =
-          reserved_fwd && special_state && options.moi_exec_save_sgpr &&
+          reserved_fwd && indirect_state &&
           append_moi_scc_preserving_indirect_jump(
-              island_words, island_offset, cave_offset, *options.moi_exec_save_sgpr,
-              special_state->scc_save_sgpr, /*capture_scc=*/true, arch) &&
+              island_words, island_offset, cave_offset, indirect_state->pc_sgpr,
+              indirect_state->scc_save_sgpr, /*capture_scc=*/true, arch) &&
           island_words.size() == kIndirectIslandWords && island_offset <= new_text.size() &&
           island_words.size() * sizeof(uint32_t) <= new_text.size() - island_offset;
       if (reserved_island_valid) {
@@ -1634,7 +1634,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           continue;
         }
         if (!emit_moi_local_indirect_entry_island(
-                new_text, *local_island, cave_offset, site.text_offset, options,
+                new_text, *local_island, cave_offset, site.text_offset, candidate_options,
                 planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
                 "ConSan MOI sampled barrier sync patch")) {
           return;

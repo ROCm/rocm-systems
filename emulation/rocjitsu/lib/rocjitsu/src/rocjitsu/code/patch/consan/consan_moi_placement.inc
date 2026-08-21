@@ -3643,14 +3643,16 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
 
 [[nodiscard]] bool
 configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSanResult &result,
-                                                   const MoiResourcePlanningState &planning_state) {
+                                                   const MoiResourcePlanningState &planning_state,
+                                                   bool dispatch_only = false) {
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   const bool component_local_sampled =
       options.moi_engine == ConSanMoiEngine::Sampled && instrumentation::is_admitted_arch(arch);
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
-      !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
+      (!options.automatic_moi_partial_exec_save_sgprs && !dispatch_only) ||
+      !options.moi_exec_save_sgpr)
     return false;
 
   const MoiResourcePlanningState &state = planning_state;
@@ -3790,12 +3792,22 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                             })
             ? component_contexts->tail_floor
             : 0u;
-    const bool needs_override = !moi_scalar_contexts_admit_reserved_window(
+    const bool needs_exec_override = !moi_scalar_contexts_admit_reserved_window(
         component_contexts->summaries, *options.moi_exec_save_sgpr, count, arch);
+    const bool needs_dispatch_override =
+        options.moi_dispatch_id_sgpr &&
+        !moi_scalar_contexts_admit_reserved_window(component_contexts->summaries,
+                                                   *options.moi_dispatch_id_sgpr,
+                                                   moi_dispatch_state_sgpr_count(options), arch);
+    const bool needs_override = dispatch_only ? needs_dispatch_override : needs_exec_override;
     if (!needs_override)
       continue;
     const RegisterSet &unavailable = unavailable_by_component[root];
-    std::optional<uint16_t> selected;
+    // A code-object-wide EXEC window may already have a complete liveness
+    // proof while only the persistent dispatch pair excludes this component.
+    // Retain that transient window and override just the dispatch
+    // representation rather than inventing a second scalar ABI.
+    std::optional<uint16_t> selected = dispatch_only ? options.moi_exec_save_sgpr : std::nullopt;
     std::optional<uint16_t> spill_pc;
     std::optional<uint16_t> spill_call_return;
     std::optional<uint16_t> spill_scc;
@@ -3803,7 +3815,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_visible;
     bool branch_only_scalar_spill = false;
     std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) {
+    if (!selected &&
+        (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled)) {
       for (uint32_t base = util::align_up(liveness_search_floor, 2u); base + count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
@@ -5038,12 +5051,12 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
   return false;
 }
 
-[[nodiscard]] bool
-configure_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResult &result,
-                                              const MoiResourcePlanningState &state) {
+[[nodiscard]] bool configure_moi_dispatch_id_overrides(ConSanOptions &options, ConSanResult &result,
+                                                       const MoiResourcePlanningState &state) {
   const rj_code_arch_t arch = state.arch;
   if (!instrumentation::is_admitted_arch(arch) ||
-      options.moi_engine != ConSanMoiEngine::RecordReplay ||
+      (options.moi_engine != ConSanMoiEngine::RecordReplay &&
+       options.moi_engine != ConSanMoiEngine::Sampled) ||
       !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
       !options.moi_exec_save_sgpr) {
     return false;
@@ -5060,7 +5073,8 @@ configure_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResu
   options.moi_transient_sgpr_assignments.clear();
   result.resolved_moi_transient_sgpr_assignments.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
-  if (!configure_automatic_moi_transient_sgpr_assignments(options, result, state)) {
+  const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled && !prior_partial_exec;
+  if (!configure_automatic_moi_transient_sgpr_assignments(options, result, state, dispatch_only)) {
     options.moi_transient_sgpr_assignments = prior_assignments;
     result.resolved_moi_transient_sgpr_assignments = prior_resolved_assignments;
     options.automatic_moi_partial_exec_save_sgprs = prior_partial_exec;
@@ -5082,8 +5096,11 @@ configure_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResu
   }
 
   result.warnings.emplace_back(
-      "ConSan MOI selected owner-local zero-generation records where the hardware "
-      "dispatch-ID pair overlaps guest scalar state");
+      options.moi_engine == ConSanMoiEngine::Sampled
+          ? "ConSan MOI selected owner-local literal dispatch IDs where the hardware pair "
+            "overlaps guest scalar state"
+          : "ConSan MOI selected owner-local zero-generation records where the hardware "
+            "dispatch-ID pair overlaps guest scalar state");
   return true;
 }
 

@@ -750,8 +750,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_inline_moi_owner_sgpr(effective_options, result))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (configure_record_replay_dispatch_id_overrides(effective_options, result,
-                                                    resource_planning_state))
+  if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||

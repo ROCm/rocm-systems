@@ -1017,10 +1017,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         const auto direct_entry =
-            explicit_dense_key
-                ? compute_sopp_branch_simm16(matched_offset, entry_host->second.body_offset)
-                : std::nullopt;
+            explicit_dense_key ? compute_sopp_branch_simm16(matched_offset + sizeof(uint32_t),
+                                                            entry_host->second.body_offset)
+                               : std::nullopt;
         if (direct_entry) {
+          const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+              special_state.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+          if (!restore_scc) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not restore its dense entry-host SCC");
+            return;
+          }
+          matched_words.push_back(*restore_scc);
           matched_words.push_back(build_s_branch(*direct_entry, arch));
         } else if (!append_moi_scc_preserving_indirect_jump(
                        matched_words, matched_offset, entry_host->second.body_offset, pc_sgpr,
@@ -1073,10 +1081,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         const auto direct_body =
-            explicit_dense_key
-                ? compute_sopp_branch_simm16(matched_offset, planned_patch->placement.body_offset)
-                : std::nullopt;
+            explicit_dense_key ? compute_sopp_branch_simm16(matched_offset + sizeof(uint32_t),
+                                                            planned_patch->placement.body_offset)
+                               : std::nullopt;
         if (direct_body) {
+          const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+              special_state.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+          if (!restore_scc) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not restore its dense route SCC");
+            return;
+          }
+          matched_words.push_back(*restore_scc);
           matched_words.push_back(build_s_branch(*direct_body, arch));
         } else if (!append_moi_scc_preserving_indirect_jump(
                        matched_words, matched_offset, planned_patch->placement.body_offset, pc_sgpr,
