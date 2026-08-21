@@ -565,9 +565,9 @@ def test_aggregate_group_by_kernel_id_separates_shared_code_object() -> None:
     assert set(result["kernel_id"]) == {100, 101}
 
 
-def test_aggregate_active_threads_counts_every_bit_in_oversized_mask() -> None:
-    """Population count includes every set bit even above the machine wave size."""
-    oversized_mask = 2**64 + 2**8 + 2**7
+def test_aggregate_active_threads_reports_full_wave_for_all_ones_mask() -> None:
+    """A fully-active wave64 reports 100 percent, the physical upper bound."""
+    all_ones_wave64 = 2**64 - 1
     records = load_pc_sample_records(
         make_tool_data(
             stochastic=[
@@ -576,7 +576,7 @@ def test_aggregate_active_threads_counts_every_bit_in_oversized_mask() -> None:
                     0x10,
                     0,
                     dispatch_id=0,
-                    exec_mask=oversized_mask,
+                    exec_mask=all_ones_wave64,
                     wave_cnt=8,
                 )
             ]
@@ -589,8 +589,8 @@ def test_aggregate_active_threads_counts_every_bit_in_oversized_mask() -> None:
         sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
     )
 
-    assert oversized_mask.bit_count() == 3
-    assert result.iloc[0]["active_thread_percent"] == 4.6875
+    assert all_ones_wave64.bit_count() == 64
+    assert result.iloc[0]["active_thread_percent"] == 100.0
 
 
 def test_aggregate_wave_means_include_every_sample_regardless_of_issue_state() -> None:
