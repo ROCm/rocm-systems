@@ -2033,6 +2033,7 @@ class TestDeriveFlatLoad:
             ('GLOBAL_LOAD_TR4_B64', 2, 1),
             ('GLOBAL_LOAD_TR6_B96', 3, 2),
             ('GLOBAL_LOAD_TR8_B64', 2, 6),
+            ('GLOBAL_LOAD_B64_TR_B8', 2, 6),
             ('GLOBAL_LOAD_TR_B64', 2, 6),
             ('GLOBAL_LOAD_TR16_B128', 4, 4),
             ('GLOBAL_LOAD_TR_B128', 4, 4),
