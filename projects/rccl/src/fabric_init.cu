@@ -27,7 +27,6 @@ using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::ddaFabricScratchSizing;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
-using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
