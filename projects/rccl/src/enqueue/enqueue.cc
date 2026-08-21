@@ -224,7 +224,6 @@ rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func,
   return (int)std::min((size_t)nMaxChannels, divUp(cells, cellsPerChannel));
 }
 
-RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
@@ -4103,8 +4102,6 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
-RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
 // TODO(raw task): move this raw task capture implementation into raw_task.cc
 // once the remaining enqueue-local profiler and red-op dependencies are split.
