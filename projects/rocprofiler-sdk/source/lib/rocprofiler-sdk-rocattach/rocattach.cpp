@@ -174,6 +174,14 @@ build_environment_buffer()
             // only take envvars starting with ROCP
             continue;
         }
+        constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
+        if(std::string_view{var}.find(register_library_env) == 0)
+        {
+            // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
+            // contain a host-only, fully versioned path. Do not propagate it to the target;
+            // let rocprofiler-register resolve the SDK in the target environment.
+            continue;
+        }
 
         var_count++;
         ROCP_TRACE << "[rocprofiler-sdk-rocattach] Adding to environment buffer: " << var;

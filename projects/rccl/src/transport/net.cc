@@ -1212,6 +1212,12 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*p == NCCL_PROTO_LL*/, proxyState->buffSizes[NCCL_PROTO_LL],
                                buffs[NCCL_PROTO_LL]);
       resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+      // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+      // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+      // and the proxy's LL128 fast-path (ready = useGdr).
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                               proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+      resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
     }
 
     NCCL_NET_MAP_ADD_POINTER(map, 1, resources->useGdr ? 1 : 0, mapMem->size, buffs[NCCL_PROTO_SIMPLE]);
@@ -1222,7 +1228,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // Ring/tree (shared==0) always need dedicated device buffers. Shared p2p connections
+    // normally have no dedicated device memory, but when NCCL_ALLOC_P2P_NET_LL_BUFFERS is on
+    // the LL128 staging buffer lives here (device memory + GDR, like the collective net path),
+    // so the bank must be backed for shared connections too.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
@@ -1316,8 +1326,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
@@ -1464,14 +1474,26 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclSendMem), sendMem);
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclRecvMem), recvMem);
 
-  if (proxyState->allocP2pNetLLBuffers) {
+  // Only P2P (shared) net connections need the LL/LL128 staging buffers. Guarding on
+  // resources->shared != 0 keeps ring/tree (shared==0) collective connections from
+  // allocating an unused GDR-resident LL128 buffer, which otherwise enlarges their DEVMEM
+  // bank and degrades collective GDR performance (e.g. all_reduce). Mirrors the send side.
+  if (resources->shared != 0 && proxyState->allocP2pNetLLBuffers) {
     NCCL_NET_MAP_ADD_POINTER(map, 0, 0 /*devMem*/, proxyState->buffSizes[NCCL_PROTO_LL], buffs[NCCL_PROTO_LL]);
     resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
+    // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
+    // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
+    // and the proxy's LL128 fast-path (ready = useGdr).
+    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                             proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
+    resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
   }
 
   map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1; // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
-    if (resources->shared == 0) {
+    // See sendProxyConnect: shared p2p connections need the dedicated device bank backed when
+    // NCCL_ALLOC_P2P_NET_LL_BUFFERS is on so the LL128 staging buffer is valid.
+    if (resources->shared == 0 || proxyState->allocP2pNetLLBuffers) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(
           map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
@@ -1556,8 +1578,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,

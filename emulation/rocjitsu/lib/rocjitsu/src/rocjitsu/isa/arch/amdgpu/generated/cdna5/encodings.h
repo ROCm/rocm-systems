@@ -535,8 +535,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -584,8 +582,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -638,8 +634,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -699,8 +693,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
@@ -758,8 +750,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vds : public IsaInstruction<Isa> {
@@ -854,8 +844,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 } // namespace cdna5

@@ -393,6 +393,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cvt_norm_u16_f16", {0x7E00C800U, 0x00000000U}},
     {"v_swap_b32", {0x7E00CA00U, 0x00000000U}},
     {"v_swap_b16", {0x7E00CC00U, 0x00000000U}},
+    {"v_permlane64_b32", {0x7E00CE00U, 0x00000000U}},
     {"v_swaprel_b32", {0x7E00D000U, 0x00000000U}},
     {"v_not_b16", {0x7E00D200U, 0x00000000U}},
     {"v_cvt_i32_i16", {0x7E00D400U, 0x00000000U}},
@@ -1613,7 +1614,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"global_load_tr6_b96", {0xEE1D0000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1592;
+inline constexpr size_t NUM_ENCODINGS = 1593;
 
 } // namespace rocjitsu::cdna5::test_data
 

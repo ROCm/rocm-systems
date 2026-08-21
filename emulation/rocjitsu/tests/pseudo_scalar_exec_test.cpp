@@ -70,7 +70,7 @@ struct PseudoScalarProfile {
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 }};
 
@@ -740,7 +740,7 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     const uint64_t expected = selector == kVccSelectors[0]
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
-    fixture.wavefront->set_vcc(source);
+    fixture.wavefront->set_vcc_raw(source);
     fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }
