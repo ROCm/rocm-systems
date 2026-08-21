@@ -12,9 +12,11 @@ cd plugins/profiler/proxytrace
 make
 ```
 
-Requires `libfmt` development headers (`fmt/format.h`) and a C++17 compiler. The
-plugin does not use `plugins/profiler/example/`; minimal NCCL plugin types live
-in `proxytrace_plugin_shim.h` next to the source.
+Requires a C++17 compiler. `fmt/format.h` is taken from the headers the CMake build
+fetches (`$(RCCL_BUILD)/_deps/fmt-src/include`), so no system `libfmt` is needed;
+override `FMT_INC` to point elsewhere. The plugin does not use
+`plugins/profiler/example/`; minimal NCCL plugin types live in
+`proxytrace_plugin_shim.h` next to the source.
 
 Output: `librccl-profiler-proxytrace.so`
 

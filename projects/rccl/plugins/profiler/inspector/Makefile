@@ -9,7 +9,10 @@
 
 # Compiler settings
 ROCM_PATH ?= /opt/rocm
-CXX ?= $(ROCM_PATH)/bin/amdclang++
+# ?= would lose to make's built-in CXX default (g++); only replace that default.
+ifeq ($(origin CXX),default)
+CXX := $(ROCM_PATH)/bin/amdclang++
+endif
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 
 # Build options
@@ -60,6 +63,8 @@ SRCS := inspector.cc \
 
 OBJS := $(SRCS:%.cc=$(OBJDIR)/%.o)
 
+HIPIFY_STAMP := $(HIPIFY_DIR)/.hipify.stamp
+
 # Target library
 TARGET := librccl-profiler-inspector.so
 
@@ -75,17 +80,24 @@ $(TARGET): $(OBJDIR) $(OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 	@echo "Built standalone RCCL Inspector: $@"
 
+
 # Fix what hipify cannot reach: INSPECTOR_CUPFN pastes pfn_##sym, and the dlopen'd
 # library is a string literal.
-$(HIPIFY_DIR)/%.cc: %.cc
+$(HIPIFY_STAMP): $(wildcard $(SRCDIR)/*.cc) $(wildcard $(SRCDIR)/*.h) $(wildcard $(SRCDIR)/nccl/*.h)
 	@mkdir -p $(HIPIFY_DIR)/nccl
-	@cp $(SRCDIR)/*.cc $(SRCDIR)/*.h $(HIPIFY_DIR)/
-	@cp $(SRCDIR)/nccl/*.h $(HIPIFY_DIR)/nccl/
-	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h $(HIPIFY_DIR)/nccl/*.h
+	@cp -f $(SRCDIR)/*.cc $(SRCDIR)/*.h $(HIPIFY_DIR)/
+	@cp -f $(SRCDIR)/nccl/*.h $(HIPIFY_DIR)/nccl/
+	@rm -f $(HIPIFY_DIR)/*.prehip $(HIPIFY_DIR)/nccl/*.prehip
+	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/nccl/*.h \
+	  `ls $(HIPIFY_DIR)/*.h | grep -v inspector_gpu_compat.h`
 	@sed -i 's/\bpfn_cu/pfn_hip/g; s/\bPFN_cu/PFN_hip/g' $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h
 	@sed -i 's/"libcuda\.so\.1"/"libamdhip64.so.6"/g; s/"libcuda\.so"/"libamdhip64.so"/g' $(HIPIFY_DIR)/*.cc
+	@touch $@
 
-$(HIPIFY_DIR)/version.cc:
+$(HIPIFY_DIR)/%.cc: $(HIPIFY_STAMP)
+	@true
+
+$(HIPIFY_DIR)/version.cc: | $(HIPIFY_STAMP)
 	@mkdir -p $(HIPIFY_DIR)
 	@echo "// Auto-generated version info" > $@
 	@echo "#ifdef __cplusplus" >> $@
