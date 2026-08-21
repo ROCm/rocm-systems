@@ -24,6 +24,7 @@
 
 import os
 import re
+import socket
 import subprocess
 import sys
 from collections import defaultdict
@@ -615,6 +616,81 @@ def test_rocprofv3_list_avail_with_trace(cli, inventory, request, tmp_path):
     databases = sorted(output_directory.rglob("*.db"))
     assert len(databases) == 1
     assert databases[0].stat().st_size > 0
+
+
+def test_rocprofv3_list_avail_rejects_non_directory_output(cli, tmp_path):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    message = "Could not resolve the list-avail output path"
+
+    direct = cli(
+        "avail",
+        "--output-directory",
+        blocker,
+        "list",
+        "--pmc",
+        check=False,
+        cwd=tmp_path,
+    )
+    launched = cli("rocprofv3", "-d", blocker, "--list-avail", check=False, cwd=tmp_path)
+    # the file name carries the subdirectory, so the blocker is in the middle of
+    # the resolved path rather than at its root
+    nested = cli(
+        "rocprofv3",
+        "-d",
+        tmp_path,
+        "-o",
+        "{}/name".format(blocker.name),
+        "--list-avail",
+        check=False,
+        cwd=tmp_path,
+    )
+
+    # every offending directory is diagnosed rather than reaching the abort
+    for result in (direct, launched, nested):
+        assert result.returncode == 1
+        assert message in result.stderr
+    assert blocker.read_text(encoding="utf-8") == ""
+
+
+def test_rocprofv3_list_avail_rejects_non_directory_placeholder(cli, tmp_path):
+    (tmp_path / socket.gethostname()).write_text("", encoding="utf-8")
+
+    result = cli(
+        "avail",
+        "--output-directory",
+        "%hostname%",
+        "list",
+        "--pmc",
+        check=False,
+        cwd=tmp_path,
+    )
+
+    # only the library can expand the placeholder, so it is also the only place
+    # that can tell the resolved path is unusable
+    assert result.returncode == 1
+    assert "Could not resolve the list-avail output path" in result.stderr
+
+
+def test_rocprofv3_list_avail_echo_runs_nothing(cli, tmp_path):
+    result = cli(
+        "rocprofv3",
+        "-d",
+        tmp_path / "echo-output",
+        "--list-avail",
+        "--echo",
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
+        cwd=tmp_path,
+    )
+
+    echoed = [line for line in result.stdout.splitlines() if line.startswith("command:")]
+    assert len(echoed) == 2
+    assert any("rocprofv3-avail" in line for line in echoed)
+    assert not _gpu_sections(result.stdout)
+    assert sorted(tmp_path.rglob("*_list_avail.txt*")) == []
 
 
 def test_rocprofv3_list_avail_with_application_and_false(cli, inventory):
