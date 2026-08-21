@@ -44,7 +44,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
              std::to_string(i) + R"(","latency":1,"weight":10})";
   }
 
-  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna5"},)"
          R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
          R"({"name":"vram","type":"gpu_memory"},)"
          R"({"name":"xcd0","type":"xcd","children":[)"
@@ -54,7 +54,9 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
          R"({"name":")" +
          cu_range +
          R"(","type":"compute_unit","config":[)"
-         R"({"key":"num_wf_slots","value":"80"},)"
+         R"({"key":"num_wf_slots","value":")" +
+         std::to_string(kGfx1250WaveSlotsPerCu) +
+         R"("},)"
          R"({"key":"sgprs_per_wf","value":"128"},)"
          R"({"key":"vgprs_per_wf","value":"1024"},)"
          R"({"key":"lds_size_kb","value":"160"})"
@@ -1459,11 +1461,10 @@ TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
   queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
   step_until_halted(*sim.engine, *sim.cu());
 
-  auto *wf = sim.cu()->wf(0);
-  ASSERT_NE(wf, nullptr);
-  const uint32_t sbase = wf->sgpr_alloc().base;
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), 0u);
-  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), 0u);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr(2), 0u);
+  EXPECT_EQ(wf.sgpr(3), 0u);
 }
 
 TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlignedOffset) {
@@ -1533,7 +1534,7 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
   };
   std::vector<LaunchState> states;
   for (const auto &wf : sim.snapshot->snapshots())
-    states.push_back({wf.wg_id, wf.sgpr(114), wf.sgpr(115), wf.sgpr(117), wf.sgpr(2), wf.sgpr(3),
+    states.push_back({wf.wg_id, wf.ttmp(6), wf.ttmp(7), wf.ttmp(9), wf.sgpr(2), wf.sgpr(3),
                       wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
   std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
     return lhs.workgroup_id < rhs.workgroup_id;

@@ -15,6 +15,7 @@
 /// a visibly wrong result. No SIMD is involved (these ops are not on the SIMD
 /// fast path); this exercises the plain decode+execute scalar path.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -81,7 +82,7 @@ struct Fixture {
     write64(vb + 2, 0, 0xA5A5A5A5A5A5A5A5ull); // sentinel in dst pair
     uint32_t enc = vop1_encode(op, /*vdst=*/2, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;

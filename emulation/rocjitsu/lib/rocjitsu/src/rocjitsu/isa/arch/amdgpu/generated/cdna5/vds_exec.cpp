@@ -3202,7 +3202,7 @@ void DsLoadTr4B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->transpose = 1;
-  ds_calculate_addresses(inst_, wf, *d);
+  ds_calculate_addresses_all_lanes(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3216,7 +3216,7 @@ void DsLoadTr6B96Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->transpose = 2;
-  ds_calculate_addresses(inst_, wf, *d);
+  ds_calculate_addresses_all_lanes(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3230,7 +3230,7 @@ void DsLoadTr16B128Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->transpose = 4;
-  ds_calculate_addresses(inst_, wf, *d);
+  ds_calculate_addresses_all_lanes(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3243,8 +3243,8 @@ void DsLoadTr8B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->transpose = 3;
-  ds_calculate_addresses(inst_, wf, *d);
+  d->transpose = 6;
+  ds_calculate_addresses_all_lanes(inst_, wf, *d);
   set_data(std::move(d));
 }
 

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace {
 
@@ -33,17 +34,11 @@ static inline size_t ddaLLArScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLArSlotStridePkts * sizeof(LLPacket16);
 }
 
-template <typename T>
-static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                  cudaStream_t stream) {
-  const int nRanks = comm->nRanks;
-  const size_t bytes = count * sizeof(T);
-  const size_t nPk = bytes >> 3; // 8 payload bytes per packet
-
+// Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
+// low (LL serves tiny messages where latency, not occupancy, dominates).
+static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, size_t count, int typeSize) {
+  const size_t nPk = ((size_t)count * (size_t)typeSize) >> 3; // 8 payload bytes per packet
   const unsigned threads = 256;
-  // LL only serves tiny messages (<= DDA_LL_THRESHOLD, 32 KiB) where latency,
-  // not occupancy, dominates; cap the grid low so we avoid the launch/sync
-  // overhead of a wide grid (LL128/Simple use the full comm->ddaFabricMaxBlocks).
   int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -52,8 +47,19 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   if (blocks == 0) {
     blocks = 1;
   }
-  dim3 block(threads);
-  dim3 grid(blocks);
+  return std::make_pair(dim3(blocks), dim3(threads));
+}
+
+template <typename T>
+static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                                  cudaStream_t stream) {
+  const int nRanks = comm->nRanks;
+  const size_t bytes = count * sizeof(T);
+  const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
+
+  auto gridBlock = ddaAllReduceFabricLLGeom(comm, count, sizeof(T));
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
@@ -126,6 +132,11 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   }
 
   return true;
+}
+
+uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllReduceFabricLLGeom(comm, count, ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
