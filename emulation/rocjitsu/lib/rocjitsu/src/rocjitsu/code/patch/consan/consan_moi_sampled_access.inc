@@ -380,14 +380,19 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         const size_t host_words_count = group_entry_island_words + 1u;
         const auto find_container_host = [&](const auto &container) {
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(group.candidates.size() + container.barrier_sites.size() +
+          occupied_ranges.reserve(candidates.size() + container.barrier_sites.size() +
                                   container.fence_sites.size() + container.atomic_sites.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
           };
-          for (const ConSanMoiCandidate *candidate : group.candidates)
-            append_occupied_range(candidate->text_offset, candidate->size);
+          // A container can be split into several relay groups. A host for one
+          // group must not consume an access anchor owned by another group.
+          const auto owner_candidates = owner_groups.find(key);
+          if (owner_candidates != owner_groups.end()) {
+            for (const ConSanMoiCandidate *candidate : owner_candidates->second)
+              append_occupied_range(candidate->text_offset, candidate->size);
+          }
           for (const ConSanBarrierSite &site : container.barrier_sites)
             append_occupied_range(site.text_offset, site.size);
           for (const ConSanFenceSite &site : container.fence_sites)

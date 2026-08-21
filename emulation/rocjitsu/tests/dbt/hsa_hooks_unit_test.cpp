@@ -6140,6 +6140,13 @@ TEST(HsaHooksUnitTest, AutoSampledReportLogsPatchProvenance) {
         "relocated_guest=0x448", "scratch_vgpr=12", "range=0", "bank=0", "mapped=true"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
   }
+  // Access-only Sampled reports cannot publish pending atomic acquires. Even
+  // with a visible watchpoint, report teardown must not scan the capacity-sized
+  // pending table once for every visible entry.
+  EXPECT_NE(log.find("sampled_pending_acquires=0 sampled_pending_acquire_contention=0 "),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("sampled_pending_release_slots_examined=0"), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, AutoSampledReportSurfacesMalformedPatchMapping) {

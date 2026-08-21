@@ -959,6 +959,7 @@ private:
     };
     std::vector<SampledEntry> visible_sampled;
     uint32_t visible_sampled_sync_metadata = 0;
+    uint64_t sampled_pending_release_slots_examined = 0;
     const auto *sampled_words = reinterpret_cast<const volatile uint32_t *>(sampled);
     const uint32_t active_sampled_generation =
         static_cast<uint32_t>(header->generation) &
@@ -1054,7 +1055,8 @@ private:
         continue;
       }
       if (snapshot.state == rocjitsu::ConSanMoiSampledSnapshotState::Stable &&
-          sampled_pending_acquire_owner_bank_count != 0u) {
+          sampled_pending_acquire_owner_bank_count != 0u &&
+          header->sampled_pending_acquire_count != 0u) {
         // A deferred acquire-release RMW carries a statically proven route
         // back to its preceding release-side access. Search only the same
         // owner's bank for each possible acquire window; exact identity and
@@ -1064,6 +1066,7 @@ private:
           std::optional<rocjitsu::ConSanMoiSampledSyncDecodeResult> release_sync;
           for (uint32_t acquire_slot = 0; acquire_slot < sampled_causal_window_capacity;
                ++acquire_slot) {
+            ++sampled_pending_release_slots_examined;
             const uint32_t release_pending_index =
                 acquire_slot * sampled_pending_acquire_owner_bank_count +
                 (snapshot.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
@@ -1319,6 +1322,7 @@ private:
         "sampled_pending_acquire_capacity=%u sampled_pending_acquires=%u "
         "sampled_pending_acquire_contention=%u "
         "sampled_pending_acquire_collisions=%u sampled_pending_acquire_malformed=%u "
+        "sampled_pending_release_slots_examined=%llu "
         "sampled_conflicts=%u "
         "sampled_immediate_conflicts=%u sampled_claimed_windows=%u "
         "sampled_dropped_windows=%u sampled_saturated_windows=%u "
@@ -1379,7 +1383,8 @@ private:
         header->sampled_pending_acquire_capacity, header->sampled_pending_acquire_count,
         header->sampled_pending_acquire_contention_count,
         header->sampled_pending_acquire_collision_count,
-        header->sampled_pending_acquire_malformed_count, sampled_conflicts,
+        header->sampled_pending_acquire_malformed_count,
+        static_cast<unsigned long long>(sampled_pending_release_slots_examined), sampled_conflicts,
         static_cast<uint32_t>(summary.sampled_immediate_conflict_count),
         header->sampled_causal_window_count, header->sampled_dropped_window_count,
         header->sampled_saturated_window_count,
