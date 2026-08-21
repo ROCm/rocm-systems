@@ -18,16 +18,13 @@ namespace profiler_hub::detail
 // the track's peak concurrency (number of lanes = max_lane). Reader-internal; exposed in
 // a header only so it can be unit-tested directly with exact coordinates.
 //
-// DESIGN DECISION (gap #2, 2026-07-20): `lane` is greedy interval packing so overlapping
-// bars never collide; `parent_id` is a true containment edge computed ONLY when
-// nesting == stack, and carries the opaque event_id_t (task 028), never a raw row id. The
-// containment walk searches DOWN the ancestor stack for the nearest true container
-// instead of testing only the immediate top — fixing the deeper-ancestor bug where a
-// partial-overlap sibling hid a real container (A=[0,100], B=[10,60], C=[50,90]: C is a
-// child of A, not top-level). `level` is retained for backward compatibility (Optiq reads
-// it for height): containment depth on stack tracks, == lane on lane tracks; height
-// consumers should migrate to track_info_t::max_lane. Open for Anthony review — see
-// design/draft_api_2026-06-22.md §4-5.
+// `lane` is greedy interval packing so overlapping bars never collide; `parent_id` is a
+// true containment edge computed ONLY when nesting == stack, and carries the opaque
+// event_id_t, never a raw row id. The containment walk searches DOWN the ancestor stack
+// for the nearest true container instead of testing only the immediate top (A=[0,100],
+// B=[10,60], C=[50,90]: C is a child of A, not top-level). `level` is retained for
+// backward compatibility (Optiq reads it for height): containment depth on stack tracks,
+// == lane on lane tracks; height consumers should migrate to track_info_t::max_lane.
 inline uint32_t
 compute_interval_layout(reader_types::interval_entry_list_t& events,
                         reader_types::nesting_model_t        nesting)

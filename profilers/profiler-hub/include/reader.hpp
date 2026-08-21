@@ -14,56 +14,6 @@ namespace profiler_hub
 {
 
 // ============================================================================
-// Design decisions & known deviations from draft_api_2026-06-22
-// ============================================================================
-// This branch deliberately departs from Anthony's API draft in a few places. The
-// items below are INTENTIONAL — decisions and deferrals, not gaps — recorded inline
-// so a reviewer reads them as such. Full rationale + the draft's original section
-// numbers: design/gap_analysis_current_vs_design_2026-07-23.md.
-//
-// Closed — draft asked, now implemented:
-//  - Opaque, session-globally-unique event_id_t (task 028): private encoding, only
-//    ==/</hash public; no leaked rocpd row id, no companion type tag. Draft principle #3.
-//  - lane + nesting_model split (task 031) and the window-filter overlap fix (task 039):
-//    lane always valid, parent_id opaque + stack-only, level deprecated, max_lane on the
-//    track; the interval window keep-rule is OVERLAP, not containment. Draft principle
-//    #4/§5.
-//  - Directed, typed, chain-grouped flows (tasks 032/033):
-//  flow_edge_t{source,dest,flow_id,kind}
-//    + flow_kind_t + three selectors (get_flows_for_event / get_flows_for_chain /
-//    get_flows_in_window). Draft §6.
-//  - Unified per-event detail (tasks 034/041): get_event_info(event_id_t) ->
-//    optional<event_info_t> with a typed properties bag, replacing the seven typed
-//    get_*_details(). Draft §7.
-//
-// Deliberate divergences — differ from the draft ON PURPOSE (not gaps):
-//  - Domain-first track_type_t is the dispatch key; the draft wanted shape-first
-//    (track_shape_t{scalar,interval} + a track_category_t metadata field). Here shape is
-//    implied by whether get_interval_track or get_scalar_track applies. Inherent to the
-//    incremental reader_t path. Gap analysis §2.3.
-//  - track_info_t carries relational shared_ptr identity objects
-//    (node/process/thread/agent/queue/stream/pmc), not the draft's flat
-//    node_id/process_id/sub_process_id ids shaped for a C-ABI. Gap analysis §2.4; draft
-//    §8.
-//  - The surface is the incremental reader_t (profiler_hub::reader_types), not the
-//    greenfield profiler_hub::viz / trace_t namespace the draft sketched (the draft
-//    floated the incremental path as an option in §11).
-//
-// Intentionally deferred — draft called for it; not yet built (not a defect):
-//  - No format-autodetecting trace_t::open; a reader is built from a storage_t.
-//  Multi-format
-//    lives only as the Perfetto trace_processor POC, not wired into the API. Gap analysis
-//    §3.4/A.4; draft §3/§9.
-//  - No LOD/max_records decimation on track reads — only pagination_t{limit,offset}.
-//    (Flow-edge decimation IS implemented, on get_flows_in_window's max_edges.) Gap
-//    analysis §3.5; draft §10.
-//  - No value_type_t on scalar tracks and no C-ABI shim. (max_lane and pmc_info units ARE
-//    present.) Gap analysis §3.6; draft §8.
-//
-// Full rationale + Anthony's original section numbers:
-// design/gap_analysis_current_vs_design_2026-07-23.md.
-// ============================================================================
-// ============================================================================
 // Reader Interface
 // ============================================================================
 
@@ -73,12 +23,10 @@ struct reader_t
      * @brief Construct a reader with the given storage backend
      * @param storage Storage backend to read from (takes ownership)
      */
-    // DESIGN DECISION (deviation, 2026-07-23): a reader is constructed directly from a
-    // storage_t backend; there is no format-autodetecting trace_t::open entry point.
-    // Multi-format detection is deferred — the Perfetto trace_processor path exists only
-    // as a POC and is not wired into this API. Open for Anthony review — see
-    // design/gap_analysis_current_vs_design_2026-07-23.md §3.4/A.4,
-    // design/draft_api_2026-06-22.md §3/§9.
+    // A reader is constructed directly from a storage_t backend; there is no
+    // format-autodetecting trace_t::open entry point. Multi-format detection is
+    // deferred — the Perfetto trace_processor path exists only as a POC and is not
+    // wired into this API.
     explicit reader_t(std::unique_ptr<profiler_hub::storage_t> storage);
 
     ~reader_t();
@@ -357,7 +305,7 @@ struct reader_t
      * get_interval_track / get_scalar_track / flows) and never construct a
      * timeline_event_t. Internally builds a timeline_event_t from the handle and
      * delegates to the timeline_event_t overload — the decode stays private inside
-     * the reader, so event_id_t opacity (task 028) is preserved; no public
+     * the reader, so event_id_t opacity is preserved; no public
      * type/row_id accessor is exposed.
      * @param id Opaque event handle.
      * @return Call stack data (empty if not available in database).
