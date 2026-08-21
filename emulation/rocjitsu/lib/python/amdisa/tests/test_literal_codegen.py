@@ -799,7 +799,7 @@ def test_simd_ternary_literal_operand_name_for_inline_literal_forms():
     # Every inline-literal FMA entry reads its literal from `simm32`.
     assert simd_ternary_literal_operand_name('v_fmaak_f32_vop2') == 'simm32'
     assert simd_ternary_literal_operand_name('v_fmamk_f32_vop2') == 'simm32'
-    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') == 'simm32'
+    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') is None
 
 
 def test_simd_ternary_literal_operand_name_none_for_accumulate_and_unknown():

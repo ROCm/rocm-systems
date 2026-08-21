@@ -8,6 +8,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - Device Management: support for querying a device identifier.
       * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+    - Device Management: support for API parity with corresponding CUDA API.
+      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
 
 ## HIP 10.0.0 for ROCm 10.0.0
 
