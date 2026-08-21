@@ -564,6 +564,12 @@ class VirtualGPU : public device::VirtualDevice {
   void submitFillMemory(amd::FillMemoryCommand& cmd);
   void submitStreamOperation(amd::StreamOperationCommand& cmd);
   void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
+
+  // Coalesce H2D/D2H hipMemcpyAsync copies into one batched SDMA submission
+  // (DEBUG_CLR_SDMA_BATCH). Flushed at markers/kernels/barriers/cap.
+  void flushPendingSdmaCopies();
+  std::vector<amd::BatchCopyOp> pendingSdmaCopies_;
+
   void submitVirtualMap(amd::VirtualMapCommand& cmd);
   void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd);
 
