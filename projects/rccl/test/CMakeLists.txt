@@ -1041,6 +1041,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
       transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
+      transport/RmaMPI/RmaMultiSegmentMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
       transport/GinNicFusionMPITests.cpp
