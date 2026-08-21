@@ -9,13 +9,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
-* Derived and populated the existing `compute_pc_sample_state` columns
-  `active_thread_percent` and `wave_occupancy_percent` from collected samples,
-  and emitted them in per-kernel ISA CSVs. Both are additionally surfaced in
-  `compute_pc_sampling_summary_view` and `pc_sampling_summary.csv`.
-  `wave_occupancy_percent` is absent for `host_trap`, whose records lack a wave
-  count.
-
 ### Changed
 
 * gfx115x Memory Chart improvements.
