@@ -61,15 +61,11 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
         if target.is_symlink():
             continue
         backup = target.with_suffix(target.suffix + ".pip-original")
-        if backup.exists():
-            log.info("Skipping %s (already replaced in prior run)", target)
-            replaced += 1
-            continue
-        orig_size = target.stat().st_size
-        shutil.copy2(str(target), str(backup))
+        if not backup.exists():
+            shutil.copy2(str(target), str(backup))
+            log.info("Backed up original: %s", backup)
         shutil.copy2(str(ci_rccl), str(target))
-        new_size = target.stat().st_size
-        log.info("Replaced %s (%d -> %d bytes)", target, orig_size, new_size)
+        log.info("Replaced %s (%d bytes)", target, target.stat().st_size)
         replaced += 1
 
     if replaced == 0:
@@ -121,15 +117,11 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
         if target.is_symlink():
             continue
         backup = target.with_suffix(target.suffix + ".pip-original")
-        if backup.exists():
-            log.info("Skipping %s (already replaced in prior run)", target)
-            replaced += 1
-            continue
-        orig_size = target.stat().st_size
-        shutil.copy2(str(target), str(backup))
+        if not backup.exists():
+            shutil.copy2(str(target), str(backup))
+            log.info("Backed up original: %s", backup)
         shutil.copy2(str(ci_hip), str(target))
-        new_size = target.stat().st_size
-        log.info("Replaced %s (%d -> %d bytes)", target, orig_size, new_size)
+        log.info("Replaced %s (%d bytes)", target, target.stat().st_size)
         replaced += 1
 
     if replaced == 0:
@@ -184,17 +176,11 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
             if not target.exists():
                 continue
             backup = target.with_suffix(target.suffix + ".pip-original")
-            if backup.exists():
-                log.info("Skipping %s (already replaced in prior run)", target)
-                replaced += 1
-                continue
-            orig_size = target.stat().st_size
-            shutil.copy2(str(target), str(backup))
+            if not backup.exists():
+                shutil.copy2(str(target), str(backup))
+                log.info("Backed up original: %s", backup)
             shutil.copy2(str(ci_kpack), str(target))
-            log.info(
-                "Replaced kpack: %s (%d -> %d bytes)",
-                target, orig_size, ci_kpack.stat().st_size,
-            )
+            log.info("Replaced kpack: %s (%d bytes)", target, ci_kpack.stat().st_size)
             replaced += 1
 
     if replaced > 0:
