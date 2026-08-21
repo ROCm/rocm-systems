@@ -40,9 +40,12 @@ NCCL_PARAM(RMADisable, "RMA_DISABLE", 0);
 // alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
 // consumer paths recognize AMD host segments.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
+#if defined(__HIP_PLATFORM_AMD__)
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+  if (type == hipMemLocationTypeHost) return true;
+#endif
+#else
   if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
-  if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
 #endif
   return false;
 }
@@ -430,7 +433,11 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   // the system-memory handle-reuse path.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < numSegments; segment++) {
-      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_HOST;
+#if defined(__HIP_PLATFORM_AMD__)
+      CUmemLocationType hostType = hipMemLocationTypeHost;
+#else
+      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#endif
       bool foundHost = false;
       for (int r = 0; r < devr->lsaSize; r++) {
         symLsaMessage* msg = messages + r * maxSegments + segment;
