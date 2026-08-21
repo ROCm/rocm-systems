@@ -148,6 +148,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--coverage-n",
         type=int,
-        default=100,
-        help="Random ATen sample budget (default 100).",
+        default=20,
+        help=(
+            "Sample budget for test_torch_trace_coverage (default 20). "
+            "Structural operators are always included. Use 100 for a nightly run."
+        ),
     )

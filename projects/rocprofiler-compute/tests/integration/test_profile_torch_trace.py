@@ -20,52 +20,91 @@ from tests.integration.common import (
     require_torch,
 )
 
+MARKER_API_COLUMNS = {
+    "Domain",
+    "Function",
+    "Process_Id",
+    "Thread_Id",
+    "Correlation_Id",
+    "Start_Timestamp",
+    "End_Timestamp",
+}
+COUNTER_COLLECTION_COLUMNS = {
+    "Correlation_Id",
+    "Kernel_Name",
+    "Counter_Name",
+    "Counter_Value",
+    "Start_Timestamp",
+    "End_Timestamp",
+}
+SIMPLE_NET_OPERATORS = ("relu", "linear", "addmm", "sum")
 
-@pytest.mark.torch_trace
-def test_torch_trace_profile(
-    binary_handler_profile_rocprof_compute,
-    binary_handler_analyze_rocprof_compute,
-    capsys,
-):
-    """
-    Test profile and analyze flow for PyTorch torch-trace.
 
-    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
-    and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator (shell-style fnmatch glob patterns like *relu, all), and verifies
-    ml_api_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
-    and CLI output format (call tree grouped by source location, aggregated stats,
-    kernel IDs, sort order).
-    Requires PyTorch and GPU; not included in default suite.
-    """
-    require_torch(gpu=True)
-    workload_dir = common.get_output_dir(param_id="torch_trace")
-
-    # --torch-trace needs --experimental for profiling
-    options = [
+def run_analyze(analyze_handler, workload_dir, *options):
+    """Run analyze --experimental on a profiled workload directory."""
+    return analyze_handler([
         "--experimental",
-        "--torch-trace",
-        "--iteration-multiplexing",
-    ]
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config,
+        "analyze",
+        "--path",
         workload_dir,
-        options,
-        check_success=True,
-        app_name="torch_test_app",
+        *options,
+    ])
+
+
+def assert_operator_named(output, operator_name):
+    """Assert ``operator_name`` appears in analyze output."""
+    assert operator_name in output, (
+        f"Expected operator {operator_name!r} in analyze output"
     )
 
-    # ---- Verify profiling output (checks 1–5) ----
 
-    # 1. Profiling completed successfully
-    assert returncode == 0, "Profiling the torch application failed"
+def assert_simple_net_operator(output):
+    """Assert analyze output contains relu, linear, addmm, or sum."""
+    assert any(name in output for name in SIMPLE_NET_OPERATORS), (
+        "Expected a SimpleNet operator name in analyze output"
+    )
 
-    # 2. Validate profile outputs (PMC data validated by check_csv_files)
-    num_devices = config.get("num_devices", 1)
-    integration_common.check_csv_files(workload_dir, num_devices, 1)
 
-    # 3. Marker/counter CSV pairs exist and counts match
+@pytest.fixture(scope="module")
+def torch_trace_workload_state():
+    """Clean the shared profiled workload directory at module teardown."""
+    state = {"dir": None}
+    yield state
+    if state["dir"] is not None:
+        common.clean_output_dir(config["cleanup"], state["dir"])
+
+
+@pytest.fixture
+def torch_trace_profiled_workload(
+    torch_trace_workload_state,
+    binary_handler_profile_rocprof_compute,
+):
+    """Profile simple_net with --torch-trace and return the workload directory."""
+    require_torch(gpu=True)
+    if torch_trace_workload_state["dir"] is None:
+        workload_dir = common.get_output_dir(param_id="torch_trace")
+        torch_trace_workload_state["dir"] = workload_dir
+        returncode = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            [
+                "--experimental",
+                "--torch-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=True,
+            app_name="torch_test_app",
+        )
+        assert returncode == 0, "Profiling the torch application failed"
+    return torch_trace_workload_state["dir"]
+
+
+@pytest.mark.torch_trace
+def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
+    """Assert PMC, marker, and counter CSVs from a --torch-trace profile."""
+    workload_dir = torch_trace_profiled_workload
+    integration_common.check_csv_files(workload_dir, config.get("num_devices", 1), 1)
+
     marker_api_trace_files = list(
         Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
     )
@@ -77,21 +116,11 @@ def test_torch_trace_profile(
         assert corresponding_counter_file.is_file(), (
             f"counter_collection CSV not found for {marker_file}"
         )
-        # 4. marker_api_trace CSVs: required columns and non-empty rows
-        expected_marker_columns = {
-            "Domain",
-            "Function",
-            "Process_Id",
-            "Thread_Id",
-            "Correlation_Id",
-            "Start_Timestamp",
-            "End_Timestamp",
-        }
         with gzip.open(marker_file, "rt", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
-            for column in expected_marker_columns:
+            for column in MARKER_API_COLUMNS:
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {marker_file}"
                 )
@@ -103,117 +132,71 @@ def test_torch_trace_profile(
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
-        # 5. counter_collection CSVs: required columns and non-empty rows
-        expected_counter_columns = {
-            "Correlation_Id",
-            "Kernel_Name",
-            "Counter_Name",
-            "Counter_Value",
-            "Start_Timestamp",
-            "End_Timestamp",
-        }
         with gzip.open(
             corresponding_counter_file, "rt", newline="", encoding="utf-8"
         ) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
-            for column in expected_counter_columns:
+            for column in COUNTER_COLLECTION_COLUMNS:
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {corresponding_counter_file}"
                 )
             found_row = False
             for row in reader:
                 found_row = True
-
                 assert row["Correlation_Id"], (
                     f"Empty Correlation_Id in {corresponding_counter_file}"
                 )
-
                 assert row["Kernel_Name"], (
                     f"Empty Kernel_Name in {corresponding_counter_file}"
                 )
-
                 assert row["Counter_Name"], (
                     f"Empty Counter_Name in {corresponding_counter_file}"
                 )
-
                 assert row["Start_Timestamp"], (
                     f"Empty Start_Timestamp in {corresponding_counter_file}"
                 )
-
                 assert row["End_Timestamp"], (
                     f"Empty End_Timestamp in {corresponding_counter_file}"
                 )
-
             assert found_row, f"{corresponding_counter_file} is empty"
 
-    # Flush any profiling output so capsys captures only the analyze output
+
+@pytest.mark.torch_trace
+def test_list_torch_operators(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """Assert --list-torch-operators call tree, relu names, and consolidated.csv.
+
+    Repeats the listing at --kernel-verbose levels 0-4.
+    """
+    workload_dir = torch_trace_profiled_workload
     capsys.readouterr()
 
-    # ---- Verify analysis output from --list-torch-operators (checks 6–8) ----
-
-    # 6. Analyze with --list-torch-operators succeeds
-    returncode_analyze = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
+    returncode_analyze = run_analyze(
+        binary_handler_analyze_rocprof_compute,
         workload_dir,
         "--list-torch-operators",
-    ])
+    )
     assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
 
     list_output = capsys.readouterr().out
-
-    # 7. ml_api_trace directory created with consolidated.csv
-    ml_api_trace_dir = Path(workload_dir) / "ml_api_trace"
-    assert ml_api_trace_dir.exists(), "ml_api_trace directory not created"
-
-    consolidated_csv = ml_api_trace_dir / "consolidated.csv"
-    assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
-
-    # 8. Consolidated CSV contains hierarchy, kernel names, and counter values
-    df = pd.read_csv(consolidated_csv)
-    assert not df.empty, "consolidated.csv is empty"
-    assert "Operator_Name" in df.columns, "Operator_Name column missing"
-    hierarchy_present = (
-        df["Operator_Name"].apply(lambda x: "/" in str(x) or "::" in str(x)).any()
-    )
-    assert hierarchy_present, "No hierarchy information in consolidated.csv"
-    assert "Kernel_Name" in df.columns, "Kernel_Name missing"
-    assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
-        "Empty Kernel_Name in consolidated.csv"
-    )
-    assert "Counter_Value" in df.columns, "Counter_Value column missing"
-    assert df["Counter_Value"].notnull().all()
-    assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
-
-    # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
-
-    # 9. Banner
     assert "PyTorch Operator Call Tree:" in list_output, "Missing banner line"
+    assert_operator_named(list_output, "relu")
 
-    # 10. Source-location grouping (file:line headers)
     location_headers = re.findall(
         r"^(\S+:\d+)\s+\(dispatches:", list_output, re.MULTILINE
     )
     assert location_headers, "No source-location headers found in output"
-
-    # 11. Aggregated stats on tree nodes
     assert re.search(r"\(dispatches:\s+\d+,\s+total:", list_output), (
         "No aggregated stats found in output"
     )
-
-    # 12. Kernel IDs
     kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
     assert kernel_ids, "No kernel IDs found in output"
 
-    # 13. Kernel launch durations
-    assert re.search(r"dispatches:\s+\d+,\s+total:", list_output), (
-        "No kernel duration info in output"
-    )
-
-    # 14. Source locations sorted by descending total duration
     location_durations = re.findall(
         r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
         list_output,
@@ -228,91 +211,92 @@ def test_torch_trace_profile(
         f"Source locations not sorted by descending duration: {location_durations}"
     )
 
-    # ---- Verify analysis output from --torch-operator (check 15) ----
+    ml_api_trace_dir = Path(workload_dir) / "ml_api_trace"
+    assert ml_api_trace_dir.exists(), "ml_api_trace directory not created"
+    consolidated_csv = ml_api_trace_dir / "consolidated.csv"
+    assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
+    df = pd.read_csv(consolidated_csv)
+    assert not df.empty, "consolidated.csv is empty"
+    assert "Operator_Name" in df.columns, "Operator_Name column missing"
+    assert df["Operator_Name"].astype(str).str.contains("relu", case=False).any(), (
+        "No relu operator in consolidated.csv"
+    )
+    hierarchy_present = (
+        df["Operator_Name"].apply(lambda x: "/" in str(x) or "::" in str(x)).any()
+    )
+    assert hierarchy_present, "No hierarchy information in consolidated.csv"
+    assert "Kernel_Name" in df.columns, "Kernel_Name missing"
+    assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+        "Empty Kernel_Name in consolidated.csv"
+    )
+    assert "Counter_Value" in df.columns, "Counter_Value column missing"
+    assert df["Counter_Value"].notnull().all()
+    assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
 
-    # Analyze with --torch-operator needs --experimental flag
-    returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
+    for verbose_level in range(5):
+        capsys.readouterr()
+        rc = run_analyze(
+            binary_handler_analyze_rocprof_compute,
+            workload_dir,
+            "--list-torch-operators",
+            "--kernel-verbose",
+            str(verbose_level),
+        )
+        assert rc == 0, (
+            f"--list-torch-operators failed with --kernel-verbose {verbose_level}"
+        )
+        verbose_output = capsys.readouterr().out
+        assert "PyTorch Operator Call Tree:" in verbose_output, (
+            f"Missing banner at --kernel-verbose {verbose_level}"
+        )
+        assert_operator_named(verbose_output, "relu")
+
+
+@pytest.mark.torch_trace
+def test_torch_operator_filters(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """Assert --torch-operator *relu*, all, -k 0, and a non-matching pattern."""
+    workload_dir = torch_trace_profiled_workload
+    capsys.readouterr()
+
+    returncode_relu = run_analyze(
+        binary_handler_analyze_rocprof_compute,
         workload_dir,
         "--torch-operator",
         "*relu*",
-    ])
-    # 15. Analyze with --torch-operator *relu* succeeds and matches the relu subtree
-    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu* failed"
+    )
+    assert returncode_relu == 0, "Analyze with --torch-operator *relu* failed"
     out_relu = capsys.readouterr().out
     assert "Matched PyTorch Operators" in out_relu, (
         "Expected 'Matched PyTorch Operators' header from --torch-operator *relu*"
     )
+    assert_operator_named(out_relu, "relu")
 
-    # --- Verify torch-operator cli output ---
-
-    # 16. Substring wildcard pattern matches torch.nn.functional.relu at any
-    #     position in the hierarchy.
     capsys.readouterr()
-    rc_exact = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "*torch.nn.functional.relu*",
-    ])
-    assert rc_exact == 0, (
-        "Analyze with --torch-operator *torch.nn.functional.relu* failed"
-    )
-    out_exact = capsys.readouterr().out
-    assert "Matched PyTorch Operators" in out_exact, (
-        "Expected 'Matched PyTorch Operators' header in --torch-operator output"
-    )
-    assert "dispatches" in out_exact, (
-        "Expected call tree with dispatches stats in --torch-operator output"
-    )
-
-    # 17. Glob wildcard pattern (*relu*) matches the relu operator subtree
-    capsys.readouterr()
-    rc_glob = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--torch-operator",
-        "*relu*",
-    ])
-    assert rc_glob == 0, "Analyze with --torch-operator *relu* failed"
-    out_glob = capsys.readouterr().out
-    assert "dispatches" in out_glob, (
-        "Glob pattern *relu* should match relu operator and render call tree"
-    )
-
-    # 18. 'all' keyword matches every operator
-    capsys.readouterr()
-    rc_all = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
+    returncode_all = run_analyze(
+        binary_handler_analyze_rocprof_compute,
         workload_dir,
         "--torch-operator",
         "all",
-    ])
-    assert rc_all == 0, "Analyze with --torch-operator all failed"
+    )
+    assert returncode_all == 0, "Analyze with --torch-operator all failed"
     out_all = capsys.readouterr().out
-    assert "dispatches" in out_all, "'all' keyword should match operators"
+    assert "Matched PyTorch Operators" in out_all
+    assert_operator_named(out_all, "relu")
 
-    # 19. --torch-operator + -k intersection succeeds and renders call tree
     capsys.readouterr()
-    rc_intersect = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
+    returncode_intersect = run_analyze(
+        binary_handler_analyze_rocprof_compute,
         workload_dir,
         "--torch-operator",
         "all",
         "-k",
         "0",
-    ])
-    assert rc_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
+    )
+    assert returncode_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
     out_intersect = capsys.readouterr().out
     assert "Matched PyTorch Operators" in out_intersect, (
         "Expected call tree output with --torch-operator all -k 0"
@@ -320,18 +304,16 @@ def test_torch_trace_profile(
     assert "Torch operator filter selected" in out_intersect, (
         "Expected filter-selection log confirming -k intersection"
     )
+    assert_simple_net_operator(out_intersect)
 
-    # 20. Non-matching pattern degrades gracefully with a warning
     capsys.readouterr()
-    rc_nomatch = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
+    returncode_nomatch = run_analyze(
+        binary_handler_analyze_rocprof_compute,
         workload_dir,
         "--torch-operator",
         "nonexistent_operator_xyz",
-    ])
-    assert rc_nomatch == 0, (
+    )
+    assert returncode_nomatch == 0, (
         "Analyze with non-matching --torch-operator should not crash"
     )
     out_nomatch = capsys.readouterr().out
@@ -339,16 +321,10 @@ def test_torch_trace_profile(
         "Expected warning about no operators matched"
     )
 
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
 
 @pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
-    """
-    Measure overhead introduced by --torch-trace flag.
-    Compares execution time with and without the flag to ensure overhead is acceptable.
-    NOTE: Not included in the test suite since this requires PyTorch and GPU.
-    """
+    """Compare wall-clock and kernel time with and without --torch-trace."""
     require_torch(gpu=True)
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
@@ -481,7 +457,7 @@ def test_profile_invalid_workloads_torch_trace(
     expected_exit,
     request,
 ):
-    """Integration test: workload validation exit codes with --torch-trace."""
+    """Assert profile exit codes for invalid workloads with --torch-trace."""
     require_torch(gpu=True)
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
@@ -553,7 +529,7 @@ def test_profile_invalid_workloads_no_torch_trace(
     expected_exit,
     request,
 ):
-    """Integration test: workload validation exit codes without --torch-trace."""
+    """Assert profile exit codes for invalid workloads without --torch-trace."""
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
 
