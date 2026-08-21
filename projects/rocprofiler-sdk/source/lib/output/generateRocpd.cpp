@@ -1297,7 +1297,7 @@ write_rocpd(
                 {
                     auto evar = std::string{itr}.substr(0, pos);
                     auto eval = std::string{itr}.substr(pos + 1);
-                    ROCP_TRACE << "ENV: " << evar << " = " << eval;
+
                     if(contains_sensitive_keyword(evar))
                     {
                         ROCP_INFO << fmt::format(
