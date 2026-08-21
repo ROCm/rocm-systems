@@ -51,9 +51,10 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
     const size_t overCap = kDdaAlltoAllGfx950ThresholdBytes + 1;
     EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), overCap, kDdaAlltoAllGfx950ThresholdBytes));
 
-    // Other collectives on gfx950 still honor RCCL_DDA_THRESHOLD when the cap is 0.
+    // Other collectives on gfx950 keep the arch table's much larger cap.
     const size_t eightMb = 8 * 1024 * 1024;
-    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), eightMb, 0));
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), eightMb,
+                               rcclDdaVmmThreshold(mockComm_.get(), ncclFuncAllReduce)));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
@@ -164,10 +165,11 @@ TEST(DdaAlltoAllThreshold, Gfx1250_FallbackToUserThreshold)
             mockComm.reset("gfx1250:sramecc+:xnack-");
             const size_t eightMb = 8 * 1024 * 1024;
             const size_t twelveMb = 12 * 1024 * 1024;
-            // With RCCL_DDA_THRESHOLD=10MiB and threshold=0, 8MiB should pass.
-            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 0));
+            // RCCL_DDA_THRESHOLD=10MiB overrides the arch table, so 8MiB passes.
+            const size_t cap = rcclDdaVmmThreshold(mockComm.get(), ncclFuncAllReduce);
+            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, cap));
             // But 12MiB should fail (over 10MiB threshold).
-            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 0));
+            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, cap));
         },
         {{"RCCL_DDA_THRESHOLD", "10485760"}});  // 10 MiB
 }
@@ -182,10 +184,11 @@ TEST(DdaAlltoAllThreshold, Gfx950_FallbackToUserThreshold)
             mockComm.reset("gfx950:sramecc+:xnack-");
             const size_t eightMb = 8 * 1024 * 1024;
             const size_t twelveMb = 12 * 1024 * 1024;
-            // With RCCL_DDA_THRESHOLD=10MiB and threshold=0, 8MiB should pass.
-            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 0));
+            // RCCL_DDA_THRESHOLD=10MiB overrides the arch table, so 8MiB passes.
+            const size_t cap = rcclDdaVmmThreshold(mockComm.get(), ncclFuncAllReduce);
+            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, cap));
             // But 12MiB should fail (over 10MiB threshold).
-            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 0));
+            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, cap));
         },
         {{"RCCL_DDA_THRESHOLD", "10485760"}});  // 10 MiB
 }

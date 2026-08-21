@@ -240,14 +240,17 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes,
                                  int numPipeOps, float* time);
 // Per-architecture DDA/CE/Ring dispatch threshold table.
-// All arrays indexed by ncclFunc_t: [Broadcast, Reduce, AllGather, ReduceScatter, AllReduce, ...].
-// DDA dda* fields use total message bytes for AR/AG; rsShardBytes (per-rank) for RS.
+// DDA arrays are indexed by ncclFunc_t through AlltoAll (ncclFuncAlltoAll == 8).
+// AR/AG/A2A compare total message bytes; RS compares rsShardBytes (per-rank).
+// 0 disables that tier for that collective. No parallel built-in defaults:
+// an unset env var uses this table, and an arch with no table gets 0.
+enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective. gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
-  size_t ddaLLMax[8];     // DDA LL tier:    0 .. ddaLLMax[func]
-  size_t ddaLL128Max[8];  // DDA LL128 tier: ddaLLMax[func]+1 .. ddaLL128Max[func]
-  size_t ddaVmmMax[8];    // DDA VMM/IPC cap: ddaLL128Max[func]+1 .. ddaVmmMax[func]
+  size_t ddaLLMax[RCCL_DDA_FUNC_COUNT];     // DDA LL tier:    0 .. ddaLLMax[func]
+  size_t ddaLL128Max[RCCL_DDA_FUNC_COUNT];  // DDA LL128 tier: ddaLLMax[func]+1 .. ddaLL128Max[func]
+  size_t ddaVmmMax[RCCL_DDA_FUNC_COUNT];    // DDA VMM/IPC cap: ddaLL128Max[func]+1 .. ddaVmmMax[func]
 
   // CE AllReduce eligible window (total bytes, single-node, recv-registered only)
   size_t ceArMin;

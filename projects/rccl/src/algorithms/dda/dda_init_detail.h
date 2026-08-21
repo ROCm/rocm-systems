@@ -41,7 +41,7 @@ constexpr size_t kDdaLL128SlotStrideLines =
 // An explicit buffer-size override takes precedence over derived sizing.
 //
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
-// - simpleCap: DDA_THRESHOLD (default 128 MiB)
+// - simpleCap: resolved DDA_THRESHOLD (env if set, else the arch table)
 // - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
 // - ll128Floor: 2 banks * nRanks * kDdaLL128SlotStrideLines * 128B (when LL128 enabled)
 //

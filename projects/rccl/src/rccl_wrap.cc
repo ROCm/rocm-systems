@@ -64,14 +64,20 @@ RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 // Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
 // enable flag (or its threshold) to 0 disables that tier and falls through to
 // the next, so each protocol can be A/B'd in isolation at runtime.
+//
+// The three thresholds default to kDdaThresholdUnset (-1) rather than to their
+// sizes: 0 is a meaningful setting (disable the tier), so "unset" needs a value
+// of its own for the arch tables to be able to supply a default. Read them
+// through rcclDda{LL,LL128,Vmm}Threshold(), which resolve unset against this
+// comm's arch table and yield 0 (no DDA) for arches that have none.
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -664,10 +670,51 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
+namespace {
+// This comm's arch table, or NULL when the arch has no DDA tuning at all.
+// comm->archThresholds is populated at init; the lookup covers comms assembled
+// by hand (unit tests) so they resolve exactly like production ones.
+inline const rcclArchThresholds* ddaArchTable(const ncclComm* comm) {
+  if (comm == nullptr) return nullptr;
+  return comm->archThresholds != nullptr ? comm->archThresholds : rcclGetArchThresholds(comm->archName);
+}
+
+// kDdaThresholdUnset means the user left the env var alone; anything else is
+// their choice and wins, including 0 to disable that tier.
+inline bool ddaThresholdFromEnv(int64_t param, size_t* threshold) {
+  if (param == kDdaThresholdUnset) return false;
+  *threshold = param > 0 ? (size_t)param : 0;
+  return true;
+}
+
+// Table entry for `func`. Collectives past AlltoAll have no slot and stay 0.
+inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
+  return (unsigned)func < RCCL_DDA_FUNC_COUNT ? caps[func] : 0;
+}
+} // namespace
+
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return ddaThresholdFromTable(table->ddaLLMax, func);
+}
+
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return ddaThresholdFromTable(table->ddaLL128Max, func);
+}
+
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
-  if (comm->archThresholds) return comm->archThresholds->ddaVmmMax[func];
-  if (IsArchMatch(comm->archName, "gfx942")) return kDdaGfx942ThresholdBytes;
-  return 0;
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return ddaThresholdFromTable(table->ddaVmmMax, func);
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
@@ -681,7 +728,6 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   } else {
     return false;
   }
-  if (threshold == 0) threshold = static_cast<size_t>(rcclParamDdaThreshold());
   return threshold > 0 && totalBytes <= threshold;
 }
 
@@ -948,11 +994,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
-  const size_t arDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncAllReduce]    : (size_t)rcclParamDdaLLThreshold();
-  const size_t arDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncAllReduce] : (size_t)rcclParamDdaLL128Threshold();
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
+      const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+      const size_t arDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
           ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1070,10 +1116,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  const size_t agDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncAllGather]    : (size_t)rcclParamDdaLLThreshold();
-  const size_t agDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncAllGather] : (size_t)rcclParamDdaLL128Threshold();
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
+      const size_t agDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllGather);
+      const size_t agDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllGather);
       if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1248,11 +1294,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
   // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  const size_t rsDdaLLMax    = comm->archThresholds ? comm->archThresholds->ddaLLMax[ncclFuncReduceScatter]    : (size_t)rcclParamDdaLLThreshold();
-  const size_t rsDdaLL128Max = comm->archThresholds ? comm->archThresholds->ddaLL128Max[ncclFuncReduceScatter] : (size_t)rcclParamDdaLL128Threshold();
   if ((!symEligible || ddaFabricArch) &&
       rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
+      const size_t rsDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
+      const size_t rsDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncReduceScatter);
       if (rcclParamDdaLL() && rsShardBytes <= rsDdaLLMax &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;

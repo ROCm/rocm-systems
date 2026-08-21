@@ -438,16 +438,15 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    const size_t a2aDdaMax = IsArchMatch(comm->archName, "gfx1250") ? kDdaAlltoAllGfx1250ThresholdBytes :
-                             IsArchMatch(comm->archName, "gfx950")  ? kDdaAlltoAllGfx950ThresholdBytes :
-                                                                     kDdaAlltoAllGfx942ThresholdBytes;
+    const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
     if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), a2aDdaMax)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
-        const int64_t llThresh = rcclParamDdaLLThreshold();
-        const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
+        // AlltoAll LL/LL128 caps live in the arch table (env still overrides).
+        const size_t llThresh = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
+        const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
         // Small-chunk fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= (size_t)llThresh &&
+        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= llThresh &&
             ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
                comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
@@ -455,7 +454,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
           return ncclSuccess;
         }
         // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= (size_t)ll128Thresh &&
+        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= ll128Thresh &&
             ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
                comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);

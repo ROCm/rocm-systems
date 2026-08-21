@@ -233,22 +233,31 @@ RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
 
-// Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
+// Per-collective DDA AlltoAll VMM/IPC caps. These match ddaVmmMax[AlltoAll]
+// in the arch tables; tests use the names as the expected table values.
 constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
 constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
 constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 
-// gfx942 DDA-IPC cap for AllReduce / AllGather / ReduceScatter when no arch
-// threshold table is attached (unit tests). Production gfx942 uses ddaVmmMax.
+// gfx942's DDA-IPC cap for AR/AG/RS, i.e. its ddaVmmMax[AllReduce] table entry.
 constexpr size_t kDdaGfx942ThresholdBytes = 8388608; // 8 MiB
 
-// DDA VMM/IPC size cap for this collective: archThresholds->ddaVmmMax when
-// present, else gfx942's 8 MiB fallback, else 0 (rcclDdaEnabled uses env).
+// Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
+// meaning "the user did not set this". 0 already means "disable this tier", so
+// unset needs a value of its own for the arch tables to act as defaults.
+constexpr int64_t kDdaThresholdUnset = -1;
+
+// Per-tier DDA size caps for this collective: env var (when set) else arch table.
+// Return 0 when the env var is unset and there is no table entry -- either the
+// arch has no table, or this collective is past AlltoAll. Nothing is invented
+// outside the table. A NULL `comm` resolves the same way.
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func);
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 
 // Returns true when the DDA fast path should be attempted for this arch/size.
-// `threshold` is the per-collective cap (ddaVmmMax or AlltoAll constant).
-// 0 falls back to RCCL_DDA_THRESHOLD.
+// `threshold` is the per-collective cap from rcclDdaVmmThreshold(). 0 disables
+// DDA for the call.
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold);
 
 int getFirmwareVersion();
