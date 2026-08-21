@@ -96,16 +96,15 @@ constexpr std::uint64_t kThreadB = 2;
 constexpr std::uint64_t kThreadC = 3;
 
 // The first `count` sequence numbers that hash to `shard` for `thread_id`.
-std::vector<std::int64_t> sequence_numbers_on_shard(
-    std::size_t shard, std::uint64_t thread_id, std::size_t count)
+std::vector<std::int64_t> sequence_numbers_on_shard(std::size_t   shard,
+                                                    std::uint64_t thread_id,
+                                                    std::size_t   count)
 {
     std::vector<std::int64_t> sequence_numbers;
     sequence_numbers.reserve(count);
-    for (std::int64_t sequence_number = 0; sequence_numbers.size() < count;
-         ++sequence_number)
+    for (std::int64_t sequence_number = 0; sequence_numbers.size() < count; ++sequence_number)
     {
-        if (SnapshotStore::shard_index(SnapshotKey{sequence_number, thread_id})
-            == shard)
+        if (SnapshotStore::shard_index(SnapshotKey{sequence_number, thread_id}) == shard)
         {
             sequence_numbers.push_back(sequence_number);
         }
@@ -322,17 +321,14 @@ TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
 
 TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(
-        0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto sequence_numbers = sequence_numbers_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        snapshots().save(
-            sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
     ASSERT_EQ(stats().snapshots_dropped.load(), 0u);
 
-    snapshots().save(
-        sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    snapshots().save(sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
     EXPECT_EQ(stats().snapshots_dropped.load(), 1u);
 
     std::vector<StackEntry> out;
@@ -342,26 +338,20 @@ TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
 
 TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(
-        0, kThreadA, SnapshotStore::kShardSoftCap + 1);
-    const auto other_shard_sequence_numbers =
-        sequence_numbers_on_shard(1, kThreadA, 1);
+    const auto sequence_numbers = sequence_numbers_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto other_shard_sequence_numbers = sequence_numbers_on_shard(1, kThreadA, 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        snapshots().save(
-            sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
-    snapshots().save(
-        other_shard_sequence_numbers.front(),
-        kThreadA,
-        std::vector<StackEntry>{{"shard1", "v"}});
+    snapshots().save(other_shard_sequence_numbers.front(),
+                     kThreadA,
+                     std::vector<StackEntry>{{"shard1", "v"}});
 
-    snapshots().save(
-        sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    snapshots().save(sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
 
     std::vector<StackEntry> out;
-    EXPECT_TRUE(snapshots().consume(
-        other_shard_sequence_numbers.front(), kThreadA, &out));
+    EXPECT_TRUE(snapshots().consume(other_shard_sequence_numbers.front(), kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "shard1");
 }

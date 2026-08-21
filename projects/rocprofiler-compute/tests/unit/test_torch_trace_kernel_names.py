@@ -4,7 +4,6 @@
 """Unit tests for ``torch_trace_kernel_names``."""
 
 import pytest
-
 from torch_trace_kernel_names import normalize_kernel_name
 
 
