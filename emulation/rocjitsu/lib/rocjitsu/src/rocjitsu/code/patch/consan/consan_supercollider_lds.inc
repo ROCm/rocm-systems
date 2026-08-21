@@ -1581,11 +1581,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // across any one reach window.  Dense generated objects can contain more
   // independent LDS sites than that, making a one-relay-per-site layout
   // mathematically impossible even when pristine text has ample relocatable
-  // instructions. gfx1250 can identify a site with its one-word s_call_i64;
-  // RDNA4 uses an explicit inline key plus s_branch in the two-word LDS
-  // anchor. Both forms let all sites in one small kernel share an eight-word
-  // local entry host. The appended dispatcher uses that identity to select the
-  // site's ordinary instrumentation body.
+  // instructions. gfx1250 can identify a site with its one-word s_call_i64.
+  // CDNA4 and RDNA4 use an explicit inline key plus s_branch in the two-word
+  // LDS anchor. Both forms let all sites in one small kernel share an
+  // eight-word local entry host. The appended dispatcher uses that identity
+  // to select the site's ordinary instrumentation body.
   // Keep this path for either the proven absolute min-cut bound or a large
   // object where most supported sites are already reach-stranded.  Requiring
   // at least 1,024 stranded sites amortizes the shared dispatcher and keeps
@@ -1597,7 +1597,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const bool is_large_majority_stranded =
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
-  if (is_rdna4_family_arch(arch) && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
+  const bool supports_dense_call =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
+  if (supports_dense_call && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
       uint64_t container_entry_text_offset = 0;
       uint64_t descriptor_file_offset = 0;

@@ -6096,6 +6096,49 @@ TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
             result.patches.end());
 }
 
+TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kSiteCount = 1025u;
+  constexpr size_t kTextWords = 66000u;
+  const auto store = build_cdna4_ds_store_b32(
+      /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(store);
+  std::vector<uint32_t> text_words(kTextWords, build_s_mov_b32(10u, 10u, kArch));
+  for (size_t site = 0; site < kSiteCount; ++site)
+    std::ranges::copy(*store, text_words.begin() + 2u * site);
+  // A small linker-style NOP cave is enough to select the local-island path,
+  // but cannot give one private island to every site. This is the shape that
+  // left most accesses uncovered in the multi-kernel rocBLAS code object.
+  for (size_t word = 2u * kSiteCount; word < 2u * kSiteCount + 8u; ++word)
+    text_words[word] = build_s_nop(0u, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "cdna4_rocblas_dense_lds");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 6u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.sc_access_coverage_resolved);
+  ASSERT_EQ(result.sc_access_coverage_sites.size(), kSiteCount);
+  EXPECT_TRUE(
+      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsStoreCheckTrap,
+                               &ConSanPatchInfo::kind),
+            kSiteCount);
+  const auto explicit_dispatcher = std::ranges::find_if(result.patches, [](const auto &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher &&
+           patch.sc_dense_explicit_key_sgpr.has_value();
+  });
+  EXPECT_NE(explicit_dispatcher, result.patches.end());
+}
+
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   constexpr size_t kSiteCount = 1025u;
   constexpr size_t kTextWords = 66000u;
