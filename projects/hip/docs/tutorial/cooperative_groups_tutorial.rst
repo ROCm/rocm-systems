@@ -242,4 +242,4 @@ With cooperative groups, you can easily use custom partitions to create custom t
 Additional cooperative groups examples demonstrate more recent features of the API:
 
 - `double-buffered tile <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/cooperative_groups_double_buffered_tile>`_ combines ``memcpy_async`` with a split barrier.
-- `prefix sum <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/cooperative_groups_prefix_sum>`_ demonstrates a parallel prefix sum implementation using ``inclusive_scan`` and ``exclusive_scan``.
+- `prefix sum <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/cooperative_groups_prefix_sum>`_ showcases a parallel prefix sum implementation using ``inclusive_scan`` and ``exclusive_scan``.
