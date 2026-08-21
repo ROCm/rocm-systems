@@ -44,6 +44,12 @@ extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetNd;
 
 #undef NCCL_NET_DATA_IMPORT
 
+// Register a multi-segment cuMem/VMM buffer as one dma-buf MR per physical
+// segment for the classic NET/IB transport (AIRUNTIME-2351 classic-path
+// follow-up). Only valid when the active net plugin is ncclNetIb.
+ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens,
+                                       uint64_t* segOffsets, int* segFds, int type, void** mhandle);
+
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 extern int64_t ncclParamDmaBufEnable();
 
