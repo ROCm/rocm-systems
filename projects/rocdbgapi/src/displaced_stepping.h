@@ -44,7 +44,7 @@ private:
 
   instruction_t const m_original_instruction;
   agent_address_t const m_from;
-  std::optional<compute_queue_t::displaced_instruction_ptr_t> m_to;
+  std::optional<queue_t::displaced_instruction_ptr_t> m_to;
 
   queue_t &m_queue;
 
@@ -52,7 +52,7 @@ public:
   displaced_stepping_t (
     amd_dbgapi_displaced_stepping_id_t displaced_stepping_id, queue_t &queue,
     instruction_t original_instruction, agent_address_t from,
-    std::optional<compute_queue_t::displaced_instruction_ptr_t> to);
+    std::optional<queue_t::displaced_instruction_ptr_t> to);
 
   ~displaced_stepping_t ();
 

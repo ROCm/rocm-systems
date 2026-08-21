@@ -60,7 +60,6 @@
 #ifndef _WIN32
 #define _open open
 #define _close close
-#define _tempnam tempnam
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -717,6 +716,11 @@ namespace elf {
 
       const char* data() override { assert(buffer); return buffer; }
       uint64_t size() override;
+      // Size in bytes of the raw backing buffer this image was initialized
+      // from, or 0 if the image is not buffer-backed. Unlike size(), this is
+      // not derived from attacker-controlled ELF header fields and is therefore
+      // safe to use for bounds checks.
+      size_t getBufferSize() const { return bufferSize; }
 
       bool push();
 
@@ -842,7 +846,16 @@ namespace elf {
 
     const char* GElfSegment::data() const
     {
-      return (const char*) elf->data() + phdr.p_offset;
+      if (!elf->buffer || elf->bufferSize == 0) {
+        return nullptr;
+      }
+      if (phdr.p_offset > elf->bufferSize) {
+        return nullptr;
+      }
+      if (phdr.p_filesz > elf->bufferSize - phdr.p_offset) {
+        return nullptr;
+      }
+      return elf->buffer + phdr.p_offset;
     }
 
     bool GElfImage::Freeze()
@@ -1225,19 +1238,39 @@ namespace elf {
       Elf_Scn *scn = elf_getscn(elf->e, ndxscn);
       assert(scn);
       while ((data = elf_getdata(scn, data)) != 0) {
-        uint32_t note_offset = 0;
-        while (note_offset < data->d_size) {
+        size_t note_offset = 0;
+        const size_t data_size = data->d_size;
+        while (note_offset < data_size) {
+          if (note_offset + sizeof(Elf64_Nhdr) > data_size) {
+            return false;
+          }
           char* notec = (char *) data->d_buf + note_offset;
           Elf64_Nhdr* note = (Elf64_Nhdr*) notec;
+          const size_t namesz_aligned = alignUp(note->n_namesz, 4);
+          const size_t descsz_aligned = alignUp(note->n_descsz, 4);
+          size_t entry_size = sizeof(Elf64_Nhdr);
+          if (entry_size + namesz_aligned < entry_size ||
+              entry_size + namesz_aligned + descsz_aligned < entry_size + namesz_aligned) {
+            return false;
+          }
+          entry_size += namesz_aligned + descsz_aligned;
+          if (note_offset + entry_size > data_size || note_offset + entry_size < note_offset) {
+            return false;
+          }
           if (type == note->n_type) {
+            const size_t desc_offset = note_offset + sizeof(Elf64_Nhdr) + namesz_aligned;
+            if (note_offset + sizeof(Elf64_Nhdr) + note->n_namesz > data_size ||
+                desc_offset + note->n_descsz > data_size) {
+              return false;
+            }
             std::string note_name = GetNoteString(note->n_namesz, notec + sizeof(Elf64_Nhdr));
             if (name == note_name) {
-              *desc = notec + sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4);
+              *desc = notec + sizeof(Elf64_Nhdr) + namesz_aligned;
               *desc_size = note->n_descsz;
               return true;
             }
           }
-          note_offset += sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4) + alignUp(note->n_descsz, 4);
+          note_offset += entry_size;
         }
       }
       return false;
@@ -1390,7 +1423,10 @@ namespace elf {
 
     bool GElfImage::initFromBuffer(const void* buffer, size_t size)
     {
-      if (size == 0) { size = ElfSize(buffer); }
+      if (size == 0) {
+        out << "Error: buffer size must be specified" << std::endl;
+        return false;
+      }
       if (!img.create()) { return imgError(); }
       if (!img.copyFrom(buffer, size)) { return imgError(); }
       if (!elfBegin(ELF_C_RDWR)) { return false; }
@@ -1399,7 +1435,13 @@ namespace elf {
 
     bool GElfImage::initAsBuffer(const void* buffer, size_t size)
     {
-      if (size == 0) { size = ElfSize(buffer); }
+      if (size == 0) {
+        size = ElfSize(buffer, 0);
+        if (size == 0) {
+          out << "Error: failed to determine buffer size" << std::endl;
+          return false;
+        }
+      }
       if ((e = elf_memory(reinterpret_cast<char*>(const_cast<void*>(buffer)), size
 #ifdef AMD_LIBELF
                        , NULL
@@ -1504,7 +1546,7 @@ namespace elf {
     uint64_t GElfImage::size()
     {
       if (buffer) {
-        return ElfSize(buffer);
+        return bufferSize;
       } else {
         return img.getSize();
       }
@@ -1737,27 +1779,63 @@ namespace elf {
     Image* NewElf32Image() { return new GElfImage(ELFCLASS32); }
     Image* NewElf64Image() { return new GElfImage(ELFCLASS64); }
 
-    uint64_t ElfSize(const void* emi)
+    uint64_t ElfSize(const void* emi, size_t buffer_size)
     {
-      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
-      if (NULL == ehdr || EV_CURRENT != ehdr->e_version) {
-        return false;
+      if (emi == NULL) {
+        return 0;
       }
 
-      const Elf64_Shdr *shdr = (const Elf64_Shdr*)((char*)emi + ehdr->e_shoff);
-      if (NULL == shdr) {
-        return false;
+      const bool bounded = buffer_size != 0;
+      if (bounded && buffer_size < sizeof(Elf64_Ehdr)) {
+        return 0;
       }
+
+      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
+      if (EV_CURRENT != ehdr->e_version) {
+        return 0;
+      }
+
+      // The loop indexes shdr[i] with sizeof(Elf64_Shdr) stride.
+      if (ehdr->e_shentsize != sizeof(Elf64_Shdr)) {
+        return 0;
+      }
+
+      if (bounded && ehdr->e_shoff >= buffer_size) {
+        return 0;
+      }
+
+      uint64_t shdr_table_size =
+          static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
+      if (bounded && shdr_table_size > buffer_size - ehdr->e_shoff) {
+        return 0;
+      }
+
+      const Elf64_Shdr *shdr = (const Elf64_Shdr*)((const char*)emi + ehdr->e_shoff);
 
       uint64_t max_offset = ehdr->e_shoff;
-      uint64_t total_size = max_offset + static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
+      uint64_t total_size = max_offset + shdr_table_size;
 
       for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+        if (bounded) {
+          uint64_t shdr_entry_offset =
+              static_cast<uint64_t>(ehdr->e_shoff) +
+              static_cast<uint64_t>(i) * sizeof(Elf64_Shdr);
+          if (shdr_entry_offset + sizeof(Elf64_Shdr) > buffer_size) {
+            return 0;
+          }
+        }
+
         uint64_t cur_offset = static_cast<uint64_t>(shdr[i].sh_offset);
         if (max_offset < cur_offset) {
           max_offset = cur_offset;
           total_size = max_offset;
+          if (bounded && cur_offset >= buffer_size) {
+            return 0;
+          }
           if (SHT_NOBITS != shdr[i].sh_type) {
+            if (bounded && shdr[i].sh_size > buffer_size - cur_offset) {
+              return 0;
+            }
             total_size += static_cast<uint64_t>(shdr[i].sh_size);
           }
         }

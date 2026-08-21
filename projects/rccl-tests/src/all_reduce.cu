@@ -62,7 +62,20 @@ testResult_t  AllReduceGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
-void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+testResult_t  AllReduceGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetSymkInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetSymkInfo(comm, ncclFuncAllReduce , count, type , op, algo, proto, nchannels));
+  return testSuccess;
+}
+
+testResult_t  AllReduceGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncAllReduce, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
+void AllReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -72,8 +85,21 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
  // set devComm reqs for allreduce device kernels
-testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
-  if (!reqs || !commProperties) return testInternalError;
+testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
+  if (!reqs || !comm) return testInternalError;
+
+  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
+    return testNcclError;
+  }
+
+  if (deviceImpl > 0 && commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
+    fprintf(
+        stderr,
+        "DeviceImplementation > 1 requires CUDA P2P connectivity across all "
+        "ranks. Not all ranks of this communicator have P2P connectivity.\n");
+    return testInvalidUsage;
+  }
 
   switch(deviceImpl) {
     case 1: // allReduceLsaKernel
@@ -82,9 +108,9 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
       return testSuccess;
     case 3: // allReduceMultimemKernel
     case 4: // allReduceMultimemVectorizedKernel
-      if (!commProperties->multimemSupport) {
+      if (!commProperties.multimemSupport) {
         fprintf(stderr, "This test requires multimem support, but multimem support is not enabled for this communicator.\n");
-        return testInternalError;
+        return testInvalidUsage;
       }
       reqs->lsaMultimem = true;
       reqs->lsaBarrierCount = deviceCtaCount;
@@ -138,11 +164,8 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
 template <typename T>
 __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
   const int globalTid = threadIdx.x + blockDim.x * (rank + blockIdx.x * nRanks);
@@ -159,11 +182,7 @@ __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, nccl
       recvPtr[offset] = v;
     }
   }
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -192,11 +211,7 @@ __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, nccl
 template <typename T>
 __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   // Compile time vector type and vector size mapping
   using TN = typename VectorTypeMapping<T>::Type;
@@ -319,11 +334,7 @@ __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendof
   }
 
   // Sync
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -353,11 +364,7 @@ __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendof
 template <typename T>
 __global__ void allReduceMultimemKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x, true };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
@@ -372,11 +379,7 @@ __global__ void allReduceMultimemKernel(ncclWindow_t sendwin, size_t sendoffset,
       multimemStore<T,T>(recv_ptr + offset, v);
     }
   }
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -411,11 +414,7 @@ template <typename T>
 __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x, true };
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN)/sizeof(T);
@@ -513,11 +512,7 @@ __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t s
   }
 
   // Sync
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 #endif
 
@@ -559,7 +554,9 @@ struct testColl allReduceTest = {
   AllReduceInitData,
   AllReduceGetBw,
   AllReduceRunColl,
-  AllReduceGetAlgoProtoChannels
+  AllReduceGetAlgoProtoChannels,
+  AllReduceGetSymkInfo,
+  AllReduceGetCollImplInfo
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -605,10 +602,13 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AllReduceGetBuffSize,
-  .runTest = AllReduceRunTest,
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-  .getDevCommRequirements = AllReduceGetDevCommRequirements
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllReduceGetBuffSize,
+  /* .runTest = */ AllReduceRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
+  /* .getDevCommRequirements = */ AllReduceGetDevCommRequirements
 #endif
 };

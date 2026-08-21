@@ -66,8 +66,18 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD)
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --extended-lambda
 CXXFLAGS   := $(CXXSTD)
+
+ifneq ($(OS),Windows_NT)
+NCCL_OS_LINUX := 1
+CXXFLAGS += -DNCCL_OS_LINUX
+NVCUFLAGS += -DNCCL_OS_LINUX
+else
+NCCL_OS_WINDOWS := 1
+CXXFLAGS += -DNCCL_OS_WINDOWS -DWIN32_LEAN_AND_MEAN -DNOMINMAX
+NVCUFLAGS += -DNCCL_OS_WINDOWS -DWIN32_LEAN_AND_MEAN -DNOMINMAX
+endif
 
 LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
 NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt

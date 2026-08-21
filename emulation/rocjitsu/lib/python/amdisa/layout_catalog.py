@@ -65,36 +65,55 @@ def _mfma_row_group_lanes(m: int, n: int, dst_vgprs: int) -> tuple[int, ...]:
 def _wmma_row_group_lanes(m: int, n: int, dst_vgprs: int) -> tuple[int, ...]:
     """Compute WMMA row_group_lanes: groups 1,2 swapped vs MFMA."""
     num_groups = m // dst_vgprs
-    return tuple(
-        (n * 2) * ((g % 2)) + n * (g // 2)
-        for g in range(num_groups)
-    )
+    return tuple((n * 2) * ((g % 2)) + n * (g // 2) for g in range(num_groups))
 
 
 def _make_mfma(
-    pattern: str, m: int, n: int, k: int,
-    src_bits: int, dst_bits: int,
-    src_vgprs: int, dst_vgprs: int,
+    pattern: str,
+    m: int,
+    n: int,
+    k: int,
+    src_bits: int,
+    dst_bits: int,
+    src_vgprs: int,
+    dst_vgprs: int,
 ) -> MatrixLayoutDescriptor:
     return MatrixLayoutDescriptor(
-        mnemonic_pattern=pattern, kind='mfma',
-        m=m, n=n, k=k, wave_size=64,
-        src_elem_bits=src_bits, dst_elem_bits=dst_bits,
-        src_vgprs=src_vgprs, dst_vgprs=dst_vgprs,
+        mnemonic_pattern=pattern,
+        kind='mfma',
+        m=m,
+        n=n,
+        k=k,
+        wave_size=64,
+        src_elem_bits=src_bits,
+        dst_elem_bits=dst_bits,
+        src_vgprs=src_vgprs,
+        dst_vgprs=dst_vgprs,
         row_group_lanes=_mfma_row_group_lanes(m, n, dst_vgprs),
     )
 
 
 def _make_wmma(
-    pattern: str, m: int, n: int, k: int,
-    src_bits: int, dst_bits: int,
-    src_vgprs: int, dst_vgprs: int,
+    pattern: str,
+    m: int,
+    n: int,
+    k: int,
+    src_bits: int,
+    dst_bits: int,
+    src_vgprs: int,
+    dst_vgprs: int,
 ) -> MatrixLayoutDescriptor:
     return MatrixLayoutDescriptor(
-        mnemonic_pattern=pattern, kind='wmma',
-        m=m, n=n, k=k, wave_size=64,
-        src_elem_bits=src_bits, dst_elem_bits=dst_bits,
-        src_vgprs=src_vgprs, dst_vgprs=dst_vgprs,
+        mnemonic_pattern=pattern,
+        kind='wmma',
+        m=m,
+        n=n,
+        k=k,
+        wave_size=64,
+        src_elem_bits=src_bits,
+        dst_elem_bits=dst_bits,
+        src_vgprs=src_vgprs,
+        dst_vgprs=dst_vgprs,
         row_group_lanes=_wmma_row_group_lanes(m, n, dst_vgprs),
     )
 
@@ -104,48 +123,102 @@ def _make_wmma(
 # =========================================================================
 
 MFMA_F32_16X16X16_F16 = _make_mfma(
-    'V_MFMA_F32_16X16X16_*', 16, 16, 16,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_MFMA_F32_16X16X16_*',
+    16,
+    16,
+    16,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 MFMA_F32_32X32X8_F16 = _make_mfma(
-    'V_MFMA_F32_32X32X8_*', 32, 32, 8,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=16,
+    'V_MFMA_F32_32X32X8_*',
+    32,
+    32,
+    8,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=16,
 )
 
 MFMA_F32_16X16X32_F16 = _make_mfma(
-    'V_MFMA_F32_16X16X32_*', 16, 16, 32,
-    src_bits=16, dst_bits=32, src_vgprs=4, dst_vgprs=4,
+    'V_MFMA_F32_16X16X32_*',
+    16,
+    16,
+    32,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=4,
+    dst_vgprs=4,
 )
 
 MFMA_F32_32X32X16_F16 = _make_mfma(
-    'V_MFMA_F32_32X32X16_*', 32, 32, 16,
-    src_bits=16, dst_bits=32, src_vgprs=4, dst_vgprs=16,
+    'V_MFMA_F32_32X32X16_*',
+    32,
+    32,
+    16,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=4,
+    dst_vgprs=16,
 )
 
 MFMA_I32_16X16X32_I8 = _make_mfma(
-    'V_MFMA_I32_16X16X32_*', 16, 16, 32,
-    src_bits=8, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_MFMA_I32_16X16X32_*',
+    16,
+    16,
+    32,
+    src_bits=8,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 MFMA_I32_32X32X16_I8 = _make_mfma(
-    'V_MFMA_I32_32X32X16_*', 32, 32, 16,
-    src_bits=8, dst_bits=32, src_vgprs=2, dst_vgprs=16,
+    'V_MFMA_I32_32X32X16_*',
+    32,
+    32,
+    16,
+    src_bits=8,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=16,
 )
 
 MFMA_F32_16X16X16_BF16 = _make_mfma(
-    'V_MFMA_F32_16X16X16_BF16', 16, 16, 16,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_MFMA_F32_16X16X16_BF16',
+    16,
+    16,
+    16,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 MFMA_F32_32X32X8_BF16 = _make_mfma(
-    'V_MFMA_F32_32X32X8_BF16', 32, 32, 8,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=16,
+    'V_MFMA_F32_32X32X8_BF16',
+    32,
+    32,
+    8,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=16,
 )
 
 MFMA_F64_16X16X4_F64 = _make_mfma(
-    'V_MFMA_F64_16X16X4_F64', 16, 16, 4,
-    src_bits=64, dst_bits=64, src_vgprs=2, dst_vgprs=4,
+    'V_MFMA_F64_16X16X4_F64',
+    16,
+    16,
+    4,
+    src_bits=64,
+    dst_bits=64,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 # =========================================================================
@@ -153,23 +226,47 @@ MFMA_F64_16X16X4_F64 = _make_mfma(
 # =========================================================================
 
 WMMA_F32_16X16X16_F16 = _make_wmma(
-    'V_WMMA_F32_16X16X16_*', 16, 16, 16,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_WMMA_F32_16X16X16_*',
+    16,
+    16,
+    16,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 WMMA_F32_16X16X32_F16 = _make_wmma(
-    'V_WMMA_F32_16X16X32_*', 16, 16, 32,
-    src_bits=16, dst_bits=32, src_vgprs=4, dst_vgprs=4,
+    'V_WMMA_F32_16X16X32_*',
+    16,
+    16,
+    32,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=4,
+    dst_vgprs=4,
 )
 
 WMMA_I32_16X16X32_I8 = _make_wmma(
-    'V_WMMA_I32_16X16X32_*', 16, 16, 32,
-    src_bits=8, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_WMMA_I32_16X16X32_*',
+    16,
+    16,
+    32,
+    src_bits=8,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 WMMA_F32_16X16X16_BF16 = _make_wmma(
-    'V_WMMA_F32_16X16X16_BF16', 16, 16, 16,
-    src_bits=16, dst_bits=32, src_vgprs=2, dst_vgprs=4,
+    'V_WMMA_F32_16X16X16_BF16',
+    16,
+    16,
+    16,
+    src_bits=16,
+    dst_bits=32,
+    src_vgprs=2,
+    dst_vgprs=4,
 )
 
 
@@ -254,17 +351,25 @@ def find_descriptor(mnemonic: str) -> MatrixLayoutDescriptor | None:
 
 
 _ELEM_BITS: dict[str, int] = {
-    'F32': 32, 'I32': 32, 'F64': 64,
-    'F16': 16, 'BF16': 16, 'I16': 16, 'U16': 16,
-    'I8': 8, 'U8': 8, 'IU8': 8, 'FP8': 8, 'BF8': 8,
-    'I4': 4, 'U4': 4, 'IU4': 4,
+    'F32': 32,
+    'I32': 32,
+    'F64': 64,
+    'F16': 16,
+    'BF16': 16,
+    'I16': 16,
+    'U16': 16,
+    'I8': 8,
+    'U8': 8,
+    'IU8': 8,
+    'FP8': 8,
+    'BF8': 8,
+    'I4': 4,
+    'U4': 4,
+    'IU4': 4,
 }
 
 _MFMA_RE = re.compile(
-    r'V_(?:S?MFMA[C]?)_'
-    r'(F32|F64|I32|F16|BF16)_'
-    r'(\d+)X(\d+)X(\d+)_'
-    r'(\w+)$'
+    r'V_(?:S?MFMA[C]?)_' r'(F32|F64|I32|F16|BF16)_' r'(\d+)X(\d+)X(\d+)_' r'(\w+)$'
 )
 
 _WMMA_RE = re.compile(
@@ -316,8 +421,14 @@ def derive_layout_descriptor(mnemonic: str) -> MatrixLayoutDescriptor | None:
 
     return MatrixLayoutDescriptor(
         mnemonic_pattern=mnemonic,
-        kind=kind, m=m, n=n, k=k, wave_size=wave_size,
-        src_elem_bits=src_bits, dst_elem_bits=dst_bits,
-        src_vgprs=src_vgprs, dst_vgprs=dst_vgprs,
+        kind=kind,
+        m=m,
+        n=n,
+        k=k,
+        wave_size=wave_size,
+        src_elem_bits=src_bits,
+        dst_elem_bits=dst_bits,
+        src_vgprs=src_vgprs,
+        dst_vgprs=dst_vgprs,
         row_group_lanes=row_groups,
     )

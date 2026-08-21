@@ -4,9 +4,16 @@
 
 .. _building-from-source:
 
-*********************************************
-Building and installing RCCL from source code
-*********************************************
+*************************
+Building RCCL from source
+*************************
+
+To build RCCL as part of the ROCm Core SDK, see `TheRock build instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build RCCL standalone using the following
+instructions.
 
 To build RCCL directly from the source code, follow these steps. This guide also includes
 instructions explaining how to test the build.
@@ -20,25 +27,165 @@ The following prerequisites are required to build RCCL:
 1. ROCm-supported GPUs
 2. Having the ROCm stack installed on the system, including the :doc:`HIP runtime <hip:index>` and the HIP-Clang compiler.
 
-Building the library using CMake:
----------------------------------
+Build and install RCCL using the install script
+===============================================
 
-To build the library from source, follow these steps:
+To quickly install RCCL using the install script, follow these steps.
+For additional tips, see :doc:`../how-to/rccl-usage-tips`.
+
+Quick start RCCL build
+----------------------
+
+RCCL directly depends on the HIP runtime plus the HIP-Clang compiler, which are part of the ROCm software stack.
+For ROCm installation instructions, see the :doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`.
+
+Use the `install.sh helper script <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/install.sh>`_,
+located in the ``projects/rccl`` directory of the rocm-systems repository,
+to build and install RCCL with a single command. It uses hard-coded configurations that can be specified directly
+when using cmake. However, it's a great way to get started quickly and provides an
+example of how to build and install RCCL.
+
+Run the install script
+----------------------
+
+To build the library using the install script, use this command:
 
 .. code-block:: shell
 
-    git clone --recursive https://github.com/ROCm/rccl.git
-    cd rccl
+    ./install.sh
+
+To build for only for your local machine's AMD GPU architecture, reducing build time, add the ``-l`` flag.
+
+.. code-block:: shell
+
+   ./install.sh -l
+
+For more information on the build options and flags for the install script, run the following command:
+
+.. code-block:: shell
+
+    ./install.sh --help
+
+The RCCL build and installation helper script options are as follows:
+
+.. code-block:: shell-session
+
+   RCCL build & installation helper script
+    Options:
+          --address-sanitizer     Build with address sanitizer enabled
+          --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
+          --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
+          --debug                 Build debug library
+          --debug-fast            Build debug library with lto optimization disabled (fast build times)
+       -d|--dependencies          Install RCCL dependencies
+          --device-linker         Build with assembly-extract device linker (default)
+          --disable-roctx         Build without ROCTX logging
+          --disable-sym-kernels   Disable symmetric memory kernels
+          --disable-warp-speed    Disable WARP_SPEED kernel optimizations
+          --dump-asm              Disassemble code and dump assembly with inline code
+       -c|--enable-code-coverage  Enable code coverage
+          --enable_backtrace      Build with custom backtrace support
+          --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
+       -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
+          --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
+       -h|--help                  Prints this help message
+       -i|--install               Install RCCL library (see --prefix argument below)
+       -j|--jobs                  Specify how many parallel compilation jobs to run (32 by default)
+          --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage
+       -l|--local_gpu_only        Only compile for local GPU architecture
+          --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
+          --no_clean              Don't delete files if they already exist
+          --no-device-linker      Disable device linker, use standard -fgpu-rdc
+          --openmp-test-enable    Enable OpenMP in rccl unit tests
+       -p|--package_build         Build RCCL package
+          --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
+       -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)
+          --rocshmem              Build with rocSHMEM support
+          --run_tests_all         Run all rccl unit tests (must be built already)
+       -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)
+          --static                Build RCCL as a static library instead of shared library
+       -t|--tests_build           Build rccl unit tests, but do not run
+          --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
+          --ninja                 Use the Ninja generator instead of Make (requires `ninja-build`; recommended for multi-arch builds)
+          --verbose               Show compile commands
+
+     Available RCCL-specific CMake options for --cmake-options:
+       -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)
+       -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
+       -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
+       -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
+       -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
+       -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
+       -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
+
+     Environment variables:
+       ONLY_FUNCS                 Build only specified collective functions (debug builds only).
+                                  Restricts GPU kernel generation to the listed collectives, significantly
+                                  reducing build time during development. Use '|' to separate multiple functions.
+                                  Example: ONLY_FUNCS="AllReduce|SendRecv" ./install.sh --debug -t
+                                  Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,
+                                             AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda
+                                  Advanced: Specify algo, protocol, redop, and type per collective.
+                                    ONLY_FUNCS="AllReduce RING SIMPLE Sum f32|SendRecv"
+       ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)
+
+.. tip::
+
+    By default, the RCCL install script builds all the GPU targets that are defined in ``DEFAULT_GPUS`` in `CMakeLists.txt <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/CMakeLists.txt>`_.
+    To target specific GPUs and potentially reduce the build time, use ``--amdgpu_targets`` along with
+    a semicolon (``;``) separated string list of the GPU targets.
+
+Building the library using CMake
+================================
+
+RCCL has moved from the standalone ``ROCm/rccl`` repository into the
+``ROCm/rocm-systems`` monorepo, where it is located at ``projects/rccl``. Clone
+the monorepo using either of the following options.
+
+Option A: Clone the full monorepo:
+
+.. code-block:: shell
+
+    git clone https://github.com/ROCm/rocm-systems.git
+    cd rocm-systems
+    git checkout develop
+
+Option B: Clone with sparse checkout. To limit your local checkout to only RCCL
+and improve performance with the large monorepo, configure a partial, sparse
+checkout so you only fetch the ``projects/rccl`` project:
+
+.. code-block:: shell
+
+    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+    cd rocm-systems
+    git sparse-checkout init --cone
+    git sparse-checkout set projects/rccl
+    git checkout develop
+
+For the default RCCL build on the ``develop`` branch, no ``git submodule`` step is
+required. Then build the library from the ``projects/rccl`` directory:
+
+.. code-block:: shell
+
+    cd projects/rccl
     mkdir build
     cd build
     cmake ..
     make -j 16      # Or some other suitable number of parallel jobs
 
-If you have already cloned the repository, you can checkout the external submodules manually.
+.. note::
 
-.. code-block:: shell
+    Optional rocSHMEM builds are configured separately and do not use RCCL git
+    submodules. Use ``./install.sh --rocshmem`` or pass ``-DENABLE_ROCSHMEM=ON``
+    together with ``-DROCSHMEM_INSTALL_DIR=<prefix>`` or
+    ``-DROCSHMEM_SOURCE_DIR=<path>``.
 
-    git submodule update --init --recursive --depth=1
+    rocSHMEM support drives RCCL's GPU Direct Async (GDA) AllToAll path, which is
+    validated only on supported GDA platforms (gfx942-class systems with a
+    supported multi-node NIC and driver setup). Building with ``--rocshmem`` on
+    other GPU architectures is not a supported configuration and may fail. For
+    the GDA NIC and driver requirements, see the
+    `rocSHMEM documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies>`_.
 
 You can substitute a different installation path by providing the path as a parameter
 to ``CMAKE_INSTALL_PREFIX``, for example:
@@ -57,11 +204,11 @@ Building the RCCL package and install package:
 ----------------------------------------------
 
 After you have cloned the repository and built the library as described in the previous section,
-use this command to build the package:
+use this command to build the package on Debian-based distros:
 
 .. code-block:: shell
 
-    cd rccl/build
+    cd projects/rccl/build
     make package
     sudo dpkg -i *.deb
 
@@ -96,8 +243,8 @@ A list of the available environment variables for filtering appears at the top o
 See the `Googletest documentation <https://google.github.io/googletest/advanced.html#running-a-subset-of-the-tests>`_
 for more information on how to form advanced filters.
 
-There are also other performance and error-checking tests for RCCL. They are maintained separately at `<https://github.com/ROCm/rccl-tests>`_.
+There are also other performance and error-checking tests for RCCL. They are maintained separately at `rccl-tests <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl-tests>`_.
 
 .. note::
 
-    For more information on how to build and run rccl-tests, see the `rccl-tests README file <https://github.com/ROCm/rccl-tests/blob/develop/README.md>`_ .
+    For more information on how to build and run rccl-tests, see the `rccl-tests README file <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_ .

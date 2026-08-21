@@ -125,6 +125,7 @@ typedef enum hipMemoryAdvise {
 #define hipStreamWaitValueEq CU_STREAM_WAIT_VALUE_EQ
 #define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
 #define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
+#define hipStreamWriteValueDefault CU_STREAM_WRITE_VALUE_DEFAULT
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -367,6 +368,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable
@@ -463,6 +465,27 @@ typedef enum cudaLimit hipLimit_t;
 typedef enum cudaFuncAttribute hipFuncAttribute;
 typedef enum cudaFuncCache hipFuncCache_t;
 typedef CUcontext hipCtx_t;
+typedef cudaExecutionContext_t hipExecutionCtx_t;
+typedef cudaDevResourceDesc_t hipDevResourceDesc_t;
+typedef cudaDevResource hipDevResource;
+typedef cudaDevSmResourceGroupParams hipDevSmResourceGroupParams;
+typedef cudaDevResourceType hipDevResourceType;
+#define hipDevResourceTypeInvalid cudaDevResourceTypeInvalid
+#define hipDevResourceTypeSm cudaDevResourceTypeSm
+#define hipDevResourceTypeWorkqueueConfig cudaDevResourceTypeWorkqueueConfig
+#define hipDevResourceTypeWorkqueue cudaDevResourceTypeWorkqueue
+#define hipDevSmResourceGroupDefault cudaDevSmResourceGroupDefault
+#define hipDevSmResourceGroupBackfill cudaDevSmResourceGroupBackfill
+#define hipDevSmResourceSplitIgnoreSmCoscheduling cudaDevSmResourceSplitIgnoreSmCoscheduling
+#define hipDevSmResourceSplitMaxPotentialClusterSize cudaDevSmResourceSplitMaxPotentialClusterSize
+#define hipDevWorkqueueConfigScopeDeviceCtx cudaDevWorkqueueConfigScopeDeviceCtx
+#define hipDevWorkqueueConfigScopeGreenCtxBalanced cudaDevWorkqueueConfigScopeGreenCtxBalanced
+typedef enum cudaDevSmResourceGroup_flags hipDevSmResourceGroup_flags;
+typedef enum cudaDevSmResourceSplitByCount_flags hipDevSmResourceSplitByCount_flags;
+typedef enum cudaDevWorkqueueConfigScope hipDevWorkqueueConfigScope;
+typedef cudaDevSmResource hipDevSmResource;
+typedef cudaDevWorkqueueConfigResource hipDevWorkqueueConfigResource;
+typedef cudaDevWorkqueueResource hipDevWorkqueueResource;
 typedef enum cudaSharedMemConfig hipSharedMemConfig;
 typedef CUfunc_cache hipFuncCache;
 typedef CUjitInputType hipJitInputType;
@@ -902,6 +925,9 @@ typedef cudaSurfaceObject_t hipSurfaceObject_t;
 #define hipDeviceScheduleMask cudaDeviceScheduleMask
 #define hipDeviceMapHost cudaDeviceMapHost
 #define hipDeviceLmemResizeToMax cudaDeviceLmemResizeToMax
+#if CUDA_VERSION >= CUDA_12000
+#define hipInitDeviceFlagsAreValid cudaInitDeviceFlagsAreValid
+#endif
 
 #define hipCpuDeviceId cudaCpuDeviceId
 #define hipInvalidDeviceId cudaInvalidDeviceId
@@ -1157,6 +1183,12 @@ inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
       return hipErrorInvalidChannelDescriptor;
     case cudaErrorInvalidTexture:
       return hipErrorInvalidTexture;
+    case cudaErrorInvalidResourceType:
+      return hipErrorInvalidResourceType;
+    case cudaErrorInvalidResourceConfiguration:
+      return hipErrorInvalidResourceConfiguration;
+    case cudaErrorStreamDetached:
+      return hipErrorStreamDetached;
     case cudaErrorUnknown:
     default:
       return hipErrorUnknown;  // Note - translated error.
@@ -1287,6 +1319,8 @@ inline static hipError_t hipCUResultTohipError(CUresult cuError) {
       return hipErrorStreamCaptureWrongThread;
     case CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE:
       return hipErrorGraphExecUpdateFailure;
+    case CUDA_ERROR_STREAM_DETACHED:
+      return hipErrorStreamDetached;
     case CUDA_ERROR_UNKNOWN:
     default:
       return hipErrorUnknown;  // Note - translated error.
@@ -1417,6 +1451,8 @@ inline static CUresult hipErrorToCUResult(hipError_t hError) {
       return CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
     case hipErrorGraphExecUpdateFailure:
       return CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+    case hipErrorStreamDetached:
+      return CUDA_ERROR_STREAM_DETACHED;
     case hipErrorUnknown:
     default:
       return CUDA_ERROR_UNKNOWN;  // Note - translated error.
@@ -1607,6 +1643,12 @@ inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
       return cudaErrorInvalidChannelDescriptor;
     case hipErrorInvalidTexture:
       return cudaErrorInvalidTexture;
+    case hipErrorInvalidResourceType:
+      return cudaErrorInvalidResourceType;
+    case hipErrorInvalidResourceConfiguration:
+      return cudaErrorInvalidResourceConfiguration;
+    case hipErrorStreamDetached:
+      return cudaErrorStreamDetached;
     // HSA: does not exist in CUDA
     case hipErrorRuntimeMemory:
     // HSA: does not exist in CUDA
@@ -1937,6 +1979,9 @@ typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
 #define hipMemHandleTypeWin32Kmt cudaMemHandleTypeWin32Kmt
+#if CUDA_VERSION >= CUDA_12040
+#define hipMemHandleTypeFabric cudaMemHandleTypeFabric
+#endif
 typedef enum cudaMemAllocationType hipMemAllocationType;
 #define hipMemAllocationTypeInvalid cudaMemAllocationTypeInvalid
 #define hipMemAllocationTypePinned cudaMemAllocationTypePinned
@@ -2002,6 +2047,12 @@ typedef void(HIPRT_CB* hipStreamCallback_t)(hipStream_t stream, hipError_t statu
 inline static hipError_t hipInit(unsigned int flags) {
   return hipCUResultTohipError(cuInit(flags));
 }
+
+#if CUDA_VERSION >= CUDA_12000
+inline static hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaInitDevice(device, deviceFlags, flags));
+}
+#endif
 
 inline static hipError_t hipDeviceReset() { return hipCUDAErrorTohipError(cudaDeviceReset()); }
 
@@ -2096,6 +2147,51 @@ inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes
                                                   unsigned long long flags, hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaMemPrefetchBatchAsync(
       dev_ptrs, sizes, count, locations, location_indices, num_locations, flags, stream));
+}
+#endif
+
+#if CUDA_VERSION >= 13020
+inline static hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes,
+                                                 size_t count, unsigned long long flags,
+                                                 hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                    size_t count, unsigned long long flags,
+                                                    hipStream_t stream) {
+  return hipCUResultTohipError(
+      cuMemDiscardBatchAsync(dptrs, sizes, count, flags, (CUstream)stream));
+}
+
+inline static hipError_t hipMemDiscardAndPrefetchBatchAsync(
+    void** dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs,
+                                          prefetchLocIdxs, numPrefetchLocs, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(
+    hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  CUmemLocation* cuLocs = (CUmemLocation*)malloc(numPrefetchLocs * sizeof(CUmemLocation));
+  if (cuLocs == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  for (size_t i = 0; i < numPrefetchLocs; i++) {
+    cuLocs[i].id = prefetchLocs[i].id;
+    cuLocs[i].type = (CUmemLocationType)prefetchLocs[i].type;
+  }
+  hipError_t err = hipCUResultTohipError(
+      cuMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, cuLocs,
+                                        prefetchLocIdxs, numPrefetchLocs, flags,
+                                        (CUstream)stream));
+  free(cuLocs);
+  return err;
 }
 #endif
 
@@ -3012,9 +3108,19 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_13000
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_HOST_ALLOC_DMA_BUF_SUPPORTED, device));
+#endif
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_12040
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      return hipCUResultTohipError(cuDeviceGetAttribute(
+          pi, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, device));
+#endif
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;
@@ -3549,6 +3655,79 @@ inline static hipError_t hipCtxDestroy(hipCtx_t ctx) {
   return hipCUResultTohipError(cuCtxDestroy(ctx));
 }
 
+inline static hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
+                                                    hipDevResource* resources,
+                                                    unsigned int nbResources) {
+  return hipCUDAErrorTohipError(cudaDevResourceGenerateDesc(desc, resources, nbResources));
+}
+
+inline static hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                               const hipDevResource* input, 
+                                               hipDevResource* remainder, unsigned int flags,
+                                               hipDevSmResourceGroupParams* groupParams) {
+  return hipCUDAErrorTohipError(cudaDevSmResourceSplit(result, nbGroups, input, remainder, flags, groupParams));
+}
+
+inline static hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                                      const hipDevResource* input, 
+                                                      hipDevResource* remainder, unsigned int flags,
+                                                      unsigned int minCount) {
+  return hipCUDAErrorTohipError(cudaDevSmResourceSplitByCount(result, nbGroups, input, remainder, flags, minCount));
+}
+
+inline static hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                                 hipDevResourceType type) {
+  return hipCUDAErrorTohipError(cudaDeviceGetDevResource(device, resource, type));
+}
+
+inline static hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc,
+                                           int device, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaGreenCtxCreate(ctx, desc, device, flags));
+}
+
+inline static hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxDestroy(ctx));
+}
+
+inline static hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                                      unsigned int flags, int priority) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxStreamCreate(stream, greenctx, flags, priority));
+}
+
+inline static hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) {
+  return hipCUDAErrorTohipError(cudaDeviceGetExecutionCtx(ctx, device));
+}
+
+inline static hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                                        hipDevResourceType type) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxGetDevResource(ctx, resource, type));
+}
+
+inline static hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxGetDevice(device, ctx));
+}
+
+inline static hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxGetId(ctx, ctxId));
+}
+
+inline static hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                                  hipDevResourceType type) {
+  return hipCUDAErrorTohipError(cudaStreamGetDevResource(hStream, resource, type));
+}
+
+inline static hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxRecordEvent(ctx, event));
+}
+
+inline static hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxSynchronize(ctx));
+}
+
+inline static hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  return hipCUDAErrorTohipError(cudaExecutionCtxWaitEvent(ctx, event));
+}
+
 inline static hipError_t hipCtxPopCurrent(hipCtx_t* ctx) {
   return hipCUResultTohipError(cuCtxPopCurrent(ctx));
 }
@@ -3601,6 +3780,7 @@ inline static hipError_t hipCtxDetach(hipCtx_t ctx) {
   return hipCUResultTohipError(cuCtxDetach(ctx));
 }
 
+
 inline static hipError_t hipDeviceGet(hipDevice_t* device, int ordinal) {
   return hipCUResultTohipError(cuDeviceGet(device, ordinal));
 }
@@ -3624,6 +3804,16 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   }
   return err;
 }
+
+#if CUDA_VERSION >= CUDA_10000
+inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask,
+                                          hipDevice_t device) {
+  if (luid == NULL || deviceNodeMask == NULL) {
+    return hipErrorInvalidValue;
+  }
+  return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
+}
+#endif
 
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
@@ -3767,6 +3957,18 @@ inline static hipError_t hipLibraryUnload(hipLibrary_t library) {
 inline static hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library,
                                              const char* name) {
   return hipCUResultTohipError(cuLibraryGetKernel(pKernel, library, name));
+}
+
+inline static hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes,
+                                             hipLibrary_t library, const char* name) {
+  return hipCUDAErrorTohipError(
+      cudaLibraryGetGlobal(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
+}
+
+inline static hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
+                                              hipLibrary_t library, const char* name) {
+  return hipCUDAErrorTohipError(
+      cudaLibraryGetManaged(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
 }
 
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
@@ -4175,6 +4377,13 @@ inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* lo
   CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
   CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
   return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, cu_allocation_type));
+}
+
+inline static hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                                 hipMemAllocationType type) {
+  CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
+  CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
+  return hipCUResultTohipError(cuMemGetDefaultMemPool(memPool, &cu_location, cu_allocation_type));
 }
 #endif // CUDA_VERSION >= CUDA_13000
 

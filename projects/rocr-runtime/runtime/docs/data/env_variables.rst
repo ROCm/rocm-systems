@@ -93,6 +93,35 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
+    * - | ``HSA_HOTSWAP_DISABLE``
+        | Stops the runtime from loading the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. The tool loads by default whenever such an agent is present.
+      - ``0``
+      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Load the HotSwap tool when a supported agent is present.
+        | Any other value: Never load the HotSwap tool.
+
+    * - | ``HSA_HOTSWAP_VERBOSE``
+        | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.
+      - ``0``
+      - | Unset, empty, or 0: Disable HotSwap diagnostic logging.
+        | Any other value: Enable HotSwap diagnostic logging.
+
+    * - | ``HSA_HOTSWAP_DUMP_SOURCE``
+        | Writes the source code object to disk when the HotSwap tool refuses to translate it. Off by default because these objects are large and a failed translation is not memoized, so the same bytes fail again on every load. At most one artifact is written per source, for at most 32 distinct sources per process; an out-of-resources failure is never captured.
+      - ``0``
+      - | Unset, empty, or 0: Do not write refused code objects.
+        | Any other value: Write each refused code object once.
+
+    * - | ``HSA_HOTSWAP_DUMP_DIR``
+        | Directory that receives the artifacts written by ``HSA_HOTSWAP_DUMP_SOURCE``. Naming a destination does not by itself enable capture.
+      - ``TMPDIR``, else ``/tmp``
+      - | Any non-empty path: Write artifacts there.
+        | Unset or empty: Fall back to ``TMPDIR``, then ``/tmp``.
+
+    * - | ``HSA_ENABLE_DXG_DETECTION``
+        | Controls detection of the DXG driver (/dev/dxg) on WSL2.
+      - ``1``
+      - | 0: Disable DXG detection.
+        | 1: Enable DXG detection, allowing ROCr to detect that it is running in WSL2.
 
 Hardware Debugging Environment Variables
 ----------------------------------------

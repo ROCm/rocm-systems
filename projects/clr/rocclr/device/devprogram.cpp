@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -1412,6 +1413,19 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
       optionsVec.push_back("-Xclang");
       optionsVec.push_back(clext.str());
     }
+
+    // ROCM-24914 - Convert incompatible pointer types error to warning for some Adobe apps.
+    // This change was made upstream but the kernels used by these apps are still affected.
+    // Refer: https://github.com/llvm/llvm-project/pull/157364
+    std::string appName = {};
+    std::string appPathAndName = {};
+    amd::Os::getAppPathAndFileName(appName, appPathAndName);
+    if ((appName == "Indigo Benchmark.exe") ||
+        (appName == "Adobe Premiere Pro.exe") ||
+        (appName == "AfterFX.exe")) {
+      optionsVec.push_back("-Xclang");
+      optionsVec.push_back("-Wno-error=incompatible-pointer-types");
+    }
   }
 
   return optionsVec;
@@ -1542,15 +1556,21 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     return false;
   }
 
-  if (!clBinary()->setElfIn()) {
-    LogError("Setting input OCL binary failed");
+  // Do not rely on amd::Elf to do validations here since it makes copies
+  // and depending on the binary size, that might be costly.
+  auto [binary, binSize] = clBinary()->data();
+  if (binSize < sizeof(amd::Elf64_Ehdr)) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+            "The elf size is way too small to validate: %d \n", binSize);
     return false;
   }
-  uint16_t type;
-  if (!clBinary()->elfIn()->getType(type)) {
-    LogError("Bad OCL Binary: error loading ELF type!");
-    return false;
-  }
+
+  // So we do the validation by explicitly getting the ELF header. Copy it into an
+  // aligned local, since the binary buffer has no alignment guarantee.
+  amd::Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, binary, sizeof(ehdr));
+  uint16_t type = ehdr.e_type;
+
   switch (type) {
     case ET_NONE: {
       setType(TYPE_NONE);
@@ -1565,9 +1585,7 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_DYN: {
-      char* sect = nullptr;
-      size_t sz = 0;
-      if (clBinary()->elfIn()->isHsaCo()) {
+      if (ehdr.e_machine == EM_AMDGPU) {
         setType(TYPE_EXECUTABLE);
       } else {
         setType(TYPE_LIBRARY);
@@ -1591,7 +1609,6 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     linkOptions_.clear();
   }
 
-  clBinary()->resetElfIn();
   return true;
 }
 

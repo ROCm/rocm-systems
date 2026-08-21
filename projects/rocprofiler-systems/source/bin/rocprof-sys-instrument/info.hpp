@@ -6,12 +6,12 @@
 #include "fwd.hpp"
 #include "module_function.hpp"
 
+#include <spdlog/fmt/fmt.h>
 #include <timemory/log/color.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 
 static inline void
@@ -28,8 +28,8 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
     module_function::reset_width();
 }
 //
-template <typename ArchiveT,
-          std::enable_if_t<tim::concepts::is_archive<ArchiveT>::value, int> = 0>
+template <typename ArchiveT>
+    requires tim::concepts::is_archive<ArchiveT>::value
 static inline void
 dump_info(ArchiveT& _ar, const fmodset_t& _data)
 {
@@ -129,9 +129,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     }
     else
     {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[rocprof-sys][exe] Error in ", __FUNCTION__, " :: filename '", _oname,
-            "' does not have one of recognized file extensions: txt, json, xml"));
+        throw std::runtime_error(
+            fmt::format("[rocprof-sys][exe] Error in {} :: filename '{}' does not have "
+                        "one of recognized file extensions: txt, json, xml",
+                        __FUNCTION__, _oname));
     }
 }
 //
@@ -206,9 +207,10 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
     }
     else
     {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[rocprof-sys][exe] Error in ", __FUNCTION__, " :: filename '", _iname,
-            "' does not have one of recognized extentions: txt, json, xml :: ", _ext));
+        throw std::runtime_error(
+            fmt::format("[rocprof-sys][exe] Error in {} :: filename '{}' does not have "
+                        "one of recognized extentions: txt, json, xml :: {}",
+                        __FUNCTION__, _iname, _ext));
     }
 }
 //

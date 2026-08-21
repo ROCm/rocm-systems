@@ -109,16 +109,35 @@ __host__ void Context::sync_all() {
   HOST_DISPATCH(sync_all());
 }
 
+__host__ void Context::sync(rocshmem_team_t team) {
+  ctxHostStats.incStat(NUM_HOST_SYNC_ALL);
+
+  HOST_DISPATCH(sync(team));
+}
+
 __host__ void Context::barrier_all() {
   ctxHostStats.incStat(NUM_HOST_BARRIER_ALL);
 
   HOST_DISPATCH(barrier_all());
 }
 
+__host__ void Context::barrier(rocshmem_team_t team) {
+  ctxHostStats.incStat(NUM_HOST_BARRIER_ALL);
+
+  HOST_DISPATCH(barrier(team));
+}
+
 __host__ void Context::barrier_all_on_stream(hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_BARRIER_ALL);
 
   HOST_DISPATCH(barrier_all_on_stream(stream));
+}
+
+__host__ void Context::barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_BARRIER_ALL);
+
+  HOST_DISPATCH(barrier_on_stream(team, stream));
 }
 
 __host__ void Context::quiet_on_stream(hipStream_t stream) {
@@ -133,12 +152,19 @@ __host__ void Context::sync_all_on_stream(hipStream_t stream) {
   HOST_DISPATCH(sync_all_on_stream(stream));
 }
 
+__host__ void Context::sync_on_stream(rocshmem_team_t team,
+                                      hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_SYNC_ALL);
+
+  HOST_DISPATCH(sync_on_stream(team, stream));
+}
+
 __host__ void Context::alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                             const void *source, size_t size,
+                                             const void *source, size_t nelems,
                                              hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_ALLTOALL);
 
-  HOST_DISPATCH(alltoallmem_on_stream(team, dest, source, size, stream));
+  HOST_DISPATCH(alltoallmem_on_stream(team, dest, source, nelems, stream));
 }
 
 __host__ void Context::broadcastmem_on_stream(rocshmem_team_t team, void *dest,

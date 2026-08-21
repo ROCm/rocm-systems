@@ -1,0 +1,395 @@
+# AINIC RCCL test runner.
+#
+# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl. The
+# test_runner framework lives at projects/rccl/tools/scripts/test_runner/ and its
+# entry point is test_runner.py (run from that directory so its `from lib...`
+# imports resolve, matching the README). The test plan is configs/ainic.json.
+# Runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner".
+#
+# Test groups (see configs/ainic.json for the full plan):
+#   Group A - NetIbMPI + GIN component/unit gtests (rccl-UnitTestsMPI binary).
+#   Group B - NCCL_NET plugin x knobs sweep on rccl-tests perf binaries.
+#   Group C - IONIC hardware counter validation.
+#
+# Triggers: manual (workflow_dispatch), nightly (schedule) against the default
+# branch, and label-gated on PRs -- add the "ainic-test" label to run a fast
+# smoke subset (Group A + selected B suites). Not a required merge gate.
+#
+# Build strategy: the runner is a SLURM submit node with no local GPUs, so
+# everything runs inside one SLURM batch job (sbatch --wait) on the GPU compute
+# nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this run's own
+# checkout on the compute node (install.sh defaults -j to $(nproc), using all of
+# the node's cores). Both groups then run against that same fresh build: Group A
+# uses the freshly built rccl-UnitTestsMPI gtest binary; Group B/C uses prebuilt
+# rccl-tests perf binaries that load the fresh librccl.so via LD_LIBRARY_PATH.
+name: AINIC RCCL Test Runner
+
+on:
+  workflow_dispatch:
+    # Inputs are left without hardcoded defaults: when empty they fall back to the
+    # env.DEFAULT_* values below (the single source of truth), so nothing is
+    # duplicated between here and the env block.
+    inputs:
+      workdir:
+        description: 'Working directory on the runner for test artifacts/logs (WORKDIR)'
+        required: false
+        default: ''
+      mpi_path:
+        description: 'MPI install path (MPI_PATH)'
+        required: false
+        default: ''
+      rocm_path:
+        description: 'ROCm toolchain root (ROCM_PATH)'
+        required: false
+        default: ''
+      rccl_build_dir:
+        description: 'Optional override: prebuilt RCCL lib dir for Group B/C. EMPTY (default) = use the fresh build produced from THIS run''s checkout, so B/C always tests the current repo state.'
+        required: false
+        default: ''
+      test_suites:
+        description: 'Comma-separated suite names to run (empty = all enabled; matched against test_suites[].name)'
+        required: false
+        default: ''
+      salloc_partition:
+        description: 'SLURM partition to allocate GPU nodes from (empty = env default)'
+        required: false
+        default: ''
+      salloc_reservation:
+        description: 'SLURM reservation holding the AINIC GPU nodes (empty = env default)'
+        required: false
+        default: ''
+      salloc_nodes:
+        description: 'Number of GPU nodes to allocate (empty = env default)'
+        required: false
+        default: ''
+      salloc_time:
+        description: 'Max wall clock for the SLURM allocation, HH:MM:SS (empty = env default)'
+        required: false
+        default: ''
+      salloc_exclude:
+        description: 'SLURM nodes to exclude from allocation (empty = env default, known-broken hardware)'
+        required: false
+        default: ''
+  schedule:
+    # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
+    - cron: '0 2 * * *'
+  pull_request:
+    # Label-gated smoke: runs only when the "ainic-test" label is present (see the
+    # job `if`); the subset that runs is defined by SMOKE_SUITES below.
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  # Shared CI root on the AINIC cluster (configs, prebuilt libs, artifacts).
+  RCCL_CI_ROOT: /it-share/rccl-ci
+  TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
+  DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
+  DEFAULT_MPI_PATH: /it-share/ompi-5.0.8
+  DEFAULT_ROCM_PATH: /it-share/rccl-ci/rocm_devel
+  # Prebuilt rccl-tests perf binaries for Group B/C (they load librccl.so at
+  # runtime via LD_LIBRARY_PATH; see the build-strategy note in the header).
+  DEFAULT_RCCL_TESTS_BIN: /it-share/rccl-ci/rccl-tests-2.30.4/bin
+  # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
+  # override them when non-empty).
+  DEFAULT_SALLOC_PARTITION: amd-tw
+  DEFAULT_SALLOC_RESERVATION: rccl_dev
+  DEFAULT_SALLOC_NODES: '2'
+  DEFAULT_SALLOC_TIME: '04:00:00'
+  # No nodes excluded by default; override via the salloc_exclude input if needed.
+  DEFAULT_SALLOC_EXCLUDE: ''
+  # PR subset for the label-gated path: Group A component gtests + selected B
+  # suites (IB baseline, CAST full alltoall, autodetect on/off, ROCM-IB no
+  # offload, CTS force-override, and the full-range guard). Skips B3-B7 and C1.
+  SMOKE_SUITES: 'A*. Component*,B1.*,B2.*,B8.*,B9.*,B10.*,B11.*,B12.*'
+
+jobs:
+  ainic-test-runner:
+    # On PRs, run only for same-repo branches (never forks) that carry the
+    # "ainic-test" label -- the same-repo guard stops a labeled fork PR from
+    # running updated fork code on the self-hosted runner via later synchronize
+    # events. All other events (workflow_dispatch, schedule) always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'ainic-test'))
+    # Serialise on the shared AINIC nodes: only one run at a time, and never
+    # cancel an in-progress allocation (it must finish cleanly to release the
+    # nodes). Job-level (not workflow-level) so skipped PR runs -- every PR
+    # synchronize in the monorepo triggers this workflow -- don't join the queue
+    # and cancel a pending labeled run that is still waiting for the runner.
+    concurrency:
+      group: ainic-test-runner-pinned-nodes
+      cancel-in-progress: false
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run AINIC test suite (sbatch)
+        id: run_tests
+        continue-on-error: true
+        env:
+          WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
+          ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
+          # Group B/C: fresh build from this checkout by default (so B/C tests the
+          # current repo state); rccl_build_dir input can override with a prebuilt lib.
+          # RCCL_TESTS_BIN stays the prebuilt perf binaries -- they link librccl.so
+          # at runtime via LD_LIBRARY_PATH (=RCCL_BUILD_DIR), so they load the fresh lib.
+          GROUP_BC_RCCL_BUILD_DIR: ${{ github.event.inputs.rccl_build_dir || format('{0}/projects/rccl/build/debug', github.workspace) }}
+          GROUP_BC_RCCL_TESTS_BIN: ${{ env.DEFAULT_RCCL_TESTS_BIN }}
+          # Non-empty only when a prebuilt RCCL lib was explicitly provided for
+          # Group B/C. Phase 0 uses this to skip the (expensive) build when Group A
+          # is not selected -- Group A always needs a fresh --enable-mpi-tests build.
+          RCCL_BUILD_OVERRIDE: ${{ github.event.inputs.rccl_build_dir || '' }}
+          # Group A: fresh --enable-mpi-tests build produced by Phase 0 of the
+          # batch job (on the compute node, see below). librccl.so and
+          # test/rccl-UnitTestsMPI both live under build/debug (see install.sh
+          # conventions), so the same dir covers RCCL_BUILD_DIR (used for
+          # LD_LIBRARY_PATH + the librccl.so existence check) and, with "/test"
+          # appended, RCCL_TESTS_BIN (paths.test_binary_dir, which resolves the
+          # gtest binary name for tests that don't set their own test_binary_dir
+          # -- see _resolve_binary_path Strategy 4 in test_executor.py; this takes
+          # priority over the build-dir default, so it must point at the fresh
+          # build for Group A to find its binary). It lives under
+          # ${{ github.workspace }} (on /it-share, shared with the compute nodes).
+          GROUP_A_RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
+          # PRs run the fast smoke subset; workflow_dispatch honors its input;
+          # schedule/push run the full plan (empty = all enabled suites).
+          TEST_SUITES: ${{ github.event_name == 'pull_request' && env.SMOKE_SUITES || github.event.inputs.test_suites || '' }}
+          SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
+          SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
+          SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
+          SALLOC_TIME: ${{ github.event.inputs.salloc_time || env.DEFAULT_SALLOC_TIME }}
+          SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+        run: |
+          set -o pipefail
+
+          # Split TEST_SUITES (or default to "everything") into a Group A glob
+          # and a Group B/C glob for --suite-name, since the two groups need
+          # different RCCL_BUILD_DIR/RCCL_TESTS_BIN and must run as separate
+          # test_runner.py invocations (its build dir is a single global value
+          # for the whole process). All Group A test_suites entries are named
+          # "A<n>. Component - ..." in ainic.json.
+          GROUP_A_FILTER="A*. Component*"
+          GROUP_BC_FILTER="-A*. Component*"
+          RUN_GROUP_A=1
+          RUN_GROUP_BC=1
+          if [ -n "${TEST_SUITES}" ]; then
+            GROUP_A_LIST=""
+            GROUP_BC_LIST=""
+            IFS=',' read -ra _suite_tokens <<< "${TEST_SUITES}"
+            for tok in "${_suite_tokens[@]}"; do
+              case "${tok}" in
+                A*". Component"*) GROUP_A_LIST="${GROUP_A_LIST:+${GROUP_A_LIST}:}${tok}" ;;
+                *)                GROUP_BC_LIST="${GROUP_BC_LIST:+${GROUP_BC_LIST}:}${tok}" ;;
+              esac
+            done
+            if [ -n "${GROUP_A_LIST}" ]; then GROUP_A_FILTER="${GROUP_A_LIST}"; else RUN_GROUP_A=0; fi
+            if [ -n "${GROUP_BC_LIST}" ]; then GROUP_BC_FILTER="${GROUP_BC_LIST}"; else RUN_GROUP_BC=0; fi
+          fi
+
+          # Run inside a SLURM batch job (sbatch, not interactive salloc): it
+          # decouples compute from the runner's shell so a transient runner hiccup
+          # can't tear down the allocation, and `--wait` makes sbatch's exit code
+          # equal the job's exit code for gating. Inside the job
+          # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
+          # `scontrol show hostnames`, and mpirun lands 8 ranks/node on real GPUs.
+          # --exclusive gives full CPUs per node so `--bind-to numa` has room. One
+          # job runs both groups to avoid double-queuing on the shared reservation.
+          # GITHUB_WORKSPACE and RUNNER_TEMP live under /it-share (shared with the
+          # compute nodes), so the fresh build and per-group logs are visible here.
+          RESV_ARG=""
+          if [ -n "${SALLOC_RESERVATION}" ]; then
+            RESV_ARG="--reservation=${SALLOC_RESERVATION}"
+          fi
+          EXCLUDE_ARG=""
+          if [ -n "${SALLOC_EXCLUDE}" ]; then
+            EXCLUDE_ARG="--exclude=${SALLOC_EXCLUDE}"
+          fi
+
+          # sbatch --export=ALL (default) forwards these to the batch job.
+          export RUN_GROUP_A RUN_GROUP_BC GROUP_A_FILTER GROUP_BC_FILTER \
+                 GROUP_A_RCCL_BUILD_DIR GROUP_BC_RCCL_BUILD_DIR GROUP_BC_RCCL_TESTS_BIN \
+                 RCCL_BUILD_OVERRIDE \
+                 GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
+                 WORKDIR MPI_PATH ROCM_PATH
+
+          BATCH_SCRIPT="${RUNNER_TEMP}/ainic_job.sbatch"
+          SLURM_OUT="${RUNNER_TEMP}/ainic_slurm.out"
+
+          # Batch payload: the two-group test_runner logic. Quoted heredoc
+          # ('BATCH') => the ${...} expand at job time from the exported
+          # environment, not now.
+          cat > "${BATCH_SCRIPT}" <<'BATCH'
+          #!/bin/bash
+          set -o pipefail
+          cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
+          overall_rc=0
+
+          # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
+          # rather than the 8-core submit node. No RCCL_BUILD_DIR here, so
+          # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
+          # therefore uses ALL of the compute node's cores. WORKDIR points at this
+          # run's own checkout so install.sh and the build tree resolve there (on
+          # /it-share, shared with every node in the allocation).
+          #
+          # When to build:
+          #   - Group A always needs a fresh --enable-mpi-tests build (that is
+          #     where its rccl-UnitTestsMPI gtest binary comes from).
+          #   - Group B/C needs a build only when NO prebuilt override was given
+          #     (RCCL_BUILD_OVERRIDE empty); with an override it loads that
+          #     prebuilt librccl.so and the build is skipped.
+          NEED_BUILD=0
+          if [ "${RUN_GROUP_A}" = "1" ]; then
+            NEED_BUILD=1
+          elif [ "${RUN_GROUP_BC}" = "1" ] && [ -z "${RCCL_BUILD_OVERRIDE}" ]; then
+            NEED_BUILD=1
+          fi
+          if [ "${NEED_BUILD}" = "1" ]; then
+            echo "================================================================"
+            echo "Phase 0: build RCCL (--enable-mpi-tests) on $(hostname) [nproc=$(nproc)]"
+            echo "================================================================"
+            WORKDIR="${GITHUB_WORKSPACE}/projects/rccl" \
+            python3 test_runner.py \
+              --config configs/ainic.json \
+              --system ainic \
+              --skip-tests \
+              2>&1 | tee "${RUNNER_TEMP}/ainic_build.log"
+            build_rc=$?
+            if [ "${build_rc}" -ne 0 ]; then
+              echo "ERROR: RCCL build failed (rc=${build_rc}); aborting batch job."
+              exit "${build_rc}"
+            fi
+            echo "== rccl-UnitTestsMPI =="
+            ls -la "${GITHUB_WORKSPACE}/projects/rccl/build/debug/test/rccl-UnitTestsMPI" 2>&1 || true
+          fi
+
+          if [ "${RUN_GROUP_A}" = "1" ]; then
+            echo "================================================================"
+            echo "Group A: gtest MPI component tests (fresh --enable-mpi-tests build)"
+            echo "================================================================"
+            RCCL_BUILD_DIR="${GROUP_A_RCCL_BUILD_DIR}" \
+            RCCL_TESTS_BIN="${GROUP_A_RCCL_BUILD_DIR}/test" \
+            python3 test_runner.py \
+              --config configs/ainic.json \
+              --system ainic \
+              --no-build \
+              --suite-name "${GROUP_A_FILTER}" \
+              --report-suffix groupA \
+              2>&1 | tee "${RUNNER_TEMP}/ainic_run_groupA.log"
+            rc=$?
+            [ "${rc}" -ne 0 ] && overall_rc=1
+          else
+            echo "SKIP: Group A (no matching suites in --suite-name selection)"
+          fi
+
+          if [ "${RUN_GROUP_BC}" = "1" ]; then
+            echo "================================================================"
+            echo "Group B/C: rccl-tests perf binaries (fresh librccl.so via LD_LIBRARY_PATH)"
+            echo "================================================================"
+            RCCL_BUILD_DIR="${GROUP_BC_RCCL_BUILD_DIR}" \
+            RCCL_TESTS_BIN="${GROUP_BC_RCCL_TESTS_BIN}" \
+            python3 test_runner.py \
+              --config configs/ainic.json \
+              --system ainic \
+              --no-build \
+              --suite-name "${GROUP_BC_FILTER}" \
+              --report-suffix groupBC \
+              2>&1 | tee "${RUNNER_TEMP}/ainic_run_groupBC.log"
+            rc=$?
+            [ "${rc}" -ne 0 ] && overall_rc=1
+          else
+            echo "SKIP: Group B/C (no matching suites in --suite-name selection)"
+          fi
+
+          exit "${overall_rc}"
+          BATCH
+
+          chmod +x "${BATCH_SCRIPT}"
+          : > "${SLURM_OUT}"
+
+          echo "Submitting sbatch job (partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
+          # --wait: sbatch blocks until the job finishes and exits with the job's
+          # exit code. Backgrounded so we can stream the job's output live into the
+          # step log via tail -F while it runs.
+          sbatch --wait \
+            --job-name=ainic-abc \
+            --output="${SLURM_OUT}" \
+            --partition="${SALLOC_PARTITION}" \
+            ${RESV_ARG} \
+            ${EXCLUDE_ARG} \
+            --nodes="${SALLOC_NODES}" \
+            --ntasks-per-node=8 \
+            --gres=gpu:8 \
+            --exclusive \
+            --time="${SALLOC_TIME}" \
+            "${BATCH_SCRIPT}" &
+          SBATCH_PID=$!
+
+          tail -n +1 -F "${SLURM_OUT}" 2>/dev/null &
+          TAIL_PID=$!
+
+          wait "${SBATCH_PID}"
+          rc=$?
+
+          sleep 2
+          kill "${TAIL_PID}" 2>/dev/null || true
+
+          # Collect this run's report directories. test_runner writes them to
+          # ${WORKDIR}/rccl_test_artifacts_<suffix>_<timestamp>; copy the newest
+          # per group into RUNNER_TEMP so the upload step captures the full
+          # per-test logs/reports (not just the tee'd console log) without picking
+          # up older runs that share this WORKDIR.
+          REPORTS_DIR="${RUNNER_TEMP}/reports"
+          mkdir -p "${REPORTS_DIR}"
+          for sfx in groupA groupBC; do
+            newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_${sfx}_* 2>/dev/null | head -n1)"
+            if [ -n "${newest}" ]; then
+              cp -a "${newest}" "${REPORTS_DIR}/" 2>/dev/null || true
+            fi
+          done
+
+          echo "sbatch --wait exit code: ${rc}"
+          exit "${rc}"
+
+      - name: Upload run log and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ainic-test-report
+          path: |
+            ${{ runner.temp }}/ainic_build.log
+            ${{ runner.temp }}/ainic_run_groupA.log
+            ${{ runner.temp }}/ainic_run_groupBC.log
+            ${{ runner.temp }}/reports
+          if-no-files-found: warn
+
+      - name: Print summary
+        if: always()
+        run: |
+          {
+            echo '### AINIC RCCL Test Runner'
+            for label_log in "Build (Group A, --enable-mpi-tests):${RUNNER_TEMP}/ainic_build.log" \
+                              "Group A tests:${RUNNER_TEMP}/ainic_run_groupA.log" \
+                              "Group B/C tests:${RUNNER_TEMP}/ainic_run_groupBC.log"; do
+              label="${label_log%%:*}"
+              log="${label_log#*:}"
+              if [ -f "${log}" ]; then
+                echo "#### ${label}"
+                echo '```'
+                # The runner prints a "Detailed Results" / "Total Tests" block at
+                # the end; surface the tail of the log in the job summary.
+                tail -n 60 "${log}"
+                echo '```'
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail job if tests failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

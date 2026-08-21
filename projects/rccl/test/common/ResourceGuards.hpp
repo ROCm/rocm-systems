@@ -324,6 +324,19 @@ struct NcclRegHandleDeleter
     }
 };
 
+// Returns the MPI world rank as a string for diagnostic messages.
+// Tries OpenMPI, MPICH/PMIx, and SLURM env vars in order.
+inline const char* getMpiRankStr()
+{
+    for(const char* var : {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
+    {
+        const char* val = std::getenv(var);
+        if(val)
+            return val;
+    }
+    return "?";
+}
+
 // Wrapper functions for AutoGuard (void-returning cleanup functions)
 inline void hipFreeWrapper(void* ptr)
 {
@@ -340,6 +353,24 @@ inline void hipFreeWrapper(void* ptr)
     }
 }
 
+// Frees buffers from allocateDeviceBuffer/ncclMemAlloc; a VMM buffer must go
+// through ncclMemFree, not hipFree.
+inline void ncclMemFreeWrapper(void* ptr)
+{
+    if(ptr)
+    {
+        ncclResult_t result = ncclMemFree(ptr);
+        if(result != ncclSuccess)
+        {
+            fprintf(stderr,
+                    "WARNING: rank %s: ncclMemFree failed in destructor: %s (ptr=%p)\n",
+                    getMpiRankStr(),
+                    ncclGetErrorString(result),
+                    ptr);
+        }
+    }
+}
+
 inline void hipStreamDestroyWrapper(hipStream_t stream)
 {
     if(stream)
@@ -348,7 +379,8 @@ inline void hipStreamDestroyWrapper(hipStream_t stream)
         if(err != hipSuccess)
         {
             fprintf(stderr,
-                    "WARNING: hipStreamDestroy failed in destructor: %s (stream=%p)\n",
+                    "WARNING: rank %s: hipStreamDestroy failed: %s (stream=%p)\n",
+                    getMpiRankStr(),
                     hipGetErrorString(err),
                     static_cast<void*>(stream));
         }
@@ -378,7 +410,8 @@ inline void ncclCommDestroyWrapper(ncclComm_t comm)
         if(result != ncclSuccess)
         {
             fprintf(stderr,
-                    "WARNING: ncclCommDestroy failed in destructor: %s (comm=%p)\n",
+                    "WARNING: rank %s: ncclCommDestroy failed: %s (comm=%p)\n",
+                    getMpiRankStr(),
                     ncclGetErrorString(result),
                     static_cast<void*>(comm));
         }
@@ -394,6 +427,7 @@ inline void freeWrapper(void* ptr)
 // Type aliases for AutoGuard-based guards
 using HostBufferAutoGuard   = AutoGuard<void*, freeWrapper>;
 using DeviceBufferAutoGuard = AutoGuard<void*, hipFreeWrapper>;
+using HipMemBufferAutoGuard = AutoGuard<void*, ncclMemFreeWrapper>;
 using HipStreamAutoGuard    = AutoGuard<hipStream_t, hipStreamDestroyWrapper>;
 using HipEventAutoGuard     = AutoGuard<hipEvent_t, hipEventDestroyWrapper>;
 using NcclCommAutoGuard     = AutoGuard<ncclComm_t, ncclCommDestroyWrapper>;
@@ -434,6 +468,12 @@ inline HostBufferAutoGuard makeHostBufferAutoGuard(void* buffer)
 inline DeviceBufferAutoGuard makeDeviceBufferAutoGuard(void* buffer)
 {
     return DeviceBufferAutoGuard(buffer);
+}
+
+// RAII guard for allocateDeviceBuffer/ncclMemAlloc buffers (frees via ncclMemFree).
+inline HipMemBufferAutoGuard makeHipMemBufferAutoGuard(void* buffer)
+{
+    return HipMemBufferAutoGuard(buffer);
 }
 
 inline HipStreamAutoGuard makeStreamAutoGuard(hipStream_t stream)

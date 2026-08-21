@@ -1,13 +1,18 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NET_V11_H_
 #define NET_V11_H_
 
+#define NCCL_NET_MAX_DEVS_PER_NIC_V11 4
+
 typedef struct {
   int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC];
+  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V11];
 } ncclNetVDeviceProps_v11_t;
 
 #define NCCL_NET_TRAFFIC_CLASS_UNDEF -1
@@ -40,13 +45,14 @@ typedef struct {
 
 #define NCCL_NET_ATTR_UNDEF -1
 
-#define NCCL_NET_ATTR_INIT { \
-  { NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF }, /* sendCommAttr */ \
-  { NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF }, /* recvCommAttr */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* op */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* algo */ \
-  (uint32_t)NCCL_NET_ATTR_UNDEF, /* proto */ \
-}
+#define NCCL_NET_ATTR_INIT \
+  { \
+    {NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF}, /* sendCommAttr */ \
+    {NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF, NCCL_NET_ATTR_UNDEF}, /* recvCommAttr */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* op */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* algo */ \
+    (uint32_t)NCCL_NET_ATTR_UNDEF, /* proto */ \
+  }
 
 typedef struct {
   int32_t maxConcurrentPeers;
@@ -67,7 +73,8 @@ typedef struct {
   // Name of the network (mainly for logs)
   const char* name;
   // Initialize the network.
-  ncclResult_t (*init)(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
+  ncclResult_t (*init)(void** ctx, uint64_t commId, ncclNetCommConfig_v11_t* config, ncclDebugLogger_t logFunction,
+                       ncclProfilerCallback_t profFunction);
   // Return the number of adapters.
   ncclResult_t (*devices)(int* ndev);
   // Get various device properties.
@@ -99,7 +106,8 @@ typedef struct {
   ncclResult_t (*isend)(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request);
   // Asynchronous recv from a peer.
   // May return request == NULL if the call cannot be performed (or would block)
-  ncclResult_t (*irecv)(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request);
+  ncclResult_t (*irecv)(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
+                        void** request);
   // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
   // visible to the GPU
   ncclResult_t (*iflush)(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request);
@@ -155,19 +163,19 @@ typedef struct {
   // Register/Deregister memory. Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
   ncclResult_t (*regMr)(void* collComm, void* data, size_t size, int type, void** mhandle);
   /* DMA-BUF support */
-  ncclResult_t (*regMrDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
+  ncclResult_t (*regMrDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                              void** mhandle);
   ncclResult_t (*deregMr)(void* collComm, void* mhandle);
   // Performs an asynchronous allreduce operation on the collective group.
   // May return request == NULL if the call cannot be performed (or would block).
-  ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, size_t count,
-      ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
+  ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, size_t count, ncclDataType_t dataType,
+                             ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
   ncclResult_t (*iallgather)(void* collComm, void* sendData, int nRecvParts, ncclNetSGE_v11_t* recvParts,
-                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
-                             void* sendMhandle, void** request);
+                             size_t bytesPerRank, size_t windowOffset, size_t windowBytes, void* sendMhandle,
+                             void** request);
   ncclResult_t (*ireducescatter)(void* collComm, int nSendParts, ncclNetSGE_v11_t* sendParts, void* recvData,
-                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
-                                 ncclDataType_t dataType, ncclRedOp_t redOp,
-                                 void* recvMhandle, void** request);
+                                 size_t bytesPerRank, size_t windowOffset, size_t windowBytes, ncclDataType_t dataType,
+                                 ncclRedOp_t redOp, void* recvMhandle, void** request);
   // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
   // visible to the GPU
   ncclResult_t (*iflush)(void* collComm, void* data, int size, void* mhandle, void** request);
@@ -183,54 +191,4 @@ typedef struct {
   // Finalize the collective network.
   ncclResult_t (*finalize)(void* ctx);
 } ncclCollNet_v11_t;
-
-typedef struct {
-  // Name of the GIN support (mainly for logs)
-  const char* name;
-  // Initialize the GIN support.
-  ncclResult_t (*init)(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction);
-  // Return the number of adapters capable of doing GIN operations.
-  // If ndev returns 0, all other functions might be set to NULL.
-  ncclResult_t (*devices)(int* ndev);
-  // Get various device properties.
-  ncclResult_t (*getProperties)(int dev, ncclNetProperties_v11_t* props);
-  // Create a receiving object and provide a handle to connect to it. The
-  // handle can be up to NCCL_NET_HANDLE_MAXSIZE bytes and will be exchanged
-  // between ranks to create connections.
-  ncclResult_t (*listen)(void* ctx, int dev, void* handle, void** listenComm);
-  // Create a group for GIN operations. handles have been created
-  // using listen() above. rank indicates caller's rank in the collective network.
-  ncclResult_t (*connect)(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm);
-  // Create device-side GIN context. devHandle will be passed to device code.
-  // This function is not used in GIN_PROXY mode.
-  ncclResult_t (*createContext)(void* collComm, int nSignals, int nCounters, void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle);
-  // Collective memory registration
-  ncclResult_t (*regMrSym)(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle, void **ginHandle);
-  ncclResult_t (*regMrSymDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle, void **ginHandle);
-  ncclResult_t (*deregMrSym)(void* collComm, void* mhandle);
-  // Close and free collective comm objects
-  ncclResult_t (*destroyContext)(void* ginCtx);
-  ncclResult_t (*closeColl)(void* collComm);
-  ncclResult_t (*closeListen)(void* listenComm);
-
-  // Put operations
-  ncclResult_t (*iput)(void* collComm, uint64_t srcOff, void* srcMhandle, size_t size,
-      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request);
-  ncclResult_t (*iputSignal)(void* collComm, uint64_t srcOff, void* srcMhandle,
-      size_t size, uint64_t dstOff, void* dstMhandle,
-      uint32_t rank, uint64_t signalOff, void *signalMhandle,
-      uint64_t signalValue, uint32_t signalOp, void** request);
-
-  // Test whether a request is complete.
-  ncclResult_t (*test)(void* collComm, void* request, int* done);
-
-  // Progress function. Will be called if non-NULL in GIN_PROXY mode, or if devHandle.needsProxyProgress=1.
-  ncclResult_t (*ginProgress)(void* collComm);
-
-  // Query the last error for the GIN support. Particularly important when ginProgress is not used, to report errors.
-  ncclResult_t (*queryLastError)(void* ginCtx, bool *hasError);
-
-  // Finalize the GIN support
-  ncclResult_t (*finalize)(void* ctx);
-} ncclGin_v11_t;
 #endif // end include guard

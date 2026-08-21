@@ -15,21 +15,11 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
-
-        # Unused, keeping for reference
-        # self.lds_sizes = {
-        #     "gfx908": 64 * 1024,
-        #     "gfx90a": 64 * 1024,
-        #     "gfx940": 64 * 1024,
-        #     "gfx941": 64 * 1024,
-        #     "gfx942": 64 * 1024,
-        #     "gfx950": 64 * 1024,
-        # }
 
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
@@ -90,6 +80,10 @@ class Bench_gfx9(benchmark_base.Bench_base):
         }
 
     # -----------------------------------------------------------------------------
+    # Helper Methods and Classes
+    # -----------------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------------
     # Benchmarking kernel source
     # -----------------------------------------------------------------------------
     def set_kernel_source(self) -> None:
@@ -98,11 +92,38 @@ class Bench_gfx9(benchmark_base.Bench_base):
 
         # Cache bandwidth and FLOPs benchmarking
         # ----------------------------------------
-        # Completed in the Bench_base class set_kernel_source()
+        # All other cache and FLOPs definitions are completed in the Bench_base
+        # class set_kernel_source()
+
+        # HBM Bandwidth benchmark — read-only with non-temporal loads
+        self.hbm_bw_src = """
+        extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
+        {
+            unsigned long offset = (unsigned long)blockIdx.x * blockDim.x
+                                   + threadIdx.x;
+            const unsigned long stride = (unsigned long)gridDim.x * blockDim.x;
+            __uint128_t v = 0;
+
+            #pragma unroll 1
+            for (long step = 0; step < numSteps; step++)
+            {
+                #pragma unroll
+                for (int i = 0; i < 16; i++)
+                {
+                    v |= __builtin_nontemporal_load(&src[offset]);
+                    offset += stride;
+                }
+            }
+            if (v == 0) src[0] = v;
+        }
+        """
+
+        self.bf16_flops_benchmark_src = """"""
 
         # Matrix operations
         # ----------------------------------------
         # Kernels need arch-specific definitions or are unsupported by the hardware
+
         self.matrix_f16_src = """"""
         self.matrix_bf16_src = """"""
         self.matrix_i8_src = """"""

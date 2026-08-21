@@ -30,9 +30,38 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <thread>
+
+static bool
+wait_for_attach_ready(pid_t pid)
+{
+    constexpr int max_wait_sec = 30;
+    auto          task_dir     = "/proc/" + std::to_string(pid) + "/task";
+
+    std::cout << "Waiting for rocp-bg-attach thread in PID " << pid << "...\n";
+    for(int elapsed = 0; elapsed < max_wait_sec; ++elapsed)
+    {
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        {
+            if(!entry.is_directory()) continue;
+            std::ifstream comm(entry.path() / "comm");
+            std::string   name;
+            if(std::getline(comm, name) && name == "rocp-bg-attach")
+            {
+                std::cout << "Attachment ready (" << elapsed << "s elapsed)\n";
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    std::cout << "Timed out after " << max_wait_sec << "s waiting for rocp-bg-attach thread\n";
+    return false;
+}
 
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
@@ -59,6 +88,26 @@ main(int argc, char** argv)
         return 1;
     }
 
+    bool send_signal                 = false;
+    bool poison_register_library_env = false;
+    for(int i = 3; i < argc; ++i)
+    {
+        std::string arg{argv[i]};
+        if(arg == "--send-signal")
+        {
+            send_signal = true;
+        }
+        else if(arg == "--stale-register-library")
+        {
+            poison_register_library_env = true;
+        }
+        else
+        {
+            std::cout << "error: unknown argument " << arg << "\n";
+            return 1;
+        }
+    }
+
     pid_t pid1 = fork();
     if(pid1 < 0)
     {
@@ -82,6 +131,13 @@ main(int argc, char** argv)
     if(pid1 == 0 || pid2 == 0)
     {
         // Child process
+        if(poison_register_library_env)
+        {
+            // These values should reach the target only through rocattach's injected
+            // environment buffer, not through normal fork/exec inheritance.
+            unsetenv("ROCPROFILER_REGISTER_LIBRARY");
+            unsetenv("ROCPROFILER_TEST_FORWARDING");
+        }
         std::cout << "child executing " << argv[1] << std::endl;
         int ret = execl(argv[1], argv[1], nullptr);
         if(ret == -1)
@@ -92,38 +148,112 @@ main(int argc, char** argv)
     }
     else
     {
-        // Wait for child processes to exec
-        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        auto kill_children = [&]() {
+            kill(pid1, SIGKILL);
+            kill(pid2, SIGKILL);
+            waitpid(pid1, nullptr, 0);
+            waitpid(pid2, nullptr, 0);
+        };
+
+        // Wait for child processes to be ready for attachment
+        if(!wait_for_attach_ready(pid1))
+        {
+            kill_children();
+            return 1;
+        }
+        if(!wait_for_attach_ready(pid2))
+        {
+            kill_children();
+            return 1;
+        }
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
+        if(poison_register_library_env)
+        {
+            // Model a stale host SDK path in the attaching process. The sentinel verifies
+            // that other ROCPROFILER_* variables are still forwarded to the target.
+            setenv("ROCPROFILER_REGISTER_LIBRARY",
+                   "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
+                   true);
+            setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
+        }
 
-        ROCATTACH_CALL(rocattach_attach(pid1));
-        ROCATTACH_CALL(rocattach_attach(pid2));
+        {
+            std::cout << "starting call to rocattach_attach(pid1)" << std::endl;
+            rocattach_status_t status = rocattach_attach(pid1);
+            if(status != ROCATTACH_STATUS_SUCCESS)
+            {
+                std::cout << "error: call to rocattach_attach(pid1) returned non zero status "
+                          << status << std::endl;
+                kill_children();
+                return 1;
+            }
+            std::cout << "call to rocattach_attach(pid1) successful" << std::endl;
+        }
+        {
+            std::cout << "starting call to rocattach_attach(pid2)" << std::endl;
+            rocattach_status_t status = rocattach_attach(pid2);
+            if(status != ROCATTACH_STATUS_SUCCESS)
+            {
+                std::cout << "error: call to rocattach_attach(pid2) returned non zero status "
+                          << status << std::endl;
+                kill_children();
+                return 1;
+            }
+            std::cout << "call to rocattach_attach(pid2) successful" << std::endl;
+        }
 
         // Send signal to child processes after attaching
-        if(argc >= 4)
+        if(send_signal)
         {
-            std::string signal_arg{argv[3]};
-            if(signal_arg == "--send-signal")
+            std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
+            if(kill(pid1, SIGWINCH) == -1)
             {
-                std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
-                if(kill(pid1, SIGWINCH) == -1)
-                {
-                    std::cout << "error: Failed to send signal to pid1\n";
-                }
-                std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
-                if(kill(pid2, SIGWINCH) == -1)
-                {
-                    std::cout << "error: Failed to send signal to pid2\n";
-                }
+                std::cout << "error: Failed to send SIGWINCH signal to pid1\n";
+            }
+            std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
+            if(kill(pid2, SIGWINCH) == -1)
+            {
+                std::cout << "error: Failed to send SIGWINCH signal to pid2\n";
             }
         }
 
         // Wait for child processes to continue executing
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        ROCATTACH_CALL(rocattach_detach(pid1));
-        ROCATTACH_CALL(rocattach_detach(pid2));
+        {
+            std::cout << "starting call to rocattach_detach(pid1)" << std::endl;
+            rocattach_status_t status = rocattach_detach(pid1);
+            if(status != ROCATTACH_STATUS_SUCCESS)
+            {
+                std::cout << "error: call to rocattach_detach(pid1) returned non zero status "
+                          << status << std::endl;
+                kill_children();
+                return 1;
+            }
+            std::cout << "call to rocattach_detach(pid1) successful" << std::endl;
+        }
+        {
+            std::cout << "starting call to rocattach_detach(pid2)" << std::endl;
+            rocattach_status_t status = rocattach_detach(pid2);
+            if(status != ROCATTACH_STATUS_SUCCESS)
+            {
+                std::cout << "error: call to rocattach_detach(pid2) returned non zero status "
+                          << status << std::endl;
+                kill_children();
+                return 1;
+            }
+            std::cout << "call to rocattach_detach(pid2) successful" << std::endl;
+        }
+
+        if(kill(pid1, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal SIGINT to pid1\n";
+        }
+        if(kill(pid2, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal SIGINT to pid2\n";
+        }
 
         int pid1status = 0;
         waitpid(pid1, &pid1status, 0);

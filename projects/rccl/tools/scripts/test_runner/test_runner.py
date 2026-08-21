@@ -11,7 +11,7 @@ import logging
 
 from lib.test_parser import ArgumentParserInterface
 from lib.test_config import TestConfigProcessor
-from lib.test_executor import TestExecutor
+from lib.test_executor import TestExecutor, glob_filter_matches
 
 # Configure logging
 logging.basicConfig(
@@ -64,6 +64,13 @@ def main():
                 if args.verbose:
                     print("Exiting: RCCL build failed")
                 sys.exit(1)
+            # Build rccl-tests (perf binaries) if the config provides a
+            # rccl_tests_build_configuration section; no-op otherwise.
+            if not executor.build_rccl_tests():
+                print("ERROR: rccl-tests build failed")
+                if args.verbose:
+                    print("Exiting: rccl-tests build failed")
+                sys.exit(1)
         else:
                 print("SKIP: Build step skipped (--no-build)")
 
@@ -81,22 +88,27 @@ def main():
                 print()
                 print(f"Found {len(test_suites)} test suite(s)")
 
-            # Print skip messages for disabled test suites upfront
+            # Print skip messages for disabled or filtered-out test suites upfront.
+            # --suite-name uses gtest-style glob filtering (see glob_filter_matches).
             print()
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
                 enabled = suite["suite_details"].get("enabled", True)
                 if not enabled:
                     print(f"SKIP: Test suite '{suite_name}' is disabled")
+                elif args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                    print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
-            # Run only enabled test suites
+            # Run only enabled (and name-matched) test suites
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
-            all_results = []
             for suite in test_suites:
+                suite_name = suite["suite_details"]["name"]
                 enabled = suite["suite_details"].get("enabled", True)
-                if enabled:
-                    results = executor.run_test_suite(suite)
-                    all_results.extend(results)
+                if not enabled:
+                    continue
+                if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                    continue
+                executor.run_test_suite(suite)
 
             # Print summary once at the end
             executor.print_summary()
@@ -105,6 +117,11 @@ def main():
         if not args.coverage_report:
             print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
         executor.generate_coverage_report()
+
+        # Emit structured results for the dashboard (no-op unless
+        # --emit-results / --db-push was passed). Coverage is emitted too when a
+        # report was generated above.
+        executor.emit_results()
 
         # Return based on results
         if executor.test_results:

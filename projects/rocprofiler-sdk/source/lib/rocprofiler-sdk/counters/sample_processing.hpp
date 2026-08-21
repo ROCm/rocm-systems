@@ -42,6 +42,12 @@ struct completed_cb_params_t
 };
 
 void
+callback_thread_start();
+
+void
+callback_thread_stop();
+
+void
 process_callback_data(completed_cb_params_t&& params);
 }  // namespace counters
 }  // namespace rocprofiler

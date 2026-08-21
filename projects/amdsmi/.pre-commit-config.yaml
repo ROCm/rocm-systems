@@ -65,3 +65,15 @@ repos:
     rev: 0.26.0
     hooks:
     -   id: gersemi
+
+-   repo: local
+    hooks:
+    -   id: amdsmi-test-conventions
+        name: amd-smi C++ test conventions
+        description: >-
+            Enforce amd_smi_test layout, file naming, and GTest suite naming
+            (see docs/conceptual/test-design.md).
+        entry: python3 projects/amdsmi/tests/amd_smi_test/check_test_conventions.py
+        language: system
+        pass_filenames: false
+        files: ^projects/amdsmi/tests/amd_smi_test/.*\.(cc|h)$

@@ -42,7 +42,7 @@ if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   if(EXPLICIT_ROCM_VERSION)
     set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
   else()
-    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
+    find_file(rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
       HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
       PATHS /opt/rocm
       REQUIRED)
@@ -69,7 +69,7 @@ list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################

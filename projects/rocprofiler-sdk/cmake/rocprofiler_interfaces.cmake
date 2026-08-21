@@ -43,6 +43,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-release-flags
                                   "Compiler flags for more debug info" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-stack-protector
                                   "Adds stack-protector compiler flags" INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-sanitizer
+    "Sanitizer instrumentation flags (no --no-undefined link policy)" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-memcheck INTERFACE INTERNAL)
 rocprofiler_add_interface_library(
     rocprofiler-sdk-experimental-flags
@@ -58,7 +61,6 @@ rocprofiler_add_interface_library(rocprofiler-sdk-dl
                                   "Build flags for dynamic linking library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
                                   INTERNAL)
@@ -110,4 +112,10 @@ rocprofiler_add_nolink_interface_library(
     "ROCDECODE headers without linking to ROCDECODE library" IMPORTED)
 rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-rocjpeg-nolink "ROCJPEG headers without linking to ROCJPEG library"
+    IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-rocshmem-nolink
+    "ROCSHMEM headers without linking to ROCSHMEM library" IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-hipfile-nolink "hipFILE headers without linking to hipFILE library"
     IMPORTED)

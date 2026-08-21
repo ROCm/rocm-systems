@@ -78,7 +78,7 @@ The parameter ``flags`` can be either
 
 .. note::
 
-  When using the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``),
+  When using the VMM POSIX memory allocator (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix``),
   you must use ``ROCSHMEM_INIT_WITH_UNIQUEID`` initialization.
   MPI-based initialization (``ROCSHMEM_INIT_WITH_MPI_COMM``) is not compatible
   with the VMM POSIX allocator and will result in a runtime error.

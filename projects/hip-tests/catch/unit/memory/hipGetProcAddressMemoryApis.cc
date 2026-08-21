@@ -7,7 +7,6 @@
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
-#include "hipMallocManagedCommon.hh"
 #include "../device/hipGetProcAddressHelpers.hh"
 
 /**
@@ -84,11 +83,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   hipError_t (*dyn_hipMemAllocPitch_ptr)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int) =
       reinterpret_cast<hipError_t (*)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int)>(
           hipMemAllocPitch_ptr);
-  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
-  hipError_t (*dyn_hipHostFree_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
-
   // Validating hipMalloc and hipFree APIs
   {
     void* d_ptr = nullptr;
@@ -300,6 +294,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
   // Skip these if we have address sanitizer enable because free might not actually free it
 #if !defined(ENABLE_ADDRESS_SANITIZER)
+  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
+  hipError_t (*dyn_hipHostFree_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
+
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
@@ -1439,7 +1438,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       reinterpret_cast<hipError_t (*)(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>(
           hipMemcpyWithStream_ptr);
   int N = 4096;
-  const int Ns = 4;
+  const int Ns = isQuickLevel() ? 2 : 4;
   int Nbytes = N * sizeof(int);
   int value = 2;
   // Validating hipMemcpyHtoDAsync API
@@ -5381,9 +5380,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
-  if (HmmAttrPrint() != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   void* hipMallocManaged_ptr = nullptr;
   void* hipMemPrefetchAsync_ptr = nullptr;
@@ -6089,9 +6086,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
 
     HIP_CHECK(dyn_hipMemcpyPeer_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes));
 
-    validateHostArray(dstDevPtr, N, value);
+    REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
+    HIP_CHECK(hipSetDevice(deviceId));
     HIP_CHECK(hipFree(srcDevPtr));
+    HIP_CHECK(hipSetDevice(peerDeviceId));
     HIP_CHECK(hipFree(dstDevPtr));
   }
 
@@ -6117,7 +6116,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
         dyn_hipMemcpyPeerAsync_ptr(dstDevPtr, peerDeviceId, srcDevPtr, deviceId, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    validateHostArray(dstDevPtr, N, value);
+    REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(srcDevPtr));

@@ -241,40 +241,11 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa)
     if(cpu_pool_ == nullptr) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
     if(kern_arg_pool_ == nullptr)
         CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
-
-    // Get AqlProfile API table
-    aqlprofile_api_ = {0};
-#ifdef ROCP_LD_AQLPROFILE
-    status = LoadAqlProfileLib(&aqlprofile_api_);
-#else
-    status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_major_extension_table_fn(
-        HSA_EXTENSION_AMD_AQLPROFILE,
-        hsa_ven_amd_aqlprofile_VERSION_MAJOR,
-        sizeof(aqlprofile_api_),
-        &aqlprofile_api_);
-#endif
-    CHECK_STATUS("aqlprofile API table load failed", status);
-
-    // Get Loader API table
-    loader_api_ = {0};
-    status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_major_extension_table_fn(
-        HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_api_), &loader_api_);
-    CHECK_STATUS("loader API table query failed", status);
-
-    // Instantiate HSA timer
-    timer_ = new HsaTimer;
-    CHECK_STATUS("HSA timer allocation failed",
-                 (timer_ == nullptr) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
-
-    // System timeout
-    timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_
-                                                        : timer_->ns_to_sysclock(timeout_ns_);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory()
 {
-    delete timer_;
     for(auto p : cpu_list_)
         delete p;
     for(auto p : gpu_list_)
@@ -284,48 +255,6 @@ HsaRsrcFactory::~HsaRsrcFactory()
         hsa_status_t status = rocprofiler::aqlprofile::get_core_table()->hsa_shut_down_fn();
         CHECK_STATUS("Error in hsa_shut_down", status);
     }
-}
-
-hsa_status_t
-HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api)
-{
-#ifdef _WIN32
-    (void) api;
-    return HSA_STATUS_ERROR;
-#else
-    void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
-    if(handle == nullptr)
-    {
-        fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
-        return HSA_STATUS_ERROR;
-    }
-    dlerror(); /* Clear any existing error */
-
-    api->hsa_ven_amd_aqlprofile_error_string =
-        (decltype(::hsa_ven_amd_aqlprofile_error_string)*) dlsym(
-            handle, "hsa_ven_amd_aqlprofile_error_string");
-    api->hsa_ven_amd_aqlprofile_validate_event =
-        (decltype(::hsa_ven_amd_aqlprofile_validate_event)*) dlsym(
-            handle, "hsa_ven_amd_aqlprofile_validate_event");
-    api->hsa_ven_amd_aqlprofile_start =
-        (decltype(::hsa_ven_amd_aqlprofile_start)*) dlsym(handle, "hsa_ven_amd_aqlprofile_start");
-    api->hsa_ven_amd_aqlprofile_stop =
-        (decltype(::hsa_ven_amd_aqlprofile_stop)*) dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
-#    ifdef AQLPROF_NEW_API
-    api->hsa_ven_amd_aqlprofile_read =
-        (decltype(::hsa_ven_amd_aqlprofile_read)*) dlsym(handle, "hsa_ven_amd_aqlprofile_read");
-#    endif
-    api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
-        (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*) dlsym(
-            handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
-    api->hsa_ven_amd_aqlprofile_get_info = (decltype(::hsa_ven_amd_aqlprofile_get_info)*) dlsym(
-        handle, "hsa_ven_amd_aqlprofile_get_info");
-    api->hsa_ven_amd_aqlprofile_iterate_data =
-        (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*) dlsym(
-            handle, "hsa_ven_amd_aqlprofile_iterate_data");
-
-    return HSA_STATUS_SUCCESS;
-#endif
 }
 
 // Add system agent info
@@ -425,6 +354,24 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
                 agent, FindStandardPool, &agent_info->gpu_pool);
         CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
 
+        // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
+        //       after CU mask support is added to agent_info
+        // TODO: gfx1250 defines 1WGP = 1CU, different from other RDNA products.
+        //       Patch it to be WGP = 2CU to reuse profiler logic
+        if(!strncmp(agent_info->name, "gfx1250", 7))
+        {
+            agent_info->cu_num      = agent_info->se_num * agent_info->shader_arrays_per_se * 9 * 2;
+            agent_info->xcc_per_aid = 4;
+        }
+        else if(!strncmp(agent_info->name, "gfx94", 5) || !strncmp(agent_info->name, "gfx95", 5))
+        {
+            agent_info->xcc_per_aid = 2;
+        }
+        else
+        {
+            agent_info->xcc_per_aid = 1;
+        }
+
         // Set GPU index
         agent_info->dev_index = gpu_list_.size();
         gpu_list_.push_back(agent_info);
@@ -436,7 +383,7 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
     return agent_info;
 }
 
-// Return systen agent info
+// Return system agent info
 const AgentInfo*
 HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent)
 {
@@ -576,7 +523,7 @@ HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size)
 }
 
 // Allocate memory to pass kernel parameters.
-// Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+// Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.
@@ -661,7 +608,7 @@ HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const
     {
         const hsa_signal_value_t signal_value =
             rocprofiler::aqlprofile::get_core_table()->hsa_signal_wait_scacquire_fn(
-                signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+                signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         if(signal_value == 0)
         {
             break;
@@ -881,6 +828,5 @@ HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes
     return write_idx;
 }
 
-HsaRsrcFactory*             HsaRsrcFactory::instance_ = nullptr;
-HsaRsrcFactory::mutex_t     HsaRsrcFactory::mutex_;
-HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
+HsaRsrcFactory*         HsaRsrcFactory::instance_ = nullptr;
+HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;

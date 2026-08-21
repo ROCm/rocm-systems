@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(pmc-gpu-collector-tests OBJECT test_device.cpp)
+add_library(
+    pmc-gpu-collector-tests
+    OBJECT
+    test_device.cpp
+    test_power_metrics.cpp
+    test_gpu_traits.cpp
+)
 
 target_link_libraries(
     pmc-gpu-collector-tests
@@ -9,6 +15,8 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
         rocprofiler-systems::rocprofiler-systems-headers
+        rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems::rocprofiler-systems-compile-definitions
 )
 
 if(ROCPROFSYS_BUILD_AINIC)

@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 option(AIS_USE_SANITIZERS "Build with sanitizers (clang only - see docs for a list)" OFF)
 option(AIS_USE_THREAD_SANITIZER "Build with -fsanitize=thread (clang only - not compatible with AIS_USE_SANITIZERS)" OFF)
 
@@ -18,15 +20,24 @@ function(ais_add_sanitizers target)
         message(FATAL_ERROR "AIS_USE_SANITIZERS is not compatible with AIS_USE_THREAD_SANITIZER")
     endif()
 
+    get_target_property(aliased_target "${target}" ALIASED_TARGET)
+    if(aliased_target)
+        set(target "${aliased_target}")
+    endif()
+
     if(AIS_USE_SANITIZERS)
         set(SANITIZER_LIST address,float-divide-by-zero,integer,leak,local-bounds,nullability,undefined,vptr)
+        # unsigned-integer-overflow is well-defined wrap-around in C++ (not UB).
+        # Keep -fsanitize=integer enabled, but disable the unsigned overflow check.
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=${SANITIZER_LIST}>
-            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=integer>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=unsigned-integer-overflow>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=${SANITIZER_LIST}>
         )
         target_link_options(${target} PRIVATE
             -Xarch_host -fsanitize=${SANITIZER_LIST}
-            -Xarch_host -fno-sanitize-recover=integer
+            -Xarch_host -fno-sanitize=unsigned-integer-overflow
+            -Xarch_host -fno-sanitize-recover=${SANITIZER_LIST}
         )
     endif()
 

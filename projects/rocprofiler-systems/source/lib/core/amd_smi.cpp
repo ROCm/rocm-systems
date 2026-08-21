@@ -1,6 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "backends/amd_smi/ainic_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
+
+#include "common/env_vars.hpp"
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -62,7 +66,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     std::string pcie_support{};
     std::string sdma_support{};
 
-    size_t device_count = gpu::get_processor_count();
+    const size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)
     {
         if(gpu::vcn_is_device_level_only(i) || gpu::is_vcn_busy_supported(i))
@@ -101,7 +105,7 @@ config_settings(const std::shared_ptr<settings>& _config)
 #endif
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_AMD_SMI_METRICS",
+        std::string, env_vars::AMD_SMI_METRICS,
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
             vcn_activity_support + xgmi_support + pcie_support + sdma_support + ". " +
             "An empty value implies 'all' and 'none' suppresses all.",

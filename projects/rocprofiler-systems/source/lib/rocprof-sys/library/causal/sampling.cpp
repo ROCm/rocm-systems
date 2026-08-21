@@ -3,6 +3,7 @@
 
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -25,7 +26,6 @@
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
 
@@ -235,7 +235,7 @@ configure(bool _setup, std::int64_t _tid)
         if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
-           get_thread_state() == ThreadState::Disabled)
+           state::thread::get() == state::thread::Disabled)
             return std::set<int>{};
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
@@ -292,7 +292,7 @@ configure(bool _setup, std::int64_t _tid)
         if(!_causal)
         {
             LOG_CRITICAL("nullptr to causal profiling instance");
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             std::abort();
         }
 
@@ -300,7 +300,7 @@ configure(bool _setup, std::int64_t _tid)
         _causal->set_verbose(_verbose);
         _causal->set_offload(&causal_offload_buffer);
 
-        if(get_causal_backend() == CausalBackend::Perf)
+        if(get_causal_backend() == state::process::CausalBackend::Perf)
         {
             auto _perf_error = _activate_perf_backend();
             if(_perf_error)
@@ -310,7 +310,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == CausalBackend::Timer)
+        else if(get_causal_backend() == state::process::CausalBackend::Timer)
         {
             if(!_activate_timer_backend())
             {
@@ -318,12 +318,12 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == CausalBackend::Auto)
+        else if(get_causal_backend() == state::process::CausalBackend::Auto)
         {
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)
             {
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "perf" });
             }
             else
@@ -337,7 +337,7 @@ configure(bool _setup, std::int64_t _tid)
                     std::exit(1);
                 }
 
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "timer" });
             }
         }
@@ -459,19 +459,15 @@ sampling_signals()
 }  // namespace
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 pause(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = false;
 
-        bool _paused_v = *_thread_paused;
+        const bool _paused_v = *_thread_paused;
         if(!_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
@@ -484,7 +480,7 @@ pause(ScopeT)
     {
         if(!_process_paused) _process_paused = false;
 
-        bool _paused_v = *_process_paused;
+        const bool _paused_v = *_process_paused;
         if(!_paused_v)
         {
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
@@ -499,19 +495,15 @@ pause(ScopeT)
 }
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 resume(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = true;
 
-        bool _paused_v = *_thread_paused;
+        const bool _paused_v = *_thread_paused;
         if(_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
@@ -524,7 +516,7 @@ resume(ScopeT)
     {
         if(!_process_paused) _process_paused = true;
 
-        bool _paused_v = *_process_paused;
+        const bool _paused_v = *_process_paused;
         if(_paused_v)
         {
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
@@ -565,7 +557,7 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_debug_sampling())
     {

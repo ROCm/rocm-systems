@@ -66,7 +66,6 @@ int ReadSysfsStr(std::string path, std::string* retStr);
 int WriteSysfsStr(std::string path, std::string val);
 bool IsInteger(const std::string& n_str);
 bool stringToInteger(const std::string& n_str, int& value);
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut = true);
 rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::string stateName,
                            std::string storageData);
 std::vector<std::string> getListOfAppTmpFiles();
@@ -83,7 +82,6 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type, uint32_t dv_ind,
 rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::size_t b_size,
                                void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err);
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm);
 int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm);
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value);

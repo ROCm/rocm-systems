@@ -1,0 +1,123 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+* @addtogroup hipMemcpyAsync
+* @{
+* @ingroup PerformanceTestMemory
+* `hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int
+srcDevice, size_t sizeBytes, hipStream_t stream) ` -
+* Copies data between devices.
+*/
+
+#include <cmd_options.hh>
+#include <hip_array_common.hh>
+#include <hip_test_common.hh>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#define VERIFY_DATA
+static constexpr size_t N = 1024 * 1024 * 256;
+static constexpr size_t dataBytes = N * sizeof(int);  // 1Gb or 1073741824 bytes
+static constexpr int nIters = 10;                     // interation number for test
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verify  device 0 to all devices copy performance.
+ *   It also verify the copy performance of indiviual devices like device 0
+ *   to device 1, device 0 to device 2,...., device 0 to device 7.
+ * Test source
+ * ------------------------
+ * - performance/scenarios/memory/hipPerfBufferCopyInterGpuPerformance.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
+  int nGpus = 0;
+  HIP_CHECK(hipGetDeviceCount(&nGpus));
+  if (nGpus < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int** ArrayOfDevicePointers = reinterpret_cast<int**>(malloc(nGpus * sizeof(int*)));
+
+  for (int local = 0; local < nGpus; local++) {
+    HIP_CHECK(hipSetDevice(local));
+    HIP_CHECK(hipMalloc(&ArrayOfDevicePointers[local], dataBytes));
+  }
+  HIP_CHECK(hipSetDevice(0));
+  hipStream_t* streams = reinterpret_cast<hipStream_t*>(malloc(nGpus * sizeof(hipStream_t)));
+  for (int stream = 0; stream < nGpus; stream++) {
+    HIP_CHECK(hipStreamCreateWithFlags(&streams[stream], hipStreamNonBlocking));
+  }
+
+  std::vector<int> srcData(dataBytes);
+  std::fill_n(srcData.begin(), N, 9);
+  HIP_CHECK(hipMemcpy(ArrayOfDevicePointers[0], srcData.data(), dataBytes, hipMemcpyHostToDevice));
+
+  // warmup operation
+  for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
+    HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
+                                 ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
+    auto cpuStart = std::chrono::steady_clock::now();
+    for (int it = 0; it < nIters; it++) {
+      HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
+                                   ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
+    }
+    HIP_CHECK(hipStreamSynchronize(streams[dstDeviceId]));
+    std::chrono::duration<double, std::milli> cpuMS = std::chrono::steady_clock::now() - cpuStart;
+
+    fprintf(stderr,
+            "Time: %f ms, transfer of %f GB data and Data transfer rate : %f "
+            "GB/s  from device : 0 to device : %d\n",
+            cpuMS.count() / nIters, dataBytes / 1e9,
+            (dataBytes * 1000) / ((cpuMS.count() / nIters) * 1024 * 1024 * 1024), dstDeviceId);
+  }
+  // copy device 0 to all the devices
+  auto cpuStart = std::chrono::steady_clock::now();
+  for (int it = 0; it < nIters; it++) {
+    for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
+      HIP_CHECK(hipMemcpyPeerAsync(ArrayOfDevicePointers[dstDeviceId], dstDeviceId,
+                                   ArrayOfDevicePointers[0], 0, dataBytes, streams[dstDeviceId]));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+  std::chrono::duration<double, std::milli> cpuMS = std::chrono::steady_clock::now() - cpuStart;
+
+  fprintf(stderr,
+          "Time: %f ms, transfer of %f GB data and Data transfer rate : %f "
+          "GB/s  from device : 0 to All devices\n",
+          cpuMS.count() / nIters, dataBytes / 1e9,
+          (dataBytes * 1000) / ((cpuMS.count() / nIters) * 1024 * 1024 * 1024));
+
+// validation
+#ifdef VERIFY_DATA
+  for (int dstDeviceId = 1; dstDeviceId < nGpus; dstDeviceId++) {
+    HIP_CHECK(hipSetDevice(dstDeviceId));
+    std::vector<int> dstData(dataBytes);
+    std::fill_n(dstData.begin(), N, 0);
+    HIP_CHECK(hipMemcpy(dstData.data(), ArrayOfDevicePointers[dstDeviceId], dataBytes,
+                        hipMemcpyDeviceToHost));
+    for (int i = 0; i < N; i++) {
+      if (dstData[i] != 9) std::cout << "data transfer failed\n";
+    }
+  }
+#endif
+  for (int i = 0; i < nGpus; i++) {
+    HIP_CHECK(hipFree(ArrayOfDevicePointers[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]));
+  }
+}
+
+/**
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

@@ -19,7 +19,6 @@ import sys
 
 from amdisa.legalization import LegalizationEntry
 
-
 _COPYRIGHT = """\
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
@@ -50,8 +49,11 @@ def _clang_format(path: Path) -> None:
     """
     exe = shutil.which('clang-format')
     if exe is None:
-        print('warning: clang-format not found; emitted files may need manual '
-              'formatting', file=sys.stderr)
+        print(
+            'warning: clang-format not found; emitted files may need manual '
+            'formatting',
+            file=sys.stderr,
+        )
         return
     try:
         subprocess.run([exe, '-i', str(path)], check=True)
@@ -84,20 +86,26 @@ def emit_all(
             if dont_care > 0 and enc_id < 0xFFFF:
                 for i in range(1 << dont_care):
                     alias_id = enc_id | i
-                    expanded.append(LegalizationEntry(
-                        src_mnemonic=e.src_mnemonic,
-                        src_encoding=e.src_encoding,
-                        src_encoding_order=alias_id,
-                        src_encoding_bits=9,
-                        src_opcode=e.src_opcode,
-                        action=e.action,
-                    ))
+                    expanded.append(
+                        LegalizationEntry(
+                            src_mnemonic=e.src_mnemonic,
+                            src_encoding=e.src_encoding,
+                            src_encoding_order=alias_id,
+                            src_encoding_bits=9,
+                            src_opcode=e.src_opcode,
+                            action=e.action,
+                        )
+                    )
             else:
                 expanded.append(e)
 
-        sorted_entries = sorted(expanded, key=lambda e: (
-            e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF,
-            e.src_opcode))
+        sorted_entries = sorted(
+            expanded,
+            key=lambda e: (
+                e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF,
+                e.src_opcode,
+            ),
+        )
         pair_path = output_dir / f'legalization_{_pair_name(src, dst)}.h'
         _emit_pair(pair_path, src, dst, sorted_entries)
         _clang_format(pair_path)
@@ -107,65 +115,78 @@ def emit_all(
 
 
 def _emit_types(path: Path) -> None:
-    lines = [_COPYRIGHT, '', '#pragma once', '',
-             '#include <algorithm>',
-             '#include <compare>',
-             '#include <cstdint>',
-             '#include <span>',
-             '',
-             'namespace rocjitsu {',
-             '',
-             'enum class Action : uint8_t {',
-             '    Identity   = 0,',
-             '    Substitute = 1,',
-             '    Lower      = 2,',
-             '    Expand     = 3,',
-             '    Illegal    = 4,',
-             '};',
-             '',
-             'struct InstructionLegalization {',
-             '    uint16_t src_opcode;',
-             '    uint16_t src_encoding_id;',
-             '    Action   action;',
-             '    uint16_t target_opcode;',
-             '',
-             '    constexpr auto operator<=>(const InstructionLegalization &rhs) const {',
-             '        if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)',
-             '            return cmp;',
-             '        return src_opcode <=> rhs.src_opcode;',
-             '    }',
-             '    constexpr bool operator==(const InstructionLegalization &rhs) const {',
-             '        return src_encoding_id == rhs.src_encoding_id && src_opcode == rhs.src_opcode;',
-             '    }',
-             '};',
-             '',
-             'inline const InstructionLegalization *lookup(',
-             '    std::span<const InstructionLegalization> table,',
-             '    uint16_t encoding_id, uint16_t opcode) {',
-             '    InstructionLegalization key{.src_opcode = opcode, .src_encoding_id = encoding_id,',
-             '                               .action = Action::Illegal, .target_opcode = 0};',
-             '    auto it = std::lower_bound(table.begin(), table.end(), key);',
-             '    if (it != table.end() && *it == key)',
-             '        return &*it;',
-             '    return nullptr;',
-             '}',
-             '',
-             '}  // namespace rocjitsu',
-             '']
+    lines = [
+        _COPYRIGHT,
+        '',
+        '#pragma once',
+        '',
+        '#include <algorithm>',
+        '#include <compare>',
+        '#include <cstdint>',
+        '#include <span>',
+        '',
+        'namespace rocjitsu {',
+        '',
+        'enum class Action : uint8_t {',
+        '    Identity   = 0,',
+        '    Substitute = 1,',
+        '    Lower      = 2,',
+        '    Expand     = 3,',
+        '    Illegal    = 4,',
+        '};',
+        '',
+        'struct InstructionLegalization {',
+        '    uint16_t src_opcode;',
+        '    uint16_t src_encoding_id;',
+        '    Action   action;',
+        '    uint16_t target_opcode;',
+        '',
+        '    constexpr auto operator<=>(const InstructionLegalization &rhs) const {',
+        '        if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)',
+        '            return cmp;',
+        '        return src_opcode <=> rhs.src_opcode;',
+        '    }',
+        '    constexpr bool operator==(const InstructionLegalization &rhs) const {',
+        '        return src_encoding_id == rhs.src_encoding_id && src_opcode == rhs.src_opcode;',
+        '    }',
+        '};',
+        '',
+        'inline const InstructionLegalization *lookup(',
+        '    std::span<const InstructionLegalization> table,',
+        '    uint16_t encoding_id, uint16_t opcode) {',
+        '    InstructionLegalization key{.src_opcode = opcode, .src_encoding_id = encoding_id,',
+        '                               .action = Action::Illegal, .target_opcode = 0};',
+        '    auto it = std::lower_bound(table.begin(), table.end(), key);',
+        '    if (it != table.end() && *it == key)',
+        '        return &*it;',
+        '    return nullptr;',
+        '}',
+        '',
+        '}  // namespace rocjitsu',
+        '',
+    ]
 
     path.write_text('\n'.join(lines))
 
 
 def _emit_pair(
     path: Path,
-    src: str, dst: str,
+    src: str,
+    dst: str,
     entries: list[LegalizationEntry],
 ) -> None:
     name = _pair_name(src, dst)
-    lines = [_COPYRIGHT, '', '#pragma once', '',
-             '#include "legalization_types.h"', '',
-             'namespace rocjitsu {', '',
-             f'inline constexpr InstructionLegalization kLegalization_{name}[] = {{']
+    lines = [
+        _COPYRIGHT,
+        '',
+        '#pragma once',
+        '',
+        '#include "legalization_types.h"',
+        '',
+        'namespace rocjitsu {',
+        '',
+        f'inline constexpr InstructionLegalization kLegalization_{name}[] = {{',
+    ]
 
     for e in entries:
         tgt = e.action.target_opcode
@@ -175,8 +196,6 @@ def _emit_pair(
             f'{_action_enum(e):<20s}, {tgt:>5}}},'
         )
 
-    lines += ['};', '',
-              '}  // namespace rocjitsu',
-              '']
+    lines += ['};', '', '}  // namespace rocjitsu', '']
 
     path.write_text('\n'.join(lines))

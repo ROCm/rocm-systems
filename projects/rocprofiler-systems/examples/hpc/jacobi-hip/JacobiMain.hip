@@ -39,18 +39,20 @@ int main(int argc, char ** argv)
 
   MPI_Comm comm = MPI_COMM_WORLD;
 
-  grid_t grid;
-  mesh_t mesh;
+  {
+    grid_t grid;
+    mesh_t mesh;
 
-  // Extract topology and domain dimensions from the command-line arguments
-  ParseCommandLineArguments(argc, argv,
-                            comm,
-                            grid,
-                            mesh);
+    // Extract topology and domain dimensions from the command-line arguments
+    ParseCommandLineArguments(argc, argv,
+                              comm,
+                              grid,
+                              mesh);
 
-  Jacobi_t Jacobi(grid, mesh);
+    Jacobi_t Jacobi(grid, mesh);
 
-  Jacobi.Run();
+    Jacobi.Run();
+  }  // Jacobi destructor (hipHostFree) runs here, before MPI_Finalize
 
   // Finalize the MPI process
   MPI_Finalize();

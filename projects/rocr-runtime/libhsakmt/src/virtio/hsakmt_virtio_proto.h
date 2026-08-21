@@ -397,7 +397,6 @@ typedef struct _memory_req_map_to_GPU_nodes_args {
   uint64_t MemoryAddress;
   uint64_t MemorySizeInBytes;
   uint64_t AlternateVAGPU;
-  HsaMemMapFlags MemMapFlags;
   uint32_t pad;
   uint64_t NumberOfNodes;
   uint32_t* NodeArray;

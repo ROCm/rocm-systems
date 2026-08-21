@@ -31,19 +31,29 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 */
 
-void GcnArchNameFormat(char *gcnArchName, char* out);
+void GcnArchNameFormat(char* gcnArchName, char* out);
 void convertGcnArchToGcnArchName(const char* gcnArch, const char** gcnArchName);
 int GetGcnArchName(int deviceId, char* out);
 double GetDeviceWallClockRateInKhz(int deviceId);
 bool IsArchMatch(char const* arch, char const* target);
 
-/* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device 
+/* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device
  * code for the same arch. */
 inline int rcclLL128LineElemsFromArch(char const* arch) {
   return IsArchMatch(arch, "gfx1250") ? 128 / (int)sizeof(uint64_t) : 64 / (int)sizeof(uint64_t);
 }
 inline int rcclLL128DataElemsFromArch(char const* arch) {
   return rcclLL128LineElemsFromArch(arch) - 1;
+}
+
+/* Host Code: lines per thread is 8 on gfx12xx (matches NCCL upstream's 128 byte
+ * non tearing line layout) and 4 on gfx9xx (64 byte lines). Total elems per
+ * thread is linesPerThread * dataElemsPerLine, so gfx12xx = 8 * 15 = 120 and
+ * gfx9xx = 4 * 7 = 28. Derived from rcclLL128DataElemsFromArch so the value
+ * stays in sync if the line size ever changes. */
+inline int rcclLL128ElemsPerThreadFromArch(char const* arch) {
+  int linesPerThread = IsArchMatch(arch, "gfx1250") ? 8 : 4;
+  return linesPerThread * rcclLL128DataElemsFromArch(arch);
 }
 
 #endif // ARCHINFO_H

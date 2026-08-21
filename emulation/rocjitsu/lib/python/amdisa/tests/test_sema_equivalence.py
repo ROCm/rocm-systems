@@ -26,40 +26,61 @@ _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
 
 
 def _make_add_block(name: str, pragma: ExecModel = ExecModel.SCALAR) -> SemaBlock:
-    s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='0'),
-    ))
-    s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='1'),
-    ))
-    body = SemaNode(SemaNodeKind.ASSIGN, children=(
-        SemaNode(SemaNodeKind.ID, id_name='D'),
-        SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(s0, s1)),
-    ))
+    s0 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+        ),
+    )
+    s1 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='1'),
+        ),
+    )
+    body = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='D'),
+            SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(s0, s1)),
+        ),
+    )
     return SemaBlock(name, pragma, body)
 
 
 def _make_sub_block(name: str) -> SemaBlock:
-    s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='0'),
-    ))
-    s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='1'),
-    ))
-    body = SemaNode(SemaNodeKind.ASSIGN, children=(
-        SemaNode(SemaNodeKind.ID, id_name='D'),
-        SemaNode(SemaNodeKind.SUB, ty=SemaType.U32, children=(s0, s1)),
-    ))
+    s0 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+        ),
+    )
+    s1 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='1'),
+        ),
+    )
+    body = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='D'),
+            SemaNode(SemaNodeKind.SUB, ty=SemaType.U32, children=(s0, s1)),
+        ),
+    )
     return SemaBlock(name, ExecModel.SCALAR, body)
 
 
 def _make_stub(name: str) -> SemaBlock:
-    return SemaBlock(name, ExecModel.UNKNOWN,
-                     SemaNode(SemaNodeKind.SEQ, children=()))
+    return SemaBlock(name, ExecModel.UNKNOWN, SemaNode(SemaNodeKind.SEQ, children=()))
 
 
 class TestBuildSemaEquivalences:
@@ -107,9 +128,9 @@ class TestBuildSemaEquivalences:
         }
         result = build_sema_equivalences('isa_a', 'isa_b', src, dst)
         assert result.identity_count == 2  # ADD, SUB
-        assert result.rename_count == 1    # ADD_OLD -> ADD or ADD_RENAMED
+        assert result.rename_count == 1  # ADD_OLD -> ADD or ADD_RENAMED
         assert result.no_match_count == 1  # UNIQUE (vector, no vector target)
-        assert result.stub_count == 1      # NOP
+        assert result.stub_count == 1  # NOP
 
     def test_empty_isas(self):
         result = build_sema_equivalences('a', 'b', {}, {})
@@ -126,13 +147,15 @@ class TestBuildSemaEquivalences:
 class TestMergeIntoUnionFind:
     def test_merges_renamed_equivalences(self):
         equiv = SemaEquivalence(
-            src_isa='a', dst_isa='b',
+            src_isa='a',
+            dst_isa='b',
             equivalences={'OLD': 'NEW', 'SAME': 'SAME', 'GONE': None},
         )
 
         class FakeUF:
             def __init__(self):
                 self.merged = []
+
             def union(self, a, b):
                 self.merged.append((a, b))
 
@@ -144,13 +167,15 @@ class TestMergeIntoUnionFind:
 
     def test_skips_missing_ids(self):
         equiv = SemaEquivalence(
-            src_isa='a', dst_isa='b',
+            src_isa='a',
+            dst_isa='b',
             equivalences={'OLD': 'NEW'},
         )
 
         class FakeUF:
             def __init__(self):
                 self.merged = []
+
             def union(self, a, b):
                 self.merged.append((a, b))
 
@@ -164,6 +189,7 @@ class TestSemaXmlEquivalence:
     @pytest.fixture(scope='class')
     def blocks(self):
         from amdisa.sema_parser import parse_semantics_xml
+
         return parse_semantics_xml(SEMA_XML_PATH)
 
     def test_self_equivalence_covers_all(self, blocks):
@@ -180,6 +206,10 @@ class TestSemaXmlEquivalence:
 
     def test_counts_sum_to_total(self, blocks):
         result = build_sema_equivalences('cdna4', 'cdna4', blocks, blocks)
-        total = (result.identity_count + result.rename_count
-                 + result.no_match_count + result.stub_count)
+        total = (
+            result.identity_count
+            + result.rename_count
+            + result.no_match_count
+            + result.stub_count
+        )
         assert total == len(blocks)

@@ -6,6 +6,9 @@
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
+#include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -26,7 +29,6 @@
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 
 #include "logger/debug.hpp"
@@ -54,7 +56,7 @@ auto         experiment_history        = std::vector<experiment>{};
 std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
 bool         use_exp_speedup_scaling =
-    get_env<bool>("ROCPROFSYS_CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP", false);
+    get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
 }  // namespace
 
 experiment::sample::sample(const base_type& _b, std::uint64_t _c)
@@ -237,7 +239,7 @@ experiment::start()
 
     LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
-    if(get_state() < State::Finalized)
+    if(state::process::get() < state::process::Finalized)
     {
         current_experiment_value = *this;
         current_selected_count.store(0);
@@ -254,7 +256,7 @@ experiment::wait() const
     auto _wait = experiment_time - (_now - start_time);
     auto _end  = _now + _wait;
     auto _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
-    while(tracing::now() < _end && get_state() < State::Finalized)
+    while(tracing::now() < _end && state::process::get() < state::process::Finalized)
     {
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _incr });
@@ -286,8 +288,8 @@ experiment::stop()
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto         _pt  = fitr.second - init_progress[fitr.first];
-        std::int64_t _num = std::max<std::int64_t>(
+        auto               _pt  = fitr.second - init_progress[fitr.first];
+        const std::int64_t _num = std::max<std::int64_t>(
             { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0) _prog_vals.emplace_back(_num);
     }
@@ -353,7 +355,7 @@ experiment::as_string() const
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
-        _ss << "[" << filepath::basename(selection.symbol.file) << ":"
+        _ss << "[" << path::filename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
 
     auto _patch = [](std::string _v) {
@@ -516,8 +518,9 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         save_line_info(_binfo_cfg, config::get_verbose());
     }
 
-    bool _causal_output_reset =
-        config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FILE_RESET").value_or(false);
+    const bool _causal_output_reset =
+        config::get_setting_value<bool>(std::string{ env_vars::CAUSAL_FILE_RESET })
+            .value_or(false);
 
     {
         auto _saved_experiments = (_causal_output_reset)
@@ -588,7 +591,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name =
+            const std::string _name =
                 (_selection.symbol_address > 0)
                     ? _line_info.func
                     : fmt::format("{}:{}", _line_info.file, _line_info.line);

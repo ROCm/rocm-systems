@@ -32,7 +32,7 @@ use std::ptr::null_mut;
 ///
 /// # Arguments
 ///
-/// * `init_flags` - Use a [`ProcessorTypeT`] for initialization flags.
+/// * `init_flags` - Use a [`AmdsmiInitFlagsT`] for initialization flags.
 ///
 /// # Returns
 ///
@@ -280,7 +280,7 @@ pub fn amdsmi_get_processor_handles(
 ///
 /// # Returns
 ///
-/// * `AmdsmiResult<ProcessorTypeT>` - Returns `Ok(ProcessorTypeT)` containing the [`ProcessorTypeT`] if successful, or an error if it fails.
+/// * `AmdsmiResult<AmdsmiProcessorTypeT>` - Returns `Ok(AmdsmiProcessorTypeT)` containing the [`AmdsmiProcessorTypeT`] if successful, or an error if it fails.
 ///
 /// # Example
 ///
@@ -310,8 +310,8 @@ pub fn amdsmi_get_processor_handles(
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_processor_type` call fails.
 pub fn amdsmi_get_processor_type(
     processor_handle: AmdsmiProcessorHandle,
-) -> AmdsmiResult<ProcessorTypeT> {
-    let mut processor_type = ProcessorTypeT::AmdsmiProcessorTypeUnknown;
+) -> AmdsmiResult<AmdsmiProcessorTypeT> {
+    let mut processor_type = AmdsmiProcessorTypeT::AmdsmiProcessorTypeUnknown;
     call_unsafe!(amdsmi_wrapper::amdsmi_get_processor_type(
         processor_handle,
         &mut processor_type
@@ -509,55 +509,6 @@ pub fn amdsmi_get_gpu_vendor_name(processor_handle: AmdsmiProcessorHandle) -> Am
         len
     ));
     Ok(cstr_to_string!(name))
-}
-
-/// Retrieves the GPU VRAM vendor name for a given processor handle.
-///
-/// This function returns the GPU VRAM vendor name associated with the specified processor handle.
-/// The VRAM vendor name provides information about the manufacturer of the GPU's VRAM.
-///
-/// # Arguments
-///
-/// * `processor_handle` - A handle to the processor for which the GPU VRAM vendor name is being queried.
-///
-/// # Returns
-///
-/// * `AmdsmiResult<String>` - Returns `Ok(String)` containing the GPU VRAM vendor name if successful, or an error if it fails.
-///
-/// # Example
-///
-/// ```rust
-/// # use amdsmi::*;
-/// #
-/// # fn main() {
-/// #   // Initialize the AMD SMI library
-/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
-/// #
-///     // Example processor_handle, assuming the number of processors is greater than zero
-///     let processor_handle = amdsmi_get_processor_handles!()[0];
-///
-///     // Retrieve the GPU VRAM vendor name
-///     match amdsmi_get_gpu_vram_vendor(processor_handle) {
-///         Ok(vram_vendor_name) => println!("GPU VRAM Vendor Name: {}", vram_vendor_name),
-///         Err(e) => panic!("Failed to get GPU VRAM vendor name: {}", e),
-///     }
-/// #
-/// #   // Shut down the AMD SMI library
-/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_vram_vendor` call fails.
-pub fn amdsmi_get_gpu_vram_vendor(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult<String> {
-    let (mut brand, len) = define_cstr!(amdsmi_wrapper::AMDSMI_MAX_STRING_LENGTH);
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_vram_vendor(
-        processor_handle,
-        brand.as_mut_ptr(),
-        len as u32,
-    ));
-    Ok(cstr_to_string!(brand))
 }
 
 /// Retrieves the GPU subsystem ID for a given processor handle.
@@ -2683,69 +2634,6 @@ pub fn amdsmi_get_gpu_reg_table_info(
     }
 
     Ok(reg_metrics)
-}
-
-/// Set the GPU clock range of the device with the specified processor handle, minimum clock value, maximum clock value, and clock type.
-///
-/// Given a processor handle `processor_handle`, a minimum clock value `minclkvalue`, a maximum clock value `maxclkvalue`, and a clock type `clk_type`,
-/// this function sets the GPU clock range for the specified processor.
-///
-/// # Arguments
-///
-/// * `processor_handle` - A handle to the processor for which the GPU clock range is being set.
-/// * `minclkvalue` - The minimum clock value to set.
-/// * `maxclkvalue` - The maximum clock value to set.
-/// * `clk_type` - The type of the clock to set.
-///
-/// # Returns
-///
-/// * `AmdsmiResult<()>` - Returns `Ok(())` if successful, or an error if it fails.
-///
-/// # Example
-///
-/// ```rust
-/// # use amdsmi::*;
-/// #
-/// # fn main() {
-/// #   // Initialize the AMD SMI library
-/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
-/// #
-///     // Example processor_handle, assuming the number of processors is greater than zero
-///     let processor_handle = amdsmi_get_processor_handles!()[0];
-///
-///     // Example clock values and clock type
-///     let minclkvalue = 500; // Set minimum clock value to 500 MHz
-///     let maxclkvalue = 1500; // Set maximum clock value to 1500 MHz
-///     let clk_type = AmdsmiClkTypeT::AmdsmiClkTypeGfx;
-///
-///     // Set the GPU clock range
-///     match amdsmi_set_gpu_clk_range(processor_handle, minclkvalue, maxclkvalue, clk_type) {
-///         Ok(()) => println!("GPU clock range set successfully"),
-///         Err(AmdsmiStatusT::AmdsmiStatusNotSupported) => println!("amdsmi_set_gpu_clk_range() not supported on this device"),
-///         Err(e) => panic!("Failed to set GPU clock range: {}", e),
-///     }
-/// #
-/// #   // Shut down the AMD SMI library
-/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_set_gpu_clk_range` call fails.
-pub fn amdsmi_set_gpu_clk_range(
-    processor_handle: AmdsmiProcessorHandle,
-    minclkvalue: u64,
-    maxclkvalue: u64,
-    clk_type: AmdsmiClkTypeT,
-) -> AmdsmiResult<()> {
-    call_unsafe!(amdsmi_wrapper::amdsmi_set_gpu_clk_range(
-        processor_handle,
-        minclkvalue,
-        maxclkvalue,
-        clk_type
-    ));
-    Ok(())
 }
 
 /// Set the GPU clock limit of the device with the specified processor handle, clock type, limit type, and clock value.
