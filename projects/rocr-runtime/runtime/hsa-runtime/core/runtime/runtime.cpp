@@ -2050,24 +2050,25 @@ void Runtime::AsyncEventsPool::clear() {
                   capacity - free_list_.size());
   }
 
-  for (auto& block : block_list_) free_()(block.first);
+  for (auto& block : block_list_) ::free(block.first);
   block_list_.clear();
   free_list_.clear();
 }
 
 Runtime::AsyncEventItem* Runtime::AsyncEventsPool::alloc() {
+  static_assert(__alignof(Runtime::AsyncEventItem) <= __alignof(max_align_t),
+                "AsyncEventItem needs over-aligned storage.");
   std::lock_guard<HybridMutex> lock(lock_);
   if (free_list_.empty()) {
-    AsyncEventItem* block = reinterpret_cast<AsyncEventItem*>(
-        allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+    AsyncEventItem* block =
+        reinterpret_cast<AsyncEventItem*>(::malloc(block_size_ * sizeof(AsyncEventItem)));
     if (block == nullptr) {
       block_size_ = minblock_;
-      block = reinterpret_cast<AsyncEventItem*>(
-          allocate_()(block_size_ * sizeof(AsyncEventItem), __alignof(AsyncEventItem), core::MemoryRegion::AllocateNonPaged, 0));
+      block = reinterpret_cast<AsyncEventItem*>(::malloc(block_size_ * sizeof(AsyncEventItem)));
       if (block == nullptr) throw std::bad_alloc();
     }
 
-    MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(block); });
+    MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { ::free(block); });
     block_list_.push_back(std::make_pair(block, block_size_));
     throwGuard.Dismiss();
 
