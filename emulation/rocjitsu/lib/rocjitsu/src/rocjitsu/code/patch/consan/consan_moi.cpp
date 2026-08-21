@@ -593,18 +593,32 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         return site.disposition == ConSanSiteDisposition::Supported &&
                site.site_kind == ConSanResourceSiteKind::Barrier;
       });
+  AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
+  const uint64_t original_text_size = original_code_object.text_sections().size() == 1
+                                          ? original_code_object.text_sections().front()->size()
+                                          : 0u;
+  const bool has_stranded_record_replay_barrier =
+      original_text_size != 0u &&
+      std::ranges::any_of(sync_admission, [&](const ConSanSiteDispositionRecord &site) {
+        return site.disposition == ConSanSiteDisposition::Supported &&
+               site.site_kind == ConSanResourceSiteKind::Barrier &&
+               !compute_sopp_branch_simm16(site.text_offset, original_text_size);
+      });
   // Record/Replay's compact persistent-epoch operating point handles bounded
-  // barrier inventories without the relocated dense router. Larger RDNA
-  // inventories can strand appended barrier bodies beyond SOPP branch reach,
-  // so reserve the router's key and call-return state up front. Do not impose
-  // that wider liveness window on ordinary kernels: on full-pressure compiler
-  // output, otherwise-unused adjacent SGPRs may still carry entry ABI state.
+  // barrier inventories whose sites can reach the appended reservation without
+  // the relocated dense router. A large generated object can strand even a
+  // small inventory, so reserve the router's key and call-return state based on
+  // architectural branch reach as well as the conservative member-count bound.
+  // Do not impose that wider liveness window on ordinary kernels: on
+  // full-pressure compiler output, otherwise-unused adjacent SGPRs may still
+  // carry entry ABI state.
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
       effective_options.moi_record_replay_dense_barrier_router ||
       (instrumentation::is_admitted_arch(arch) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       supported_barrier_members > kCompactRecordReplayBarrierMemberLimit);
+       (supported_barrier_members > kCompactRecordReplayBarrierMemberLimit ||
+        has_stranded_record_replay_barrier));
   const MoiSyncInventoryIndex sync_index(result);
   const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
     return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {

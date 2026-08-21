@@ -424,6 +424,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaStreamkTwoTile|cdna_streamk_two_tile|ConSanDeviceCdnaStreamkTwoTileTest"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
             "CdnaDenseSccRoutes|cdna_dense_scc_routes|ConSanDeviceCdnaDenseSccRoutesTest|no-record-replay"
+            "CdnaB16SccRoute|cdna_b16_scc_route|ConSanDeviceCdnaB16SccRouteTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
@@ -688,6 +689,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_streamk_two_tile|cdna_streamk_two_tile_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"
             "cdna_dense_scc_routes|cdna_dense_scc_routes_test.hip"
+            "cdna_b16_scc_route|cdna_b16_scc_route_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")
