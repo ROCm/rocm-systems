@@ -58,3 +58,12 @@ ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mas
   IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_pd_set_udma_mask,
                               ionicdv_internal_pd_set_udma_mask(ibpd, udma_mask), 0, "ionic_dv_pd_set_udma_mask");
 }
+
+ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, int plane_idx, struct ionic_dv_puec_route* route) {
+  if (ionicdvSymbols.ionicdv_internal_qp_set_puec_plane_route == NULL) {
+    errno = EOPNOTSUPP;
+    return ncclSystemError;
+  }
+  IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_qp_set_puec_plane_route,
+                              ionicdv_internal_qp_set_puec_plane_route(qp, plane_idx, route), 0, "ionic_dv_qp_set_puec_plane_route");
+}
