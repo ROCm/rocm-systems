@@ -18,12 +18,12 @@
 #define ROCPROFSYS_CAUSAL_API_H_
 
 #if defined(ROCPROFSYS_CAUSAL_API_SOURCE) && (ROCPROFSYS_CAUSAL_API_SOURCE > 0)
-#    if !defined(ROCPROFSYS_PUBLIC_API)
-#        define ROCPROFSYS_PUBLIC_API __attribute__((visibility("default")))
+#    if !defined(ROCPROFSYS_CAUSAL_PUBLIC_API)
+#        define ROCPROFSYS_CAUSAL_PUBLIC_API __attribute__((visibility("default")))
 #    endif
 #else
-#    if !defined(ROCPROFSYS_PUBLIC_API)
-#        define ROCPROFSYS_PUBLIC_API
+#    if !defined(ROCPROFSYS_CAUSAL_PUBLIC_API)
+#        define ROCPROFSYS_CAUSAL_PUBLIC_API
 #    endif
 #endif
 
@@ -53,32 +53,23 @@ extern "C"
         rocprofsys_causal_annotated_func_t annotated_progress;
     } rocprofsys_causal_callbacks_t;
 
-#if defined(__cplusplus)
-}
-#endif
-
-#if defined(__cplusplus)
-extern "C"
-{
-#endif
-
     /// @brief Starts a latency progress point (region of interest) with the given label.
-    extern int rocprofsys_causal_begin(const char*) ROCPROFSYS_PUBLIC_API;
+    extern int rocprofsys_causal_begin(const char*) ROCPROFSYS_CAUSAL_PUBLIC_API;
 
     /// @brief Ends the latency progress point for the matching label.
-    extern int rocprofsys_causal_end(const char*) ROCPROFSYS_PUBLIC_API;
+    extern int rocprofsys_causal_end(const char*) ROCPROFSYS_CAUSAL_PUBLIC_API;
 
     /// @brief Adds a throughput progress point with the given label.
-    extern int rocprofsys_causal_progress(const char*) ROCPROFSYS_PUBLIC_API;
+    extern int rocprofsys_causal_progress(const char*) ROCPROFSYS_CAUSAL_PUBLIC_API;
 
     /// @brief Adds a throughput progress point with the given label and annotations.
     extern int rocprofsys_causal_annotated_progress(const char*, rocprofsys_annotation_t*,
-                                                    size_t) ROCPROFSYS_PUBLIC_API;
+                                                    size_t) ROCPROFSYS_CAUSAL_PUBLIC_API;
 
     /// @brief Registers the callbacks invoked by the functions above. Called by
     /// librocprof-sys-dl once it dlopen's this library; not intended for direct use.
     extern void rocprofsys_causal_register_callbacks(rocprofsys_causal_callbacks_t)
-        ROCPROFSYS_PUBLIC_API;
+        ROCPROFSYS_CAUSAL_PUBLIC_API;
 
 #if defined(__cplusplus)
 }

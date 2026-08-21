@@ -72,25 +72,20 @@ extern "C"
     /// double
     /// compute(size_t n, double* data, size_t nitr, double tolerance)
     /// {
+    ///     size_t iteration = 0;
+    ///     double residual  = tolerance;
     ///     rocprofsys_annotation_t _annotations[] = {
-    ///         { "iteration", ROCPROFSYS_VALUE_SIZE_T, nullptr },
-    ///         { "residual", ROCPROFSYS_VALUE_FLOAT64, nullptr },
-    ///         { "data", ROCPROFSYS_VALUE_PTR, data },
-    ///         { "size", ROCPROFSYS_VALUE_SIZE_T, &n },
-    ///         { "tolerance", ROCPROFSYS_VALUE_FLOAT64, &tolerance },
-    ///         nullptr
+    ///         { "iteration", ROCPROFSYS_VALUE_SIZE_T, &iteration },
+    ///         { "residual", ROCPROFSYS_VALUE_FLOAT64, &residual },
     ///     };
     ///
-    ///     double residual = tolerance;
-    ///     for(size_t i = 0; i < nitr; ++i)
+    ///     for(iteration = 0; iteration < nitr; ++iteration)
     ///     {
     ///         rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_USER, "compute",
     ///                                         _annotations, 2);
     ///
     ///         residual = compute_residual(n, data);
     ///
-    ///         _annotations[0].value = &i;
-    ///         _annotations[1].value = &residual;
     ///         rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_USER, "compute",
     ///                                        _annotations, 2);
     ///     }

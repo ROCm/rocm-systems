@@ -114,6 +114,7 @@ WARN_LOGFILE           = doc/warnings.log
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
 INPUT                  = ../../README.md \
+                         ../../source/lib/rocprof-sys-common-api/rocprofiler-systems/annotation.h \
                          ../../source/lib/rocprof-sys-common-api/rocprofiler-systems/categories.h \
                          ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal_api.h \
                          ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal.h
