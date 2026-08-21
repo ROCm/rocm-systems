@@ -278,6 +278,50 @@ def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> N
     assert {semantics[name].transpose_kind for name in names} == {expected_kind}
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 6),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 6),
+    ],
+)
+def test_global_b8_transpose_aliases_share_profile_routing(
+    profile, expected_kind
+) -> None:
+    names = (
+        'GLOBAL_LOAD_TR8_B64',
+        'GLOBAL_LOAD_B64_TR_B8',
+        'GLOBAL_LOAD_TR_B64',
+    )
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VGLOBAL',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert profile.global_b8_transpose_kind == expected_kind
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+def test_global_b8_transpose_kind_can_be_overridden_by_profile() -> None:
+    class GlobalB8Kind3Profile(Cdna5Profile):
+        @property
+        def global_b8_transpose_kind(self) -> int:
+            return 3
+
+    sem = derive_semantics('GLOBAL_LOAD_TR8_B64', 'ENC_VGLOBAL', GlobalB8Kind3Profile())
+
+    assert sem is not None
+    assert sem.transpose_kind == 3
+
+
 def test_gfx1250_ds_b8_transpose_uses_profile_routing(
     gfx1250_generated_root: Path,
 ) -> None:

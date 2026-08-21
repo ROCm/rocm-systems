@@ -2637,6 +2637,16 @@ def derive_semantics(
     ):
         sem = replace(sem, transpose_kind=profile.ds_b8_transpose_kind)
 
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class == 'flat_load'
+        and name.upper().startswith('GLOBAL_LOAD_')
+    ):
+        transpose_info = _derive_transpose_load_info(name.upper())
+        if transpose_info is not None and transpose_info[0] == 'b8':
+            sem = replace(sem, transpose_kind=profile.global_b8_transpose_kind)
+
     return sem
 
 
