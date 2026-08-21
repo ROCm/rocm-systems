@@ -415,6 +415,7 @@ function(rj_add_consan_device_conformance_cases)
         "MoeRouting|moe_routing|ConSanDeviceMoeRoutingTest|atomics"
         "ContinuousBatching|continuous_batching|ConSanDeviceContinuousBatchingTest"
         "VglobalCachePublication|vglobal_cache_publication|ConSanDeviceVglobalCachePublicationTest|atomics"
+        "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
     )
     if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
         list(
@@ -427,21 +428,15 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaIndependentScalarProofs|cdna_sampled_independent_scalar_proofs|ConSanDeviceCdnaSampledIndependentScalarProofsTest|sampled-only"
             "CdnaB16SccRoute|cdna_b16_scc_route|ConSanDeviceCdnaB16SccRouteTest"
             "CdnaClobberingLdsReduction|cdna_clobbering_lds_reduction|ConSanDeviceCdnaClobberingLdsReductionTest"
+            "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
+            "CdnaWave64LargeText|cdna_wave64_large_text|ConSanDeviceCdnaWave64LargeTextTest"
+            "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
         list(
             APPEND _device_workloads
-            "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
-            "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
-            "Gfx950Wave64LargeText|gfx950_wave64_large_text|ConSanDeviceGfx950Wave64LargeTextTest"
-        )
-    endif()
-    if(NOT _device_TARGET STREQUAL "gfx1250")
-        list(
-            APPEND _device_workloads
-            "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1201" OR _device_TARGET STREQUAL "gfx1250")
@@ -805,6 +800,7 @@ function(rj_add_consan_device_fixture_targets target)
         "moe_routing|moe_routing_test.hip"
         "continuous_batching|continuous_batching_test.hip"
         "vglobal_cache_publication|vglobal_cache_publication_test.hip"
+        "group_flat_wide|group_flat_wide_test.hip"
     )
     if(target STREQUAL "gfx942" OR target STREQUAL "gfx950")
         list(
@@ -817,21 +813,15 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
             "cdna_b16_scc_route|cdna_b16_scc_route_test.hip"
             "cdna_clobbering_lds_reduction|cdna_clobbering_lds_reduction_test.hip"
+            "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
+            "cdna_wave64_large_text|cdna_wave64_large_text_test.hip"
+            "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")
         list(
             APPEND _device_workload_sources
-            "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
-            "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
-            "gfx950_wave64_large_text|gfx950_wave64_large_text_test.hip"
-        )
-    endif()
-    if(NOT target STREQUAL "gfx1250")
-        list(
-            APPEND _device_workload_sources
-            "group_flat_wide|group_flat_wide_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")

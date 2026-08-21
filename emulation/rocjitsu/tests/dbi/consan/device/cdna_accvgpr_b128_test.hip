@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// CDNA4 native B128 LDS load directly into AccVGPRs. Independent accumulator
+/// CDNA3/CDNA4 native B128 LDS load directly into AccVGPRs. Independent accumulator
 /// state and VCC remain live across the access so either class being clobbered
 /// changes an exact output.
 

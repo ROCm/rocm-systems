@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Production-scale CDNA4 SuperCollider dense dispatch distilled from
+/// Production-scale CDNA SuperCollider dense dispatch distilled from
 /// PyTorch's generated radix-sort library. The checked-in kernel crosses the
 /// 1,024-stranded-site routing threshold while executing the stress sites with
 /// one active lane, keeping the behavioral test quick.

@@ -38,7 +38,7 @@ __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *add
 }
 
 __global__
-__launch_bounds__(kThreadCount) void gfx950_wave64_large_text_for_consan(DeviceState *state) {
+__launch_bounds__(kThreadCount) void cdna_wave64_large_text_for_consan(DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -65,13 +65,13 @@ __launch_bounds__(kThreadCount) void gfx950_wave64_large_text_for_consan(DeviceS
   state->control[tid] = 0xc2000000u | tid;
 }
 
-void run_gfx950_wave64_large_text(bool synchronize) {
+void run_cdna_wave64_large_text(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  gfx950_wave64_large_text_for_consan<<<1, kThreadCount>>>(device_state);
+  cdna_wave64_large_text_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -86,8 +86,8 @@ void run_gfx950_wave64_large_text(bool synchronize) {
       EXPECT_EQ(state.observed[lane], 0xc1000000u | lane) << "lane=" << lane;
 }
 
-TEST(ConSanDeviceGfx950Wave64LargeTextTest, Correct) { run_gfx950_wave64_large_text(true); }
+TEST(ConSanDeviceCdnaWave64LargeTextTest, Correct) { run_cdna_wave64_large_text(true); }
 
-TEST(ConSanDeviceGfx950Wave64LargeTextTest, Incorrect) { run_gfx950_wave64_large_text(false); }
+TEST(ConSanDeviceCdnaWave64LargeTextTest, Incorrect) { run_cdna_wave64_large_text(false); }
 
 } // namespace
