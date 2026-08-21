@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
 #include <hip/hip_runtime.h>
 #include <nccl.h>
 #include <nccl_device.h>

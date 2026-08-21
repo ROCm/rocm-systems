@@ -8,23 +8,31 @@
  * per-call structure belongs to the caller, which is what makes a cached
  * replay exact.
  *
+ * The stream belongs to the caller too. Every data-path entry point takes one
+ * and launches on it: torch creates its streams non-blocking, so the legacy
+ * null stream does NOT implicitly order against them, and a null-stream launch
+ * would read inputs still being produced on the caller's stream. Setup
+ * (ep_create, ep_configure) stays on the null stream -- it runs once, before
+ * any caller work exists to race with.
+ *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #include <cstdio>
 #include <cstring>
-#include <hip/hip_runtime.h>
+
 #include <hip/hip_bf16.h>
+#include <hip/hip_runtime.h>
 #include <nccl.h>
 #include <nccl_device.h>
 
-#include "device/hip_prims.h"
-#include "device/ep_common.h"
-#include "device/dispatch.h"
 #include "device/combine.h"
+#include "device/dispatch.h"
+#include "device/ep_common.h"
 #include "device/expand.h"
-#include "include/ep_layout.h"
+#include "device/hip_prims.h"
 #include "include/ep_arch.h"
+#include "include/ep_layout.h"
 
 using namespace rccl_ep;
 
@@ -60,6 +68,17 @@ inline int ctas_per_rank(int num_sms, int dflt, int num_ranks) {
   return per > 0 ? per : 1;
 }
 
+// Release the symmetric window. ep_configure's failure paths run with
+// `configured` still false, so ep_destroy would never reach a window they had
+// already taken; they have to hand it back themselves.
+inline void release_window(EpHandle* h, bool registered) {
+  if (registered) ncclCommWindowDeregister(h->comm, h->win);
+  if (h->win_buf) {
+    ncclMemFree(h->win_buf);
+    h->win_buf = nullptr;
+  }
+}
+
 // Waves per block for every kernel that moves payload. The parallelism these
 // kernels get is CTAs x waves, and only the CTA count follows the caller's
 // num_sms budget, so a narrow block starves them at every budget below the
@@ -77,8 +96,9 @@ constexpr int kEpWaves = 16;
 }  // namespace
 
 __global__ void k_capi_fill_views(ncclWindow_t w, EpWindowLayout l, int n, WindowView* out) {
-  if (threadIdx.x == 0 && blockIdx.x == 0)
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
     for (int p = 0; p < n; ++p) { out[p].base = (uint8_t*)ncclGetLsaPointer(w, 0, p); out[p].l = l; }
+  }
 }
 
 extern "C" {
@@ -108,6 +128,12 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   // odd hidden here rather than reach a misaligned dwordx4.
   if (hidden % 8 != 0) {
     fprintf(stderr, "[rccl_ep] hidden %d must be a multiple of 8 (16B vector alignment)\n", hidden);
+    return nullptr;
+  }
+  // kMaxRanks bounds the scale-up domain the window layout is written for, and
+  // ctas_per_rank divides by num_ranks, so zero is a division by zero.
+  if (num_ranks < 1 || num_ranks > kMaxRanks) {
+    fprintf(stderr, "[rccl_ep] num_ranks %d must be in [1, kMaxRanks=%d]\n", num_ranks, kMaxRanks);
     return nullptr;
   }
 
@@ -150,14 +176,24 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   auto* h = static_cast<EpHandle*>(handle);
   if (h->configured && h->cfg.num_experts == num_experts && h->cfg.num_topk == num_topk)
     return 0;
-  if (h->configured) {
-    ncclCommWindowDeregister(h->comm, h->win);
-    ncclMemFree(h->win_buf);
-    h->configured = false;
-  }
-  if (num_topk > kMaxTopk) {
-    fprintf(stderr, "[rccl_ep] num_topk %d exceeds kMaxTopk %d\n", num_topk, kMaxTopk);
+  // Validated before the teardown below, so a rejected reconfigure leaves the
+  // existing window intact rather than freed.
+  if (num_topk < 1 || num_topk > kMaxTopk) {
+    fprintf(stderr, "[rccl_ep] num_topk %d must be in [1, kMaxTopk=%d]\n", num_topk, kMaxTopk);
     return -1;
+  }
+  // experts_per_rank() truncates, so a non-multiple leaves the tail experts
+  // owned by no rank: k_ep_plan never routes their tokens, and the epilogue's
+  // owner = e / experts_per_rank() reaches num_ranks, indexing one whole
+  // rank-region past the end of `y`. num_experts <= 0 is the epr == 0 case.
+  if (num_experts <= 0 || num_experts % h->cfg.num_ranks != 0) {
+    fprintf(stderr, "[rccl_ep] num_experts %d must be a positive multiple of num_ranks %d\n",
+            num_experts, h->cfg.num_ranks);
+    return -1;
+  }
+  if (h->configured) {
+    release_window(h, true);
+    h->configured = false;
   }
   h->cfg.num_experts = num_experts;
   h->cfg.num_topk = num_topk;
@@ -167,12 +203,14 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   ncclResult_t nr = ncclMemAlloc(&h->win_buf, h->win_bytes);
   if (nr != ncclSuccess) {
     fprintf(stderr, "[rccl_ep] ncclMemAlloc(%zu): %s\n", h->win_bytes, ncclGetErrorString(nr));
+    h->win_buf = nullptr;
     return -1;
   }
   hipMemset(h->win_buf, 0, h->win_bytes);
   nr = ncclCommWindowRegister(h->comm, h->win_buf, h->win_bytes, &h->win, NCCL_WIN_COLL_SYMMETRIC);
   if (nr != ncclSuccess) {
     fprintf(stderr, "[rccl_ep] WindowRegister: %s (NCCL_CUMEM_ENABLE=1?)\n", ncclGetErrorString(nr));
+    release_window(h, false);
     return -1;
   }
 
@@ -181,12 +219,20 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   nr = ncclDevCommCreate(h->comm, &reqs, &h->devComm);
   if (nr != ncclSuccess) {
     fprintf(stderr, "[rccl_ep] ncclDevCommCreate: %s\n", ncclGetErrorString(nr));
+    release_window(h, true);
     return -1;
   }
 
   hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0,
                      h->win, h->lay, h->cfg.num_ranks, h->d_views);
-  HC(hipDeviceSynchronize());
+  // Spelled out rather than wrapped in HC: the macro returns before the window
+  // can be handed back.
+  hipError_t he = hipDeviceSynchronize();
+  if (he != hipSuccess) {
+    fprintf(stderr, "[rccl_ep] view fill: %s\n", hipGetErrorString(he));
+    release_window(h, true);
+    return -1;
+  }
   h->self_view = WindowView{(uint8_t*)h->win_buf, h->lay};
 
   // Before any payload moves: a mixed-architecture communicator has no correct
@@ -197,6 +243,7 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   if (check_uniform_arch(h->cfg, h->cfg.rank, h->d_views, h->self_view,
                          h->devComm, err, sizeof(err)) != 0) {
     fprintf(stderr, "[rccl_ep] %s\n", err);
+    release_window(h, true);
     return -1;
   }
 
@@ -211,10 +258,7 @@ size_t ep_window_bytes(void* handle) {
 void ep_destroy(void* handle) {
   auto* h = static_cast<EpHandle*>(handle);
   if (!h) return;
-  if (h->configured) {
-    ncclCommWindowDeregister(h->comm, h->win);
-    ncclMemFree(h->win_buf);
-  }
+  if (h->configured) release_window(h, true);
   hipFree(h->d_recvoff);
   hipFree(h->d_total);
   hipFree(h->d_views);
@@ -222,22 +266,25 @@ void ep_destroy(void* handle) {
   delete h;
 }
 
-int ep_barrier(void* handle) {
+int ep_barrier(void* handle, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, h->devComm);
-  HC(hipDeviceSynchronize());
+  hipStream_t s = (hipStream_t)stream;
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  HC(hipStreamSynchronize(s));
   return 0;
 }
 
 // Routing plan. Written into caller-owned tensors so a cached dispatch replays
 // the identical plan rather than depending on library state.
 int ep_plan(void* handle, uintptr_t topk_idx, int num_tokens,
-            uintptr_t out_slot, uintptr_t out_list, uintptr_t out_sendc) {
+            uintptr_t out_slot, uintptr_t out_list, uintptr_t out_sendc,
+            uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kWarpSize), 0, 0,
+  hipStream_t s = (hipStream_t)stream;
+  hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kWarpSize), 0, s,
                      h->cfg, (const int32_t*)topk_idx, num_tokens,
                      (int32_t*)out_slot, (int32_t*)out_list, (int32_t*)out_sendc);
-  HC(hipDeviceSynchronize());
+  HC(hipStreamSynchronize(s));
   return 0;
 }
 
@@ -247,88 +294,124 @@ int ep_dispatch(void* handle,
                 uintptr_t topk_idx, uintptr_t topk_w, int num_tokens,
                 uintptr_t send_list, uintptr_t sendc, int use_fp8, int num_sms,
                 uintptr_t out_x, uintptr_t out_sf,
-                uintptr_t out_topk, uintptr_t out_tw, uintptr_t out_src) {
+                uintptr_t out_topk, uintptr_t out_tw, uintptr_t out_src,
+                uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
+  hipStream_t s = (hipStream_t)stream;
+  // The C ABI is reachable without the Python layer -- the unit tests include
+  // these headers directly -- so an unconfigured handle has to say so rather
+  // than fault on a null window.
+  if (!h->configured) {
+    fprintf(stderr, "[rccl_ep] ep_dispatch before a successful ep_configure\n");
+    return -1;
+  }
+  // fp8 payload is 1 byte/element, so the 16B vector copies need hidden % 16 == 0;
+  // ep_create's hidden % 8 guard only covers bf16 (2 bytes/element).
+  if (use_fp8 && c.hidden % 16 != 0) {
+    fprintf(stderr, "[rccl_ep] hidden %d must be a multiple of 16 for fp8 (16B vector alignment)\n", c.hidden);
+    return -1;
+  }
+
+  // Slot index is rank * num_max_tokens_per_rank + i, with i bounded only by
+  // num_tokens in k_ep_plan. Past capacity the push runs into the next rank's
+  // region of the peer's window, and combine's src_tok = g % T then aliases
+  // two tokens onto one slot.
+  if (num_tokens > c.num_max_tokens_per_rank) {
+    fprintf(stderr, "[rccl_ep] num_tokens %d exceeds num_max_tokens_per_rank %d\n",
+            num_tokens, c.num_max_tokens_per_rank);
+    return -1;
+  }
+
   // 128 total CTAs is the measured bandwidth peak on gfx950; sweeping the CTA
   // budget shows dispatch flat from 32 upward on 8x MI350X.
   const int cta = ctas_per_rank(num_sms, 128, c.num_ranks);
 
-  HC(hipMemset((uint8_t*)h->win_buf + h->lay.off_counts, 0, c.num_ranks * sizeof(int32_t)));
+  HC(hipMemsetAsync((uint8_t*)h->win_buf + h->lay.off_counts, 0, c.num_ranks * sizeof(int32_t), s));
 
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
   if (use_fp8) {
-    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, (const fp8_t*)x, (const float*)x_sf, (const int32_t*)topk_idx,
                        (const float*)topk_w, num_tokens, (const int32_t*)send_list,
                        (const int32_t*)sendc, h->d_views);
   } else {
-    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, (const bf16_t*)x, (const int32_t*)topk_idx, (const float*)topk_w,
                        num_tokens, (const int32_t*)send_list, (const int32_t*)sendc, h->d_views);
   }
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, h->devComm);
-  hipLaunchKernelGGL(k_ep_scan_counts, dim3(1), dim3(1), 0, 0,
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_scan_counts, dim3(1), dim3(1), 0, s,
                      c, h->self_view, h->d_recvoff, h->d_total);
-  HC(hipDeviceSynchronize());
 
+  // The receive total has to reach the host to size the epilogue's output, so
+  // this one sync is structural rather than incidental. The copy is already
+  // ordered behind k_ep_scan_counts on `s`, so it needs no separate barrier.
   int total = 0;
-  HC(hipMemcpy(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost));
+  HC(hipMemcpyAsync(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost, s));
+  HC(hipStreamSynchronize(s));
 
   if (use_fp8) {
-    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, h->self_view, h->d_recvoff, (fp8_t*)out_x, (float*)out_sf,
                        (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
   } else {
-    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, h->self_view, h->d_recvoff, (bf16_t*)out_x,
                        (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
   }
-  HC(hipDeviceSynchronize());
+  HC(hipStreamSynchronize(s));
   return total;
 }
 
 // Per-source received counts, so the caller can report the per-rank prefix sum.
-int ep_recv_counts(void* handle, uintptr_t out_counts) {
+int ep_recv_counts(void* handle, uintptr_t out_counts, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  HC(hipMemcpy((void*)out_counts, (uint8_t*)h->win_buf + h->lay.off_counts,
-               h->cfg.num_ranks * sizeof(int32_t), hipMemcpyDeviceToDevice));
+  hipStream_t s = (hipStream_t)stream;
+  // No sync: the destination is a caller tensor read back on the same stream.
+  HC(hipMemcpyAsync((void*)out_counts, (uint8_t*)h->win_buf + h->lay.off_counts,
+                    h->cfg.num_ranks * sizeof(int32_t), hipMemcpyDeviceToDevice, s));
   return 0;
 }
 
-int ep_expert_counts(void* handle, uintptr_t recv_topk, int num_recv, uintptr_t out_counts) {
+int ep_expert_counts(void* handle, uintptr_t recv_topk, int num_recv, uintptr_t out_counts,
+                     uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  hipLaunchKernelGGL(k_expand_count, dim3(h->cfg.experts_per_rank()), dim3(256), 0, 0,
+  hipStream_t s = (hipStream_t)stream;
+  hipLaunchKernelGGL(k_expand_count, dim3(h->cfg.experts_per_rank()), dim3(256), 0, s,
                      h->cfg, (const int32_t*)recv_topk, num_recv, (int32_t*)out_counts);
-  HC(hipDeviceSynchronize());
+  HC(hipStreamSynchronize(s));
   return 0;
 }
 
 // Build the expanded-layout row map. Returns total rows (including padding).
 int ep_expand_build(void* handle, uintptr_t recv_topk, int num_recv, int expert_alignment,
                     uintptr_t counts, uintptr_t offsets, uintptr_t psum,
-                    uintptr_t hist, uintptr_t row_map) {
+                    uintptr_t hist, uintptr_t row_map, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
+  hipStream_t s = (hipStream_t)stream;
   const int epr = c.experts_per_rank();
   const int blocks = num_recv > 0 ? (num_recv + 255) / 256 : 1;
 
-  hipLaunchKernelGGL(k_expand_count, dim3(epr), dim3(256), 0, 0,
+  hipLaunchKernelGGL(k_expand_count, dim3(epr), dim3(256), 0, s,
                      c, (const int32_t*)recv_topk, num_recv, (int32_t*)counts);
-  hipLaunchKernelGGL(k_expand_scan, dim3(1), dim3(1), 0, 0,
+  hipLaunchKernelGGL(k_expand_scan, dim3(1), dim3(1), 0, s,
                      c, expert_alignment, (const int32_t*)counts,
                      (int32_t*)offsets, (int32_t*)psum, h->d_total);
-  hipLaunchKernelGGL(k_expand_hist, dim3(blocks), dim3(256), 0, 0,
+  hipLaunchKernelGGL(k_expand_hist, dim3(blocks), dim3(256), 0, s,
                      c, (const int32_t*)recv_topk, num_recv, (int32_t*)hist);
-  hipLaunchKernelGGL(k_expand_base, dim3(epr), dim3(kWarpSize), 0, 0,
+  hipLaunchKernelGGL(k_expand_base, dim3(epr), dim3(kWarpSize), 0, s,
                      c, num_recv, (int32_t*)hist);
-  hipLaunchKernelGGL(k_expand_map, dim3(blocks), dim3(256), 0, 0,
+  hipLaunchKernelGGL(k_expand_map, dim3(blocks), dim3(256), 0, s,
                      c, (const int32_t*)recv_topk, num_recv,
                      (const int32_t*)offsets, (const int32_t*)hist, (int32_t*)row_map);
-  HC(hipDeviceSynchronize());
 
+  // Row count reaches the host to size the expanded tensors, so this sync is
+  // structural. The copy is already ordered behind k_expand_scan on `s`.
   int total = 0;
-  HC(hipMemcpy(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost));
+  HC(hipMemcpyAsync(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost, s));
+  HC(hipStreamSynchronize(s));
   return total;
 }
 
@@ -338,28 +421,29 @@ int ep_expand_scatter(void* handle, int use_fp8,
                       uintptr_t out_x, uintptr_t out_sf, int sf_row_stride, int sf_col_stride,
                       uintptr_t out_w,
                       int zero_pad, int expert_alignment,
-                      uintptr_t counts, uintptr_t offsets, int num_sms) {
+                      uintptr_t counts, uintptr_t offsets, int num_sms, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
+  hipStream_t s = (hipStream_t)stream;
   const int cta = sms_or(num_sms, 64);
 
   if (use_fp8) {
-    hipLaunchKernelGGL(k_expand_scatter_fp8, dim3(cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(k_expand_scatter_fp8, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, (const fp8_t*)src_x, (const float*)src_sf, (const float*)src_w,
                        (const int32_t*)row_map, num_recv, (fp8_t*)out_x, (float*)out_sf,
                        sf_row_stride, sf_col_stride, (float*)out_w);
   } else {
-    hipLaunchKernelGGL(k_expand_scatter, dim3(cta), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(k_expand_scatter, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, (const bf16_t*)src_x, (const float*)src_w,
                        (const int32_t*)row_map, num_recv, (bf16_t*)out_x, (float*)out_w);
   }
   if (zero_pad) {
-    hipLaunchKernelGGL(k_expand_zero_pad, dim3(c.experts_per_rank()), dim3(kEpWaves * kWarpSize), 0, 0,
+    hipLaunchKernelGGL(k_expand_zero_pad, dim3(c.experts_per_rank()), dim3(kEpWaves * kWarpSize), 0, s,
                        c, expert_alignment, (const int32_t*)counts, (const int32_t*)offsets,
                        use_fp8 ? 1 : (int)sizeof(bf16_t), (void*)out_x,
                        (float*)out_sf, sf_row_stride, sf_col_stride, (float*)out_w);
   }
-  HC(hipDeviceSynchronize());
+  HC(hipStreamSynchronize(s));
   return 0;
 }
 
@@ -372,9 +456,14 @@ int ep_combine(void* handle,
                uintptr_t recv_topk, uintptr_t recv_src, int num_recv,
                uintptr_t topk_idx, int num_tokens,
                uintptr_t bias0, uintptr_t bias1, int grouped,
-               uintptr_t out, uintptr_t out_w, int num_sms) {
+               uintptr_t out, uintptr_t out_w, int num_sms, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
+  hipStream_t s = (hipStream_t)stream;
+  if (!h->configured) {
+    fprintf(stderr, "[rccl_ep] ep_combine before a successful ep_configure\n");
+    return -1;
+  }
   // Two different grids. The transport is (num_ranks, per_rank) so a CTA owns
   // one peer; the reduce epilogue is purely local and 1-D over tokens, so it
   // takes the whole budget. Sharing one value silently starved the epilogue of
@@ -382,17 +471,17 @@ int ep_combine(void* handle,
   const int cta = ctas_per_rank(num_sms, 128, c.num_ranks);
   const int cta_reduce = sms_or(num_sms, 128);
 
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, h->devComm);
-  hipLaunchKernelGGL(combine_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, 0,
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(combine_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                      c, (const bf16_t*)y, (const float*)in_w, (const int32_t*)row_map,
                      (const int32_t*)recv_topk, (const int32_t*)recv_src, num_recv,
                      grouped, h->self_view, h->d_views);
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, h->devComm);
-  hipLaunchKernelGGL(combine_reduce_epilogue_impl, dim3(cta_reduce), dim3(kEpWaves * kWarpSize), 0, 0,
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(combine_reduce_epilogue_impl, dim3(cta_reduce), dim3(kEpWaves * kWarpSize), 0, s,
                      c, h->self_view, (const int32_t*)topk_idx, num_tokens,
                      (const bf16_t*)bias0, (const bf16_t*)bias1, grouped,
                      (bf16_t*)out, (float*)out_w);
-  HC(hipDeviceSynchronize());
+  HC(hipStreamSynchronize(s));
   return 0;
 }
 

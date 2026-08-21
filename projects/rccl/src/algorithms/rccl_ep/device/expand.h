@@ -13,12 +13,13 @@
 #ifndef RCCL_EP_EXPAND_H_
 #define RCCL_EP_EXPAND_H_
 
-#include <hip/hip_runtime.h>
-#include <hip/hip_bf16.h>
 #include <cstdint>
 
-#include "device/hip_prims.h"
+#include <hip/hip_bf16.h>
+#include <hip/hip_runtime.h>
+
 #include "device/ep_common.h"
+#include "device/hip_prims.h"
 #include "include/ep_layout.h"
 
 namespace rccl_ep {
@@ -199,8 +200,9 @@ __global__ void k_expand_zero_pad(EpConfig cfg, int expert_alignment, const int3
     const int row = base + p;
     uint8_t* dst = (uint8_t*)out_x + (size_t)row * row_bytes;
     for (size_t b = lane; b < row_bytes; b += kWarpSize) dst[b] = 0;
-    if (out_sf)
+    if (out_sf) {
       for (int j = lane; j < nsf; j += kWarpSize) out_sf[(size_t)row * sf_row_stride + (size_t)j * sf_col_stride] = 0.f;
+    }
     if (out_w && lane == 0) out_w[row] = 0.f;
   }
 }
