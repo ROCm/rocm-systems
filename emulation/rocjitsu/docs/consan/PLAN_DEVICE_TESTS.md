@@ -89,10 +89,10 @@ produce a deterministic value from the deliberately racy data path.
 
 The portable tier now has 18 adjacent correct/incorrect pairs. Each common
 pair runs as baseline plus all four engines on five RocJitsu targets and
-physical `gfx950`, for 60 rows per scenario. Eighteen additional pair names
+physical `gfx950`, for 60 rows per scenario. Nineteen additional pair names
 cover family- or target-specific behavior on only the architectures where the
-form exists. The union is 36 behavioral pairs and the registered matrix is
-1,445 tests, including four physical module-load lifecycle rows and the
+form exists. The union is 37 behavioral pairs and the registered matrix is
+1,469 tests, including four physical module-load lifecycle rows and the
 physical post-instrumentation health row.
 
 | Scenario | Workload-derived contract | Status |
@@ -118,7 +118,8 @@ physical post-instrumentation health row.
 
 The target-specific tranche adds CDNA MFMA/AccVGPR liveness, full-bank dynamic
 Stream-K, an 80-access/five-barrier two-tile Stream-K relay shape, native
-B128-to-AccVGPR, a gfx950 160-KiB/32-stage LDS pipeline, a
+B128-to-AccVGPR, dense far-routed LDS access and barrier sites with live SCC,
+a gfx950 160-KiB/32-stage LDS pipeline, a
 large generated-text wave64 shape, wide group-FLAT, CDNA and RDNA B96 aliasing
 boundaries, instruction-encoded atomic scope, WMMA and FP8 staging, both gfx11
 VGLOBAL address forms, repeated multi-stream image

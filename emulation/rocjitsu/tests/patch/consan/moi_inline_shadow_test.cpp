@@ -4990,15 +4990,21 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
       /*vsrc=*/1, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto spill_store = build_address_free_scratch_store_b32(
       /*vsrc=*/1, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto drain_guest_vmem =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(epoch_load);
   ASSERT_TRUE(epoch_barrier_load);
   ASSERT_TRUE(epoch_store);
   ASSERT_TRUE(spill_store);
+  ASSERT_TRUE(drain_guest_vmem);
   EXPECT_TRUE(contains_subsequence(access_words, *spill_store));
   EXPECT_TRUE(contains_subsequence(access_words, *epoch_load));
   EXPECT_TRUE(contains_subsequence(barrier_words, *spill_store));
   EXPECT_TRUE(contains_subsequence(barrier_words, *epoch_barrier_load));
   EXPECT_TRUE(contains_subsequence(barrier_words, *epoch_store));
+  ASSERT_GE(barrier_words.size(), 2u);
+  EXPECT_EQ(barrier_words[0], kBarrierWait);
+  EXPECT_EQ(barrier_words[1], *drain_guest_vmem);
   EXPECT_TRUE(contains_subsequence(prologue_words, *spill_store));
   EXPECT_TRUE(contains_subsequence(prologue_words, *epoch_store));
 }
@@ -6219,17 +6225,41 @@ TEST(ConSanMoi, Cdna4FarInlineShadowAccessesShareExplicitKeyRelay) {
 
 TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  constexpr uint32_t kAccessCount = 12u;
+  constexpr uint32_t kAccessCount = 18u;
   constexpr uint16_t kIndirectPcSgpr = 48u;
   constexpr uint16_t kKeyAndSccSgpr = 50u;
   constexpr uint64_t kFirstAccessOffset = 8u * sizeof(uint32_t);
   std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
+  uint64_t last_access_offset = 0u;
   for (uint32_t index = 0; index < kAccessCount; ++index) {
+    if (index + 1u == kAccessCount) {
+      const auto seed_scc = ib::build_s_cmp_eq_u32(
+          /*ssrc0=*/0u, scalar_positive_inline_u32(0u), kArch);
+      ASSERT_TRUE(seed_scc);
+      text_words.push_back(*seed_scc);
+      last_access_offset = text_words.size() * sizeof(uint32_t);
+    }
     const auto store = build_cdna4_ds_store_b32(
         /*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/index * sizeof(uint32_t), kArch);
     ASSERT_TRUE(store);
     text_words.insert(text_words.end(), store->begin(), store->end());
+    if (index + 1u == kAccessCount) {
+      const auto consume_scc = instrumentation::build_s_cbranch_scc1(/*displacement=*/0, kArch);
+      ASSERT_TRUE(consume_scc);
+      text_words.push_back(*consume_scc);
+    }
   }
+  const auto barrier_seed_scc =
+      ib::build_s_cmp_eq_u32(/*ssrc0=*/0u, scalar_positive_inline_u32(0u), kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  const auto barrier_consume_scc = instrumentation::build_s_cbranch_scc1(/*displacement=*/0, kArch);
+  ASSERT_TRUE(barrier_seed_scc);
+  ASSERT_TRUE(barrier);
+  ASSERT_TRUE(barrier_consume_scc);
+  text_words.push_back(*barrier_seed_scc);
+  const uint64_t barrier_offset = text_words.size() * sizeof(uint32_t);
+  text_words.push_back(*barrier);
+  text_words.push_back(*barrier_consume_scc);
   text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch));
   text_words.push_back(build_s_endpgm(kArch));
 
@@ -6267,7 +6297,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
        .dynamic_stack_borrowed_sgpr = std::nullopt});
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.moi_track_barriers = false;
+  options.moi_track_barriers = true;
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
@@ -6279,6 +6309,9 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6289,9 +6322,20 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
                                                   scalar_positive_inline_u32(2u), kArch);
   ASSERT_TRUE(tagged_key);
   EXPECT_EQ(anchor_words.front(), *tagged_key);
+  const std::vector<uint32_t> last_anchor_words =
+      text_words_at_offset(patched, last_access_offset, 2u * sizeof(uint32_t));
+  ASSERT_EQ(last_anchor_words.size(), 2u);
+  const auto last_tagged_key =
+      ib::build_s_cselect_b32(kKeyAndSccSgpr, scalar_positive_inline_u32(2u * kAccessCount + 1u),
+                              scalar_positive_inline_u32(2u * kAccessCount), kArch);
+  ASSERT_TRUE(last_tagged_key);
+  EXPECT_EQ(last_anchor_words.front(), *last_tagged_key);
 
   const uint32_t restore_scc = build_sopc_encoding(kArch, cdna4::kSBitcmp1B32Sopc, kKeyAndSccSgpr,
                                                    scalar_positive_inline_u32(0));
+  const auto normalize_scc = ib::build_s_cselect_b32(kKeyAndSccSgpr, scalar_positive_inline_u32(1u),
+                                                     scalar_positive_inline_u32(0u), kArch);
+  ASSERT_TRUE(normalize_scc);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
         patch.trampoline_size == 0u) {
@@ -6299,8 +6343,22 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
     }
     const std::vector<uint32_t> words =
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    return std::ranges::find(words, restore_scc) != words.end();
+    return std::ranges::search(words, std::array{restore_scc, *normalize_scc}).begin() !=
+           words.end();
   }));
+  const auto barrier_dispatcher = std::ranges::find_if(result.patches, [&](const auto &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == barrier_offset && patch.original_size == 0u;
+  });
+  ASSERT_NE(barrier_dispatcher, result.patches.end());
+  const std::vector<uint32_t> barrier_dispatcher_words = text_words_at_offset(
+      patched, barrier_dispatcher->trampoline_offset, barrier_dispatcher->trampoline_size);
+  const uint32_t decode_route =
+      build_s_lshr_b32(kIndirectPcSgpr, kKeyAndSccSgpr, scalar_positive_inline_u32(1u), kArch);
+  ASSERT_FALSE(barrier_dispatcher_words.empty());
+  EXPECT_EQ(barrier_dispatcher_words.front(), decode_route);
+  EXPECT_TRUE(std::ranges::search(barrier_dispatcher_words, std::array{restore_scc, *normalize_scc})
+                  .begin() != barrier_dispatcher_words.end());
 }
 
 TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesUseCalledFunctionHost) {

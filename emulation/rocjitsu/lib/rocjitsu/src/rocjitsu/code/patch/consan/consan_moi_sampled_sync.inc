@@ -1252,6 +1252,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       // scalar assignment is spill backed.
       const bool use_gfx1250_clone_local_routes = arch == ROCJITSU_CODE_ARCH_GFX1250;
       const bool derive_key_at_entry = spill_backed_router && !use_gfx1250_clone_local_routes;
+      const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1263,7 +1264,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const uint64_t island_words_count =
           use_gfx1250_clone_local_routes
               ? 2u * (indices.size() + 1u) + kMoiRecordReplayIndirectIslandWords
-              : moi_dense_entry_island_words(derive_key_at_entry);
+              : moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
@@ -1409,6 +1410,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
+      if (key_encodes_scc) {
+        dispatcher_words.push_back(
+            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
+      }
       if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
@@ -1430,14 +1435,26 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
             return false;
           dispatcher_words.push_back(*compare);
         } else {
-          const auto compare =
-              instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+          const auto compare = instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
           if (!compare)
             return false;
           dispatcher_words.push_back(*compare);
-          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
+                                     (key_encodes_scc ? 2u : 1u));
         }
         std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const uint16_t bitcmp_opcode =
+              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
+          const auto normalize = instrumentation::build_s_cselect_b32(
+              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+          if (!normalize)
+            return false;
+          matched_words.push_back(
+              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
+          matched_words.push_back(*normalize);
+        }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
@@ -2614,7 +2631,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         }
       }
       const bool derive_key_at_entry = spill_backed_router;
-      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
+      const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
+      const uint64_t island_words_count =
+          moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
@@ -2692,6 +2711,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
+      if (key_encodes_scc) {
+        dispatcher_words.push_back(
+            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
+      }
       if (!derive_key_at_entry) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
@@ -2705,12 +2728,25 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
       const auto append_target = [&](uint64_t caller_return, uint64_t target) {
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+        const auto compare = instrumentation::build_s_cmp_eq_u32(
+            key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
         if (!compare)
           return false;
         dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
+                                   (key_encodes_scc ? 2u : 1u));
         std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const uint16_t bitcmp_opcode =
+              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
+          const auto normalize = instrumentation::build_s_cselect_b32(
+              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+          if (!normalize)
+            return false;
+          matched_words.push_back(
+              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
+          matched_words.push_back(*normalize);
+        }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,

@@ -32,13 +32,14 @@ moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
 }
 
-[[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry) {
+[[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
+                                                              bool key_encodes_scc = false) {
   // Relocatable dense routers derive the dispatcher key at entry:
   // key = call return - island offset. The prologue captures SCC itself, so
   // the following indirect jump omits its ordinary SCC-capture word.
-  return derive_key_at_entry
-             ? kMoiDenseBarrierEntryKeyPrologueWords + (kMoiRecordReplayIndirectIslandWords - 1u)
-             : kMoiRecordReplayIndirectIslandWords;
+  return derive_key_at_entry ? kMoiDenseBarrierEntryKeyPrologueWords + (key_encodes_scc ? 1u : 0u) +
+                                   (kMoiRecordReplayIndirectIslandWords - 1u)
+                             : kMoiRecordReplayIndirectIslandWords;
 }
 
 class MoiLocalNopIslandAllocator {

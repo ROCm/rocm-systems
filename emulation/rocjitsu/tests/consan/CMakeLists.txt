@@ -423,6 +423,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
             "CdnaStreamkTwoTile|cdna_streamk_two_tile|ConSanDeviceCdnaStreamkTwoTileTest"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
+            "CdnaDenseSccRoutes|cdna_dense_scc_routes|ConSanDeviceCdnaDenseSccRoutesTest|no-record-replay"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
@@ -514,6 +515,16 @@ function(rj_add_consan_device_conformance_cases)
             list(GET _workload_fields 0 _workload_name)
             list(GET _workload_fields 1 _workload_target)
             list(GET _workload_fields 2 _workload_suite)
+            list(LENGTH _workload_fields _workload_field_count)
+            if(_workload_field_count GREATER 3)
+                list(GET _workload_fields 3 _workload_feature)
+                if(
+                    _workload_feature STREQUAL "no-record-replay"
+                    AND _mode_value STREQUAL "record-replay"
+                )
+                    continue()
+                endif()
+            endif()
 
             set(_common_environment
                 "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
@@ -551,7 +562,6 @@ function(rj_add_consan_device_conformance_cases)
                 endif()
             endif()
 
-            list(LENGTH _workload_fields _workload_field_count)
             if(_workload_field_count GREATER 3)
                 list(GET _workload_fields 3 _workload_feature)
                 if(_workload_feature STREQUAL "atomics")
@@ -677,6 +687,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
             "cdna_streamk_two_tile|cdna_streamk_two_tile_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"
+            "cdna_dense_scc_routes|cdna_dense_scc_routes_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")

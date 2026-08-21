@@ -434,6 +434,7 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
                                      const MoiDenseBarrierRouterScalarAbi &abi,
                                      bool derive_key_at_entry, rj_code_arch_t arch) {
   std::vector<uint32_t> words;
+  const bool key_encodes_scc = derive_key_at_entry && abi.key_sgpr == abi.saved_scc_sgpr;
   if (derive_key_at_entry) {
     const auto save_scc = instrumentation::build_s_cselect_b32(
         abi.saved_scc_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
@@ -442,6 +443,13 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
     if (!save_scc || !subtract_pc)
       return std::nullopt;
     words.push_back(*save_scc);
+    if (key_encodes_scc) {
+      // Scalar-pressure layouts may share the derived route key with the SCC
+      // snapshot.  The call-return PC is four-byte aligned, so carry SCC in
+      // its otherwise-zero low bit before deriving the relative route.
+      words.push_back(
+          build_s_add_u32(abi.call_return_sgpr, abi.call_return_sgpr, abi.saved_scc_sgpr, arch));
+    }
     words.push_back(build_s_mov_b32(abi.key_sgpr, abi.call_return_sgpr, arch));
     words.push_back(build_s_getpc_b64(abi.jump_pc_sgpr, arch));
     const uint32_t pc_after_getpc_from_island =
@@ -453,7 +461,7 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
   if (!append_moi_scc_preserving_indirect_jump(words, island_text_offset, dispatcher_text_offset,
                                                abi.jump_pc_sgpr, abi.saved_scc_sgpr,
                                                /*capture_scc=*/!derive_key_at_entry, arch) ||
-      words.size() != moi_dense_entry_island_words(derive_key_at_entry)) {
+      words.size() != moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc)) {
     return std::nullopt;
   }
   return words;

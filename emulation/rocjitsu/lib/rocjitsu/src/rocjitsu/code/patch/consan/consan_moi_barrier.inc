@@ -593,8 +593,9 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   const auto store_epoch =
       instrumentation::build_private_store_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
+  const auto drain_guest_vmem = instrumentation::build_s_wait_global_load0(arch);
   if (!load_epoch || !wait_load || !increment_epoch || !saturate_epoch || !store_epoch ||
-      !wait_store) {
+      !wait_store || !drain_guest_vmem) {
     errors.emplace_back("ConSan MOI inline-shadow barrier could not encode private epoch update");
     return std::nullopt;
   }
@@ -604,11 +605,16 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
-      2u + spill.save_words.size() + load_epoch->size() + store_epoch->size() +
+      3u + spill.save_words.size() + load_epoch->size() + store_epoch->size() +
       saturate_epoch->size() + spill.restore_words.size() +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u) +
       3u + (control_gfx1250_vgpr_bank ? 1u : 0u) + (restore_guest_vgpr_bank ? 1u : 0u));
   words.push_back(original_barrier_word);
+  // A guest load may intentionally remain outstanding across the barrier and
+  // be consumed after a following waitcnt.  Drain it before saving a
+  // spill-backed temporary: otherwise the pending load can complete between
+  // our save and restore, and the restore overwrites the guest's new value.
+  words.push_back(*drain_guest_vmem);
   if (control_gfx1250_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(gfx1250_vgpr_msb_mode.value_or(0u)), 0u, arch));
@@ -1804,6 +1810,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         call_return_sgpr = *group_options.moi_record_replay_call_return_sgpr;
       }
       const bool derive_key_at_entry = spill_backed_router;
+      const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1812,7 +1819,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
-      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
+      const uint64_t island_words_count =
+          moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       std::vector<uint64_t> anchors;
@@ -1945,6 +1953,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
+      if (key_encodes_scc) {
+        dispatcher_words.push_back(
+            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
+      }
       if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
@@ -1963,14 +1975,26 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                             jump_pc_sgpr, call_return_sgpr, arch))
             return false;
         } else {
-          const auto compare =
-              instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+          const auto compare = instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
           if (!compare)
             return false;
           dispatcher_words.push_back(*compare);
-          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
+                                     (key_encodes_scc ? 2u : 1u));
         }
         std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const uint16_t bitcmp_opcode =
+              arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
+          const auto normalize = instrumentation::build_s_cselect_b32(
+              key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+          if (!normalize)
+            return false;
+          matched_words.push_back(
+              build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
+          matched_words.push_back(*normalize);
+        }
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
         if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
