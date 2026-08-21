@@ -56,29 +56,7 @@ set_target_properties(
 
 rocprofiler_systems_strip_target(rocprofiler-systems-causal-api-library)
 
-foreach(_HEADER ${_causal_api_headers})
-    string(
-        REPLACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/"
-        "${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}/"
-        _DEST
-        ${_HEADER}
-    )
-    string(
-        REPLACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/"
-        "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/"
-        _DEST
-        "${_DEST}"
-    )
-
-    configure_file(${_HEADER} ${_DEST} COPYONLY)
-endforeach()
-
-install(
-    FILES ${_causal_api_headers}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
-)
+rocprofiler_systems_install_public_headers(${_causal_api_headers})
 
 install(
     TARGETS rocprofiler-systems-causal-api-library

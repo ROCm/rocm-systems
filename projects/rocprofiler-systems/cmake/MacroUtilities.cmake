@@ -449,6 +449,33 @@ macro(ROCPROFILER_SYSTEMS_ADD_INTERFACE_LIBRARY _TARGET)
     endif()
 endmacro()
 
+# ----------------------------------------------------------------------------------------#
+# function install_public_headers(<header>...) stage public headers into the build tree and
+# install them.
+#
+# Each header is copied to ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/, keeping its
+# path relative to the calling directory, so an uninstalled build tree presents the same
+# include layout as an install. The same headers are then installed.
+#
+function(ROCPROFILER_SYSTEMS_INSTALL_PUBLIC_HEADERS)
+    foreach(_HEADER ${ARGN})
+        string(
+            REPLACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/"
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/"
+            _DEST
+            "${_HEADER}"
+        )
+        configure_file("${_HEADER}" "${_DEST}" COPYONLY)
+    endforeach()
+
+    install(
+        FILES ${ARGN}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+        COMPONENT core
+    )
+endfunction()
+
 # -----------------------------------------------------------------------
 # function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
 # specified by the existence of the variable <NAME>, to the list of enabled/disabled

@@ -37,22 +37,7 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-foreach(_HEADER ${_common_api_headers})
-    string(
-        REPLACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/"
-        "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/"
-        _DEST
-        "${_HEADER}"
-    )
-
-    configure_file(${_HEADER} ${_DEST} COPYONLY)
-endforeach()
-
-install(
-    FILES ${_common_api_headers}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
-)
+rocprofiler_systems_install_public_headers(${_common_api_headers})
 
 install(
     TARGETS rocprofiler-systems-common-api-library
