@@ -133,31 +133,24 @@ class TestGpuPower(unittest.TestCase):
 
     def test_set_gpu_power_profile(self):
         self.common.print_func_name("")
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            for (
-                power_profile_preset_mask_name,
-                power_profile_preset_mask,
-                power_profile_preset_masks_cond,
-            ) in common.POWER_PROFILE_PRESET_MASKS:
-                # A device that does not support a given preset returns
-                # AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS; accept that as a valid
-                # not-supported outcome rather than a failure.
-                set_expected = [
-                    power_profile_preset_masks_cond,
-                    "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS",
-                ]
-                msg = f"\t### amdsmi_set_gpu_power_profile(gpu={i}, power_profile_preset_mask={power_profile_preset_mask_name}):"
-                try:
-                    amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, power_profile_preset_mask)
-                    self.common.print(msg, "")
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, set_expected):
-                        self.raise_exception = e
-                self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
+        # Valid rejections (although driver may include others)
+        refused = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,  # eg. guest devices, or sysfs node absent
+            amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,  # eg. invalid input
+            amdsmi.AmdSmiStatus.NO_PERM,  # eg. ran w/o admin priv., or R/O sysfs
+        ]
+        # All valid responses
+        applied_or_refused = [amdsmi.AmdSmiStatus.SUCCESS, *refused]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                for mask_name, mask, _ in common.POWER_PROFILE_PRESET_MASKS:
+                    accept = refused if mask_name == "INVALID" else applied_or_refused
+                    msg = (
+                        f"\t### amdsmi_set_gpu_power_profile(gpu={i}, "
+                        f"power_profile_preset_mask={mask_name}):"
+                    )
+                    with self.common.expect_status(msg, accept):
+                        amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
+                    self.common.print("")
         return
-
-    # pisolates
