@@ -40,3 +40,12 @@ class TestRenderGuidanceBlocks:
 
     def test_missing_template_skipped(self):
         assert render_guidance_blocks(["missing"], {}, {}, {}) == ()
+
+    def test_template_error_includes_exception_info(self):
+        templates = {"t1": "Threshold: {threshold:th}%"}
+        blocks = render_guidance_blocks(
+            ["t1"], templates, thresholds={"th": "not_a_number"}, metric_values={}
+        )
+        assert len(blocks) == 1
+        assert "template error" in blocks[0]
+        assert "Error" in blocks[0] or "TypeError" in blocks[0]
