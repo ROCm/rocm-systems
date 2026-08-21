@@ -52,5 +52,5 @@ class Workload:
     matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
-# The prefix of raw pmc_perf.csv
-PMC_PERF_FILE_PREFIX = "pmc_perf"
+# The merged counter intermediate analyze writes and reads back, gzip.
+PMC_PERF_CSV = "pmc_perf.csv.gz"

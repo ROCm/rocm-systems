@@ -57,7 +57,7 @@ class tui_analysis(OmniAnalyze_Base):
             )
             return
 
-        # Merge out/ profile artifacts into pmc_perf.csv if needed
+        # Merge out/ profile artifacts into the counter CSV if needed
         self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(

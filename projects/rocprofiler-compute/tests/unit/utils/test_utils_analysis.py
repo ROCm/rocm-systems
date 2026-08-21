@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
+from utils import csv_compression, schema
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
@@ -59,6 +60,14 @@ from utils.utils_analysis import (
 # =============================================================================
 
 
+def _write_pmc_perf(workload_dir: Path, text: str) -> Path:
+    """Write the gzip counter CSV that analyze reads back."""
+    path = workload_dir / schema.PMC_PERF_CSV
+    with csv_compression.open_gzip_csv_write(path) as out:
+        out.write(text)
+    return path
+
+
 def test_validate_workload_valid_data_file(tmp_path):
     """
     Test validate_workload with a valid pmc_perf.csv file containing data.
@@ -74,12 +83,11 @@ def test_validate_workload_valid_data_file(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     valid_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
 kernel2,1,150,250
 kernel3,0,120,220"""
-    pmc_perf_file.write_text(valid_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, valid_data)
 
     console_error_calls = []
 
@@ -107,12 +115,11 @@ def test_validate_workload_file_with_nan_values(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     nan_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 ,,NaN,
 ,NaN,,NaN
 NaN,,,"""
-    pmc_perf_file.write_text(nan_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, nan_data)
 
     console_error_calls = []
 
@@ -126,7 +133,7 @@ NaN,,,"""
     error_args = console_error_calls[0][0]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
-    assert "pmc_perf.csv" in error_args[1]
+    assert schema.PMC_PERF_CSV in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
 
 
@@ -138,7 +145,9 @@ def test_validate_workload_legacy_results_csv_not_supported(tmp_path):
     workload_dir.mkdir()
 
     result_file = workload_dir / "results_pmc_perf_0.csv.gz"
-    result_file.write_bytes(gzip.compress(b"GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"))
+    result_file.write_bytes(
+        gzip.compress(b"GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n")
+    )
 
     console_error_calls = []
 
@@ -169,9 +178,8 @@ def test_validate_workload_headers_only_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     headers_only = "Kernel_Name,GPU_ID,Counter1,Counter2"
-    pmc_perf_file.write_text(headers_only)
+    pmc_perf_file = _write_pmc_perf(workload_dir, headers_only)
 
     console_error_calls = []
 
@@ -254,12 +262,11 @@ def test_validate_workload_malformed_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     malformed_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200,extra_column_data
 kernel2,1,150
 incomplete_row"""
-    pmc_perf_file.write_text(malformed_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, malformed_data)
 
     console_error_calls = []
 
@@ -288,13 +295,12 @@ def test_validate_workload_mixed_valid_invalid_data(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     mixed_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
 kernel2,,NaN,250
 kernel3,1,120,
 ,0,110,240"""
-    pmc_perf_file.write_text(mixed_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, mixed_data)
 
     console_error_calls = []
 
@@ -322,13 +328,12 @@ def test_validate_workload_large_dataset_with_nans(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     headers = "Kernel_Name,GPU_ID,Counter1,Counter2\n"
     nan_rows = []
     for i in range(1000):
         nan_rows.append("NaN,NaN,NaN,NaN")
     large_nan_data = headers + "\n".join(nan_rows)
-    pmc_perf_file.write_text(large_nan_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, large_nan_data)
 
     console_error_calls = []
 
@@ -359,12 +364,11 @@ def test_validate_workload_unicode_content(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     unicode_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel_测试,0,100,200
 kernel_тест,1,150,250
 kernel_tëst,0,120,220"""
-    pmc_perf_file.write_text(unicode_data, encoding="utf-8")
+    pmc_perf_file = _write_pmc_perf(workload_dir, unicode_data)
 
     console_error_calls = []
 
@@ -392,10 +396,9 @@ def test_validate_workload_special_path_characters(tmp_path):
     workload_dir = tmp_path / "workload-test_dir.with.dots"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
     valid_data = """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200"""
-    pmc_perf_file.write_text(valid_data)
+    pmc_perf_file = _write_pmc_perf(workload_dir, valid_data)
 
     console_error_calls = []
 
@@ -426,8 +429,7 @@ def test_validate_workload_csv_read_permission_error(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
+    pmc_perf_file = _write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
     pmc_perf_file.chmod(0o000)  # Remove all permissions
 
     console_error_calls = []
@@ -484,8 +486,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nNaN,NaN")
+    pmc_perf_file = _write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nNaN,NaN")
 
     console_error_calls = []
 
@@ -497,8 +498,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    expected_path = str(workload_dir / "pmc_perf.csv")
-    assert expected_path in error_args[1]
+    assert str(pmc_perf_file) in error_args[1]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
@@ -519,8 +519,7 @@ def test_validate_workload_function_return_value(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = workload_dir / "pmc_perf.csv"
-    pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
+    pmc_perf_file = _write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
 
     with patch("utils.utils_analysis.console_error"):
         result = utils_analysis.validate_workload(str(workload_dir))

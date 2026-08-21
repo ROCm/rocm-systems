@@ -21,8 +21,8 @@ choose.
 .. note::
 
    Analyze mode merges per-pass profile artifacts from ``out/`` into a unified
-   ``pmc_perf.csv`` for analysis. If the workload directory already contains a
-   ``pmc_perf.csv``, that file is used as-is.
+   ``pmc_perf.csv.gz`` for analysis. If the workload directory already contains a
+   ``pmc_perf.csv.gz``, that file is used as-is.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.

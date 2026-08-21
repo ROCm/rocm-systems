@@ -318,13 +318,13 @@ def create_df_pmc(
     """
     Load all raw pmc counters and join into one df.
     """
-    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    pmc_perf_path = Path(raw_data_dir) / schema.PMC_PERF_CSV
     if not pmc_perf_path.is_file():
         return pd.DataFrame()
 
     df = pd.read_csv(pmc_perf_path)
 
-    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
+    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
     # else was written by a removed backend and is no longer supported.
     if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         console_error(

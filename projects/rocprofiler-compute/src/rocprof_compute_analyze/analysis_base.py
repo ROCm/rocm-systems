@@ -377,9 +377,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def merge_profile_artifacts(self, workload_dir: Path, output_file: Path) -> None:
-        """Merge per-process profile artifacts into one plain CSV."""
+        """Merge per-process profile artifacts into one gzip CSV."""
         try:
-            with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+            with csv_compression.open_gzip_csv_write(output_file) as outfile:
                 rows_written = rocpd_data.write_pmc_rows(
                     rocpd_data.iter_workload_rows(workload_dir), outfile
                 )
@@ -402,8 +402,8 @@ class OmniAnalyze_Base:
         console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Build pmc_perf.csv from profile artifacts under ``out/``."""
-        pmc_perf = workload_dir / "pmc_perf.csv"
+        """Build the merged counter CSV from profile artifacts under ``out/``."""
+        pmc_perf = workload_dir / schema.PMC_PERF_CSV
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
@@ -411,9 +411,7 @@ class OmniAnalyze_Base:
             console_log(f"Merging profile artifacts for {workload_dir}...")
             self.merge_profile_artifacts(workload_dir, pmc_perf)
             console_log(f"Created {pmc_perf}")
-        elif sorted(
-            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
-        ):
+        elif sorted(workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")):
             console_error(
                 f"Legacy results_*.csv.gz found in {workload_dir}.\n"
                 "These workloads are no longer supported; re-run "
@@ -422,7 +420,7 @@ class OmniAnalyze_Base:
         else:
             console_error(
                 f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv or {rocpd_data.OUT_DIR}/ artifacts.\n"
+                f"Expected: {schema.PMC_PERF_CSV} or {rocpd_data.OUT_DIR}/ artifacts.\n"
                 f"Please run 'rocprof-compute profile' first."
             )
 
@@ -468,7 +466,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Merge out/ profile artifacts into pmc_perf.csv if needed
+            # Merge out/ profile artifacts into the counter CSV if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)

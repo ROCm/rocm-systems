@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils import csv_compression, rocpd_data
+from utils import csv_compression, rocpd_data, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -588,7 +588,7 @@ def process_ml_api_trace_output(
 def validate_workload(path: str) -> None:
     """Validate workload directory contains readable, non-empty profiling output."""
     workload_dir = Path(path)
-    pmc_perf_path = workload_dir / "pmc_perf.csv"
+    pmc_perf_path = workload_dir / schema.PMC_PERF_CSV
 
     if rocpd_data.pass_dirs(workload_dir):
         return

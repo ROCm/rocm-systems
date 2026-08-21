@@ -553,12 +553,11 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "pmc_perf.csv").exists():
+            pmc_perf = Path(workload_path) / schema.PMC_PERF_CSV
+            if not pmc_perf.exists():
                 continue
 
-            pmc_df = utils_analysis.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
-            )
+            pmc_df = utils_analysis.process_rocpd_csv(pd.read_csv(pmc_perf))
 
             utils_analysis.add_unit_counter(pmc_df)
 

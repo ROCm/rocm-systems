@@ -25,7 +25,7 @@ import pytest
 import yaml
 from common import SUPPORTED_ARCHS
 
-from utils import rocpd_data
+from utils import rocpd_data, schema
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -207,8 +207,8 @@ def profile_artifact_files(output_dir):
 
 
 def load_profile_counter_df(output_dir):
-    """Load counter rows from ``pmc_perf.csv`` or ``out/`` profile artifacts."""
-    pmc_perf = Path(output_dir) / "pmc_perf.csv"
+    """Load counter rows from the merged counter CSV or ``out/`` artifacts."""
+    pmc_perf = Path(output_dir) / schema.PMC_PERF_CSV
     if pmc_perf.is_file() and pmc_perf.stat().st_size > 0:
         return pd.read_csv(pmc_perf)
     rows = list(rocpd_data.iter_workload_rows(output_dir))
@@ -231,11 +231,11 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     workload_path = Path(output_dir)
     pass_paths = rocpd_data.pass_dirs(workload_path)
-    pmc_perf = workload_path / "pmc_perf.csv"
+    pmc_perf = workload_path / schema.PMC_PERF_CSV
     has_pmc_perf = pmc_perf.is_file() and pmc_perf.stat().st_size > 0
 
     assert pass_paths or has_pmc_perf, (
-        "Expected out/{pass}/ profile artifacts or pmc_perf.csv from profile mode"
+        f"Expected out/{{pass}}/ profile artifacts or {schema.PMC_PERF_CSV}"
     )
 
     if pass_paths:
@@ -248,7 +248,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     else:
         df = pd.read_csv(pmc_perf)
         err_msg = (
-            f"pmc_perf.csv has insufficient rows: {len(df.index)} < {num_kernels}"
+            f"{schema.PMC_PERF_CSV} has insufficient rows: "
+            f"{len(df.index)} < {num_kernels}"
         )
         assert len(df.index) >= num_kernels, err_msg
 
@@ -274,7 +275,7 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
     # Load non-PMC files into return dict
     for file in files_in_workload:
         # Skip merged PMC output and profile artifact tree
-        if file == "pmc_perf.csv" or file == rocpd_data.OUT_DIR:
+        if file == schema.PMC_PERF_CSV or file == rocpd_data.OUT_DIR:
             continue
 
         if file.endswith(".csv"):
