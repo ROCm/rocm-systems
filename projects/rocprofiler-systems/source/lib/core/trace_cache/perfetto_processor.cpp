@@ -1089,6 +1089,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     using thread_hardware_counter_track =
         core::perfetto::counter_track<category::thread_hardware_counter>;
     using comm_data_track = core::perfetto::counter_track<category::comm_data>;
+    using hipfile_track   = core::perfetto::counter_track<category::hipfile>;
 
     static const std::unordered_map<size_t, pmc_track_info> PMC_TRACK_MAP = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
@@ -1166,6 +1167,14 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             [](auto id, auto idx, auto ts, auto val) {
                 TRACE_COUNTER(trait::name<category::comm_data>::value,
                               comm_data_track::at(id, idx), ts, val);
+            } } },
+
+        { ROCPROFSYS_CATEGORY_HIPFILE,
+          { "", [](auto id) { return hipfile_track::exists(id); },
+            [](auto id, auto& n, auto& u) { hipfile_track::emplace(id, n, u.c_str()); },
+            [](auto id, auto idx, auto ts, auto val) {
+                TRACE_COUNTER(trait::name<category::hipfile>::value,
+                              hipfile_track::at(id, idx), ts, val);
             } } }
     };
 

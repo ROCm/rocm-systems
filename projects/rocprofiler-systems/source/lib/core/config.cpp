@@ -636,6 +636,13 @@ configure_settings(bool _init)
                               "vcn_activity, jpeg_activity and memory usage",
                               true, "backend", "amd_smi", "rocm", "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, env_vars::USE_HIPFILE,
+        "Enable periodic sampling of hipFile GPU-direct storage I/O statistics "
+        "(bytes, bandwidth, op counts, errors). Requires the target application to "
+        "use hipFile; sets HIPFILE_STATS_LEVEL=1 automatically.",
+        false, "backend", "hipfile", "rocm", "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SAMPLING,
                               "Enable statistical sampling of call-stack", false,
                               "backend", "sampling");
@@ -1601,6 +1608,15 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_AMD_SMI, false);
     }
 
+    if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
+    {
+        // Ask libhipfile to enable its stats server. hipFile reads this once, the first
+        // time it initializes, so it has to be set during configuration rather than when
+        // the PMC sampler starts - by then the target may already have initialized
+        // hipFile and the setting would be ignored. Never overrides an explicit level.
+        rocprofsys::set_env(env_vars::HIPFILE_STATS_LEVEL, "1", 0);
+    }
+
     if(_config->get<bool>(std::string{ env_vars::USE_KOKKOSP }))
     {
         auto _current_kokkosp_lib = rocprofsys::get_env<std::string>("KOKKOS_TOOLS_LIBS");
@@ -2284,6 +2300,13 @@ bool
 get_use_amd_smi()
 {
     static auto _v = get_config()->find(std::string{ env_vars::USE_AMD_SMI });
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_hipfile()
+{
+    static auto _v = get_config()->find(std::string{ env_vars::USE_HIPFILE });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

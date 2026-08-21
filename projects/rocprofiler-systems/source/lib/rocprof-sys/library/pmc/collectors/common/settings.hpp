@@ -9,11 +9,13 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <regex>
@@ -52,6 +54,14 @@ using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
 }  // namespace cpu
+
+// Import hipFile types into collectors namespace
+namespace hipfile
+{
+using ::rocprofsys::pmc::collectors::hipfile::ALL_HIPFILE_METRICS;
+using ::rocprofsys::pmc::collectors::hipfile::enabled_metrics;
+using ::rocprofsys::pmc::collectors::hipfile::METRIC_TABLE;
+}  // namespace hipfile
 
 // GPU metric bitfield helpers: ENABLE_ALL_METRICS sets bits 0..NUM_GPU_METRIC_BITS-1
 inline constexpr std::uint32_t NUM_GPU_METRIC_BITS = 17;
@@ -104,6 +114,73 @@ struct settings_policy
     static std::optional<std::set<std::string>> get_visible_gpu_bdfs()
     {
         return rocprofsys::gpu::get_visible_gpu_bdfs();
+    }
+
+    /**
+     * @brief Number of GPUs the ROCm runtime exposes.
+     *
+     * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Used by the hipFile collector,
+     * whose stats are indexed by GPU ordinal rather than discovered through an
+     * enumeration API.
+     *
+     * Derived from the same visible-BDF set the GPU collector filters on, so the two
+     * agree on which GPUs exist. std::nullopt means the runtime reported no agents at
+     * all, which is indistinguishable from having no GPUs as far as GPU-direct storage
+     * I/O is concerned, so it reports zero.
+     */
+    static std::size_t get_visible_gpu_count()
+    {
+        const auto visible = get_visible_gpu_bdfs();
+        return visible.has_value() ? visible->size() : 0U;
+    }
+
+    /**
+     * @brief hipFile metrics selected by ROCPROFSYS_HIPFILE_METRICS.
+     *
+     * Accepts "all"/"on" (default), "none"/"off", or a comma or semicolon separated list
+     * of the metric keys in METRIC_TABLE (e.g. "read_bytes,write_bytes").
+     */
+    static hipfile::enabled_metrics get_hipfile_enabled_metrics()
+    {
+        static auto _enabled_metrics = []() {
+            auto setting =
+                get_setting_value<std::string>(std::string{ env_vars::HIPFILE_METRICS });
+            return parse_hipfile_enabled_metrics(setting.value_or("all"));
+        }();
+        return _enabled_metrics;
+    }
+
+    static hipfile::enabled_metrics parse_hipfile_enabled_metrics(
+        const std::string& setting)
+    {
+        hipfile::enabled_metrics metrics;
+
+        if(setting.empty() || setting == "all" || setting == "on")
+        {
+            metrics.value = hipfile::ALL_HIPFILE_METRICS;
+            return metrics;
+        }
+        if(setting == "none" || setting == "off")
+        {
+            metrics.value = 0U;
+            return metrics;
+        }
+
+        for(const auto& token : parse_name_list(setting))
+        {
+            const auto found = std::find_if(
+                hipfile::METRIC_TABLE.begin(), hipfile::METRIC_TABLE.end(),
+                [&token](const auto& metric) { return token == metric.key; });
+
+            if(found == hipfile::METRIC_TABLE.end())
+            {
+                LOG_WARNING("Unknown hipFile metric '{}' in {}, ignoring", token,
+                            env_vars::HIPFILE_METRICS);
+                continue;
+            }
+            metrics.value |= (1U << found->bit);
+        }
+        return metrics;
     }
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
