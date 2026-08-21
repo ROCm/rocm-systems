@@ -1703,8 +1703,9 @@ def run(app_args, args, **kwargs):
         append=True,
     )
 
-    # -o/-d default to None so an explicit request stays distinguishable from an
-    # inherited one; fall back to the environment for the effective value here
+    # -o/-d stay None so a typed option stays distinguishable from an inherited
+    # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
+    # this restores the effective values the argparse defaults used to supply
     _output_file = (
         args.output_file
         if args.output_file is not None
@@ -2077,8 +2078,13 @@ def run(app_args, args, **kwargs):
         avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
 
         if app_args:
-            # --echo reports the command without running anything
-            if not args.echo:
+            if args.echo:
+                # the listing runs as its own process, so report it alongside the
+                # application command echoed at the end of this function
+                sys.stderr.flush()
+                print(f"command: {avail_command}")
+                sys.stdout.flush()
+            else:
                 try:
                     subprocess.check_call(avail_command, env=app_env)
                 except subprocess.CalledProcessError as error:
@@ -2086,6 +2092,8 @@ def run(app_args, args, **kwargs):
                         "rocprofv3-avail exit with error", exit_code=error.returncode
                     )
         else:
+            # with no application to profile the listing is what rocprofv3 runs,
+            # so --echo and the exit code flow through the common path below
             app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
