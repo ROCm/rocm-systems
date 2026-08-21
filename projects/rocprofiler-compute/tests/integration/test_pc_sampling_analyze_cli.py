@@ -222,13 +222,6 @@ def test_pc_sampling_analyze_database_output(
             .between(0, 100, inclusive="right")
             .all()
         )
-        percent_columns = [
-            "wave_occupancy_percent",
-            "active_thread_percent",
-        ]
-        assert db_pc_sampling[percent_columns].notna().all().all()
-        assert db_pc_sampling[percent_columns].ge(0).all().all()
-        assert db_pc_sampling[percent_columns].le(100).all().all()
         # vcopy is fully converged: every wave64 lane is active.
         assert db_pc_sampling["active_thread_percent"].eq(100.0).all()
         assert db_pc_sampling["wave_occupancy_percent"].gt(0).all()
@@ -319,7 +312,6 @@ def test_pc_sampling_analyze_csv_output(
             "wave_occupancy_percent",
             "active_thread_percent",
         ]
-        assert set(percent_columns) <= set(csv_pc_sampling.columns)
         assert csv_pc_sampling[percent_columns].notna().all().all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
