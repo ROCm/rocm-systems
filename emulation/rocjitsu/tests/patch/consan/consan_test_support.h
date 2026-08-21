@@ -1146,11 +1146,12 @@ std::vector<uint8_t> make_cdna4_code_object_with_local_function(
 /// retain the object-wide dispatch pair in SGPRs, while the dynamic-stack
 /// kernel exhausts the ordinary SGPR tail and must receive dispatch identity
 /// in its component-local VGPR tuple. No code-object-wide scalar tuple can
-/// hide the mixed-placement requirement.
-std::vector<uint8_t>
-make_cdna4_mixed_accvgpr_persistence_code_object(bool full_sampled_pressure = false,
-                                                 bool dynamic_flat_group_load = false,
-                                                 bool dynamic_has_accvgpr_bank = false) {
+/// hide the mixed-placement requirement. The fixed-stack full-pressure
+/// variant models the same component-local dispatch fallback without a guest
+/// dynamic stack.
+std::vector<uint8_t> make_cdna4_mixed_accvgpr_persistence_code_object(
+    bool full_sampled_pressure = false, bool dynamic_flat_group_load = false,
+    bool dynamic_has_accvgpr_bank = false, bool second_fixed_stack_full_scalar_pressure = false) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto store = build_cdna4_ds_store_b32(
       /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
@@ -1188,7 +1189,8 @@ make_cdna4_mixed_accvgpr_persistence_code_object(bool full_sampled_pressure = fa
     std::ranges::copy(*store, dynamic_words.begin() + 1u);
     dynamic_words[3] = *barrier;
   }
-  for (uint16_t sgpr = 70u; sgpr < 102u; ++sgpr)
+  const uint16_t dynamic_scalar_limit = second_fixed_stack_full_scalar_pressure ? 106u : 102u;
+  for (uint16_t sgpr = 70u; sgpr < dynamic_scalar_limit; ++sgpr)
     dynamic_words[dynamic_scalar_liveness_start + static_cast<size_t>(sgpr - 70u)] =
         build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
   if (full_sampled_pressure) {
@@ -1215,15 +1217,16 @@ make_cdna4_mixed_accvgpr_persistence_code_object(bool full_sampled_pressure = fa
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 3u);
   });
-  mutate_kernel_descriptor(image, "lds_helper", [full_sampled_pressure](KD &descriptor) {
+  mutate_kernel_descriptor(image, "lds_helper", [&](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                    full_sampled_pressure ? 63u : 31u);
+                    full_sampled_pressure || second_fixed_stack_full_scalar_pressure ? 63u : 31u);
     if (full_sampled_pressure) {
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 63u);
     }
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                    second_fixed_stack_full_scalar_pressure ? 13u : 12u);
   });
   constexpr std::array<std::string_view, 1> kAdditionalKernelNames = {"lds_helper"};
   append_kernel_metadata_note(image, "lds_probe", /*uses_dynamic_stack=*/false,
@@ -1249,9 +1252,10 @@ make_cdna4_mixed_accvgpr_persistence_code_object(bool full_sampled_pressure = fa
     EXPECT_EQ(*encoded_value, expected);
     *encoded_value = value;
   };
-  mutate_second_value(".uses_dynamic_stack", 0xc2u, 0xc3u);
+  if (!second_fixed_stack_full_scalar_pressure)
+    mutate_second_value(".uses_dynamic_stack", 0xc2u, 0xc3u);
   mutate_second_value(".agpr_count", 1u, dynamic_has_accvgpr_bank ? 1u : 0u);
-  mutate_second_value(".sgpr_count", 32u, 104u);
+  mutate_second_value(".sgpr_count", 32u, second_fixed_stack_full_scalar_pressure ? 106u : 104u);
   return image;
 }
 

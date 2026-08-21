@@ -4372,6 +4372,76 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
             1u);
 }
 
+TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgprs) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object(
+      /*full_sampled_pressure=*/false, /*dynamic_flat_group_load=*/false,
+      /*dynamic_has_accvgpr_bank=*/false,
+      /*second_fixed_stack_full_scalar_pressure=*/true);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto full_pressure =
+      std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(full_pressure, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto transient = std::ranges::find(
+      result.resolved_moi_transient_sgpr_assignments, full_pressure->descriptor_file_offset,
+      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(transient, result.resolved_moi_transient_sgpr_assignments.end());
+  EXPECT_FALSE(transient->dispatch_id_sgpr);
+  const auto persistent = std::ranges::find(
+      result.resolved_moi_persistent_vgpr_assignments, full_pressure->descriptor_file_offset,
+      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(persistent, result.resolved_moi_persistent_vgpr_assignments.end())
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(persistent->dispatch_id_vgpr);
+  const auto full_access_site =
+      std::ranges::find_if(result.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
+        return site.container_name == "lds_helper" &&
+               site.site_kind == ConSanResourceSiteKind::Access;
+      });
+  ASSERT_NE(full_access_site, result.site_dispositions.end());
+  EXPECT_EQ(full_access_site->lowering_outcome, ConSanSiteLoweringOutcome::Patched)
+      << "lowering_reason=" << static_cast<unsigned>(full_access_site->lowering_reason)
+      << " resource_reason=" << static_cast<unsigned>(full_access_site->resource_reason)
+      << " text=" << full_access_site->text_offset;
+  const auto full_access_plan =
+      std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.text_offset == full_access_site->text_offset &&
+               plan.site_kind == ConSanResourceSiteKind::Access;
+      });
+  ASSERT_NE(full_access_plan, result.resource_plans.end());
+  EXPECT_NE(full_access_plan->source, ConSanRegisterAllocationSource::Unsupported)
+      << "reason=" << static_cast<unsigned>(full_access_plan->reason)
+      << " scratch=" << testing::PrintToString(full_access_plan->scratch_vgpr)
+      << " count=" << full_access_plan->scratch_vgpr_count;
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
+                               &ConSanSiteDispositionRecord::lowering_outcome),
+            4u)
+      << testing::PrintToString(result.site_dispositions);
+  const auto access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
+           std::ranges::find(patch.owner_descriptor_file_offsets,
+                             full_pressure->descriptor_file_offset) !=
+               patch.owner_descriptor_file_offsets.end();
+  });
+  ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(access->persistent_dispatch_id_private_offset);
+}
+
 TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   const std::array<uint32_t, 4> text_words = {
       build_v_mov_b32_e32(/*vdst=*/11, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
@@ -6475,6 +6545,13 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
+                               &ConSanSiteDispositionRecord::lowering_outcome),
+            kAccessCount)
+      << testing::PrintToString(result.site_dispositions);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());

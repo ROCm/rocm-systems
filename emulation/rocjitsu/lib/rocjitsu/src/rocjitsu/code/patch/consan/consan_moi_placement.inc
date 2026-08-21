@@ -1451,7 +1451,13 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   if (assigned_owner_count != owner_descriptor_offsets.size())
     return false;
   options.automatic_moi_private_epoch = false;
-  options.automatic_moi_private_dispatch_id = false;
+  // Owner/epoch/workgroup state and dispatch identity are independently
+  // placed. A full-pressure CDNA owner can admit the former in persistent
+  // VGPRs while still needing the hardware dispatch preload captured in
+  // private entry state. Only a selected dispatch VGPR pair supersedes that
+  // private representation.
+  if (selected->dispatch_id_vgpr)
+    options.automatic_moi_private_dispatch_id = false;
   options.moi_owner_vgpr = selected->owner_vgpr;
   options.moi_epoch_vgpr = selected->epoch_vgpr;
   options.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
@@ -6004,8 +6010,12 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           options.moi_transient_sgpr_assignments.empty() ||
           apply_moi_transient_sgpr_assignment(component_options, component);
       const bool component_needs_persistent_dispatch_vgprs =
-          needs_persistent_dispatch_vgprs && component_transient_state_resolved &&
+          (needs_persistent_dispatch_vgprs || options.automatic_moi_private_dispatch_id) &&
+          component_transient_state_resolved &&
           !moi_has_runtime_hardware_dispatch_id(component_options);
+      const uint32_t component_persistent_count =
+          persistent_count +
+          (component_needs_persistent_dispatch_vgprs && !needs_persistent_dispatch_vgprs ? 2u : 0u);
       for (uint64_t descriptor_offset : component) {
         const auto found = planning_state.context_by_descriptor.find(descriptor_offset);
         if (found == planning_state.context_by_descriptor.end() || found->second == nullptr) {
@@ -6040,7 +6050,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           component_limit = std::min<uint32_t>(component_limit, plan.ordinary_vgpr_limit);
       }
       const bool crosses_encoded_component_boundary =
-          component_base + persistent_count > component_encoded_limit;
+          component_base + component_persistent_count > component_encoded_limit;
       // Scalar state avoids descriptor growth even when trusted metadata says
       // an empty accumulator boundary can move. Prefer that smaller, more
       // conservative representation when it is legal across the complete
@@ -6049,10 +6059,11 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (crosses_encoded_component_boundary &&
           (options.moi_engine == ConSanMoiEngine::InlineShadow ||
            options.moi_engine == ConSanMoiEngine::Sampled) &&
-          !options.force_private_epoch && try_assign_scalar_persistent_state()) {
+          !options.force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
+          try_assign_scalar_persistent_state()) {
         return true;
       }
-      if (component_base + persistent_count > component_limit) {
+      if (component_base + component_persistent_count > component_limit) {
         const bool has_dynamic_stack_owner =
             std::ranges::any_of(component, [&](uint64_t descriptor_offset) {
               const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
@@ -6062,7 +6073,8 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         if (!crosses_encoded_component_boundary &&
             (options.moi_engine == ConSanMoiEngine::InlineShadow ||
              options.moi_engine == ConSanMoiEngine::Sampled) &&
-            !options.force_private_epoch && try_assign_scalar_persistent_state()) {
+            !options.force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
+            try_assign_scalar_persistent_state()) {
           return true;
         }
         if ((options.moi_engine == ConSanMoiEngine::InlineShadow ||
@@ -6073,7 +6085,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
               "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
               ") for a dynamic-stack CDNA owner with a full ordinary VGPR bank: component " +
               std::to_string(component_base) + ":" +
-              std::to_string(component_base + persistent_count) + " exceeds limit " +
+              std::to_string(component_base + component_persistent_count) + " exceeds limit " +
               std::to_string(component_limit));
           return false;
         }
@@ -6138,7 +6150,12 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
     }
     options.moi_init_owner_epoch = true;
     options.automatic_moi_persistent_vgprs = !options.moi_persistent_vgpr_assignments.empty();
-    if (needs_persistent_dispatch_vgprs && options.automatic_moi_persistent_vgprs) {
+    const bool assigned_persistent_dispatch_vgprs =
+        std::ranges::any_of(options.moi_persistent_vgpr_assignments,
+                            [](const ConSanMoiPersistentVgprAssignment &assignment) {
+                              return assignment.dispatch_id_vgpr.has_value();
+                            });
+    if (assigned_persistent_dispatch_vgprs) {
       if (!assigned_private_component)
         options.automatic_moi_private_dispatch_id = false;
       options.automatic_moi_dispatch_id_vgprs = true;
