@@ -8606,6 +8606,127 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
   }
 }
 
+TEST(ConSanMoi, Gfx1250FarFenceUsesDenseRelayWithAutomaticExecSave) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr size_t kOwnerWordCount = 33'000u;
+  const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
+    std::vector<uint32_t> words(9u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+    for (uint32_t index = 0; index < kAccessCount; ++index) {
+      words.push_back(0xD8340000u | index * sizeof(uint32_t));
+      words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    }
+    words.insert(words.end(), {
+                                  0xC4050018u, 0x40883804u,
+                                  0x00000005u, // buffer_load_b32 v4, v5, device
+                                  0xBFC00000u, // s_wait_loadcnt 0
+                                  0xEE0AC07Cu, 0x00080000u,
+                                  0x00000000u, // global_inv scope:device
+                                  0xBFC00000u, // s_wait_loadcnt 0
+                                  0xBE804EC1u, // s_barrier_signal -1
+                                  0xBF94FFFFu, // s_barrier_wait -1
+                              });
+    const size_t live_word_count = last_live - first_live + 1u;
+    words.resize(kOwnerWordCount - live_word_count - 1u,
+                 build_s_mov_b32(/*sdst=*/0u, scalar_positive_inline_u32(0u), kArch));
+    for (uint16_t sgpr = first_live; sgpr <= last_live; ++sgpr)
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, kArch));
+    words.push_back(build_s_endpgm(kArch));
+    return words;
+  };
+  const std::vector<uint32_t> first_words =
+      make_owner(/*first_live=*/16u, /*last_live=*/105u, /*dead_destination=*/0u);
+  const std::vector<uint32_t> second_words =
+      make_owner(/*first_live=*/0u, /*last_live=*/87u, /*dead_destination=*/88u);
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
+      first_words, second_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_init_owner_epoch = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = true;
+  options.moi_runtime_sample_stride = 65'536u;
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.max_patches = 128u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
+      /*access_record_capacity=*/128u, 0u, 0u, 0u, /*barrier_record_capacity=*/8u,
+      /*atomic_record_capacity=*/0u, /*fence_record_capacity=*/4u);
+
+  ASSERT_FALSE(options.moi_exec_save_sgpr);
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_NE(result.resolved_moi_transient_sgpr_assignments.front().exec_save_sgpr,
+            *result.resolved_moi_exec_save_sgpr);
+  EXPECT_TRUE(std::ranges::none_of(result.resolved_moi_transient_sgpr_assignments,
+                                   &ConSanMoiTransientSgprAssignment::spill_backed));
+  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(
+      result.moi_fence_candidates,
+      [](const ConSanMoiFenceCandidate &candidate) { return candidate.eligible; }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            2u * kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            4u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            2u)
+      << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const ConSanPatchInfo &fence : result.patches) {
+    if (fence.kind != ConSanPatchKind::TrampolineMoiFenceRecord)
+      continue;
+    ASSERT_EQ(fence.owner_descriptor_file_offsets.size(), 1u);
+    const uint64_t owner = fence.owner_descriptor_file_offsets.front();
+    const auto assignment =
+        std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                          &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+    const uint16_t owner_exec_save_sgpr =
+        assignment == result.resolved_moi_transient_sgpr_assignments.end()
+            ? *result.resolved_moi_exec_save_sgpr
+            : assignment->exec_save_sgpr;
+    const std::optional<uint16_t> call_return_sgpr =
+        assignment != result.resolved_moi_transient_sgpr_assignments.end() &&
+                assignment->spill_backed
+            ? assignment->call_return_sgpr
+            : std::optional<uint16_t>(static_cast<uint16_t>(owner_exec_save_sgpr + 6u));
+    ASSERT_TRUE(call_return_sgpr);
+    const std::vector<uint32_t> anchor_words =
+        text_words_at_offset(patched, fence.anchor_offset, sizeof(uint32_t));
+    ASSERT_EQ(anchor_words.size(), 1u);
+    bool uses_owner_local_call_return = false;
+    for (const ConSanPatchInfo &relay : result.patches) {
+      if (relay.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
+          relay.original_size <= sizeof(uint32_t) ||
+          std::ranges::find(relay.owner_descriptor_file_offsets, owner) ==
+              relay.owner_descriptor_file_offsets.end()) {
+        continue;
+      }
+      const auto displacement =
+          compute_sopp_branch_simm16(fence.anchor_offset, relay.anchor_offset + sizeof(uint32_t));
+      if (!displacement)
+        continue;
+      const auto expected =
+          instrumentation::build_s_call_i64(*call_return_sgpr, *displacement, kArch);
+      uses_owner_local_call_return |= expected && anchor_words.front() == *expected;
+    }
+    EXPECT_TRUE(uses_owner_local_call_return)
+        << "owner descriptor " << owner << " call-return s" << *call_return_sgpr
+        << " actual anchor word 0x" << std::hex << anchor_words.front() << std::dec;
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint16_t kExecSaveSgpr = 80u;

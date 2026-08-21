@@ -251,10 +251,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     };
     for (size_t host_index = result.patches.size(); host_index-- > 0u;) {
       const ConSanPatchInfo &host = result.patches[host_index];
-      // A relocatable dense host preserves at least one entry word before the
-      // local indirect island. Compact eight-word islands are not dispatchers.
+      // A relocatable dense host records the complete local indirect island;
+      // compact islands without displaced host ownership remain smaller.
       if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
-          host.original_size < (kMoiLocalIndirectIslandWords + 1u) * sizeof(uint32_t) ||
+          host.original_size < kMoiLocalIndirectIslandWords * sizeof(uint32_t) ||
           !owns_descriptor(host) || host_index + 1u >= result.patches.size())
         continue;
       const ConSanPatchInfo &dispatcher = result.patches[host_index + 1u];
@@ -263,7 +263,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         continue;
       uint64_t reservation_end = std::numeric_limits<uint64_t>::max();
       for (const ConSanPatchInfo &patch : result.patches) {
-        if (patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
+        if ((patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier ||
+             patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord) &&
             owns_descriptor(patch) && patch.trampoline_offset > dispatcher.trampoline_offset) {
           reservation_end = std::min(reservation_end, patch.trampoline_offset);
         }
@@ -297,6 +298,22 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           "ConSan MOI fence record patch lost its entry workgroup assignment");
       return;
     }
+    const std::optional<uint16_t> dense_call_return_sgpr =
+        candidate_options.automatic_moi_record_replay_sgpr_spill
+            ? candidate_options.moi_record_replay_call_return_sgpr
+            : (candidate_options.moi_exec_save_sgpr
+                   ? std::optional<uint16_t>(
+                         static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 6u))
+                   : std::nullopt);
+    const std::optional<uint16_t> dense_dispatch_key_sgpr =
+        candidate_options.automatic_moi_record_replay_sgpr_spill
+            ? candidate_options.moi_record_replay_dispatch_key_sgpr
+            : (candidate_options.moi_exec_save_sgpr
+                   ? std::optional<uint16_t>(
+                         static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 5u))
+                   : std::nullopt);
+    const auto dense_indirect_state = moi_indirect_jump_sgprs(candidate_options);
+    const auto dense_special_state = moi_special_state_sgprs(candidate_options);
     const bool direct_entry =
         compute_sopp_branch_simm16(fence.text_offset, cave_text_offset).has_value();
     uint64_t indirect_entry_island = 0;
@@ -386,7 +403,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       return;
     std::optional<DenseFenceRelay> dense_relay;
     if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-        planned.candidate.kernel_descriptor_file_offset && options.moi_exec_save_sgpr) {
+        planned.candidate.kernel_descriptor_file_offset && dense_call_return_sgpr &&
+        dense_dispatch_key_sgpr && dense_indirect_state && dense_special_state) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
       if (dense_relay &&
           !compute_sopp_branch_simm16(fence.text_offset, dense_relay->island_offset)) {
@@ -401,7 +419,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                 ? layout.fence_record_capacity
                 : record_count,
             layout.fence_records_offset, cave_text_offset, return_text_offset,
-            static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
+            *dense_call_return_sgpr,
             /*displaced_tail_words=*/{},
             planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
                                   : std::nullopt,
@@ -447,8 +465,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (entry_island_at_anchor) {
       // The indirect island written below occupies the relocated prefix.
     } else if (dense_relay) {
-      const auto call = instrumentation::build_s_call_i64(
-          static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), *fwd, arch);
+      const auto call = instrumentation::build_s_call_i64(*dense_call_return_sgpr, *fwd, arch);
       if (!call) {
         result.errors.emplace_back("ConSan MOI fence record patch could not encode dense call");
         return;
@@ -524,11 +541,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         return;
       }
       dispatcher_words.pop_back();
-      const uint16_t base = *options.moi_exec_save_sgpr;
-      const uint16_t key_sgpr = static_cast<uint16_t>(base + 5u);
+      const uint16_t key_sgpr = *dense_dispatch_key_sgpr;
       const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
-      const auto special_state = moi_special_state_sgprs(options);
-      if (!compare || !special_state) {
+      if (!compare) {
         result.errors.emplace_back(
             "ConSan MOI fence record patch could not extend dense dispatcher");
         return;
@@ -540,8 +555,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       const uint64_t matched_offset =
           dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
       if (!append_moi_scc_preserving_indirect_jump(
-              matched_words, matched_offset, placement->body_offset, base,
-              special_state->scc_save_sgpr, /*capture_scc=*/false, arch)) {
+              matched_words, matched_offset, placement->body_offset, dense_indirect_state->pc_sgpr,
+              dense_special_state->scc_save_sgpr, /*capture_scc=*/false, arch)) {
         result.errors.emplace_back(
             "ConSan MOI fence record patch could not encode dense dispatch target");
         return;
