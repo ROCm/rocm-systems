@@ -888,11 +888,6 @@ add_test(
         tests/unit/rocprof_compute_tui/widgets/test_collapsibles.py ${WORKING_DIR_OPTION}
 )
 
-# Build the roctx_recordfn pybind11 extension and its gtest.
-if(ENABLE_TESTS)
-    add_subdirectory(src/lib/roctx_recordfn)
-endif()
-
 if(TARGET test-roctx-recordfn)
     if(TEST_FROM_INSTALL)
         set(_rcfn_test_cmd tests/test-roctx-recordfn)
@@ -939,6 +934,14 @@ add_test(
         --junitxml=tests/test_torch_cpp_loader.xml ${COV_OPTION}
         tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py
         ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_kernel_names
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_kernel_names.xml ${COV_OPTION}
+        tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1135,6 +1138,7 @@ if(${ENABLE_COVERAGE})
         test_profile_torch_trace
         test_profile_triton_trace
         test_torch_cpp_loader
+        test_torch_trace_kernel_names
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
@@ -1234,17 +1238,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "rooflines*" EXCLUDE
-    PATTERN "__pycache__" EXCLUDE
-)
-# Install the roctx_recordfn sources so the runtime loader can build the
-# extension against the user's PyTorch environment on first use.
-install(
-    DIRECTORY src/lib/roctx_recordfn
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
-    COMPONENT main
-    PATTERN "_build" EXCLUDE
-    PATTERN "build" EXCLUDE
-    PATTERN "tests" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
 # src/roofline
@@ -1349,24 +1342,29 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so or source files
+# install librocprofiler-compute-tool.so
 if(NOT SKIP_NATIVE_TOOL_BUILD)
     install(
         TARGETS rocprofiler-compute-tool
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
-else()
-    # Install source files for runtime compilation. roctx_recordfn/ is
-    # installed by a dedicated rule above and excluded here.
-    install(
-        DIRECTORY src/lib/
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
-        COMPONENT main
-        PATTERN "_build" EXCLUDE
-        PATTERN "tests" EXCLUDE
-        PATTERN "roctx_recordfn" EXCLUDE
-    )
 endif()
+
+# Sources for runtime compilation.
+install(
+    DIRECTORY src/lib/
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
+    COMPONENT main
+    PATTERN "_build" EXCLUDE
+    PATTERN "build" EXCLUDE
+    PATTERN "tests" EXCLUDE
+    PATTERN "test" EXCLUDE
+    PATTERN "doc" EXCLUDE
+    PATTERN "docs" EXCLUDE
+    PATTERN "tools" EXCLUDE
+    PATTERN "googletest" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
 
 # top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
 configure_file(

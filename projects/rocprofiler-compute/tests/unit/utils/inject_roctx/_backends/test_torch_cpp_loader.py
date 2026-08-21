@@ -3,17 +3,19 @@
 
 """Unit tests for utils.inject_roctx._backends.torch_cpp_loader. No GPU.
 CMake build is end-to-end in test_torch_trace_coverage; this file stubs the
-loader to pin contracts: tier order, cache fingerprint, REBUILD env var,
+loader to pin contracts: tier order, artifact fingerprint, REBUILD env var,
 no-ninja policy.
 """
 
 import importlib
+import re
 import sys
 
 import common  # noqa: F401
 import pytest
 
 from utils.inject_roctx._backends import torch_cpp_loader as inject_roctx_loader
+from utils.inject_roctx._backends import torch_trace_fingerprint
 
 _FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
@@ -39,6 +41,13 @@ def test_compute_tag_returns_well_formed_string():
     assert src_value == "missing" or (
         len(src_value) == 12 and all(c in "0123456789abcdef" for c in src_value)
     ), f"unexpected src component {src_value!r} in tag {tag!r}"
+    import torch
+
+    torch_components = [p for p in parts if p.startswith("torch")]
+    assert len(torch_components) == 1, (
+        f"expected exactly one '_torch...' component in tag {tag!r}"
+    )
+    assert torch_components[0] == "torch" + torch.__version__.split("+", 1)[0]
 
 
 def test_compute_tag_is_stable_across_calls():
@@ -48,35 +57,35 @@ def test_compute_tag_is_stable_across_calls():
 
 def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
     """A single-byte edit to any input changes the fingerprint."""
-    cpp = tmp_path / "roctx_recordfn.cpp"
+    cpp = tmp_path / "torch_trace_collector.cpp"
     cmake = tmp_path / "CMakeLists.txt"
     cpp.write_text("// fingerprint test source\n")
     cmake.write_text("# fingerprint test buildfile\n")
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_FINGERPRINT_INPUTS",
-        (cpp, cmake),
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (cpp, cmake),
     )
 
-    baseline = inject_roctx_loader._source_fingerprint()
+    baseline = torch_trace_fingerprint.source_fingerprint()
     assert len(baseline) == 12
 
     for input_path in (cpp, cmake):
         original = input_path.read_bytes()
         input_path.write_bytes(original + b"\n# mutation\n")
-        mutated = inject_roctx_loader._source_fingerprint()
+        mutated = torch_trace_fingerprint.source_fingerprint()
         assert mutated != baseline, (
             f"editing {input_path.name} did not change the fingerprint"
         )
         input_path.write_bytes(original)
-        assert inject_roctx_loader._source_fingerprint() == baseline
+        assert torch_trace_fingerprint.source_fingerprint() == baseline
 
 
 def test_source_fingerprint_excludes_tool_version_file():
     """The tool ``VERSION`` file is not a fingerprint input."""
-    for path in inject_roctx_loader._FINGERPRINT_INPUTS:
+    for path in torch_trace_fingerprint.fingerprint_input_paths():
         assert path.name != "VERSION", (
-            f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
+            f"VERSION should not be in fingerprint_input_paths; saw {path}"
         )
 
 
@@ -86,53 +95,28 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
 ):
     """When no inputs are readable, the fingerprint is the ``"missing"`` sentinel."""
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_FINGERPRINT_INPUTS",
-        (tmp_path / "does_not_exist.cpp",),
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (tmp_path / "does_not_exist.cpp",),
     )
-    assert inject_roctx_loader._source_fingerprint() == "missing"
+    assert torch_trace_fingerprint.source_fingerprint() == "missing"
 
 
-def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
+def test_source_fingerprint_separates_input_boundaries(tmp_path, monkeypatch):
     """Reshuffling bytes across input boundaries changes the fingerprint."""
     a = tmp_path / "a.cpp"
     b = tmp_path / "b.txt"
-    monkeypatch.setattr(inject_roctx_loader, "_FINGERPRINT_INPUTS", (a, b))
+    monkeypatch.setattr(
+        torch_trace_fingerprint, "fingerprint_input_paths", lambda: (a, b)
+    )
 
     a.write_bytes(b"AB")
     b.write_bytes(b"C")
-    fp1 = inject_roctx_loader._source_fingerprint()
+    fp1 = torch_trace_fingerprint.source_fingerprint()
     a.write_bytes(b"A")
     b.write_bytes(b"BC")
-    fp2 = inject_roctx_loader._source_fingerprint()
+    fp2 = torch_trace_fingerprint.source_fingerprint()
     assert fp1 != fp2, "fingerprint collided across an input boundary"
-
-
-def test_cmake_and_runtime_compute_identical_fingerprint():
-    """The loader and CMake compute the same source fingerprint."""
-    import subprocess
-
-    cmake_dir = inject_roctx_loader._SO_SOURCE_DIR
-    assert cmake_dir.is_dir(), f"missing cmake source dir at {cmake_dir}"
-
-    snippet = (
-        "import sys, pathlib; "
-        f"sys.path.insert(0, str(pathlib.Path('{cmake_dir}/../..').resolve())); "
-        "from utils.inject_roctx._backends.torch_cpp_loader "
-        "import _source_fingerprint; "
-        "print(_source_fingerprint())"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", snippet],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    cmake_side = result.stdout.strip()
-    runtime_side = inject_roctx_loader._source_fingerprint()
-    assert cmake_side == runtime_side, (
-        f"install-time fingerprint {cmake_side!r} != runtime {runtime_side!r}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -140,31 +124,136 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
 # ---------------------------------------------------------------------------
 
 
-def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
-    """The source must not include ``<torch/{extension,all,torch}.h>``."""
-    cpp_path = inject_roctx_loader._SO_SOURCE
-    assert cpp_path.is_file(), f"missing C++ source at {cpp_path}"
-    active_lines = [
-        line
-        for line in cpp_path.read_text().splitlines()
-        if not line.lstrip().startswith("//")
+def torch_trace_collector_module_sources():
+    """Collector ``*.cpp`` and ``*.h`` files from the fingerprint inputs."""
+    return sorted(
+        p
+        for p in torch_trace_fingerprint.fingerprint_input_paths()
+        if p.suffix in (".cpp", ".h") and p.parent == inject_roctx_loader._SO_SOURCE_DIR
+    )
+
+
+def cmake_declared_sources():
+    """C++ files named in ``add_library`` and ``_ttc_headers`` in CMakeLists.txt."""
+    text = inject_roctx_loader._SO_BUILDFILE.read_text()
+    names = set()
+
+    header_block = re.search(r"set\(_ttc_headers(.*?)\)", text, re.DOTALL)
+    if header_block:
+        names.update(re.findall(r"[\w.-]+\.(?:hpp|hxx|h)(?!\w)", header_block.group(1)))
+
+    for args in re.findall(r"add_library\((.*?)\)", text, re.DOTALL):
+        names.update(re.findall(r"[\w.-]+\.(?:cpp|cxx|cc)(?!\w)", args))
+
+    return names
+
+
+def test_fingerprint_inputs_cover_every_build_input():
+    """Every file the build consumes is a fingerprint input."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+
+    declared = cmake_declared_sources()
+    assert declared, (
+        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        "the build file changed shape and this parser needs updating"
+    )
+
+    input_names = {p.name for p in torch_trace_fingerprint.fingerprint_input_paths()}
+    missing = declared - input_names
+    assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
+
+    for required in (
+        "CMakeLists.txt",
+        "synchronized.hpp",
+        "gsl_assert.h",
+    ):
+        assert required in input_names, f"{required} is not a fingerprint input"
+
+
+def test_required_input_paths_cover_every_build_input():
+    """Every file the build consumes is a required input."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+
+    declared = cmake_declared_sources()
+    assert declared, (
+        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        "the build file changed shape and this parser needs updating"
+    )
+
+    required_names = {p.name for p in torch_trace_fingerprint.required_input_paths()}
+    missing = declared - required_names
+    assert not missing, f"build inputs absent from the required list: {sorted(missing)}"
+
+    for required in (
+        "CMakeLists.txt",
+        "synchronized.hpp",
+        "gsl_assert.h",
+    ):
+        assert required in required_names, f"{required} is not a required input"
+
+
+def test_required_input_paths_include_missing_files(tmp_path, monkeypatch):
+    """``required_input_paths()`` includes collector files that are not on disk."""
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", tmp_path)
+    monkeypatch.setattr(
+        torch_trace_fingerprint, "_SO_BUILDFILE", tmp_path / "CMakeLists.txt"
+    )
+    names = {path.name for path in torch_trace_fingerprint.required_input_paths()}
+    for name in torch_trace_fingerprint._COLLECTOR_SOURCE_NAMES:
+        assert name in names
+    for name in torch_trace_fingerprint._COLLECTOR_HEADER_NAMES:
+        assert name in names
+    assert "CMakeLists.txt" in names
+    assert "synchronized.hpp" in names
+    assert "gsl_assert.h" in names
+    assert not (tmp_path / "torch_trace_collector.cpp").exists()
+    assert not (tmp_path / "leaf_context.h").exists()
+
+
+def test_required_input_paths_exist_in_the_source_tree():
+    """Every required input exists in the source tree."""
+    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    if not src_dir.is_dir():
+        pytest.skip(f"module sources not present at {src_dir}")
+    missing = [
+        path.name
+        for path in torch_trace_fingerprint.required_input_paths()
+        if not path.exists()
     ]
-    active_src = "\n".join(active_lines)
+    assert not missing, f"required inputs are absent: {missing}"
+
+
+def test_torch_trace_collector_source_avoids_torch_umbrella_headers():
+    """No module source may include ``<torch/{extension,all,torch}.h>``."""
+    sources = torch_trace_collector_module_sources()
+    assert sources, f"no C++ sources under {inject_roctx_loader._SO_SOURCE_DIR}"
 
     forbidden = (
         "<torch/extension.h>",
         "<torch/all.h>",
         "<torch/torch.h>",
     )
-    for header in forbidden:
-        directive = f"#include {header}"
-        assert directive not in active_src, f"must not include {header}"
+    for path in sources:
+        active_lines = [
+            line
+            for line in path.read_text().splitlines()
+            if not line.lstrip().startswith("//")
+        ]
+        active_src = "\n".join(active_lines)
+        for header in forbidden:
+            directive = f"#include {header}"
+            assert directive not in active_src, f"{path.name} must not include {header}"
 
 
-def test_roctx_recordfn_source_uses_narrow_includes():
-    """The source includes only the required narrow PyTorch headers."""
-    cpp_path = inject_roctx_loader._SO_SOURCE
-    src = cpp_path.read_text()
+def test_torch_trace_collector_source_uses_narrow_includes():
+    """The module includes the required narrow PyTorch headers."""
+    combined = "\n".join(
+        path.read_text() for path in torch_trace_collector_module_sources()
+    )
 
     required = (
         "#include <ATen/record_function.h>",
@@ -173,7 +262,7 @@ def test_roctx_recordfn_source_uses_narrow_includes():
         "#include <pybind11/stl.h>",
     )
     for directive in required:
-        assert directive in src, f"must include {directive}"
+        assert directive in combined, f"module must include {directive}"
 
 
 def test_cmake_buildfile_does_not_override_output_name():
@@ -205,12 +294,30 @@ def test_cmake_buildfile_strips_lib_prefix():
     assert re.search(r'PREFIX\s+""', active_src), 'must set PREFIX ""'
 
 
+def test_cmake_buildfile_hardcodes_cxx11_abi():
+    """Official ROCm libtorch 2.10+ is CXX11 ABI."""
+    cmake_path = inject_roctx_loader._SO_BUILDFILE
+    active_lines = [
+        line
+        for line in cmake_path.read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    active_src = "\n".join(active_lines)
+
+    assert "PUBLIC _GLIBCXX_USE_CXX11_ABI=1" in active_src, (
+        "the collector must compile with CXX11 ABI to match ROCm libtorch 2.10+"
+    )
+    assert "TORCH_TRACE_CXX11_ABI" not in active_src, (
+        "ABI must not be a configure cache variable"
+    )
+
+
 def test_loader_and_cmake_agree_on_artifact_filename_shape():
     """The loader and CMake produce identical artifact filenames."""
     import inspect
 
-    src = inspect.getsource(inject_roctx_loader._try_jit)
-    assert 'f"roctx_recordfn-{tag}.so"' in src, (
+    src = inspect.getsource(inject_roctx_loader._try_runtime_build)
+    assert 'f"torch_trace_collector-{tag}.so"' in src, (
         "artifact filename has changed; update this test accordingly"
     )
 
@@ -239,10 +346,10 @@ def test_loader_source_never_recommends_installing_ninja():
 
 
 def test_c_tier_names_matches_the_tier_ladder():
-    """``C_TIER_NAMES`` enumerates exactly the prebuilt and JIT tiers."""
+    """``C_TIER_NAMES`` enumerates exactly the prebuilt and runtime-build tiers."""
     assert inject_roctx_loader.C_TIER_NAMES == frozenset((
         inject_roctx_loader.TIER_PREBUILT,
-        inject_roctx_loader.TIER_JIT,
+        inject_roctx_loader.TIER_RUNTIME_BUILD,
     ))
 
 
@@ -255,40 +362,12 @@ def test_force_python_fallback_returns_none():
     assert inject_roctx_loader.load(force_python_fallback=True).module is None
 
 
-def test_install_cached_so_overwrites_stale_artifact(tmp_path):
-    """``_install_cached_so`` overwrites an existing cached ``.so``."""
-    src = tmp_path / "build" / "roctx_recordfn.so"
-    src.parent.mkdir()
-    src.write_bytes(b"new content")
-    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
-    cached.parent.mkdir()
-    cached.write_bytes(b"STALE content -- must be overwritten")
-
-    inject_roctx_loader._install_cached_so(src, cached)
-    assert cached.read_bytes() == b"new content", (
-        "cache copy did not overwrite the existing cached .so"
-    )
-
-
-def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
-    """``_install_cached_so`` is a no-op when the source ``.so`` is missing."""
-    src = tmp_path / "build" / "does_not_exist.so"
-    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
-    cached.parent.mkdir()
-    cached.write_bytes(b"good content")
-
-    inject_roctx_loader._install_cached_so(src, cached)
-    assert cached.read_bytes() == b"good content", (
-        "missing src must leave cached .so untouched"
-    )
-
-
-def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):
-    """``_jit_cache_dir`` creates the directory on first call and is idempotent."""
+def test_user_cache_dir_is_creatable(monkeypatch, tmp_path):
+    """``_user_cache_dir`` creates the directory on first call and is idempotent."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    d = inject_roctx_loader._jit_cache_dir()
+    d = inject_roctx_loader._user_cache_dir()
     assert d.exists() and d.is_dir()
-    assert inject_roctx_loader._jit_cache_dir() == d
+    assert inject_roctx_loader._user_cache_dir() == d
 
 
 def test_cmake_executable_honors_env_var_then_falls_back(monkeypatch):
@@ -320,47 +399,165 @@ def test_no_prebuilt_returns_none_for_unknown_tag(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# JIT failure marker
+# _try_runtime_build: build directory and finder handoff
 # ---------------------------------------------------------------------------
 
 
-def test_jit_failure_marker_round_trip(monkeypatch, tmp_path):
-    """``_previous_jit_failure`` reads the reason from ``_record_jit_failure``."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = _FAKE_TAG
-
-    assert inject_roctx_loader._previous_jit_failure(tag) is None
-    inject_roctx_loader._record_jit_failure(tag, RuntimeError("ninja missing"))
-    recorded = inject_roctx_loader._previous_jit_failure(tag)
-    assert recorded is not None
-    assert "ninja missing" in recorded
-    assert "RuntimeError" in recorded
-
-
-def test_jit_failure_marker_cleared_on_demand(monkeypatch, tmp_path):
-    """_clear_jit_failure() must remove the marker and be idempotent."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = _FAKE_TAG
-
-    inject_roctx_loader._record_jit_failure(tag, RuntimeError("x"))
-    assert inject_roctx_loader._previous_jit_failure(tag) is not None
-    inject_roctx_loader._clear_jit_failure(tag)
-    assert inject_roctx_loader._previous_jit_failure(tag) is None
-    inject_roctx_loader._clear_jit_failure(tag)
-
-
-# ---------------------------------------------------------------------------
-# _try_jit: cache-hit path
-# ---------------------------------------------------------------------------
+def _set_so_inputs_present(monkeypatch, tmp_path):
+    """Point the loader at synthetic source files."""
+    src_dir = tmp_path / "torch_trace_collector"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    cpp = src_dir / "torch_trace_collector.cpp"
+    module_cpp = src_dir / "torch_trace_collector_module.cpp"
+    cml = src_dir / "CMakeLists.txt"
+    cpp.write_text("// stub\n")
+    module_cpp.write_text("// stub\n")
+    cml.write_text("# stub\n")
+    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE_DIR", src_dir)
+    monkeypatch.setattr(inject_roctx_loader, "_SO_BUILDFILE", cml)
+    monkeypatch.setattr(
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (cpp, module_cpp, cml),
+    )
+    monkeypatch.setattr(
+        torch_trace_fingerprint,
+        "required_input_paths",
+        lambda: (cpp, module_cpp, cml),
+    )
+    return src_dir
 
 
-def test_try_jit_returns_cache_hit_without_invoking_cmake(monkeypatch, tmp_path):
-    """An on-disk cached ``.so`` is loaded directly, no cmake invocation."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    cache_dir = inject_roctx_loader._jit_cache_dir()
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    cached_so.write_bytes(b"stub-so")
+def _patch_finder(monkeypatch, *, artifact_path=None, error=None):
+    """Replace ``NativeToolFinder`` with a subclass that records how the loader
+    constructed it and resolves without running cmake.
 
+    Returns the list of instances the loader created.
+    """
+    from utils.native_tool_finder import NativeToolFinder
+
+    instances = []
+
+    class _RecordingFinder(NativeToolFinder):
+        def __init__(self, root_path, **kwargs):
+            super().__init__(root_path, **kwargs)
+            instances.append(self)
+
+        def get_artifact_path(self):
+            if error is not None:
+                raise error
+            return artifact_path
+
+    monkeypatch.setattr("utils.native_tool_finder.NativeToolFinder", _RecordingFinder)
+    return instances
+
+
+def test_importing_the_loader_pulls_in_neither_the_finder_nor_torch():
+    """The finder is imported only when a runtime build runs, so the loader
+    remains importable where the ``utils`` package is absent.
+    """
+    import os
+    import subprocess
+
+    code = (
+        "import sys\n"
+        "import utils.inject_roctx._backends.torch_cpp_loader\n"
+        "assert 'utils.native_tool_finder' not in sys.modules, 'finder imported'\n"
+        "assert 'torch' not in sys.modules, 'torch imported'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env={
+            **os.environ,
+            "PYTHONPATH": str(inject_roctx_loader._NATIVE_TOOL_ROOT),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_is_writable_uses_the_parent_for_a_missing_directory(tmp_path):
+    """Writability of a missing directory is decided by its parent."""
+    assert inject_roctx_loader._is_writable(tmp_path / "_build") is True
+    assert inject_roctx_loader._is_writable(tmp_path / "absent" / "_build") is False
+
+
+def test_runtime_build_path_uses_the_source_tree_when_writable(tmp_path):
+    """A writable build directory in the source tree is used unchanged."""
+    source_build_path = tmp_path / "lib" / "_build"
+    source_build_path.parent.mkdir(parents=True)
+    assert (
+        inject_roctx_loader._runtime_build_path(source_build_path) == source_build_path
+    )
+
+
+def test_runtime_build_path_falls_back_to_the_user_cache(monkeypatch, tmp_path):
+    """A read-only source tree moves the build directory under the user cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(inject_roctx_loader, "_is_writable", lambda _p: False)
+
+    build_path = inject_roctx_loader._runtime_build_path(tmp_path / "lib" / "_build")
+
+    assert build_path is not None
+    assert build_path.name == "_build"
+    assert str(tmp_path / "cache") in str(build_path), (
+        f"build directory must live under the user cache; saw {build_path}"
+    )
+
+
+def test_runtime_build_skips_when_a_required_source_is_absent(monkeypatch, tmp_path):
+    """A missing required source skips the runtime build."""
+    src_dir = tmp_path / "torch_trace_collector"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "CMakeLists.txt").write_text("# stub\n")
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", src_dir)
+    monkeypatch.setattr(
+        torch_trace_fingerprint, "_SO_BUILDFILE", src_dir / "CMakeLists.txt"
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_cmake_executable",
+        lambda: pytest.fail("cmake was invoked"),
+    )
+    diagnostics: list[tuple[str, str]] = []
+    assert (
+        inject_roctx_loader._try_runtime_build(_FAKE_TAG, diagnostics=diagnostics)
+        is None
+    )
+    joined = " ".join(msg for _, msg in diagnostics)
+    assert "torch_trace_collector.cpp" in joined, (
+        f"absent collector source not reported; saw {diagnostics!r}"
+    )
+    assert "leaf_context.h" in joined, (
+        f"absent collector header not reported; saw {diagnostics!r}"
+    )
+
+
+def test_runtime_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
+    """Absence of cmake on ``PATH`` skips the tier without constructing a finder."""
+    _set_so_inputs_present(monkeypatch, tmp_path)
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: None)
+    instances = _patch_finder(monkeypatch)
+
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is None
+    assert instances == [], "cmake absence must be detected before the finder runs"
+
+
+def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
+    monkeypatch, tmp_path
+):
+    """Runtime cmake receives the tagged artifact, interpreter, and fingerprint."""
+    _set_so_inputs_present(monkeypatch, tmp_path)
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_runtime_build_path",
+        lambda _p, diagnostics=None: tmp_path / "_build",
+    )
+    so_path = tmp_path / f"torch_trace_collector-{_FAKE_TAG}.so"
+    so_path.write_bytes(b"stub-so")
+    instances = _patch_finder(monkeypatch, artifact_path=so_path)
     sentinel = object()
     monkeypatch.setattr(
         inject_roctx_loader,
@@ -368,259 +565,150 @@ def test_try_jit_returns_cache_hit_without_invoking_cmake(monkeypatch, tmp_path)
         lambda _n, _p: sentinel,
     )
 
-    def fail_subprocess(*_a, **_k):
-        pytest.fail("subprocess.run must not fire on cache hit")
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is sentinel
-
-
-def test_try_jit_force_rebuild_bypasses_cache(monkeypatch, tmp_path):
-    """``force_rebuild=True`` ignores the cache and reaches the build path."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    cache_dir = inject_roctx_loader._jit_cache_dir()
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    cached_so.write_bytes(b"stale")
-
-    def must_not_import(_n, _p):
-        pytest.fail("cache hit must not be consulted under force_rebuild")
-
-    monkeypatch.setattr(
-        inject_roctx_loader, "_import_module_from_path", must_not_import
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is sentinel
+    assert len(instances) == 1, f"expected one finder, saw {instances!r}"
+    finder = instances[0]
+    assert finder.artifact_name == f"torch_trace_collector-{_FAKE_TAG}.so"
+    assert finder.build_target == f"torch_trace_collector-{_FAKE_TAG}", (
+        "the build must be scoped to the extension target"
     )
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "missing.cpp")
-
-    assert inject_roctx_loader._try_jit(_FAKE_TAG, force_rebuild=True) is None
-
-
-# ---------------------------------------------------------------------------
-# _try_jit: cmake build path
-# ---------------------------------------------------------------------------
-
-
-class _StubCompleted:
-    """Minimal ``subprocess.CompletedProcess`` stand-in."""
-
-    def __init__(self, returncode=0, stdout="", stderr=""):
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-
-
-def _set_so_inputs_present(monkeypatch, tmp_path):
-    """Point the loader at synthetic source files."""
-    src_dir = tmp_path / "roctx_recordfn"
-    src_dir.mkdir(parents=True, exist_ok=True)
-    cpp = src_dir / "roctx_recordfn.cpp"
-    cml = src_dir / "CMakeLists.txt"
-    cpp.write_text("// stub\n")
-    cml.write_text("# stub\n")
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE_DIR", src_dir)
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", cpp)
-    monkeypatch.setattr(inject_roctx_loader, "_SO_BUILDFILE", cml)
-    return src_dir
-
-
-def test_try_jit_skips_when_sources_missing(monkeypatch, tmp_path):
-    """``_try_jit`` returns ``None`` when sources are missing (no cache hit)."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "nonexistent.cpp")
-    monkeypatch.setattr(
-        inject_roctx_loader, "_SO_BUILDFILE", tmp_path / "nonexistent.txt"
+    assert f"-DTORCH_TRACE_PYTHON={sys.executable}" in finder.configure_options, (
+        f"-DTORCH_TRACE_PYTHON must equal sys.executable; "
+        f"saw {finder.configure_options!r}"
+    )
+    assert (
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={_FAKE_TAG.rpartition('_src')[2]}"
+        in finder.configure_options
+    ), (
+        f"-DTORCH_TRACE_SOURCE_FINGERPRINT must be the tag's src suffix; "
+        f"saw {finder.configure_options!r}"
+    )
+    assert "-DBUILD_TORCH_TRACE_COLLECTOR=ON" in finder.configure_options, (
+        "the extension must be required so an absent torch is an error"
+    )
+    assert not any(
+        opt.startswith("-DTORCH_TRACE_CXX11_ABI=") for opt in finder.configure_options
+    ), (
+        "CXX11 ABI is hardcoded in CMakeLists.txt; the loader must not pass it; "
+        f"saw {finder.configure_options!r}"
+    )
+    assert finder.cmake_executable == "/fake/cmake"
+    assert finder.search_installed is True
+    assert finder.reuse_built_artifact is True, (
+        "the tag identifies the sources, so an artifact already built under it "
+        "must be imported without configuring again"
     )
 
-    def fail_subprocess(*_a, **_k):
-        pytest.fail("subprocess.run must not be called when sources are missing")
 
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-
-
-def test_try_jit_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
-    """Absence of cmake on ``PATH`` does not write a failure marker."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: None)
-
-    def fail_subprocess(*_a, **_k):
-        pytest.fail("subprocess.run must not be called when cmake is absent")
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None
-
-
-def test_try_jit_short_circuits_on_prior_failure(monkeypatch, tmp_path):
-    """A prior failure marker vetoes ``_try_jit``."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+def test_runtime_build_force_rebuild_discards_the_build_directory(
+    monkeypatch, tmp_path
+):
+    """``force_rebuild`` discards the build directory and skips the installed search."""
     _set_so_inputs_present(monkeypatch, tmp_path)
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-    inject_roctx_loader._record_jit_failure(
-        _FAKE_TAG,
-        RuntimeError("earlier failure"),
+    build_path = tmp_path / "_build"
+    stale = build_path / "CMakeCache.txt"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("stale cache\n")
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_runtime_build_path",
+        lambda _p, diagnostics=None: build_path,
     )
-
-    def fail_subprocess(*_a, **_k):
-        pytest.fail("subprocess.run must not fire when marker is present")
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-
-
-def test_try_jit_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
-    """``_try_jit`` passes ``-DTORCH_TRACE_PYTHON=sys.executable`` to cmake."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-
-    invocations = []
-
-    def fake_run(argv, **_kw):
-        invocations.append(list(argv))
-        return _StubCompleted(returncode=0)
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
-    cache_dir = inject_roctx_loader._jit_cache_dir()
-    build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    produced.parent.mkdir(parents=True, exist_ok=True)
-    produced.write_bytes(b"stub-so")
+    so_path = tmp_path / f"torch_trace_collector-{_FAKE_TAG}.so"
+    so_path.write_bytes(b"stub-so")
+    instances = _patch_finder(monkeypatch, artifact_path=so_path)
     monkeypatch.setattr(
         inject_roctx_loader,
         "_import_module_from_path",
         lambda _n, _p: object(),
     )
 
-    inject_roctx_loader._try_jit(_FAKE_TAG)
+    result = inject_roctx_loader._try_runtime_build(_FAKE_TAG, force_rebuild=True)
 
-    assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
-    configure_argv = invocations[0]
-    runtime_python_flag = f"-DTORCH_TRACE_PYTHON={sys.executable}"
-    assert runtime_python_flag in configure_argv, (
-        f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
-    )
-    build_argv = invocations[1]
-    assert build_argv[1] == "--build", (
-        f"second invocation must be `cmake --build`, saw {build_argv!r}"
-    )
-
-
-def test_try_jit_records_failure_marker_on_configure_failure(monkeypatch, tmp_path):
-    """A non-zero configure return code writes a JIT failure marker."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-
-    def fake_run(argv, **_kw):
-        return _StubCompleted(
-            returncode=1,
-            stderr="CMake Error: Could not find Torch (missing: TORCH_DIR)\n",
-        )
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-    marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
-    assert marker is not None
-    assert inject_roctx_loader.TIER_JIT in marker
-    assert "Could not find Torch" in marker, (
-        f"marker must preserve stderr tail; saw {marker!r}"
-    )
-
-
-def test_try_jit_records_failure_marker_on_build_failure(monkeypatch, tmp_path):
-    """A non-zero build return code writes a JIT failure marker."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-
-    call_count = [0]
-
-    def fake_run(argv, **_kw):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return _StubCompleted(returncode=0)
-        return _StubCompleted(
-            returncode=2,
-            stderr="error: undefined reference to `roctxRangePushA'\n",
-        )
-
-    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-    marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
-    assert marker is not None
-    assert inject_roctx_loader.TIER_JIT in marker
-    assert "undefined reference" in marker
-
-
-def test_try_jit_records_failure_marker_when_so_missing(monkeypatch, tmp_path):
-    """A successful build with no ``.so`` output writes a failure marker."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-    monkeypatch.setattr(
-        inject_roctx_loader.subprocess,
-        "run",
-        lambda *a, **k: _StubCompleted(returncode=0),
-    )
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-    marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
-    assert marker is not None
-    assert inject_roctx_loader.TIER_JIT in marker
-    assert "missing" in marker
-
-
-def test_try_jit_cleans_build_dir_on_success(monkeypatch, tmp_path):
-    """The build directory is removed after a successful build."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
-    monkeypatch.setattr(
-        inject_roctx_loader.subprocess,
-        "run",
-        lambda *a, **k: _StubCompleted(returncode=0),
-    )
-
-    cache_dir = inject_roctx_loader._jit_cache_dir()
-    build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    produced.parent.mkdir(parents=True, exist_ok=True)
-    produced.write_bytes(b"stub-so")
-    leftover = build_dir / "CMakeFiles"
-    leftover.mkdir(exist_ok=True)
-    (leftover / "stale.o").write_bytes(b"x")
-
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_import_module_from_path",
-        lambda _n, _p: object(),
-    )
-
-    result = inject_roctx_loader._try_jit(_FAKE_TAG)
     assert result is not None
-    assert not build_dir.exists(), (
-        "build dir must be removed on success to bound cache disk usage"
+    assert not stale.exists(), "force_rebuild must discard the stale build directory"
+    assert instances[0].search_installed is False, (
+        "force_rebuild must not resolve to an installed artifact"
     )
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    assert cached_so.exists() and cached_so.read_bytes() == b"stub-so", (
-        "produced .so must have been copied to the cache before cleanup"
+    assert instances[0].reuse_built_artifact is False, (
+        "force_rebuild must not reuse an artifact from the build directory"
     )
 
 
-def test_try_jit_keeps_build_dir_on_failure(monkeypatch, tmp_path):
-    """Preserve the build dir on failure for post-mortem inspection."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+def test_runtime_build_returns_none_and_classifies_a_cmake_failure(
+    monkeypatch, tmp_path
+):
+    """A failing build is reported in the diagnostic trail and yields ``None``."""
     _set_so_inputs_present(monkeypatch, tmp_path)
     monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     monkeypatch.setattr(
-        inject_roctx_loader.subprocess,
-        "run",
-        lambda *a, **k: _StubCompleted(returncode=1, stderr="boom\n"),
+        inject_roctx_loader,
+        "_runtime_build_path",
+        lambda _p, diagnostics=None: tmp_path / "_build",
+    )
+    instances = _patch_finder(
+        monkeypatch,
+        error=RuntimeError(
+            "Failed to execute command: cmake\n"
+            "CMake Error: Could not find Torch (missing: TORCH_DIR)"
+        ),
     )
 
-    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
-    build_dir = inject_roctx_loader._jit_cache_dir() / f"cmake-build-{_FAKE_TAG}"
-    assert build_dir.exists(), "build dir must survive a failure"
+    diagnostics: list[tuple[str, str]] = []
+    result = inject_roctx_loader._try_runtime_build(_FAKE_TAG, diagnostics=diagnostics)
+
+    assert result is None
+    assert len(instances) == 1, f"expected one finder, saw {len(instances)}"
+    joined = " ".join(msg for _, msg in diagnostics).lower()
+    assert "libtorch" in joined, (
+        f"the cmake failure was not reported to the user: {diagnostics!r}"
+    )
+
+
+def test_runtime_build_retries_once_on_import_failure(monkeypatch, tmp_path):
+    """Import failure unlinks a file under the build directory, retries once,
+    and does not unlink a file outside it.
+    """
+    _set_so_inputs_present(monkeypatch, tmp_path)
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
+    build_path = tmp_path / "_build"
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_runtime_build_path",
+        lambda _p, diagnostics=None: build_path,
+    )
+    so_path = build_path / "lib" / f"torch_trace_collector-{_FAKE_TAG}.so"
+    so_path.parent.mkdir(parents=True)
+    so_path.write_bytes(b"stub-so")
+    so_path_outside_build = (
+        tmp_path / "install" / f"torch_trace_collector-{_FAKE_TAG}.so"
+    )
+    so_path_outside_build.parent.mkdir(parents=True)
+    so_path_outside_build.write_bytes(b"stub-so")
+    instances = _patch_finder(monkeypatch, artifact_path=so_path)
+    import_count = 0
+    sentinel = object()
+
+    def import_module(_name, _path):
+        nonlocal import_count
+        import_count += 1
+        if import_count == 1:
+            raise ImportError("failed")
+        return sentinel
+
+    monkeypatch.setattr(inject_roctx_loader, "_import_module_from_path", import_module)
+
+    assert inject_roctx_loader._try_runtime_build(_FAKE_TAG) is sentinel
+    assert not so_path.exists()
+    inject_roctx_loader._unlink_runtime_build_artifact(
+        so_path_outside_build, build_path
+    )
+    assert so_path_outside_build.is_file()
+    assert import_count == 2
+    assert len(instances) == 2, f"expected two finders, saw {len(instances)}"
+    assert instances[1].search_installed is False
+    assert instances[1].reuse_built_artifact is False
 
 
 # ---------------------------------------------------------------------------
@@ -630,9 +718,7 @@ def test_try_jit_keeps_build_dir_on_failure(monkeypatch, tmp_path):
 
 def test_explain_cmake_failure_classifies_torch_not_found():
     reason, hint = inject_roctx_loader._explain_cmake_failure(
-        "configure",
-        RuntimeError("rc=1"),
-        "CMake Error: Could not find Torch (missing: TORCH_DIR)\n",
+        RuntimeError("CMake Error: Could not find Torch (missing: TORCH_DIR)")
     )
     assert "libtorch" in reason.lower()
     assert "torch" in hint.lower()
@@ -640,9 +726,7 @@ def test_explain_cmake_failure_classifies_torch_not_found():
 
 def test_explain_cmake_failure_classifies_roctx_not_found():
     reason, hint = inject_roctx_loader._explain_cmake_failure(
-        "configure",
-        RuntimeError("rc=1"),
-        "find_library failed: rocprofiler-sdk-roctx not found\n",
+        RuntimeError("find_library failed: rocprofiler-sdk-roctx not found")
     )
     assert "roctx" in reason.lower() or "rocprofiler-sdk-roctx" in reason.lower()
     assert "rocm_path" in hint.lower() or "/opt/rocm" in hint.lower()
@@ -650,9 +734,7 @@ def test_explain_cmake_failure_classifies_roctx_not_found():
 
 def test_explain_cmake_failure_classifies_missing_cxx_compiler():
     reason, hint = inject_roctx_loader._explain_cmake_failure(
-        "configure",
-        RuntimeError("rc=1"),
-        "No CMAKE_CXX_COMPILER could be found.\n",
+        RuntimeError("No CMAKE_CXX_COMPILER could be found.")
     )
     assert "compiler" in reason.lower()
     assert "g++" in hint.lower() or "clang" in hint.lower()
@@ -661,16 +743,12 @@ def test_explain_cmake_failure_classifies_missing_cxx_compiler():
 def test_explain_cmake_failure_never_recommends_installing_ninja():
     """cmake-tier hints must not recommend installing ninja."""
     samples = [
-        (RuntimeError("rc=1"), "CMake Error: ninja not found"),
-        (RuntimeError("rc=1"), "Could not find Torch"),
-        (RuntimeError("rc=1"), ""),
+        RuntimeError("CMake Error: ninja not found"),
+        RuntimeError("Could not find Torch"),
+        RuntimeError("rc=1"),
     ]
-    for err, stderr in samples:
-        reason, hint = inject_roctx_loader._explain_cmake_failure(
-            "configure",
-            err,
-            stderr,
-        )
+    for err in samples:
+        reason, hint = inject_roctx_loader._explain_cmake_failure(err)
         forbidden = ("install ninja", "pip install ninja", "apt install ninja")
         joined = (reason + " " + hint).lower()
         for token in forbidden:
@@ -685,36 +763,8 @@ def test_explain_cmake_failure_never_recommends_installing_ninja():
 # ---------------------------------------------------------------------------
 
 
-def test_rebuild_env_var_clears_failure_marker(monkeypatch, tmp_path):
-    """``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` clears any cached failure marker."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
-
-    inject_roctx_loader._record_jit_failure(_FAKE_TAG, RuntimeError("stale failure"))
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is not None
-
-    sentinel = object()
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda _t, diagnostics=None: pytest.fail("prebuilt must be skipped"),
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: sentinel,
-    )
-
-    result = inject_roctx_loader.load()
-    assert result.module is sentinel
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
-        "REBUILD must clear the negative cache before the forced rebuild"
-    )
-
-
-def test_rebuild_env_var_skips_prebuilt_and_forces_jit_rebuild(monkeypatch):
-    """REBUILD=1 routes directly to the JIT build, skipping prebuilt and cache."""
+def test_rebuild_env_var_skips_prebuilt_and_forces_a_rebuild(monkeypatch):
+    """REBUILD=1 routes directly to the runtime build, skipping the prebuilt tier."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     calls = []
     monkeypatch.setattr(
@@ -724,24 +774,24 @@ def test_rebuild_env_var_skips_prebuilt_and_forces_jit_rebuild(monkeypatch):
     )
     sentinel = object()
 
-    def _jit(tag, force_rebuild=False, diagnostics=None):
-        calls.append(("jit", tag, force_rebuild))
+    def _runtime_build(tag, force_rebuild=False, diagnostics=None, **_kwargs):
+        calls.append(("runtime-build", tag, force_rebuild))
         return sentinel
 
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit", _jit)
+    monkeypatch.setattr(inject_roctx_loader, "_try_runtime_build", _runtime_build)
     monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
 
     result = inject_roctx_loader.load()
     assert result.module is sentinel
-    assert [c[0] for c in calls] == ["jit"], (
-        f"expected only _try_jit to fire under REBUILD; saw {calls!r}"
+    assert [c[0] for c in calls] == ["runtime-build"], (
+        f"expected only _try_runtime_build to fire under REBUILD; saw {calls!r}"
     )
     assert calls[0][1] == _FAKE_TAG, "tag must propagate to the build step"
     assert calls[0][2] is True, "REBUILD must pass force_rebuild=True"
 
 
 def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
-    """Under REBUILD, JIT failing yields ``None`` with no fallback."""
+    """Under REBUILD, a failing build yields ``None`` with no fallback."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.setattr(
         inject_roctx_loader,
@@ -750,8 +800,8 @@ def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: None,
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: None,
     )
     monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
     assert inject_roctx_loader.load().module is None
@@ -770,17 +820,19 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda tag, force_rebuild=False, diagnostics=None: calls.append("jit") or None,
+        "_try_runtime_build",
+        lambda tag, force_rebuild=False, diagnostics=None, **_kwargs: (
+            calls.append("runtime-build") or None
+        ),
     )
     assert inject_roctx_loader.load().module is sentinel
     assert calls == ["prebuilt"], (
-        f"expected prebuilt to short-circuit before jit; saw {calls!r}"
+        f"expected prebuilt to short-circuit before the build; saw {calls!r}"
     )
 
 
-def test_default_load_path_walks_prebuilt_then_jit(monkeypatch):
-    """Tiers are tried in order: prebuilt, then jit."""
+def test_default_load_path_walks_prebuilt_then_runtime_build(monkeypatch):
+    """Tiers are tried in order: prebuilt, then runtime build."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     calls = []
@@ -792,14 +844,14 @@ def test_default_load_path_walks_prebuilt_then_jit(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda tag, force_rebuild=False, diagnostics=None: (
-            calls.append("jit") or sentinel
+        "_try_runtime_build",
+        lambda tag, force_rebuild=False, diagnostics=None, **_kwargs: (
+            calls.append("runtime-build") or sentinel
         ),
     )
     assert inject_roctx_loader.load().module is sentinel
-    assert calls == ["prebuilt", "jit"], (
-        f"expected order prebuilt -> jit, saw {calls!r}"
+    assert calls == ["prebuilt", "runtime-build"], (
+        f"expected order prebuilt -> runtime-build, saw {calls!r}"
     )
 
 
@@ -839,13 +891,13 @@ def test_load_result_records_successful_tier(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: sentinel,
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: sentinel,
     )
     result = inject_roctx_loader.load()
     assert result.module is sentinel
-    assert result.tier == inject_roctx_loader.TIER_JIT
-    assert inject_roctx_loader.TIER_JIT in inject_roctx_loader.C_TIER_NAMES
+    assert result.tier == inject_roctx_loader.TIER_RUNTIME_BUILD
+    assert inject_roctx_loader.TIER_RUNTIME_BUILD in inject_roctx_loader.C_TIER_NAMES
 
 
 def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
@@ -857,8 +909,8 @@ def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: None,
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: None,
     )
     result = inject_roctx_loader.load()
     assert result.module is None
@@ -874,8 +926,8 @@ def test_load_returns_independent_diagnostics(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: None,
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: None,
     )
 
     first = inject_roctx_loader.load().diagnostics
@@ -907,12 +959,12 @@ def test_load_result_carries_tier_and_diagnostics(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: object(),
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: object(),
     )
 
     result = inject_roctx_loader.load()
-    assert result.tier == inject_roctx_loader.TIER_JIT
+    assert result.tier == inject_roctx_loader.TIER_RUNTIME_BUILD
     assert isinstance(result.diagnostics, list)
 
 
@@ -925,14 +977,14 @@ def test_load_result_returns_python_tier_failure_trail(monkeypatch):
     )
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_jit",
-        lambda _t, force_rebuild=False, diagnostics=None: None,
+        "_try_runtime_build",
+        lambda _t, force_rebuild=False, diagnostics=None, **_kwargs: None,
     )
 
     result = inject_roctx_loader.load()
     assert result.tier is None
     joined = " ".join(msg for _, msg in result.diagnostics).lower()
-    assert "python-only injector" in joined or "no roctx_recordfn" in joined, (
+    assert "python-only injector" in joined or "no torch_trace_collector" in joined, (
         f"terminal-fallback line missing from trail: "
         f"{[(lvl, msg) for lvl, msg in result.diagnostics]!r}"
     )
@@ -991,7 +1043,7 @@ def test_python_fallback_path_still_works_without_so(monkeypatch):
         from utils.inject_roctx._backends import torch as _torch_backend
 
         assert _torch_backend.using_c_tier() is False
-        assert _torch_backend.dump_recordfn_stats() is None
+        assert _torch_backend.dump_torch_trace_stats() is None
 
         pushed: list[str] = []
         original_io = core.get_python_tier_io()
@@ -1065,7 +1117,7 @@ def test_import_does_not_apply_global_patches(monkeypatch):
         for sym in (
             "install_function_apply_wrappers",
             "using_c_tier",
-            "dump_recordfn_stats",
+            "dump_torch_trace_stats",
         ):
             assert hasattr(_torch_backend, sym), f"torch backend symbol missing: {sym}"
         assert post["compile"] is pre["compile"], "torch.compile was replaced on import"
