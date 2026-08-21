@@ -31,6 +31,37 @@ to users, expose current target limitations precisely, and distinguish a safe
 new abstraction from a regression without depending on the prototype's layout
 or implementation choices.
 
+### Working loop and priority rules
+
+1. Start from a current base: merge the latest `origin/develop` with a merge
+   commit, then repair and regression-test any integration breakage before
+   treating later validation evidence as current.
+2. Keep both [STATUS_CDNA4.md](STATUS_CDNA4.md) and
+   [STATUS_GFX1250.md](STATUS_GFX1250.md) live. Update the relevant ledger in
+   the same change whenever an investigation changes what is known about a
+   cell; the documents must describe the state at every revision, not merely
+   the intended end state.
+3. Allocate effort by engine importance: Record/Replay first, then Sampled,
+   then SuperCollider, then Inline Shadow. Within the active engine priority,
+   lift the floor by addressing red before orange, orange before yellow, and
+   yellow before revalidating green. After all applicable cells are green,
+   re-run every green cell on one reviewed revision.
+4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
+   slowness when that is actionable; otherwise record and defer a slow cell and
+   move to the next useful target. A tactically slow higher-priority cell must
+   not prevent progress on other cells, but it remains an explicit exit item.
+5. For every defect or useful end-to-end idiom encountered, make the durable
+   result a focused host-unit test, checked-in device test, or both. The
+   prototype fix supports that deliverable; it does not replace it.
+6. Generalize every new and existing test by behavior rather than by its source
+   architecture. Translate target-native device code as necessary and cover
+   every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
+   `gfx950`-to-`gfx942` transport is only one example, not the boundary.
+7. Use fast host tests and parallel RocJitsu targets for the tight loop. It is
+   acceptable to omit serialized physical `gfx950` temporarily when it
+   dominates latency, but run it at regular checkpoints, after relevant native
+   changes, and for final qualification.
+
 ### Remaining work
 
 1. Merge the latest `origin/develop` into this branch with a merge commit.
