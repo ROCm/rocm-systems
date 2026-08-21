@@ -729,13 +729,14 @@ if(BUILD_TESTS)
       )
 
       # Minimal MPI binary for NCCL 2.30.7 custom-GIN-plugin regression only.
+      # Avoids compiling the full rccl-UnitTestsMPI suite, which may lag API
+      # updates on in-progress NCCL sync branches.
       add_executable(rccl-HostApiCustomGinPluginMPI
         common/main_mpi.cpp
         common/MPIHelpers.cpp
         common/MPITestCore.cpp
         common/MPIEnvironment.cpp
         common/TestChecks.cpp
-        common/MPIHostUtils.cc
         HostApiCustomGinPluginMPITests.cpp
       )
       list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
