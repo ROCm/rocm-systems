@@ -19,14 +19,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#ifndef UALOE_CB_H
-#define UALOE_CB_H
+#ifndef UALOE_TELEM_H
+#define UALOE_TELEM_H
 
 #include "ualoe_lib.h"
 
-void ualoe_cb_fini(ualoe_handle_t handle);
-int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_handle_t cdev_fd,
-                  ualoe_event_callback_t cb, void* user_ctx);
+#ifdef __GNUC__
+#define ADD_OVERFLOW(a, b, res) __builtin_add_overflow((a), (b), (res))
+#else
+#define ADD_OVERFLOW(a, b, res) (*(res) = (a) + (b), (*(res) < (a) || *(res) < (b)))
+#endif
 
-#endif /* UALOE_CB_H */
+long ualoe_get_page_size(void);
+int ualoe_telem_parse(const void* mmap_buf, size_t buf_size, unsigned category_mask,
+                      ualoe_telemetry_t* telemetry);
+
+#endif /* UALOE_TELEM_H */
