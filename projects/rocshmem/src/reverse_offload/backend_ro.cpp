@@ -24,8 +24,6 @@
 
 #include "backend_ro.hpp"
 
-#include <immintrin.h>
-#include <smmintrin.h>
 #include <unistd.h>
 
 #include <cassert>
