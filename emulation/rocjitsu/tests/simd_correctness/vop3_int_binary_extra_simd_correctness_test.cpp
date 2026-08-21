@@ -3,8 +3,8 @@
 
 /// @file vop3_int_binary_extra_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3-only
-/// plain integer add/sub forms that have no VOP2 twin on CDNA4 (v_add_i32,
-/// v_sub_i32, v_add_i16, v_sub_i16). All apply no modifiers and reuse
+/// plain integer forms that have no VOP2 twin on CDNA4, including
+/// v_bcnt_u32_b32's popcount-plus-accumulator operation. All apply no modifiers and reuse
 /// try_execute_binary_vop3_simd<uint32_t> via the SIMD_VOP3_BINARY_INT_EXTRA
 /// table — the i16 forms mask the low 16 bits in the functor to match the scalar
 /// `uint32(uint16(int16(...)))` zero-extension. Each (case, rot) runs TWICE in
@@ -28,10 +28,12 @@
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -55,7 +57,8 @@ struct Case {
   bool i16;
 };
 
-const std::array<Case, 6> kCases = {{
+const std::array<Case, 7> kCases = {{
+    {"v_bcnt_u32_b32_vop3", 651, false},
     {"v_add_i32_vop3", 668, false},
     {"v_sub_i32_vop3", 669, false},
     {"v_add_i16_vop3", 670, true},
@@ -162,6 +165,12 @@ void check_case(const Case &c, uint64_t exec) {
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
+      if (active && std::string_view(c.name) == "v_bcnt_u32_b32_vop3") {
+        const uint32_t expected =
+            std::popcount(kVals[lane % kVals.size()]) + kVals[(lane + rot) % kVals.size()];
+        EXPECT_EQ(scalar_out[lane], expected) << "rot=" << rot << " lane=" << lane;
+        EXPECT_EQ(simd_out[lane], expected) << "rot=" << rot << " lane=" << lane;
+      }
       if (!active) {
         EXPECT_EQ(simd_out[lane], DST_SENTINEL)
             << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;

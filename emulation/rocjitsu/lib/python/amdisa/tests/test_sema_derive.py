@@ -2631,6 +2631,18 @@ class TestDerivePermlane:
         block = derive_sema_block(sem)
         assert block is not None
 
+    def test_bcnt_adds_explicit_accumulator(self):
+        sem = derive_semantics('V_BCNT_U32_B32', 'ENC_VOP3')
+        assert sem is not None
+        assert sem.semantic_class == 'vector_bcnt'
+        block = derive_sema_block(sem)
+        assert block is not None
+        cpp = lower_sema_block(block)
+        assert 'std::popcount' in cpp
+        assert 'read_lane(inst.src0, lane)' in cpp
+        assert 'read_lane(inst.src1, lane)' in cpp
+        assert ' + ' in cpp
+
 
 class TestDeriveSpecialScalar:
     def test_cselect(self):

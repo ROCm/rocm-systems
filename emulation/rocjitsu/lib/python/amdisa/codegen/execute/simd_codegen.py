@@ -1747,6 +1747,12 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
 # signed-vs-unsigned wraps the same way.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
+    # Population count plus an explicit accumulator. LLVM relies on src1 to
+    # combine a wave-local rank with a previously reserved global prefix.
+    'v_bcnt_u32_b32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) { return util::popcount_u32_simd(a) + b; }',
+    ),
     # Pack two clamped 32-bit ints into the hi/lo 16-bit halves of the dst.
     # v_cvt_pk_i16_i32: signed-clamp each source to [-32768, 32767]; u16_u32:
     # unsigned-saturate each to 0xFFFF. Pure element-wise, no modifiers.
@@ -1938,14 +1944,6 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         'uint32_t',
         '[](auto a) { return (~a) & 0xFFFFu; }',
-    ),
-    # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). The scalar body is a plain
-    # std::popcount(src0) -> vdst (src1 is read but unused by this codebase's
-    # body), so the unary src0->vdst glue is bit-exact.
-    'v_bcnt_u32_b32_vop3': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) { return util::popcount_u32_simd(a); }',
     ),
 }
 

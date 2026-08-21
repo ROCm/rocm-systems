@@ -1963,7 +1963,7 @@ class Gfx1250Profile(Rdna4Profile):
             return 'alu'
         if sem_class in {'vector_mad_32_16', 'vector_mad_64_32'}:
             return 'ternary'
-        if sem_class in {'vector_mbcnt', 'vector_bitop3'}:
+        if sem_class in {'vector_bcnt', 'vector_mbcnt', 'vector_bitop3'}:
             return 'alu'
         if sem_class == 'vector_add_co':
             return 'alu'

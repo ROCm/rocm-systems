@@ -2306,6 +2306,22 @@ class _VectorMbcnt(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('vector_bcnt')
+class _VectorBcnt(_ScalarDeriver):
+    """Derive ``popcount(src0) + src1`` for V_BCNT_U32_B32."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        count = _vec_unary_expr('bcnt', _cast(_src(0), SemaType.U32), SemaType.U32)
+        result = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.U32,
+            children=(count, _cast(_src(1), SemaType.U32)),
+        )
+        body = _assign(_cast(_dst(0), SemaType.U32), result)
+        return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
 @_register('vector_bitop3')
 class _VectorBitop3(_ScalarDeriver):
     @staticmethod

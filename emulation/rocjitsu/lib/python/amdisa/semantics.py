@@ -743,7 +743,7 @@ _VOP1_OP_MAP = {
     'V_SWAP': ('vector_swap', None),
     'V_NOT': ('vector_unary', 'not'),
     'V_BFREV': ('vector_unary', 'bfrev'),
-    'V_BCNT_U32': ('vector_unary', 'bcnt'),
+    'V_BCNT_U32': ('vector_bcnt', 'bcnt'),
     'V_FFBL': ('vector_unary', 'ffbl'),
     'V_FFBH_U32': ('vector_unary', 'ffbh_u32'),
     'V_FFBH_I32': ('vector_unary', 'ffbh_i32'),

@@ -128,6 +128,13 @@ def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
     assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=True) is None
 
 
+def test_bcnt_simd_probe_adds_src1_accumulator():
+    probe = simd_probe_line('v_bcnt_u32_b32_vop3')
+    assert probe is not None
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_INT' in probe
+    assert 'util::popcount_u32_simd(a) + b' in probe
+
+
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

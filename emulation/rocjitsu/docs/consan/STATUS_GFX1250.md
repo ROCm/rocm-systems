@@ -819,13 +819,41 @@ that workaround consistently.
 |---|---|---|---|---|---|---|
 | P0 | PyTorch/Triton tensor-descriptor add, one-CTA and two-CTA variants | 🟩 Exact `a + b`; 29/29 accesses; current paired 1.19x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 1.33x | 🟩 Exact `a + b`; 29/29 accesses; 20/20 applicable barriers; current paired 2.16x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 4.16x | All profiles accepted; proves tensor-descriptor and clustered dispatch, not cluster-memory opcodes. |
 | P0 | `torch.mode`, large rows | 🟩 Exact values/indices; 28,195/28,195 accesses; current paired 120.67x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 232.20x | 🟩 Exact values/indices; 28,939/28,939 accesses and 8,892/8,892 barrier members; current paired 203.53x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 341.90x | All four profile bundles accepted. |
-| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟧 Current tip transforms both large objects, then signals before an oracle; older exact run covered 160,345/161,136 accesses and all 11,423 barriers | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟧 Both large objects finish patching; client signals during execution before an oracle | SuperCollider is accepted; Record/Replay and Inline Shadow signal before an oracle, while Sampled remains resource-incomplete. |
+| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟨 Current exact FP64/BF16 oracles pass in 75.02 seconds with dynamic completeness and zero diagnostics; static coverage remains resource-incomplete at 153,748/161,244 accesses and 13,486/22,846 barriers | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟧 Both large objects finish patching; client signals during execution before an oracle | The RocJitsu `v_bcnt_u32_b32` accumulator fix restores the Record/Replay baseline and instrumented numeric oracles. Record/Replay and Sampled remain resource-incomplete; Inline Shadow still signals. |
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Current RocJitsu clean refresh passes exact counts in 3.41 seconds with 175/175 accesses and 168/168 split-barrier members; prior paired 72.00x and causal fault bundle retained | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 211.06x; reviewed exact-one fault and health accepted | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay uses owner-local zero-generation records where full-pressure kernels cannot preserve the global dispatch-ID pair; all profiles have accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
+
+### 2026-08-21 `torch.topk` Record/Replay simulator fix
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-rr-bcnt-fix-timeout180`
+runs the target-specific PyTorch environment through the explicit RocJitsu
+`gfx1250.json` launcher.  The exact FP64 and BF16 value/index oracles now pass
+both uninstrumented in 1.83 seconds and under Record/Replay in 75.02 seconds.
+This supersedes
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-rr-current`,
+where both paths returned only four BF16 values per row.
+
+The simulator had implemented `v_bcnt_u32_b32` as `popcount(src0)` and dropped
+its explicit `src1` accumulator.  PyTorch's TopK gather uses that accumulator
+to combine each lane's wave-local rank with the global prefix reserved for its
+wave; dropping it made all 32 waves overwrite the first few output slots.  The
+fix is guarded by generator, scalar/SIMD, exact-instruction, and paired
+gfx1250 device tests.
+
+Both transformed objects are dynamically complete and replay 58,056 published
+access records plus 512 barrier records without drops, unsupported replay
+events, conflicts, metadata exhaustion, or diagnostics.  Static coverage is
+complete for the second object at 48,224/48,224 accesses and 12,064/12,064
+barriers.  The first object is incomplete at 105,524/113,020 accesses and
+1,422/10,782 barriers; all 16,856 omissions are typed resource failures.  The
+aggregate row is therefore 153,748/161,244 accesses and 13,486/22,846
+barriers.  The loaded hook SHA-256 is
+`7b64edf75d40fb14de7178be673bfc0b03da37ce9df85eabdb8984e0bf561b7b`.
 
 ## Environment baseline
 

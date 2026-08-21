@@ -4629,6 +4629,7 @@ class CodeGenerator:
                 'vector_binop',
                 'vector_ternary',
                 'vector_unary',
+                'vector_bcnt',
                 'vector_cmp',
                 'vector_cndmask',
                 'vector_add_co',

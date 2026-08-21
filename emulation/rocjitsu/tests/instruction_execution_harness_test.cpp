@@ -1601,6 +1601,57 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
     wf->halt();
 }
 
+TEST(Gfx1250TopKPrefixTest, Vop3BcntAddsOverlappingSrc1Accumulator) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_bcnt_accumulator_mem");
+  amdgpu::L2Cache l2("gfx1250_bcnt_accumulator_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  constexpr uint32_t active_mask = 0xA5A5F0F1u;
+  const uint32_t v2 = wf->vgpr_alloc().base + 2;
+  const uint32_t v6 = wf->vgpr_alloc().base + 6;
+  std::array<uint32_t, 32> sources{};
+  std::array<uint32_t, 32> accumulators{};
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    sources[lane] = 0xF0F00000u ^ (0x01010101u * lane);
+    accumulators[lane] = 100u + 3u * lane;
+    cu->write_vgpr(v6, lane, sources[lane]);
+    cu->write_vgpr(v2, lane, accumulators[lane]);
+  }
+  wf->set_exec(active_mask);
+
+  // Exact sequence used by LLVM's gfx1250 TopK prefix lowering:
+  // v_bcnt_u32_b32 v2, v6, v2
+  const uint32_t bcnt_words[] = {0xD71E0002u, 0x02020506u};
+  std::unique_ptr<Instruction> bcnt(decode_valid(*decoder, bcnt_words));
+  ASSERT_NE(bcnt, nullptr);
+  ASSERT_EQ(std::string_view(bcnt->mnemonic()), "v_bcnt_u32_b32");
+  cu->execute_instruction(bcnt.get(), *wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint32_t expected = (active_mask & (1u << lane))
+                                  ? accumulators[lane] + std::popcount(sources[lane])
+                                  : accumulators[lane];
+    EXPECT_EQ(cu->read_vgpr(v2, lane), expected) << "lane=" << lane;
+  }
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cmp_f32_mask_mem");
   amdgpu::L2Cache l2("gfx1250_cmp_f32_mask_l2");
