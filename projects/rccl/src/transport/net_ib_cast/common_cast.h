@@ -619,8 +619,8 @@ static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element
 static_assert(sizeof(struct ncclIbSendFifo) <= 64, "struct ncclIbSendFifo should fit one cache line");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
               "ncclIbSendFifoCtsInline element size must be 32-byte aligned");
-static_assert((sizeof(struct ncclIbSendFifoCtsInline) <=32),
-               "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) <= 32),
+              "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 

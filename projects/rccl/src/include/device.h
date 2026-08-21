@@ -849,8 +849,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
     // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
-  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
-             coll == ncclFuncAlltoAllvGda) {
+  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
   } else {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |

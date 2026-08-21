@@ -370,15 +370,15 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
   volatile void* slots = (volatile void*)comm->ctsFifo[slot];
 
   if (!comm->useCtsOffload) {
-    uint32_t idx = (uint32_t)(comm->base.fifoHead+1);
+    uint32_t idx = (uint32_t)(comm->base.fifoHead + 1);
     if (ctsFifoIdx(slots, 0) != idx) {
       *request = NULL;
       return ncclSuccess;
     }
     nreqs = ctsFifoNreqs(slots, 0);
     // Wait until all data has arrived
-    for (int r=1; r<nreqs; r++)
-      while(ctsFifoIdx(slots, r) != idx);
+    for (int r = 1; r < nreqs; r++)
+      while (ctsFifoIdx(slots, r) != idx);
     std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
   }
 
@@ -393,9 +393,9 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
         char line[SOCKET_NAME_MAXLEN + 1];
         union ncclSocketAddress addr;
         ncclSocketGetAddr(&comm->base.sock, &addr);
-        WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x",
-             r, nreqs, tag, ncclSocketToString(&addr, line), ctsFifoSize(slots, r),
-             ctsFifoAddr(slots, r), ctsFifoRkey(slots, r, 0));
+        WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x", r, nreqs,
+             tag, ncclSocketToString(&addr, line), ctsFifoSize(slots, r), ctsFifoAddr(slots, r),
+             ctsFifoRkey(slots, r, 0));
         return ncclInternalError;
       }
     }
@@ -513,16 +513,14 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.sg_list[0].length = MAX_INLINE_DATA_SIZE;
   } else {
     wr.sg_list[0].length =
-      n * (IbCastAinicCtsInlineData ?
-             sizeof(struct ncclIbSendFifoCtsInline) :
-             sizeof(struct ncclIbSendFifo));
+      n * (IbCastAinicCtsInlineData ? sizeof(struct ncclIbSendFifoCtsInline) : sizeof(struct ncclIbSendFifo));
   }
   wr.num_sge = 1;
 
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = comm->remCtsFifo.flags; // IBV_SEND_INLINE
-  // for multi-receive requests, reset inline flag in send_flags as 
-  // QP max_inline_data attribute limits the inline data to 1 request. 
+  // for multi-receive requests, reset inline flag in send_flags as
+  // QP max_inline_data attribute limits the inline data to 1 request.
   if (IbCastAinicCtsInlineData && n > 1) {
     wr.send_flags &= ~(IBV_SEND_INLINE);
   }
@@ -676,7 +674,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       localElemInline[i].nreqs = (uint8_t)n;
       localElemInline[i].size = sizes[i]; // Sanity/Debugging
       localElemInline[i].tag = (uint16_t)tags[i];
-      localElemInline[i].idx = (uint32_t)(comm->base.fifoHead+1);
+      localElemInline[i].idx = (uint32_t)(comm->base.fifoHead + 1);
       localElemInline[i].rxReqIndex = (uint8_t)rxReqIndex;
     } else {
       localElem[i].addr = (uint64_t)data[i];
