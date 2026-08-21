@@ -1078,8 +1078,11 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       /*scope=*/2u, kArch);
   ASSERT_TRUE(store && barrier && wait && atomic);
 
-  std::vector<uint32_t> full_pressure_words(800u, build_s_nop(0u, kArch));
-  size_t cursor = 7u;
+  // Put the access just inside direct SOPP reach of the appended body. The
+  // scalar-spill body itself then pushes the return outside that range and
+  // forces the same indirect long-return sequence used by torch.sort.
+  std::vector<uint32_t> full_pressure_words(40'000u, build_s_mov_b32(0u, 0u, kArch));
+  size_t cursor = 9'000u;
   for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
     if (sgpr >= 48u && sgpr <= 50u)
       continue;
@@ -1101,6 +1104,14 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   for (uint16_t sgpr = 48u; sgpr <= 50u; ++sgpr) {
     full_pressure_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(0u), kArch);
     full_pressure_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  }
+  // Inline switches to its scalable indirect routing bank at eight access
+  // sites. Match the production object's routing mode without making these
+  // companion sites part of the behavioral condition under examination.
+  for (uint32_t index = 0u; index < 7u; ++index) {
+    std::copy(store->begin(), store->end(), full_pressure_words.begin() + cursor);
+    cursor += store->size();
+    full_pressure_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
   }
   // This owner reaches both architectural tails. Its SGPR allocation overlaps
   // the object-wide dispatch pair, while site-local liveness still leaves a
@@ -1196,7 +1207,11 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   const auto full_access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return is_access(patch) && owns(patch, full_kernel->descriptor_file_offset);
   });
-  ASSERT_NE(full_access, result.patches.end());
+  ASSERT_NE(full_access, result.patches.end())
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans)
+      << " patches=" << testing::PrintToString(result.patches);
   ASSERT_TRUE(full_access->persistent_dispatch_id_private_offset);
   ASSERT_TRUE(full_access->persistent_private_state_end);
   EXPECT_GE(*full_access->persistent_private_state_end,
@@ -1221,6 +1236,31 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, full_access->trampoline_offset, full_access->trampoline_size);
+  ASSERT_FALSE(full_access->branch_only_continuation);
+  ASSERT_TRUE(full_access->relocated_guest_instruction_offset);
+  ASSERT_GE(*full_access->relocated_guest_instruction_offset,
+            full_access->trampoline_offset + sizeof(uint32_t));
+  const uint64_t relocated_guest_word =
+      (*full_access->relocated_guest_instruction_offset - full_access->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_GT(relocated_guest_word, 1u);
+  ASSERT_FALSE(access_words.empty());
+  const int16_t encoded_empty_exec_distance = static_cast<int16_t>(access_words.front() & 0xffffu);
+  ASSERT_GE(encoded_empty_exec_distance, 0);
+  const uint64_t empty_exec_continuation_word =
+      static_cast<uint64_t>(encoded_empty_exec_distance) + 1u;
+  ASSERT_LT(empty_exec_continuation_word, relocated_guest_word);
+  const auto return_getpc = build_s_getpc_b64(*full_assignment->indirect_pc_sgpr, kArch);
+  ASSERT_LT(empty_exec_continuation_word, access_words.size());
+  EXPECT_EQ(access_words[empty_exec_continuation_word], return_getpc);
+  const uint64_t empty_exec_guard_distance = empty_exec_continuation_word - 1u;
+  ASSERT_LE(empty_exec_guard_distance, static_cast<uint64_t>(std::numeric_limits<int16_t>::max()));
+  const auto empty_exec_guard = instrumentation::build_s_cbranch_execz(
+      static_cast<int16_t>(empty_exec_guard_distance), kArch);
+  ASSERT_TRUE(empty_exec_guard);
+  EXPECT_EQ(access_words.front(), *empty_exec_guard)
+      << "an empty wave must skip per-lane scalar save/restore but still build the "
+         "indirect return before reaching the inert guest LDS operation";
   const auto load_low = instrumentation::build_private_load_b32(
       *full_access->scratch_vgpr, *full_access->persistent_dispatch_id_private_offset, kArch);
   const auto load_high = instrumentation::build_private_load_b32(
@@ -3327,6 +3367,84 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
 
 TEST(ConSanMoi, Gfx1250InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
   check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(ROCJITSU_CODE_ARCH_GFX1250);
+}
+
+void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
+    rj_code_arch_t arch) {
+  std::vector<uint32_t> text_words(1600u, build_s_nop(0, arch));
+  size_t cursor = 0u;
+  // Model the checked-in device reduction: a large live scalar window still
+  // leaves s48:s55 available for an indirect PC/SCC/key router. Fixed-stack
+  // owners must nevertheless choose the branch-only route because an empty
+  // EXEC cannot privately preserve that router state.
+  for (uint16_t sgpr = 6u; sgpr < 100u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 55u)
+      continue;
+    text_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(1u), arch);
+  }
+  for (uint32_t site = 0u; site < 8u; ++site) {
+    if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+      constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
+      text_words[cursor++] = store[0];
+      text_words[cursor++] = store[1];
+    } else {
+      text_words[cursor++] = 0xD8340000u;
+      text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+    }
+  }
+  for (uint16_t sgpr = 6u; sgpr < 100u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 55u)
+      continue;
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, arch);
+  }
+  text_words.back() = build_s_endpgm(arch);
+  const std::vector<uint8_t> bytes =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? make_gfx1250_code_object(text_words, "inline_branch_only_preferred_gfx1250",
+                                     kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
+                                     /*uses_dynamic_stack=*/false)
+          : make_rdna4_lds_code_object(text_words, "inline_branch_only_preferred_rdna4",
+                                       kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                       /*uses_dynamic_stack=*/false);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.dispatch_key_sgpr);
+  EXPECT_FALSE(assignment.call_return_sgpr);
+  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
+            8u);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+}
+
+TEST(ConSanMoi, Rdna4InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter) {
+  check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
+      ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(ConSanMoi, Gfx1250InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter) {
+  check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
+      ROCJITSU_CODE_ARCH_GFX1250);
 }
 
 TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {

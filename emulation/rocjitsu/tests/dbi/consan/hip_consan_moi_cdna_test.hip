@@ -30,6 +30,8 @@
   "s_nop 0\n\t"                                                                                    \
   ".endr\n\t"
 
+#include "hip_consan_moi_empty_exec_scalar_spill.h"
+
 namespace {
 
 using MoiAccessRecord = rocjitsu::ConSanMoiAccessRecord;
@@ -495,6 +497,39 @@ TEST(ConSanMoiCdnaTest, ForcedSpillInlineShadowPreservesLiveVgprs) {
       EXPECT_EQ(out[tid * kValuesPerThread + i], kBases[i] ^ tid)
           << "tid=" << tid << " value=" << i;
   }
+}
+
+TEST(ConSanMoiCdnaTest, ZeroExecScalarSpillCorrectPreservesLiveScalars) {
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0, sizeof(uint32_t)));
+
+  moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation<<<1, 64>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, out_device, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(out_device));
+  EXPECT_EQ(out, 0x2468ace0u);
+}
+
+TEST(ConSanMoiCdnaTest, NonemptyScalarSpillIncorrectReportsRace) {
+  constexpr size_t kWaveCount = 2;
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, kWaveCount * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0, kWaveCount * sizeof(uint32_t)));
+
+  moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation<<<1, 128>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kWaveCount> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), out_device, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(out_device));
+  constexpr uint32_t expected = 0x2468ace0u;
+  EXPECT_EQ(out[0], expected);
+  EXPECT_EQ(out[1], expected);
 }
 
 TEST(ConSanMoiCdnaTest, SharedHelperForcedSpillPreservesBothCallers) {

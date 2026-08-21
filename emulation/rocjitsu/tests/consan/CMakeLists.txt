@@ -1090,6 +1090,12 @@ set(RJ_CONSAN_CDNA_MOI_ATOMIC_TEST
 set(RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST
     "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
 )
+set(RJ_CONSAN_CDNA_MOI_ZERO_EXEC_SCALAR_SPILL_CORRECT_TEST
+    "ConSanMoiCdnaTest.ZeroExecScalarSpillCorrectPreservesLiveScalars"
+)
+set(RJ_CONSAN_CDNA_MOI_NONEMPTY_SCALAR_SPILL_INCORRECT_TEST
+    "ConSanMoiCdnaTest.NonemptyScalarSpillIncorrectReportsRace"
+)
 set(RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST
     "ConSanMoiCdnaTest.SecondAddressGroupReportsExactLaneConflict"
 )
@@ -1552,8 +1558,130 @@ function(rj_add_consan_common_sim_cases)
     )
 endfunction()
 
+function(rj_add_consan_inline_scalar_spill_exec_cases)
+    set(_options PHYSICAL)
+    set(
+        _one_value_args
+        PREFIX TARGET CONFIG ARCH_LABEL CORRECT_TEST INCORRECT_TEST
+    )
+    cmake_parse_arguments(
+        PARSE_ARGV
+        0
+        _spill
+        "${_options}"
+        "${_one_value_args}"
+        ""
+    )
+    if(_spill_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "unknown ConSan Inline scalar-spill arguments: ${_spill_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    foreach(
+        _required
+        IN
+        ITEMS PREFIX TARGET ARCH_LABEL CORRECT_TEST INCORRECT_TEST
+    )
+        if(NOT _spill_${_required})
+            message(
+                FATAL_ERROR
+                "ConSan Inline scalar-spill cases require ${_required}"
+            )
+        endif()
+    endforeach()
+
+    set(_config_args)
+    if(_spill_CONFIG)
+        list(APPEND _config_args CONFIG "${_spill_CONFIG}")
+    endif()
+    set(_resource_args)
+    set(_execution_label simulator)
+    if(_spill_PHYSICAL)
+        list(APPEND _resource_args RESOURCE_LOCK "consan_physical_gfx950")
+        set(_execution_label physical)
+    endif()
+
+    # The correct and incorrect workloads intentionally share the same SGPR
+    # pressure and Inline Shadow route. Empty EXEC must preserve the guest's
+    # scalars without publishing evidence, while two nonempty waves must retain
+    # those scalars and diagnose their conflicting LDS stores.
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.BaselineScalarSpillExec.Correct"
+        TARGET ${_spill_TARGET}
+        FILTER "${_spill_CORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        LABELS
+            consan consan-device scalar-spill baseline
+            "${_spill_ARCH_LABEL}" "${_execution_label}" correct
+    )
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.BaselineScalarSpillExec.Incorrect"
+        TARGET ${_spill_TARGET}
+        FILTER "${_spill_INCORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        LABELS
+            consan consan-device scalar-spill baseline
+            "${_spill_ARCH_LABEL}" "${_execution_label}" incorrect racy
+    )
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.MoiInlineShadowScalarSpillExec.Correct"
+        TARGET ${_spill_TARGET}
+        FILTER "${_spill_CORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        PASS_REGEX
+            "assigned its Inline resident-wave owner inside the saved scalar window"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=inline-shadow"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+        LABELS
+            consan consan-device inline-shadow scalar-spill
+            "${_spill_ARCH_LABEL}" "${_execution_label}" correct
+    )
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.MoiInlineShadowScalarSpillExec.Incorrect"
+        TARGET ${_spill_TARGET}
+        FILTER
+            "${_spill_INCORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        PASS_REGEX
+            "assigned its Inline resident-wave owner inside the saved scalar window"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=inline-shadow"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+        LABELS
+            consan consan-device inline-shadow scalar-spill
+            "${_spill_ARCH_LABEL}" "${_execution_label}" incorrect racy
+    )
+endfunction()
+
 function(rj_add_consan_cdna_sim_cases)
-    set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG)
+    set(_one_value_args PREFIX LDS_TARGET MOI_TARGET CONFIG ARCH_LABEL)
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
     if(_sim_UNPARSED_ARGUMENTS)
         message(
@@ -1561,7 +1689,7 @@ function(rj_add_consan_cdna_sim_cases)
             "unknown ConSan CDNA simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
         )
     endif()
-    foreach(_required IN ITEMS PREFIX LDS_TARGET MOI_TARGET CONFIG)
+    foreach(_required IN ITEMS PREFIX LDS_TARGET MOI_TARGET CONFIG ARCH_LABEL)
         if(NOT _sim_${_required})
             message(
                 FATAL_ERROR
@@ -1587,6 +1715,16 @@ function(rj_add_consan_cdna_sim_cases)
         ${_sim_MOI_TARGET}
         "${RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST}"
         "${_sim_CONFIG}"
+    )
+    rj_add_consan_inline_scalar_spill_exec_cases(
+        PREFIX "${_sim_PREFIX}"
+        TARGET ${_sim_MOI_TARGET}
+        CONFIG "${_sim_CONFIG}"
+        ARCH_LABEL "${_sim_ARCH_LABEL}"
+        CORRECT_TEST
+            "${RJ_CONSAN_CDNA_MOI_ZERO_EXEC_SCALAR_SPILL_CORRECT_TEST}"
+        INCORRECT_TEST
+            "${RJ_CONSAN_CDNA_MOI_NONEMPTY_SCALAR_SPILL_INCORRECT_TEST}"
     )
 
     # CDNA's focused MOI fixture has spill-specific inline, synchronization,
@@ -1802,6 +1940,16 @@ function(rj_add_consan_gfx1250_sim_cases)
         ${_sim_MOI_TARGET}
         "${RJ_CONSAN_MOI_ADDRESS_GROUP_TEST}"
         "${_sim_CONFIG}"
+    )
+    rj_add_consan_inline_scalar_spill_exec_cases(
+        PREFIX "${_sim_PREFIX}"
+        TARGET ${_sim_MOI_TARGET}
+        CONFIG "${_sim_CONFIG}"
+        ARCH_LABEL gfx1250
+        CORRECT_TEST
+            "ConSanMoiHipTest.ZeroExecScalarSpillCorrectPreservesLiveScalars"
+        INCORRECT_TEST
+            "ConSanMoiHipTest.NonemptyScalarSpillIncorrectReportsRace"
     )
     rj_add_consan_rdna4_b96_cases(
         PREFIX "${_sim_PREFIX}"
@@ -2047,6 +2195,17 @@ function(rj_add_consan_rdna3_compact_sim_cases)
     # coverage stays in the host suite; this slice proves that native gfx11
     # objects execute all four engines and attribute a real conflict.
 
+    rj_add_consan_inline_scalar_spill_exec_cases(
+        PREFIX "${_sim_PREFIX}"
+        TARGET ${_sim_MOI_TARGET}
+        CONFIG "${_sim_CONFIG}"
+        ARCH_LABEL gfx1100
+        CORRECT_TEST
+            "ConSanMoiRdna3Test.ZeroExecScalarSpillCorrectPreservesLiveScalars"
+        INCORRECT_TEST
+            "ConSanMoiRdna3Test.NonemptyScalarSpillIncorrectReportsRace"
+    )
+
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.SuperColliderAllSupportedSites"
         TARGET ${_sim_LDS_TARGET}
@@ -2169,7 +2328,7 @@ function(rj_add_consan_hip_tests)
         "${_rj_consan_include_dir}/rocjitsu/code/patch/consan/consan_moi_abi.h"
     )
     set(_rj_consan_moi_hip_fixture_headers
-        "${_rj_consan_moi_abi_header};${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/hip_consan_address_group_test.h"
+        "${_rj_consan_moi_abi_header};${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/hip_consan_address_group_test.h;${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/hip_consan_moi_empty_exec_scalar_spill.h"
     )
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
         rj_add_consan_device_fixture_targets(gfx942)
@@ -2199,6 +2358,7 @@ function(rj_add_consan_hip_tests)
             LDS_TARGET hip_consan_lds_gfx942_test
             MOI_TARGET hip_consan_moi_gfx942_test
             CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+            ARCH_LABEL gfx942
         )
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
@@ -2298,6 +2458,7 @@ function(rj_add_consan_hip_tests)
             LDS_TARGET hip_consan_lds_gfx950_test
             MOI_TARGET hip_consan_moi_gfx950_test
             CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+            ARCH_LABEL gfx950
         )
         # Keep cross-compiled gfx950 fixtures available on other hosts,
         # but only register native HIP execution when gfx950 is present.
@@ -2305,6 +2466,16 @@ function(rj_add_consan_hip_tests)
             rj_add_consan_device_conformance_cases(
                 PREFIX "ConSanDeviceGfx950Physical"
                 TARGET gfx950
+                PHYSICAL
+            )
+            rj_add_consan_inline_scalar_spill_exec_cases(
+                PREFIX "ConSanGfx950Physical"
+                TARGET hip_consan_moi_gfx950_test
+                ARCH_LABEL gfx950
+                CORRECT_TEST
+                    "${RJ_CONSAN_CDNA_MOI_ZERO_EXEC_SCALAR_SPILL_CORRECT_TEST}"
+                INCORRECT_TEST
+                    "${RJ_CONSAN_CDNA_MOI_NONEMPTY_SCALAR_SPILL_INCORRECT_TEST}"
                 PHYSICAL
             )
             foreach(_outcome IN ITEMS Correct Incorrect)
@@ -2529,6 +2700,7 @@ function(rj_add_consan_hip_tests)
                 hip_consan_moi_gfx1100_test
                 ARCH gfx1100
                 SOURCE dbi/consan/hip_consan_moi_rdna3_test.hip
+                EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
         )
         add_dependencies(hip_consan_lds_gfx1100_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx1100_test_target rocjitsu_dbi_hooks)
@@ -2714,6 +2886,16 @@ function(rj_add_consan_hip_tests)
             EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
     )
     add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
+    rj_add_consan_inline_scalar_spill_exec_cases(
+        PREFIX "ConSanGfx1201Sim"
+        TARGET hip_consan_moi_test
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+        ARCH_LABEL gfx1201
+        CORRECT_TEST
+            "ConSanMoiHipTest.ZeroExecScalarSpillCorrectPreservesLiveScalars"
+        INCORRECT_TEST
+            "ConSanMoiHipTest.NonemptyScalarSpillIncorrectReportsRace"
+    )
     # Deliberately ill-formed GPU synchronization. The gtests are disabled
     # by default and must only run through consan_fault_runner.py with the
     # destructive opt-in, timeout, health checks, and quarantine enabled.

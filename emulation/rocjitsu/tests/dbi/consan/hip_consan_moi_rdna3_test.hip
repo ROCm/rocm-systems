@@ -36,6 +36,9 @@ int main(int argc, char **argv) {
   "s_nop 0\n\t"                                                                                    \
   ".endr\n\t"
 
+#define RJ_CONSAN_MOI_RECORD_NOP_CAVE RJ_CONSAN_RDNA3_NOP_CAVE
+#include "hip_consan_moi_empty_exec_scalar_spill.h"
+
 namespace {
 
 __global__
@@ -112,6 +115,39 @@ TEST(ConSanMoiRdna3Test, TwoWaveRacyStoresComplete) {
   HIP_ASSERT(hipFree(device_output));
   for (uint32_t lane = 0; lane < output.size(); ++lane)
     EXPECT_EQ(output[lane], lane + 1u) << "lane=" << lane;
+}
+
+TEST(ConSanMoiRdna3Test, ZeroExecScalarSpillCorrectPreservesLiveScalars) {
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0, sizeof(uint32_t)));
+
+  moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation<<<1, 64>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, out_device, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(out_device));
+  EXPECT_EQ(out, 0x2468ace0u);
+}
+
+TEST(ConSanMoiRdna3Test, NonemptyScalarSpillIncorrectReportsRace) {
+  constexpr size_t kWaveCount = 2;
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, kWaveCount * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0, kWaveCount * sizeof(uint32_t)));
+
+  moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation<<<1, 128>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::array<uint32_t, kWaveCount> out{};
+  HIP_ASSERT(hipMemcpy(out.data(), out_device, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(out_device));
+  constexpr uint32_t expected = 0x2468ace0u;
+  EXPECT_EQ(out[0], expected);
+  EXPECT_EQ(out[1], expected);
 }
 
 } // namespace

@@ -4010,6 +4010,20 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                 owner_uses_dynamic_stack(descriptor_offset);
             return uses_dynamic_stack.has_value() && !*uses_dynamic_stack;
           });
+      // Fixed-stack RDNA4-family owners can return through direct SOPP relay
+      // hops without borrowing any live-through router SGPR. Prefer that
+      // stronger contract even when a compact indirect router happens to fit:
+      // an empty EXEC cannot use per-lane private storage to preserve the
+      // latter's call/PC state. The branch-only prologue backup remains valid
+      // for both empty and partially active waves.
+      if (all_owners_use_fixed_stack) {
+        selected.reset();
+        spill_pc.reset();
+        spill_call_return.reset();
+        spill_scc.reset();
+        spill_key.reset();
+        spill_visible.reset();
+      }
       if (!selected && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
         uint16_t allocated_limit = limit;
         for (const auto &summary : component_contexts->summaries)

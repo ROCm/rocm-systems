@@ -57,6 +57,25 @@ preserve an earlier green claim.
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
 | **P4 Jakub cooperative matmul** | 🟩 Current clean-revision four-oracle row in 7.50 seconds with complete 70/70 access coverage; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 10.18 seconds with complete 70/70 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired and reviewed-fault evidence retained | 🟩 Final candidate-tree recheck passes all four oracles in 7.06 seconds with complete 70/70 accesses plus 8/8 applicable barriers and complete static and dynamic verdicts; the code-object-wide cluster-tuple gate reservation regression remains fixed, and prior paired and reviewed-fault evidence is retained | 🟩 Current clean-revision four-oracle row in 7.37 seconds with complete 70/70 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired and reviewed-fault evidence retained |
 
+### 2026-08-21 fixed-stack Inline scalar-route regression
+
+The checked-in reduction of the physical-gfx950 PyTorch `torch.sort` empty-EXEC
+failure is intentionally shared with gfx1250.  Expanding each correct/incorrect
+member from one to eight LDS access sites selected the scalable Inline route
+and exposed a gfx1250 simulator crash in under a second.  Fixed-stack owners
+were choosing an available compact indirect router, but its call/PC state was
+preserved in per-lane private storage and therefore did not exist for an empty
+wave.  The planner now prefers the branch-only scalar-spill route for
+fixed-stack RDNA4-family owners; focused gfx1250 and gfx1201 host tests assert
+that choice even when the indirect router would otherwise fit.
+
+The final baseline/Inline correct/incorrect matrix passes all 24 rows across
+five simulated architectures and physical gfx950 in 1.13 seconds, including
+the gfx1250 correct workload's exact scalar oracle and the incorrect workload's
+required LDS conflict diagnostic.  This focused evidence does not by itself
+promote any E2E matrix cell, but it closes the fast regression-test gap for the
+route that the generalized workload uncovered.
+
 ### 2026-08-20 bounded Tensile Stream-K revalidation
 
 Artifact

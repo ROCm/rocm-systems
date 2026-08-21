@@ -864,6 +864,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                              scalar_spill->restore_words.size()) *
                            sizeof(uint32_t)
                      : 0;
+    // Per-lane private stores cannot preserve a borrowed scalar window when
+    // EXEC is empty. Reserve a leading guard for every scalar-spill body so
+    // emission can bypass the save/probe/restore sequence and continue with
+    // the displaced guest instruction (which is itself inert under EXEC=0).
+    const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
     const uint64_t vgpr_msb_bytes =
         arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
             ? (spill ? 4u : 2u) * sizeof(uint32_t)
@@ -888,7 +893,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (use_indirect_appended && candidate_options.moi_inline_branch_only_scalar_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
-                                   sizeof(uint32_t);
+                                   scalar_spill_guard_bytes;
       const uint64_t remaining_candidate_count = planning_candidates.size() - planning_index;
       const uint64_t remaining_patch_budget =
           options.max_patches > planned_patches.size()
@@ -1076,7 +1081,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         const uint64_t patch_bytes =
             static_cast<uint64_t>((words->size() + displaced_tail_words.size()) *
                                   sizeof(uint32_t)) +
-            spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
+            spill_bytes + scalar_spill_bytes + vgpr_msb_bytes + scalar_spill_guard_bytes;
         // The long return is getpc, a three-word signed delta builder, SCC
         // restore, a scalar-destination dependency wait, and setpc. The fixed
         // reservation keeps later body addresses stable while their
@@ -1097,7 +1102,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     if (!placed_through_indirect_island) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
-                                   spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
+                                   spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
+                                   scalar_spill_guard_bytes;
       const bool needs_chainable_entry_patch =
           options.moi_init_owner_epoch &&
           std::ranges::any_of(
@@ -1798,11 +1804,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         }
 
         MoiAppendedBodyOptions body_options(arch);
-        const std::array<uint32_t, 1> dynamic_stack_guard_placeholder = {
+        const std::array<uint32_t, 1> empty_exec_guard_placeholder = {
             build_s_nop(0, arch),
         };
-        if (planned_patch.branch_only_route)
-          body_options.entry_prefix_words = dynamic_stack_guard_placeholder;
+        if (planned_patch.scalar_spill)
+          body_options.entry_prefix_words = empty_exec_guard_placeholder;
         body_options.deferred_guest_word_count = deferred_guest_words.size();
         body_options.scalar_save_words = planned_patch.scalar_spill
                                              ? planned_patch.scalar_spill->save_words
@@ -1815,6 +1821,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                      result.errors, body_options);
         if (!cave_words)
           return;
+        std::optional<size_t> empty_exec_continuation_word_offset;
         const auto insert_deferred_guest = [&](size_t word_offset) {
           if (deferred_guest_words.empty())
             return;
@@ -1889,6 +1896,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->push_back(build_s_branch(*ret, arch));
         } else if (planned_patch.dense_call_anchor) {
           if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+            empty_exec_continuation_word_offset = cave_words->size();
             insert_deferred_guest(cave_words->size());
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                                displaced_tail_words.end());
@@ -1899,6 +1907,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {
             const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+            empty_exec_continuation_word_offset = cave_words->size();
             if (!jump_sgprs ||
                 !append_moi_scc_preserving_indirect_jump(
                     *cave_words, cave_text_offset, planned_patch.placement.return_target,
@@ -1923,6 +1932,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           }
         } else if (planned_patch.entry_island_offset) {
           const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+          empty_exec_continuation_word_offset = cave_words->size();
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no return jump scalar state");
@@ -1954,10 +1964,30 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 "ConSan MOI inline-shadow probe appended cave return is out of range");
             return;
           }
+          empty_exec_continuation_word_offset = cave_words->size();
           insert_deferred_guest(cave_words->size());
           cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                              displaced_tail_words.end());
           cave_words->push_back(build_s_branch(*ret, arch));
+        }
+        if (planned_patch.scalar_spill && !planned_patch.branch_only_route) {
+          if (!empty_exec_continuation_word_offset || *empty_exec_continuation_word_offset == 0u ||
+              *empty_exec_continuation_word_offset - 1u >
+                  static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+            result.errors.emplace_back(
+                "ConSan MOI inline-shadow scalar-spill empty-wave guard cannot reach the "
+                "guest continuation");
+            return;
+          }
+          const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
+              static_cast<int16_t>(*empty_exec_continuation_word_offset - 1u), arch);
+          if (!skip_empty_wave || cave_words->empty()) {
+            result.errors.emplace_back(
+                "ConSan MOI inline-shadow scalar-spill body could not encode its empty-wave "
+                "guard");
+            return;
+          }
+          cave_words->front() = *skip_empty_wave;
         }
         append_words_bytes(new_text, *cave_words);
         info.trampoline_offset = cave_text_offset;
