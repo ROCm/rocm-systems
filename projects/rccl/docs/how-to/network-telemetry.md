@@ -3,7 +3,7 @@
 Per device / channel / QP network telemetry for the `IB-CAST` transport,
 collected in-tree without a separate plugin or a build flag. Software counters
 accumulate over the whole process; hardware counters are reported as deltas
-against a baseline taken when the device is registered. One JSON file per rank
+against a baseline taken on the device's first use. One JSON file per rank
 is written at process exit.
 
 Telemetry is off by default and has no effect unless `RCCL_TELEMETRY_ENABLE=1`.
@@ -18,7 +18,7 @@ Telemetry is off by default and has no effect unless `RCCL_TELEMETRY_ENABLE=1`.
 | `RCCL_TELEMETRY_HISTOGRAM_INTERVAL_NS` | `30000` | Width of one latency bucket in nanoseconds. Bucket `b` covers up to `(b+1) * interval` ns. |
 | `RCCL_TELEMETRY_LATENCY_SAMPLE` | `1` | Measure the completion latency of one posted WQE in `N`. `1` measures every WQE. Must be a power of two; any other value is rounded **up** to the next one, with a line on stderr saying so. See [Latency sampling](#latency-sampling). |
 | `RCCL_TELEMETRY_HW_COUNTERS` | all | Comma-separated allow-list of hardware counter names to collect. Empty means collect every counter the driver exposes. |
-| `RCCL_TELEMETRY_SAMPLE_MS` | `0` | If greater than 0, a background thread samples a small set of congestion counters every N ms into a `hw_samples` time series. `0` disables the sampler; hardware counters are then read only at registration and at exit. |
+| `RCCL_TELEMETRY_SAMPLE_MS` | `0` | If greater than 0, a background thread samples a small set of congestion counters every N ms into a `hw_samples` time series. `0` disables the sampler; hardware counters are then read only on first use and at exit. |
 | `RCCL_TELEMETRY_DEBUG` | unset | If set, prints device registration and flush diagnostics to stderr. |
 
 ## Where the data lands

@@ -20,10 +20,12 @@ extern "C" {
  *
  * This subsystem provides unified telemetry collection for RCCL network transports.
  * Telemetry is enabled at runtime via RCCL_TELEMETRY_ENABLE=1.
- * Optional configuration can be provided via RCCL_TELEMETRY_CONFIG=/path/to/cfg.json
+ * Configuration is read from environment variables (RCCL_TELEMETRY_OUTPUT_DIR,
+ * RCCL_TELEMETRY_SAMPLE_MS, etc.); there is no JSON config file.
  *
  * Output: JSON file written on process exit to
- *   /tmp/rccl_telemetry_<hostname>_<pid>.json
+ *   <output_dir>/rccl_telemetry_<hostname>_<uid>_<pid>.json
+ *   (output_dir defaults to /tmp)
  *
  * Supported hardware:
  *   - AMD AINIC (driver: ionic)
@@ -94,6 +96,16 @@ extern "C" {
 /* Bound on the longest json_name in any counter table, used to size the config
  * filter list below so that naming every counter still fits. */
 #define RCCL_TELEMETRY_HWC_NAME_MAX   32
+
+/* Compile-time assert usable from both the C++ implementation and any C
+ * consumer of this header. */
+#ifndef RCCL_TEL_STATIC_ASSERT
+#ifdef __cplusplus
+#define RCCL_TEL_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define RCCL_TEL_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+#endif
 
 /* Runtime guard - 1 if telemetry is enabled, 0 otherwise.
  * Published with a release store at the very end of rcclTelemetryInit(), so it
@@ -168,8 +180,8 @@ __attribute__((visibility("default")))
 int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs);
 
 /*
- * Configuration structure - populated from RCCL_TELEMETRY_CONFIG JSON file
- * or uses defaults if not specified
+ * Configuration structure - populated from environment variables
+ * (RCCL_TELEMETRY_*), or uses defaults if not specified
  */
 typedef struct {
   /* Directory the JSON is written to, default "/tmp". PATH_MAX bounds the
@@ -430,6 +442,15 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
   int64_t delta_tx_packets;
   int64_t delta_rx_packets;
 } RcclDeviceStats;
+
+/* Layout tripwire: this hot-path struct is cache-line aligned and splits its
+ * counters across lines to avoid false sharing. Pin the size so any field change
+ * that alters the layout is a deliberate, reviewed edit, and keep it a whole
+ * number of cache lines. */
+RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) == 2560,
+  "RcclDeviceStats size changed; re-check the cache-line layout");
+RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) % RCCL_TELEMETRY_CACHELINE == 0,
+  "RcclDeviceStats must stay a whole number of cache lines");
 
 /* Global device statistics array */
 extern RcclDeviceStats rcclTelemetryDevs[RCCL_TELEMETRY_MAX_DEVS];

@@ -16,13 +16,14 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
 #include <pthread.h>
 
-#ifdef __cplusplus
-#define RCCL_TEL_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
-#else
-#define RCCL_TEL_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
-#endif
+/* RCCL_TEL_STATIC_ASSERT comes from net_telemetry.h. */
 
 /* The output path is output_dir plus the file name appended to it, and both
  * bounds come from RCCL_TEL_PATH_MAX, so the join below cannot truncate. */
@@ -660,45 +661,93 @@ static void rcclTelemetryCollectEthtoolBatch(const char* eth_device,
   if (eth_device[0] == '\0' || num_wanted == 0) {
     return;
   }
+  /* SIOCETHTOOL identifies the interface by ifr_name, which is IFNAMSIZ wide. */
+  if (strlen(eth_device) >= IFNAMSIZ) {
+    return;
+  }
 
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "ethtool -S %s 2>/dev/null", eth_device);
+  int fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd < 0) {
+    return;
+  }
 
-  FILE* fp = popen(cmd, "r");
-  if (fp == NULL) {
+  struct ifreq ifr;
+  memset(&ifr, 0, sizeof(ifr));
+  /* Length checked above; ifr is zeroed, so the copy stays NUL-terminated. */
+  memcpy(ifr.ifr_name, eth_device, strlen(eth_device));
+
+  /* n_stats from ETHTOOL_GDRVINFO is the length of the ETH_SS_STATS set, i.e.
+   * the number of `ethtool -S` counters this NIC exposes. */
+  struct ethtool_drvinfo drvinfo;
+  memset(&drvinfo, 0, sizeof(drvinfo));
+  drvinfo.cmd = ETHTOOL_GDRVINFO;
+  ifr.ifr_data = (char*)&drvinfo;
+  if (ioctl(fd, SIOCETHTOOL, &ifr) != 0) {
+    close(fd);
+    return;
+  }
+  unsigned int n_stats = drvinfo.n_stats;
+  if (n_stats == 0) {
+    close(fd);
+    return;
+  }
+
+  /* GSTRINGS gives the counter names (ETH_GSTRING_LEN each), GSTATS the values
+   * in the same order; index i of one lines up with index i of the other. */
+  struct ethtool_gstrings* strings =
+      (struct ethtool_gstrings*)calloc(1, sizeof(*strings) +
+                                           (size_t)n_stats * ETH_GSTRING_LEN);
+  struct ethtool_stats* stats =
+      (struct ethtool_stats*)calloc(1, sizeof(*stats) +
+                                        (size_t)n_stats * sizeof(uint64_t));
+  if (strings == NULL || stats == NULL) {
+    free(strings);
+    free(stats);
+    close(fd);
+    return;
+  }
+
+  strings->cmd = ETHTOOL_GSTRINGS;
+  strings->string_set = ETH_SS_STATS;
+  strings->len = n_stats;
+  ifr.ifr_data = (char*)strings;
+  if (ioctl(fd, SIOCETHTOOL, &ifr) != 0) {
+    free(strings);
+    free(stats);
+    close(fd);
+    return;
+  }
+
+  stats->cmd = ETHTOOL_GSTATS;
+  stats->n_stats = n_stats;
+  ifr.ifr_data = (char*)stats;
+  if (ioctl(fd, SIOCETHTOOL, &ifr) != 0) {
+    free(strings);
+    free(stats);
+    close(fd);
     return;
   }
 
   int found = 0;
-  char line[256];
-  while (fgets(line, sizeof(line), fp) != NULL && found < num_wanted) {
+  for (unsigned int s = 0; s < n_stats && found < num_wanted; s++) {
+    /* Kernel names need not be NUL-terminated when they fill the field, so copy
+     * into a bounded buffer and terminate before comparing. */
+    char name[ETH_GSTRING_LEN + 1];
+    memcpy(name, strings->data + (size_t)s * ETH_GSTRING_LEN, ETH_GSTRING_LEN);
+    name[ETH_GSTRING_LEN] = '\0';
+
     for (int i = 0; i < num_wanted; i++) {
       if (*(wanted[i].target) >= 0) continue;
-
-      char* p = strstr(line, wanted[i].key);
-      if (p == NULL) continue;
-
-      /* Verify word boundary: char before key must be whitespace or start of line */
-      if (p > line) {
-        char prev = *(p - 1);
-        if (prev != ' ' && prev != '\t') continue;
-      }
-      /* Verify word boundary: char after key must not be alphanumeric or underscore */
-      size_t klen = strlen(wanted[i].key);
-      char after = *(p + klen);
-      if (after != ':' && after != ' ' && after != '\t' &&
-          after != '\0' && after != '\n') continue;
-
-      p += klen;
-      while (*p == ' ' || *p == ':') p++;
-      if (*p != '\0' && *p != '\n') {
-        *(wanted[i].target) = strtoll(p, NULL, 10);
-        found++;
-      }
+      if (strcmp(name, wanted[i].key) != 0) continue;
+      *(wanted[i].target) = (int64_t)stats->data[s];
+      found++;
+      break;
     }
   }
 
-  pclose(fp);
+  free(strings);
+  free(stats);
+  close(fd);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1143,8 +1192,9 @@ static void rcclTelemetrySnapshotInit(RcclDeviceStats* dev) {
  *
  * Registration deliberately does not do this: a rank registers every NIC it can
  * enumerate (8 on an MI300X node) but normally drives one or two, and every
- * baseline costs one `ethtool -S` subprocess. Deferring to first use makes the
- * number of subprocesses proportional to the NICs the rank actually drives.
+ * baseline costs a full ethtool stats read (ioctl) plus IB-sysfs reads.
+ * Deferring to first use makes that work proportional to the NICs the rank
+ * actually drives.
  */
 static void rcclTelemetryEnsureSnapshot(int devIdx) {
   if (devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
@@ -1152,7 +1202,9 @@ static void rcclTelemetryEnsureSnapshot(int devIdx) {
   if (__atomic_load_n(&dev->snap_taken, __ATOMIC_ACQUIRE)) return;
 
   pthread_mutex_lock(&rcclTelemetrySnapshotLock);
-  if (!dev->snap_taken) {
+  /* Re-check under the lock with the same atomic load used on the fast path and
+   * the write below, so every access to snap_taken goes through __atomic_*. */
+  if (!__atomic_load_n(&dev->snap_taken, __ATOMIC_ACQUIRE)) {
     rcclTelemetrySnapshotInit(dev);
     /* Release store: a flush that sees the flag also sees the baseline. */
     __atomic_store_n(&dev->snap_taken, 1, __ATOMIC_RELEASE);
