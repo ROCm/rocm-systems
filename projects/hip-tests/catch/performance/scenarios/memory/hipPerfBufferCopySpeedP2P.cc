@@ -35,7 +35,6 @@ static constexpr int sizes[] = {262144};
 #endif
 static constexpr int nSizes = sizeof(sizes) / sizeof(sizes[0]);
 static constexpr double megaSize = 1000000.;
-static constexpr int defaultIterations = 200;
 static constexpr unsigned threadsPerBlock = 1024;
 
 template <typename T> static __global__ void copy_kernel(T* dst, T* src, size_t N) {
@@ -442,16 +441,14 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, true);
 }
 
 HIP_TEST_CASE(Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, true);
 }
 
@@ -469,16 +466,14 @@ HIP_TEST_CASE(Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PUniDirKernelCopy_test_Timing_CPU) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, false);
 }
 
 HIP_TEST_CASE(Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, false);
 }
 
@@ -498,9 +493,8 @@ HIP_TEST_CASE(Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PBiDirMemcpyAsync_test) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PBiDirMemPerf(iterations, true);
 }
 
@@ -518,9 +512,8 @@ HIP_TEST_CASE(Performance_hipTestP2PBiDirMemcpyAsync_test) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PBiDirKernelCopy_test) {
-  const auto gIterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+  const int iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
 
-  const int iterations = gIterations == 1000 ? defaultIterations : gIterations;
   testP2PBiDirMemPerf(iterations, false);
 }
 
