@@ -22,11 +22,10 @@ These tests exercise:
 import argparse
 import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, stub_modules
 
 _ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
 METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
@@ -71,7 +70,7 @@ def _patch(testcase, obj, **overrides):
         testcase.addCleanup(_restore_attr, obj, name, original)
 
 
-def _install_fake_amdsmi():
+def _build_fake_amdsmi():
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
@@ -100,10 +99,11 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+    }
 
 
 def _load_metric_module():
@@ -239,22 +239,10 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls._saved_modules = {
-            name: sys.modules.get(name)
-            for name in ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception")
-        }
-        cls.interface = _install_fake_amdsmi()
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        # The fake amdsmi is process-global; leaving it installed fails the
-        # suite runner's sys.modules isolation guard and corrupts later tests.
-        for name, module in cls._saved_modules.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
 
     def test_navi_vcn_busy_reads_sysfs(self):
         # gpu_partition_metrics is None and num_partition is "N/A": the new
