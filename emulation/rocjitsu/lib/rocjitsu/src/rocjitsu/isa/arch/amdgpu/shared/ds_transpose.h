@@ -11,8 +11,8 @@
 /// cross-lane shuffle to produce the transposed matrix layout expected by
 /// matrix instructions.
 ///
-/// B64_TR_B8 is the CDNA4 MFMA byte transpose with groups of 4 consecutive
-/// lanes. WMMA_TR_B8 is the CDNA5/RDNA4 16x16 byte-matrix transpose.
+/// B64_TR_B8 is the CDNA4 MFMA and CDNA5 DS byte transpose with groups of 4
+/// consecutive lanes. WMMA_TR_B8 is used by RDNA4 and CDNA5 global loads.
 /// TR16_B128 (gfx1250 ds/global_load_tr16_b128, RDNA4 global_load_tr_b128)
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
@@ -37,7 +37,7 @@ enum class TransposeKind : uint8_t {
   WMMA_TR_B8 = 6,
 };
 
-/// @brief CDNA4 B64 byte-level MFMA transpose (B64_TR_B8 only).
+/// @brief CDNA4 MFMA / CDNA5 DS B64 byte-level transpose (B64_TR_B8 only).
 ///
 /// Groups of 4 source lanes, 8 byte iterations per group.
 /// Each iteration packs one byte from each of 4 source lanes into a dword
@@ -81,7 +81,7 @@ inline void transpose_b64_tr_b8(std::vector<uint8_t> &response_data, uint32_t nu
   response_data = std::move(output);
 }
 
-/// @brief CDNA5/RDNA4 16x16 8-bit WMMA transpose-load layout.
+/// @brief RDNA4 and CDNA5 global-load 16x16 8-bit WMMA transpose layout.
 ///
 /// Each of source lanes 0..31 reads eight adjacent matrix rows for one K
 /// coordinate. Wave32 writes two VGPRs per lane. RDNA4 Wave64 consumes the
