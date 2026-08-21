@@ -491,7 +491,10 @@ TEST(MfmaExecTest, SwmmacK32InputLocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g4s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchSparseManual) {
+TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchHardwareReferenceKernels) {
+  // These anchors record the layout required by hardware-reference Tensile
+  // kernels. They intentionally do not claim agreement with the public CDNA5
+  // sparse-layout text, which describes different B and selector routing.
   for (uint32_t ck = 0; ck < 64; ++ck) {
     const uint32_t expected_a_lane = 5u + 16u * ((ck >> 4) & 1u);
     const uint32_t expected_a_slot = (ck & 15u) + 16u * (ck >> 5);

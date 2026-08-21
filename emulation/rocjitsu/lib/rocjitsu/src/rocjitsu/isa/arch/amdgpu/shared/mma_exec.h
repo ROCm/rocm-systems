@@ -538,6 +538,12 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bit
     }
     return {row + 16u * ((group / 2u) & 1u), 2u * (group & 1u) + 4u * (group / 4u) + slot};
   }
+  // This generic routing is also intentional for gfx1250 K=128 8-bit
+  // SWMMAC. Hardware-reference Tensile kernels require contiguous 32-entry
+  // selector blocks even though sparse A changes lane halves every 16 packed
+  // K elements. That differs from the association described by the public
+  // CDNA5 ISA Sections 7.12.3 and 7.12.5; retain the validated behavior
+  // pending specification clarification.
   return {row + (compressed_k / index_entries) * M, compressed_k % index_entries};
 }
 
@@ -595,8 +601,10 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
 inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t dense_k,
                                    uint32_t elem_bits) {
   if (N == 16 && K == 128 && elem_bits == 8) {
-    // K=128 SWMMAC keeps the sparse instruction's 32-element B ordering;
-    // it is not the dense K=128 WMMA operand layout.
+    // Hardware-reference gfx1250 Tensile kernels require this 32-element
+    // SWMMAC B ordering. It differs from both dense K=128 WMMA and the public
+    // CDNA5 ISA Section 7.12.5; retain the validated instruction-specific
+    // layout pending specification clarification.
     const uint32_t lane = col + 16u * ((dense_k >> 5) & 1u);
     const uint32_t slot = (dense_k & 31u) + 32u * (dense_k >> 6);
     return wmma_packed_input_loc(lane, slot, elem_bits);
