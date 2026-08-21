@@ -61,15 +61,20 @@ struct mock_wrapper
     static constexpr std::size_t MAX_GPU_SLOTS = MAX_GPUS;
 
     inline static stats_l3_t  next_stats{};
-    inline static bool        query_succeeds = true;
-    inline static std::size_t call_count     = 0;
+    inline static bool        query_succeeds    = true;
+    inline static bool        version_supported = true;
+    inline static std::size_t call_count        = 0;
 
     static void reset()
     {
-        next_stats     = stats_l3_t{};
-        query_succeeds = true;
-        call_count     = 0;
+        next_stats        = stats_l3_t{};
+        query_succeeds    = true;
+        version_supported = true;
+        call_count        = 0;
     }
+
+    /// Stands in for the cached hipFileGetVersion() check in the real wrapper.
+    static bool runtime_version_supported() noexcept { return version_supported; }
 
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {

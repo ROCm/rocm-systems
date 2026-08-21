@@ -272,7 +272,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--counter-names",
         type=str,
-        help="Require counter name in the traces",
+        help="Require counter name in the traces, with a positive total",
+        default=[],
+        nargs="*",
+    )
+    parser.add_argument(
+        "--counter-names-present",
+        type=str,
+        help=(
+            "Require the counter track to exist and be sampled, whatever its values. "
+            "Use for counters that are legitimately zero in some environments"
+        ),
         default=[],
         nargs="*",
     )
@@ -400,7 +410,7 @@ if __name__ == "__main__":
         if key_count != count:
             ret = 1
 
-    if args.counter_names and args.print:
+    if (args.counter_names or args.counter_names_present) and args.print:
         all_counter_tracks = tp.query(
             "SELECT DISTINCT name FROM counter_track ORDER BY name"
         )
@@ -444,6 +454,24 @@ if __name__ == "__main__":
 
         if total_value <= 0:
             print(f"Fail: Counter {counter_name} is not found in the traces")
+            ret = 1
+
+    for counter_name in args.counter_names_present:
+        counter_entries = tp.query(
+            f"""SELECT COUNT(counter.id) AS num_entries FROM counter_track JOIN counter ON
+              counter.track_id = counter_track.id WHERE counter_track.name LIKE
+              '%{counter_name}%'"""
+        )
+        num_entries = 0
+
+        for row in counter_entries:
+            num_entries = row.num_entries if row.num_entries is not None else 0
+
+        if args.print:
+            print(f"Number of samples on {counter_name} is {num_entries}")
+
+        if num_entries <= 0:
+            print(f"Fail: Counter {counter_name} is not present in the traces")
             ret = 1
 
     if args.check_counter_pairing and args.counter_names:
