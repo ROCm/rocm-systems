@@ -1956,7 +1956,7 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   constexpr int kIters = 16;
 
-  // Only barrierCount provisions the two pools consumed by the generic
+  // Only barrierCount provisions the three pools consumed by the generic
   // world-team session. Keeping every specialized count at zero ensures an
   // accidental constructor or requirement-routing regression cannot be masked.
   ncclDevCommRequirements reqs = defaultGinReqs();
@@ -1969,7 +1969,8 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   ASSERT_MPI_EQ(1, devComm.hybridLsaBarrier.nBarriers);
   ASSERT_MPI_EQ(0, devComm.lsaBarrier.nBarriers);
-  ASSERT_MPI_EQ(ncclTeamRail(comm).nRanks, devComm.ginSignalCount);
+  // barrierCount sizes both outer GIN arms: one cell per source rank of the rail team and of the world team.
+  ASSERT_MPI_EQ(ncclTeamRail(comm).nRanks + ncclTeamWorld(comm).nRanks, devComm.ginSignalCount);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
