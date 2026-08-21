@@ -96,7 +96,7 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
-// Multi-segment (Option B, AIRUNTIME-2351 classic-path follow-up) variant of
+// Multi-segment (AIRUNTIME-2351 classic-path follow-up) variant of
 // ncclIbMultiSend. It splits each request's per-QP chunk into one RDMA-write WR
 // per local+remote physical segment slice, so a transfer that straddles a
 // segment boundary uses the correct per-segment lkey/rkey. Invoked only when at
@@ -288,7 +288,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  // Multi-segment (Option B): if any request's local or remote buffer spans
+  // Multi-segment: if any request's local or remote buffer spans
   // multiple physical segments, use the segment-splitting builder.
   for (int r = 0; r < nreqs; r++) {
     struct ncclIbMrHandle* mh = reqs[r]->send.mh;
@@ -786,7 +786,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     for (int j = 0; j < comm->base.vProps.ndevs; j++) {
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
     }
-    // Multi-segment (Option B): publish the full receiver segment layout so the
+    // Multi-segment: publish the full receiver segment layout so the
     // sender can split RDMA writes at these physical segment boundaries. The
     // buffer base data[i] equals segStart[0] (registration starts at the base),
     // so segment VAs are contiguous and remote addresses stay linear.

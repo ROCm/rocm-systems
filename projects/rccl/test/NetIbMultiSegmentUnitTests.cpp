@@ -4,15 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only unit tests for the classic NET/IB multi-segment math (AIRUNTIME-2351
-// classic-path follow-up). These exercise the pure, dependency-free helpers in
-// src/transport/net_ib/multiseg.h and run in rccl-UnitTestsFixtures without IB
-// hardware, a GPU, or MPI.
-//
-// This is the Option B (wire-protocol) variant of the unit tests: in addition
-// to the segment-selection / uniformity helpers shared with Option A, it covers
-// ncclIbSplitTransfer, the segment-boundary-splitting builder used by the
-// segment-aware ncclIbMultiSend.
+// Host-only unit tests for classic NET/IB multi-segment math.
+// They cover segment selection, layout uniformity, and transfer splitting in
+// src/transport/net_ib/multiseg.h and run in rccl-UnitTestsFixtures without
+// IB hardware, a GPU, or MPI.
 
 #include <gtest/gtest.h>
 
@@ -61,7 +56,7 @@ constexpr size_t    kSeg  = 2u * 1024 * 1024;
 
 } // namespace
 
-// === Shared selection / uniformity helpers (also used by Option A) ==========
+// === Segment selection and uniformity helpers ===============================
 
 TEST(NetIbMultiSeg, StartOfEachSegmentMapsToThatSegment) {
     Layout L = MakeUniform(kBase, kSeg, 4);
@@ -90,7 +85,7 @@ TEST(NetIbMultiSeg, NonUniformInteriorRejected) {
     EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));
 }
 
-// === Option B: ncclIbSplitTransfer ==========================================
+// === Transfer splitting helpers =============================================
 
 // A single-segment transfer on both sides yields exactly one slice with linear
 // addresses (the single-segment fast path in ncclIbMultiSend).

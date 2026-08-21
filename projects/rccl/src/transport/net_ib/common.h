@@ -224,7 +224,7 @@ struct ncclIbRequest {
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
       // Local MR handle for this send; used by the multi-segment WR builder to
-      // resolve the per-segment local lkey (Option B). NULL/single-segment
+      // resolve the per-segment local lkey. NULL/single-segment
       // handles use lkeys[] directly on the fast path.
       struct ncclIbMrHandle* mh;
       // Tracks whether data was transmitted on a QP for this request.
@@ -261,7 +261,7 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
-  // Multi-segment (Option B, AIRUNTIME-2351 classic-path follow-up). The
+  // Multi-segment (AIRUNTIME-2351 classic-path follow-up). The
   // receiver publishes its full segment layout so the sender can split RDMA
   // writes at the receiver's physical segment boundaries. nSegments == 1 (or 0)
   // means a single contiguous MR and segStart/segRkeys are unused. Extending
@@ -275,7 +275,7 @@ struct alignas(64) ncclIbSendFifo {
 
 // Worst-case work requests posted for one multi-recv send on a single QP: each
 // request's chunk may be split at every local and remote segment boundary it
-// spans (Option B). Single-segment sends use exactly one WR per request.
+// spans. Single-segment sends use exactly one WR per request.
 #define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
 
 struct ncclIbQpInitAttr {
@@ -491,7 +491,7 @@ struct ncclIbSendComm {
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
-  // per local+remote segment boundary crossing (Option B). Size the WR/SGE pools
+  // per local+remote segment boundary crossing. Size the WR/SGE pools
   // for the worst case; single-segment sends use exactly one WR per request.
   struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
   struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];

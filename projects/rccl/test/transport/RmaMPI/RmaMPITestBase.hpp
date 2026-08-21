@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifndef GIN_MPI_TEST_BASE_HPP
-#define GIN_MPI_TEST_BASE_HPP
+#ifndef RMA_MPI_TEST_BASE_HPP
+#define RMA_MPI_TEST_BASE_HPP
 
 #ifdef MPI_TESTS_ENABLED
 #ifdef RCCL_HAS_RMA_IB_PROXY
@@ -518,4 +518,4 @@ protected:
 #endif // RCCL_HAS_RMA_IB_PROXY
 #endif // MPI_TESTS_ENABLED
 
-#endif // GIN_MPI_TEST_BASE_HPP
+#endif // RMA_MPI_TEST_BASE_HPP

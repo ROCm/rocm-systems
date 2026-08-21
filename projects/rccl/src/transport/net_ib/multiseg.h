@@ -66,7 +66,7 @@ static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
 }
 
 // ---------------------------------------------------------------------------
-// Option B (wire-protocol) segment-splitting.
+// Wire-protocol segment splitting.
 //
 // A single logical transfer maps offset o -> localBase+o on the sender and
 // remoteBase+o on the receiver. The two sides may have *different* physical

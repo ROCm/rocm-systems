@@ -4,27 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Multi-segment DMA-BUF tests for the CLASSIC NET/IB proxy path with the
-// Option B (wire-protocol) segment-aware data path (AIRUNTIME-2351 classic-path
-// follow-up). Unlike Option A -- which requires every transfer to stay within a
-// single physical segment -- Option B publishes the receiver's full segment
-// layout in the CTS FIFO and splits RDMA writes at segment boundaries, so a
-// single transfer may span multiple segments.
-//
-// These require 2 processes, an IB/RoCE device with GDR, and the cuMem/HIP
-// dma-buf export API; otherwise they GTEST_SKIP. Rank 0 is the receiver, rank 1
-// the sender (matches SetupConnectionWithGuard).
-//
-// Coverage: per-segment registration + transfer, intra-segment offset
-// selection, boundary-crossing AND whole-buffer transfers (Option B's splitting
-// builder), the flush path's per-segment MR selection, over-cap rejection,
-// single-segment regression, and a host (NCCL_PTR_HOST) + device (NCCL_PTR_CUDA)
-// pointer-type regression. (Option B splits cross-boundary transfers rather than
-// rejecting them, so there is no send-side rejection test here -- see
-// CrossBoundaryTransferSucceeds instead.)
+// Multi-segment DMA-BUF tests for the classic NET/IB proxy path.
+// They require two processes, IB/RoCE with GDR, and cuMem/HIP DMA-BUF export.
+// Coverage includes per-segment registration, offsets, boundary-split and
+// whole-buffer transfers, flush MR selection, segment limits, and regressions.
+// Rank 0 receives, rank 1 sends, and unsupported environments are skipped.
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbMultiSegmentHelpers.hpp"
+#include "MPIHelpers.hpp"
 
 #include <cstring>
 #include <vector>
@@ -59,9 +47,7 @@ protected:
     }
 
     bool SyncSkip(bool want) {
-        int f = want ? 1 : 0;
-        MPI_Allreduce(MPI_IN_PLACE, &f, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        return f != 0;
+        return MPIHelpers::anyRankTrue(want);
     }
 
     bool PtrSupported(int mask) {
@@ -248,8 +234,8 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
                            srcOff, dstOff, size, /*tag=*/350, /*seed=*/0xD3);
 }
 
-// OPTION B FLAGSHIP: a single transfer that straddles a segment boundary now
-// SUCCEEDS -- the sender splits the RDMA write at the receiver's boundary using
+// A single transfer that straddles a segment boundary succeeds because the
+// sender splits the RDMA write at the receiver's boundary using
 // the per-segment rkeys published in the CTS FIFO. Data must arrive intact.
 TEST_F(NetIbMultiSegmentMPITest, CrossBoundaryTransferSucceeds) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
@@ -297,8 +283,8 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) 
     }
 }
 
-// OPTION B: a single transfer spanning the ENTIRE multi-segment buffer (crosses
-// every boundary) completes and verifies -- exercises the full splitting builder.
+// A transfer spanning the entire multi-segment buffer crosses every boundary
+// and exercises the full splitting builder.
 TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) SETUP_OR_SKIP();
@@ -350,8 +336,8 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
 
 // FLUSH: after receiving into a NON-zero segment, ncclIbIflush must fence the
 // buffer using that segment's MR (rkey selected by ncclIbMrForRange), not
-// segment 0's. The flush 4-byte read never straddles a boundary even under
-// Option B, so this validates per-segment key selection on the flush path.
+// segment 0's. The flush 4-byte read never straddles a boundary, so this
+// validates per-segment key selection on the flush path.
 // When GDR flush is disabled, iflush returns success with no request; the test
 // still asserts iflush accepts a multi-segment handle without a boundary error.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
