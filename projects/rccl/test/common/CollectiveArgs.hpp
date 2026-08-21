@@ -84,7 +84,6 @@ namespace RcclUnitTesting
 
     // Bias support for fused AllReduce+Bias operations
     bool            useBias = false;        // Enable bias addition
-    void*           biasPtr = nullptr;      // Pointer to bias buffer (GPU memory)
     size_t          biasNumElements = 0;    // Number of elements in bias buffer
     int             biasConstantValue = -1; // If >= 0, use constant value for all bias elements (instead of incremental pattern)
 
@@ -135,8 +134,9 @@ namespace RcclUnitTesting
     PtrUnion       biasGpu;           // Bias buffer on GPU
     PtrUnion       biasCpu;           // Bias buffer on CPU (for initialization/validation)
     void*          biasRegHandle;     // Handle for registered bias buffer
-    size_t         numBiasElements;   // Number of elements in bias buffer
-    size_t         numBiasBytesAllocated;  // Number of bytes allocated for bias
+    size_t         numBiasElements;          // Current number of elements in bias buffer
+    size_t         numBiasElementsAllocated; // Max number of elements allocated for bias
+    size_t         numBiasBytesAllocated;    // Number of bytes allocated for bias
 
     // Set collective arguments
     ErrCode SetArgs(int             const globalRank,

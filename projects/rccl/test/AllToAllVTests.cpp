@@ -74,23 +74,24 @@ namespace RcclUnitTesting
     }
   }
 
+  // Note: HIP graph variants are intentionally omitted for AlltoAllv. Unlike AlltoAll
+  // and other collectives that call ncclEnqueueCheck directly (making them capturable
+  // as single GPU operations), ncclAlltoAllv_impl decomposes into
+  // ncclGroupStart + N×Send/Recv + ncclGroupEnd internally (see collectives.cc).
+  // Speculation: This group dispatch is CPU-driven and cannot be captured as GPU graph
+  // nodes, causing HIP graph capture to hang. Datatypes from omitted graph variants
+  // are folded into the non-graph tests below.
   TEST(AlltoAllv, OutOfPlace)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclDataType_t> const& testDataTypes   = {ncclInt32, ncclFloat64, ncclFloat16};
-    bool                        const  inPlace         = false;
-    bool                        const  useManagedMem   = false;
-    bool                        const  useHipGraph     = false;
+    std::vector<ncclDataType_t> const dataTypes     = testBed.ev.GetDataTypes({ncclInt32, ncclFloat64, ncclFloat16, ncclFloat32, ncclInt8});
+    bool                        const inPlace       = false;
+    bool                        const useManagedMem = false;
+    bool                        const useHipGraph   = false;
 
     OptionalColArgs options;
-
-    std::vector<ncclDataType_t> dataTypes;
-    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
-    }
 
     bool isCorrect = true;
     for (int totalRanks : testBed.ev.GetNumGpusList())
@@ -138,23 +139,17 @@ namespace RcclUnitTesting
   }
 
 
-  TEST(AlltoAllv, OutOfPlaceGraph)
+  TEST(AlltoAllv, ManagedMem)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclDataType_t> const& testDataTypes   = {ncclFloat32, ncclInt8};
-    bool                        const  inPlace         = false;
-    bool                        const  useManagedMem   = false;
-    bool                        const  useHipGraph     = false;
+    std::vector<ncclDataType_t> const dataTypes     = testBed.ev.GetDataTypes({ncclBfloat16, ncclUint32, ncclFloat16, ncclFloat8e4m3});
+    bool                        const inPlace       = false;
+    bool                        const useManagedMem = true;
+    bool                        const useHipGraph   = false;
 
     OptionalColArgs options;
-
-    std::vector<ncclDataType_t> dataTypes;
-    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
-    }
 
     bool isCorrect = true;
     for (int totalRanks : testBed.ev.GetNumGpusList())
@@ -167,9 +162,9 @@ namespace RcclUnitTesting
       // Prepare AlltoAllV options
       std::vector<size_t> numInputElements;
       std::vector<size_t> numOutputElements;
-      PrepareCounts(totalRanks, 256, options, numInputElements, numOutputElements, 60);
+      PrepareCounts(totalRanks, 256, options, numInputElements, numOutputElements, 40);
 
-      for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
+      for (int dataIdx = 0; dataIdx < (int)dataTypes.size() && isCorrect; ++dataIdx)
       {
         if (testBed.ev.showNames)
         {
@@ -200,4 +195,5 @@ namespace RcclUnitTesting
     }
     testBed.Finalize();
   }
+
 }

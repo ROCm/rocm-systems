@@ -612,7 +612,7 @@ namespace RcclUnitTesting
                                           collArg.options.redOp,
                                           this->comms[localRank],
                                           this->streams[groupId][localRank][collArg.streamIdx],
-                                          collArg.options.biasPtr),
+                                          collArg.biasGpu.ptr),
                             "ncclAllReduceWithBias");
           }
           else

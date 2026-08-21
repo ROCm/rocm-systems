@@ -5,15 +5,11 @@
  ************************************************************************/
 
 #pragma once
-#include <hsa/hsa.h>
 #include <vector>
 #include "rccl/rccl.h"
 
 namespace RcclUnitTesting
 {
-  // Helper function to count the number of GPUs on system
-  static hsa_status_t CountGpus(hsa_agent_t agent, void* data);
-
   // Helper class to track environment variables that affect the unit tests
   class EnvVars
   {
@@ -35,6 +31,7 @@ namespace RcclUnitTesting
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
     bool isGfx12;        // Detects if architecture is gfx12
+    bool isGfx125;       // Detects if architecture is gfx125 (e.g. gfx1250)
     bool isGfx90;        // Detects if architecture is gfx90
 
     // Constructor that parses and collects environment variables
@@ -46,11 +43,19 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
+
+    // Each of the following returns the env var override if set,
+    // otherwise the provided per-test defaults.
+    std::vector<ncclDataType_t> GetDataTypes(std::vector<ncclDataType_t> const& defaults) const;
+    std::vector<ncclRedOp_t>    GetRedOps   (std::vector<ncclRedOp_t>    const& defaults) const;
+    std::vector<int>            GetElements (std::vector<int>            const& defaults) const;
+
     void ShowConfig();
 
   protected:
     std::vector<ncclRedOp_t>    redOps;             // Supported reduction ops [UT_REDOPS]
     std::vector<ncclDataType_t> dataTypes;          // Support datatypes       [UT_DATATYPES]
+    std::vector<int>            elements;           // Element count override  [UT_ELEMENTS]
     std::vector<int>            numGpusList;        // List of # Gpus to use   [UT_MIN_GPUS/UT_MAX_GPUS/UT_POW2_GPUS]
     std::vector<int>            isMultiProcessList; // Single or multi process [UT_PROCESS_MASK]
     int                         numDetectedGpus;

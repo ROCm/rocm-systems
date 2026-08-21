@@ -88,21 +88,12 @@ namespace RcclUnitTesting
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclDataType_t> const& testDataTypes   = {ncclInt32, ncclFloat16, ncclFloat64};
-    std::vector<int>            const  numElements     = {1048576, 53327, 1024, 0};
-    bool                        const  inPlace         = false;
-    bool                        const  useManagedMem   = false;
+    std::vector<ncclDataType_t> const dataTypes     = testBed.ev.GetDataTypes({ncclInt32, ncclFloat16, ncclFloat64});
+    std::vector<int>            const numElements   = testBed.ev.GetElements({1048576, 53327, 1024, 0});
+    bool                        const inPlace       = false;
+    bool                        const useManagedMem = false;
 
     OptionalColArgs options;
-
-    std::vector<ncclDataType_t> dataTypes;
-    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
-    }
-    if (testBed.ev.maxGpus < 2) {
-      GTEST_SKIP() << "Skipping... SendRecv.SinglePairs requires at least 2 GPUs (detected " << testBed.ev.maxGpus << ")";
-    }
 
     bool isCorrect = true;
     int numGpus = testBed.ev.maxGpus;
@@ -662,19 +653,13 @@ namespace RcclUnitTesting
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclDataType_t> const& testDataTypes   = {ncclInt32, ncclFloat16, ncclFloat64};
-    std::vector<int>            const  numElements     = {1048576, 53327, 1024};
-    bool                        const  inPlace         = false;
-    bool                        const  useManagedMem   = false;
-    bool                        const  userRegistered  = true;
+    std::vector<ncclDataType_t> const dataTypes      = testBed.ev.GetDataTypes({ncclInt32, ncclFloat16, ncclFloat64});
+    std::vector<int>            const numElements    = testBed.ev.GetElements({1048576, 53327, 1024});
+    bool                        const inPlace        = false;
+    bool                        const useManagedMem  = false;
+    bool                        const userRegistered = true;
 
     OptionalColArgs options;
-
-    std::vector<ncclDataType_t> dataTypes;
-    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
-    }
 
     bool isCorrect = true;
     int numGpus = testBed.ev.maxGpus;

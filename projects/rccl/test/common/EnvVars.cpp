@@ -8,6 +8,7 @@
 #include "CollectiveArgs.hpp"
 #include "ProcessIsolatedTestRunner.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <algorithm>
@@ -19,6 +20,8 @@ namespace RcclUnitTesting
 {
   int const UT_SINGLE_PROCESS = (1<<0);
   int const UT_MULTI_PROCESS  = (1<<1);
+
+  namespace {
 
   int getArchInfo(bool *isRightArch,  const char *gfx)
   {
@@ -40,7 +43,7 @@ namespace RcclUnitTesting
           CHECK_HIP(hipGetDeviceProperties(&devProp, deviceId));
           char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
           strcpy(gcn, gcnArchNameToken);
-          if(std::strncmp(gfx, gcn, 5) == 0) {
+          if(std::strncmp(gfx, gcn, std::strlen(gfx)) == 0) {
             isGfxTest = true;
           } else {
             isGfxTest = false;
@@ -132,7 +135,6 @@ namespace RcclUnitTesting
       close(pipefd[1]);
     }
     return TEST_SUCCESS;
-    return 0;
   }
 
   ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
@@ -204,6 +206,7 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  } // namespace
 
   EnvVars::EnvVars()
   {
@@ -222,6 +225,8 @@ namespace RcclUnitTesting
     if(!isIsolatedChild) getArchInfo(&isGfx95, "gfx95");
     isGfx12 = false;
     if(!isIsolatedChild) getArchInfo(&isGfx12, "gfx12");
+    isGfx125 = false;
+    if(!isIsolatedChild) getArchInfo(&isGfx125, "gfx125");
     isGfx90 = false;
     if(!isIsolatedChild) getArchInfo(&isGfx90, "gfx90");
 
@@ -257,53 +262,68 @@ namespace RcclUnitTesting
     onlyPow2Gpus   = GetEnvVar("UT_POW2_GPUS"   , isCpxMode); // Default value set based on whether system is in CPX mode. UT_POW2_GPUS set by user overrides it.
 
     std::vector<std::string> redOpStrings = GetEnvVarsList("UT_REDOPS");
-    for (auto s : redOpStrings)
-    {
-      for (int i = 0; i < numOps; ++i)
-      {
-        if (!strcmp(s.c_str(), ncclRedOpNames[i]))
-        {
-          redOps.push_back((ncclRedOp_t)i);
-          break;
-        }
-      }
-    }
-    // Default back to all ops if no strings are found
-    if (redOps.empty())
+    if (std::find(redOpStrings.begin(), redOpStrings.end(), "all") != redOpStrings.end())
     {
       for (int i = 0; i < numOps; i++)
         redOps.push_back((ncclRedOp_t)i);
     }
-
-    // Limit number of supported datatypes if only allReduce is built
-    std::vector<std::string> dtStrings = GetEnvVarsList("UT_DATATYPES");
-    for (auto s : dtStrings)
+    else
     {
-      for (int i = 0; i < ncclNumTypes; ++i)
+      for (auto s : redOpStrings)
       {
-        if (!strcmp(s.c_str(), ncclDataTypeNames[i]))
+        bool found = false;
+        for (int i = 0; i < numOps; ++i)
         {
-          dataTypes.push_back((ncclDataType_t)i);
+          if (!strcmp(s.c_str(), ncclRedOpNames[i]))
+          {
+            redOps.push_back((ncclRedOp_t)i);
+            found = true;
+            break;
+          }
         }
+        if (!found)
+          TEST_WARN("UT_REDOPS: unrecognized value '%s' (ignored)", s.c_str());
       }
     }
 
-    // Default option if no valid datatypes are found in env var
-    if (dataTypes.empty())
+    // Limit number of supported datatypes if only allReduce is built
+    std::vector<std::string> dtStrings = GetEnvVarsList("UT_DATATYPES");
+    if (std::find(dtStrings.begin(), dtStrings.end(), "all") != dtStrings.end())
     {
-      dataTypes.push_back(ncclFloat32);
-      dataTypes.push_back(ncclInt8);
-      dataTypes.push_back(ncclUint8);
-      dataTypes.push_back(ncclInt32);
-      dataTypes.push_back(ncclUint32);
-      dataTypes.push_back(ncclInt64);
-      dataTypes.push_back(ncclUint64);
-      dataTypes.push_back(ncclFloat16);
-      dataTypes.push_back(ncclFloat32);
-      dataTypes.push_back(ncclFloat64);
-      dataTypes.push_back(ncclBfloat16);
-      dataTypes.push_back(ncclFloat8e4m3);
-      dataTypes.push_back(ncclFloat8e5m2);
+      for (int i = 0; i < ncclNumTypes; ++i)
+        dataTypes.push_back((ncclDataType_t)i);
+    }
+    else
+    {
+      for (auto s : dtStrings)
+      {
+        bool found = false;
+        for (int i = 0; i < ncclNumTypes; ++i)
+        {
+          if (!strcmp(s.c_str(), ncclDataTypeNames[i]))
+          {
+            dataTypes.push_back((ncclDataType_t)i);
+            found = true;
+          }
+        }
+        if (!found)
+          TEST_WARN("UT_DATATYPES: unrecognized value '%s' (ignored)", s.c_str());
+      }
+    }
+
+
+    // Parse optional element count override (0 is valid for Send/Recv zero-element tests)
+    for (auto s : GetEnvVarsList("UT_ELEMENTS"))
+    {
+      std::stringstream ss(s);
+      int val;
+      char extra;
+      if (!(ss >> val) || (ss >> extra))
+        TEST_WARN("UT_ELEMENTS: invalid value '%s' (ignored)", s.c_str());
+      else if (val < 0)
+        TEST_WARN("UT_ELEMENTS: negative value '%s' (ignored)", s.c_str());
+      else
+        elements.push_back(val);
     }
 
     // Build list of possible # GPU ranks based on env vars
@@ -316,6 +336,21 @@ namespace RcclUnitTesting
     isMultiProcessList.clear();
     if (this->processMask & UT_SINGLE_PROCESS) isMultiProcessList.push_back(0);
     if (this->processMask & UT_MULTI_PROCESS)  isMultiProcessList.push_back(1);
+  }
+
+  std::vector<ncclDataType_t> EnvVars::GetDataTypes(std::vector<ncclDataType_t> const& defaults) const
+  {
+    return dataTypes.empty() ? defaults : dataTypes;
+  }
+
+  std::vector<ncclRedOp_t> EnvVars::GetRedOps(std::vector<ncclRedOp_t> const& defaults) const
+  {
+    return redOps.empty() ? defaults : redOps;
+  }
+
+  std::vector<int> EnvVars::GetElements(std::vector<int> const& defaults) const
+  {
+    return elements.empty() ? defaults : elements;
   }
 
   std::vector<ncclRedOp_t> const& EnvVars::GetAllSupportedRedOps()
@@ -378,8 +413,9 @@ namespace RcclUnitTesting
         std::make_tuple("UT_POW2_GPUS"        , onlyPow2Gpus  , "Only allow power-of-2 # of GPUs"),
         std::make_tuple("UT_PROCESS_MASK"     , processMask   , "Whether to run single/multi process"),
         std::make_tuple("UT_VERBOSE"          , verbose       , "Show verbose unit test output"),
-        std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test"),
-        std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test"),
+        std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test (or 'all')"),
+        std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test (or 'all')"),
+        std::make_tuple("UT_ELEMENTS"         , -1            , "Override element counts for all tests"),
         std::make_tuple("UT_MAX_RANKS_PER_GPU", maxRanksPerGpu, "Maximum number of ranks using the same GPU"),
         std::make_tuple("UT_PRINT_VALUES"     , printValues   , "Print array values (-1 for all)"),
         std::make_tuple("UT_SHOW_TIMING"      , showTiming    , "Show timing table"),

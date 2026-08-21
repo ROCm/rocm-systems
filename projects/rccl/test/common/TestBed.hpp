@@ -161,7 +161,8 @@ namespace RcclUnitTesting
                                        bool           const inPlace,
                                        bool           const managedMem,
                                        bool           const useHipGraph,
-                                       int            const ranksPerProc=1);
+                                       int            const ranksPerProc=1,
+                                       bool           const useBias=false);
 
     // Run a simple sweep
     void RunSimpleSweep(std::vector<ncclFunc_t>     const& funcTypes,
@@ -172,7 +173,9 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& inPlaceList,
                         std::vector<bool>           const& managedMemList,
                         std::vector<bool>           const& useHipGraphList,
-                        bool                        const& enableSweep = true);
+                        bool                        const& enableSweep = true,
+                        OptionalColArgs             const& options = {},
+                        int                         const  minNonSweepGpus = 8);
 
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);

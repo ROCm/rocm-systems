@@ -596,36 +596,32 @@ namespace RcclUnitTesting
 
   void TestBed::GetSupportedRedOps(std::vector<ncclRedOp_t>& redOps, const std::vector<ncclRedOp_t>& testRedOps)
   {
-    // Filter out any unsupported reduction ops, in case only subset has been compiled for
+    // If UT_REDOPS is unset, no filtering — pass all test-specified ops through.
     auto& supportedOps = ev.GetAllSupportedRedOps();
-    for (auto redop : testRedOps)
+    if (supportedOps.empty())
     {
-      for (int i = 0; i < supportedOps.size(); ++i)
-      {
-        if (supportedOps[i] == redop)
-        {
-          redOps.push_back(redop);
-          break;
-        }
-      }
+      redOps = testRedOps;
+      return;
     }
+    // Otherwise filter to the intersection with the UT_REDOPS override list.
+    for (auto redop : testRedOps)
+      for (auto supported : supportedOps)
+        if (supported == redop) { redOps.push_back(redop); break; }
   }
 
   void TestBed::GetSupportedDataTypes(std::vector<ncclDataType_t>& dataTypes, const std::vector<ncclDataType_t>& testDataTypes)
   {
-    // Filter out any unsupported datatypes, in case only subset has been compiled for
+    // If UT_DATATYPES is unset, no filtering — pass all test-specified types through.
     auto& supportedDataTypes = ev.GetAllSupportedDataTypes();
-    for (auto dt : testDataTypes)
+    if (supportedDataTypes.empty())
     {
-      for (int i = 0; i < supportedDataTypes.size(); ++i)
-      {
-        if (supportedDataTypes[i] == dt)
-        {
-          dataTypes.push_back(dt);
-          break;
-        }
-      }
+      dataTypes = testDataTypes;
+      return;
     }
+    // Otherwise filter to the intersection with the UT_DATATYPES override list.
+    for (auto dt : testDataTypes)
+      for (auto supported : supportedDataTypes)
+        if (supported == dt) { dataTypes.push_back(dt); break; }
   }
 
   std::vector<int> const TestBed::GetNumCollsPerGroup(int numCollectivesInGroup,
@@ -672,7 +668,8 @@ namespace RcclUnitTesting
                                        bool           const inPlace,
                                        bool           const managedMem,
                                        bool           const useHipGraph,
-                                       int            const ranksPerProc)
+                                       int            const ranksPerProc,
+                                       bool           const useBias)
   {
     std::stringstream ss;
     ss << (isMultiProcess ? "MP" : "SP") <<  " ";
@@ -682,7 +679,9 @@ namespace RcclUnitTesting
     else
       ss << "    ";
     ss << "ranks ";
-    ss << std::setfill(' ') << std::setw(20) << ncclFuncNames[funcType] << " ";
+    std::string funcName = ncclFuncNames[funcType];
+    if (useBias && funcType == ncclCollAllReduce) funcName += "Bias";
+    ss << std::setfill(' ') << std::setw(20) << funcName << " ";
     ss << "(" << (inPlace ? "IP" : "OP") << ","
        << (managedMem ? "MM" : "GM") << ","
        << (useHipGraph ? "GL" : "NL") <<") ";
@@ -700,12 +699,14 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& inPlaceList,
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
-                               bool                        const& enableSweep)
+                               bool                        const& enableSweep,
+                               OptionalColArgs             const& options,
+                               int                         const  minNonSweepGpus)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
     std::sort(sortedN.rbegin(), sortedN.rend());
-    OptionalColArgs optionalArgs;
+    OptionalColArgs optionalArgs = options;
     std::vector<ncclDataType_t> dataTypes;
     this->GetSupportedDataTypes(dataTypes, tmpDataTypes);
     if (dataTypes.empty()) {
@@ -728,7 +729,7 @@ namespace RcclUnitTesting
       // Test either single process all GPUs, or 1 process per GPU
       int const numChildren = isMultiProcess ? numGpus : 1;
       int const numRanks    = numGpus*ranksPerGpu;
-      if(enableSweep == false && (numGpus < 8 || numRanks < 8)) {
+      if(enableSweep == false && (numGpus < minNonSweepGpus || numRanks < minNonSweepGpus)) {
         continue;
       }
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
@@ -781,7 +782,9 @@ namespace RcclUnitTesting
             continue;
           }
 
-          // Only allocate once for largest size
+          // Only allocate once for largest size; bias reuses the same allocation
+          // since PrepareData copies only the current numBiasElements values
+          // (numBiasElements * DataTypeToBytes(dataType) bytes), not the full allocated size
           if (neIdx == 0)
           {
             this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);
@@ -811,7 +814,8 @@ namespace RcclUnitTesting
                                                      funcTypes[ftIdx], dataTypes[dtIdx],
                                                      redOps[rdIdx], roots[rtIdx],
                                                      inPlaceList[ipIdx], managedMemList[mmIdx],
-                                                     useHipGraphList[hgIdx], ranksPerGpu);
+                                                     useHipGraphList[hgIdx], ranksPerGpu,
+                                                     optionalArgs.useBias);
 
             if (ev.showNames)
             {
