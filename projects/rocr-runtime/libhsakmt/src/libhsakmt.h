@@ -274,6 +274,7 @@ extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
 void hsakmt_clear_events_page(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx);
+void hsakmt_fmm_destroy_always_mapped_tracker(HsaKFDContext *ctx);
 void hsakmt_clear_process_doorbells(HsaKFDContext *ctx);
 uint32_t hsakmt_get_num_sysfs_nodes(HsaKFDContext *ctx);
 
