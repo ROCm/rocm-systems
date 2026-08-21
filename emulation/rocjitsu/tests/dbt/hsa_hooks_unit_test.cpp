@@ -3597,6 +3597,63 @@ TEST(HsaHooksUnitTest, RecordReplayPressureKeysFanoutByFullDynamicIdentity) {
   EXPECT_EQ(telemetry.logical_access_range_count, 3u);
 }
 
+TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRegions) {
+  rocjitsu::ConSanMoiAutoReportInventory inventory;
+  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 2;
+  inventory.barrier_event_count = 1024;
+  inventory.atomic_event_count = 512;
+  inventory.fence_event_count = 256;
+  inventory.diagnostic_count = 2048;
+  inventory.record_replay_dispatch_token_capacity = 2;
+  inventory.record_replay_access_dispatch_bank_count = 1;
+  inventory.record_replay_access_owner_bank_count = 1;
+  inventory.record_replay_address_group_headroom = 1;
+  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+  const auto header = rocjitsu::make_consan_moi_report_header_for_layout(
+      1, 2, report.layout, rocjitsu::ConSanMoiEngine::RecordReplay);
+
+  const auto plan = rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
+      header, report.layout, report.required_bytes, report.layout.access_record_capacity,
+      /*visible_barriers=*/3, /*visible_atomics=*/2, /*visible_fences=*/1,
+      /*visible_diagnostics=*/4);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->range_count, 6u);
+  const size_t expected_bytes =
+      sizeof(rocjitsu::ConSanMoiReportHeader) +
+      static_cast<size_t>(report.layout.access_record_capacity) *
+          sizeof(rocjitsu::ConSanMoiAccessRecord) +
+      3u * sizeof(rocjitsu::ConSanMoiBarrierRecord) + 2u * sizeof(rocjitsu::ConSanMoiAtomicRecord) +
+      sizeof(rocjitsu::ConSanMoiFenceRecord) + 4u * sizeof(rocjitsu::ConSanMoiDiagnosticRecord);
+  EXPECT_EQ(plan->copied_bytes, expected_bytes);
+  EXPECT_LT(plan->copied_bytes, report.required_bytes);
+
+  EXPECT_FALSE(rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
+      header, report.layout, report.required_bytes, report.layout.access_record_capacity,
+      report.layout.barrier_record_capacity + 1u, 0, 0, 0));
+  auto malformed_layout = report.layout;
+  malformed_layout.diagnostic_records_offset = report.required_bytes;
+  EXPECT_FALSE(rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
+      header, malformed_layout, report.required_bytes, report.layout.access_record_capacity, 0, 0,
+      0, 1));
+}
+
+TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapacity) {
+  std::vector<rocjitsu::ConSanMoiAccessRecord> records(1u << 16u);
+  records.front().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
+  records.back().claim_token = 7;
+  records.back().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Read);
+
+  const auto compact = rocjitsu::consan_hook::compact_record_replay_access_records(records, 2);
+  EXPECT_EQ(compact.committed_record_count, 2u);
+  ASSERT_EQ(compact.replay_records.size(), 2u);
+  EXPECT_LE(compact.replay_records.capacity(), 2u);
+  EXPECT_EQ(compact.replay_records.front().access_kind,
+            static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write));
+  EXPECT_EQ(compact.replay_records.back().claim_token, 7u);
+}
+
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar flavor("RJ_CONSAN_FLAVOR", "moi");
@@ -6008,10 +6065,10 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
     EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
   }
   ASSERT_FALSE(g_transform_override_report_sizes.empty());
-  const std::string fine_grained_snapshot =
+  EXPECT_NE(log.find("fine_grained_snapshot_bytes="), std::string::npos) << log;
+  const std::string full_snapshot =
       "fine_grained_snapshot_bytes=" + std::to_string(g_transform_override_report_sizes.back());
-  EXPECT_NE(log.find(fine_grained_snapshot), std::string::npos) << fine_grained_snapshot << '\n'
-                                                                << log;
+  EXPECT_EQ(log.find(full_snapshot), std::string::npos) << full_snapshot << '\n' << log;
   const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
   for (std::string_view field :

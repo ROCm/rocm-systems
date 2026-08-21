@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -648,15 +649,15 @@ private:
       ++summary.inline_malformed_count;
     if (entry.sampled_patch_mapping_malformed)
       ++summary.sampled_patch_mapping_malformed_count;
-    // Summarization performs several full and sparse passes over large reports.
-    // Reading a fine-grained HSA allocation field by field can be orders of
-    // magnitude slower than one sequential copy into ordinary host memory.
-    // Snapshot both allocation kinds once after dispatch completion, then keep
-    // every parser and replay pass on cacheable process-local storage.
-    std::vector<uint8_t> snapshot(entry.size);
+    // Summarization performs several passes over report data. Reading a
+    // fine-grained HSA allocation field by field can be orders of magnitude
+    // slower than sequential copies into ordinary host memory. Snapshot after
+    // dispatch completion, then keep parsing and replay on cacheable storage.
+    // Default-initialization deliberately leaves uncopied Record/Replay tail
+    // capacity untouched; no parser is allowed to read those ranges.
+    std::unique_ptr<uint8_t[]> snapshot(new uint8_t[entry.size]);
     if (entry.fine_grained) {
-      std::memcpy(snapshot.data(), entry.ptr, entry.size);
-      summary.fine_grained_snapshot_bytes = entry.size;
+      std::memcpy(snapshot.get(), entry.ptr, sizeof(rocjitsu::ConSanMoiReportHeader));
     } else {
       if (core == nullptr || core->hsa_memory_copy_fn == nullptr) {
         log_message(kLogInfo,
@@ -666,7 +667,7 @@ private:
         return summary;
       }
       const hsa_status_t copy_status =
-          core->hsa_memory_copy_fn(snapshot.data(), entry.ptr, entry.size);
+          core->hsa_memory_copy_fn(snapshot.get(), entry.ptr, entry.size);
       if (copy_status != HSA_STATUS_SUCCESS) {
         log_message(kLogInfo, "ConSan MOI auto report reader=%llu hsa_memory_copy failed status=%d",
                     static_cast<unsigned long long>(entry.reader), static_cast<int>(copy_status));
@@ -674,7 +675,7 @@ private:
       }
       summary.coarse_grained_snapshot_bytes = entry.size;
     }
-    const void *report_ptr = snapshot.data();
+    const void *report_ptr = snapshot.get();
 
     const auto *header = static_cast<const rocjitsu::ConSanMoiReportHeader *>(report_ptr);
     if (!rocjitsu::consan_moi_report_header_is_current(*header)) {
@@ -716,6 +717,33 @@ private:
         std::min(header->fence_record_count, entry.fence_record_capacity);
     const uint32_t raw_visible_diagnostics =
         std::min(header->diagnostic_count, header->diagnostic_capacity);
+    if (entry.fine_grained) {
+      if (expected_engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
+        const auto snapshot_plan = rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
+            *header, expected_layout, entry.size, expected_layout.access_record_capacity,
+            visible_barriers, visible_atomics, visible_fences, raw_visible_diagnostics);
+        if (!snapshot_plan) {
+          log_message(kLogInfo,
+                      "ConSan MOI auto report reader=%llu has invalid sparse snapshot ranges",
+                      static_cast<unsigned long long>(entry.reader));
+          return summary;
+        }
+        const auto *source = static_cast<const uint8_t *>(entry.ptr);
+        for (const auto &range :
+             std::span(snapshot_plan->ranges.data(), snapshot_plan->range_count)) {
+          if (range.offset == 0)
+            continue;
+          std::memcpy(snapshot.get() + range.offset, source + range.offset, range.size);
+        }
+        summary.fine_grained_snapshot_bytes = snapshot_plan->copied_bytes;
+      } else {
+        std::memcpy(snapshot.get() + sizeof(rocjitsu::ConSanMoiReportHeader),
+                    static_cast<const uint8_t *>(entry.ptr) +
+                        sizeof(rocjitsu::ConSanMoiReportHeader),
+                    entry.size - sizeof(rocjitsu::ConSanMoiReportHeader));
+        summary.fine_grained_snapshot_bytes = entry.size;
+      }
+    }
     const uint32_t dropped_records =
         access_record_count > visible_records ? access_record_count - visible_records : 0;
     const uint32_t dropped_barriers =
@@ -1281,28 +1309,19 @@ private:
     }
     const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
         bytes + expected_layout.access_records_offset);
-    uint32_t committed_records = 0;
-    std::vector<rocjitsu::ConSanMoiAccessRecord> replay_access_records;
-    if (expected_engine == ConSanMoiEngine::RecordReplay)
-      replay_access_records.reserve(std::min(visible_records, header->event_counter));
-    for (uint32_t i = 0; i < visible_records; ++i) {
-      const rocjitsu::ConSanMoiAccessRecord &record = records[i];
-      if (record.access_kind != static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Empty)) {
-        ++committed_records;
-      }
-      // Fixed per-site tables expose their entire capacity as visible. Replay
-      // only the published slots, but retain a partially initialized Empty
-      // record so the model reports it as unsupported instead of hiding it.
-      if (expected_engine == ConSanMoiEngine::RecordReplay &&
-          !rocjitsu::consan_moi_access_record_is_unpublished(record)) {
-        replay_access_records.push_back(record);
-      }
+    rocjitsu::consan_hook::CompactRecordReplayAccessRecords compact_access_records;
+    if (expected_engine == ConSanMoiEngine::RecordReplay) {
+      compact_access_records = rocjitsu::consan_hook::compact_record_replay_access_records(
+          std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
+          header->event_counter);
     }
-    const RecordReplayPressureTelemetry record_replay_pressure = record_replay_pressure_telemetry(
-        *header, expected_engine,
-        std::span<const rocjitsu::ConSanMoiAccessRecord>(records, visible_records),
-        expected_layout.record_replay_logical_access_range_count,
-        expected_layout.record_replay_address_group_headroom);
+    const uint32_t committed_records = compact_access_records.committed_record_count;
+    std::vector<rocjitsu::ConSanMoiAccessRecord> &replay_access_records =
+        compact_access_records.replay_records;
+    const RecordReplayPressureTelemetry record_replay_pressure =
+        record_replay_pressure_telemetry(*header, expected_engine, replay_access_records,
+                                         expected_layout.record_replay_logical_access_range_count,
+                                         expected_layout.record_replay_address_group_headroom);
     summary.visible_access_record_count = committed_records;
     summary.visible_barrier_record_count = visible_barriers;
     summary.visible_atomic_record_count = visible_atomics;
