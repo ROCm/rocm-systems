@@ -1637,7 +1637,8 @@ ib_recv:
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
-       remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
+       remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
+       rComm->base.recvMatchingScheme);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
   if (remMeta.isRMA) {
     rComm->base.nqps = 1;
