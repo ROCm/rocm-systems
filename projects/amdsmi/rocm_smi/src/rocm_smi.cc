@@ -1982,6 +1982,10 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_prese
 }
 
 static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_node_number) {
+  if (numa_node_number == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   TRY
 
       GET_DEV_AND_KFDNODE_FROM_INDX
@@ -4990,6 +4994,9 @@ rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
                                    void* /*unused*/) {
+  if (evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   TRY
 
       amd::smi::evt::Event* evt = reinterpret_cast<amd::smi::evt::Event*>(evt_handle);
@@ -4999,10 +5006,6 @@ rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_
   REQUIRE_ROOT_ACCESS
 
   int ret = 0;
-
-  if (evt_handle == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (cmd) {
     case RSMI_CNTR_CMD_START:
@@ -7605,7 +7608,6 @@ rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(header_value != nullptr);
   if (header_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -7629,7 +7631,6 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(xcd_counter_value != nullptr);
   if (xcd_counter_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }

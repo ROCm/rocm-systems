@@ -456,6 +456,7 @@ if(BUILD_TESTS)
       ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
@@ -680,6 +681,7 @@ if(BUILD_TESTS)
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
+      DdaAllReduceMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})

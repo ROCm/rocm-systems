@@ -185,7 +185,7 @@ static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginI
     // Honor NCCL_GIN_ENABLE: when disabled, keep ginType NONE so globalGinSupport
     // resolves to NONE and GIN bring-up is cleanly rejected downstream.
     comm->sharedRes->ginState.ginType =
-        ncclParamGinEnable() ? static_cast<ncclGinType_t>(props.netDeviceType) : NCCL_GIN_TYPE_NONE;
+      ncclParamGinEnable() ? static_cast<ncclGinType_t>(props.netDeviceType) : NCCL_GIN_TYPE_NONE;
     comm->ginPluginIndex = pluginIndex;
 
     ncclGinProperties_t ginProperties;
@@ -326,7 +326,7 @@ static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
   if (ncclParamGinEnable() == 0) {
-    INFO(NCCL_INIT|NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
+    INFO(NCCL_INIT | NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
     return ncclSuccess;
   }
 #if !defined(__HIP_PLATFORM_AMD__)

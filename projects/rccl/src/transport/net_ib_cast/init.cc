@@ -606,7 +606,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // CTS Offload and CTS Inline are mutually dependent — both must be
       // enabled for either to function. Disable both if either is missing.
       if (IbCastOffloadEnabled && !IbCastUseInline) {
-        INFO(NCCL_INIT|NCCL_NET, "NET/IB : IB Use Inline is disabled and CTS Offload is enabled - enabling IB Use Inline Data");
+        INFO(NCCL_INIT | NCCL_NET,
+             "NET/IB : IB Use Inline is disabled and CTS Offload is enabled - enabling IB Use Inline Data");
         IbCastUseInline = true;
       }
       if (IbCastOffloadEnabled && rcclUseIbCastQpSched()) {
@@ -621,10 +622,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       INFO(NCCL_INIT | NCCL_NET,
            "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: %s; GDR Flush: %s",
-           IbCastAinicCtsInlineData ? "Enabled": "Disabled",
-           IbCastOffloadEnabled ? "Enabled": "Disabled",
-           IbCastUseInline ? "Enabled": "Disabled",
-           IbCastGdrFlushDisable ? "Disabled": "Enabled");
+           IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
+           IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
     }
   }
 exit:
@@ -637,9 +636,8 @@ exit:
   }
   if (ret == ncclSuccess && IbCastOffloadEnabled &&
       (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
-    INFO(NCCL_INIT | NCCL_NET,
-         "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload, Inline Data "
-         "(not compatible with resiliency)");
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload, Inline Data "
+                               "(not compatible with resiliency)");
     IbCastOffloadEnabled = false;
     IbCastUseInline = false;
     IbCastAinicCtsInlineData = false;
@@ -693,7 +691,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxComms = ibDev->maxQp;
   // AINIC with CTS offload enabled supports max of 1 recv only.
   if (IbCastOffloadEnabled && !rcclParamIbCastP2pDisableCts()) {
-    props->maxRecvs = 1; 
+    props->maxRecvs = 1;
   } else {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   }

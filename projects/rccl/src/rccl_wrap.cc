@@ -68,6 +68,8 @@ RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 #ifdef ENABLE_WARP_SPEED
@@ -386,8 +388,8 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
 
 extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
                                 int numPipeOps, ncclSimInfo_t* simInfo = NULL);
-extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count,
-                                    ncclDataType_t datatype, int protocol, int nMaxChannels);
+extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
+                                    int protocol, int nMaxChannels);
 
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels) {
@@ -508,7 +510,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncReduceScatter) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true, &decision));
+    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
+                                      &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -642,8 +645,8 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
-                    size_t gfx950Default, size_t gfx1250Default) {
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
+                    size_t gfx1250Default) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -760,8 +763,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
-                        const void* acc) {
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc) {
   static int enabled = rcclParamCeAllReduce();
   static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
@@ -871,9 +873,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
   // as the pre-refactor collectives.cc path did.
-  const bool symEligible =
-    (op == ncclSum) &&
-    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+  const bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum,
+                                                                         datatype, count, sendbuff, recvbuff);
 
   // (2) CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
   //  - Live dispatch (query=false): probe the real stream and tick the graph
@@ -903,8 +904,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   struct ncclDevrWindow* recvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &sendWin);
   ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  const bool hasSysmemSegment =
-    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
 
@@ -933,8 +933,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && msgBytes <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
@@ -1013,8 +1012,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     decision->protocol = task.protocol;
     // Report the traffic-packed channel count the kernel actually runs on, not the
     // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
-    int packed = rcclKernelPackedChannels(comm, ncclFuncAllReduce, count, datatype, task.protocol,
-                                          task.nMaxChannels);
+    int packed = rcclKernelPackedChannels(comm, ncclFuncAllReduce, count, datatype, task.protocol, task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
     decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
@@ -1131,8 +1129,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     struct ncclDevrWindow* recvWin = nullptr;
     ncclDevrFindWindow(comm, sendbuff, &sendWin);
     ncclDevrFindWindow(comm, recvbuff, &recvWin);
-    const bool hasSysmemSegment =
-      ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+    const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     // Branch #2: FORCE_CE via DDA scratch (unregistered windows).
@@ -1190,8 +1187,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     decision->protocol = task.protocol;
     // Report the traffic-packed channel count the kernel actually runs on, not the
     // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
-    int packed = rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol,
-                                          task.nMaxChannels);
+    int packed =
+      rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol, task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
     decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
@@ -1221,9 +1218,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA IPC / Direct here.
   const bool symEligible =
     (op == ncclSum || op == ncclAvg) &&
-    isSymmetricKernelRequested(comm, ncclFuncReduceScatter,
-                               (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum, datatype, recvcount,
-                               sendbuff, recvbuff);
+    isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
+                               datatype, recvcount, sendbuff, recvbuff);
 
   // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
   // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
@@ -1304,8 +1300,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     decision->protocol = task.protocol;
     // Report the traffic-packed channel count the kernel actually runs on, not the
     // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
-    int packed = rcclKernelPackedChannels(comm, ncclFuncReduceScatter, recvcount, datatype, task.protocol,
-                                          task.nMaxChannels);
+    int packed =
+      rcclKernelPackedChannels(comm, ncclFuncReduceScatter, recvcount, datatype, task.protocol, task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
     decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
@@ -1539,8 +1535,8 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       // nChannels to MAXCHANNELS) instead of failing. Force-enable still errors below.
       if (!rcclWarpSpeedChannelCountSupported(comm)) {
         if (comm->rank == 0)
-          INFO(NCCL_TUNING, "RCCL WarpSpeed auto-disabled: %d channels exceeds max %d supported",
-               comm->nChannels, MAXCHANNELS / 2);
+          INFO(NCCL_TUNING, "RCCL WarpSpeed auto-disabled: %d channels exceeds max %d supported", comm->nChannels,
+               MAXCHANNELS / 2);
       } else {
         info->nWarps = 4;
         info->useWarpSpeed = true;
