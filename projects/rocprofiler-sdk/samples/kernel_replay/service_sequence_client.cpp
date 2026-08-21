@@ -222,7 +222,16 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
             return ROCPROFILER_STATUS_SUCCESS;
         },
         &all));
-    if(all.empty())
+    std::vector<rocprofiler_counter_id_t> want{};
+    for(auto counter : all)
+    {
+        rocprofiler_counter_info_v0_t info{};
+        KR_CHECK(
+            rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_0, &info));
+        if(info.name && std::string{info.name} == "SQ_WAVES") want.push_back(counter);
+    }
+    if(want.empty() && !all.empty()) want.push_back(all.front());
+    if(want.empty())
     {
         fprintf(stderr, "SPM unavailable\n");
         *config = rocprofiler_counter_config_id_t{.handle = 0};
@@ -236,7 +245,7 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
     rocprofiler_spm_parameters_t* parameters[] = {&parameter};
     rocprofiler_counter_config_id_t created{.handle = 0};
     KR_CHECK(rocprofiler_spm_create_counter_config(
-        agent, all.data(), 1, parameters, 1, &created));
+        agent, want.data(), want.size(), parameters, 1, &created));
     {
         std::lock_guard<std::mutex> lock{mutex};
         cache.emplace(agent.handle, created);
