@@ -7,7 +7,7 @@
 #define ROCPROFSYS_CAUSAL_H_
 
 /**
- * @defgroup ROCPROFSYS_CASUAL_GROUP ROCm Systems Profiler Causal Profiling Defines
+ * @defgroup ROCPROFSYS_CAUSAL_GROUP ROCm Systems Profiler Causal Profiling Defines
  *
  * @{
  */
