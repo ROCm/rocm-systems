@@ -14,9 +14,9 @@ GPU/CPU/Core or elevated permissions.
 import os
 import sys
 import unittest
+from typing import Any
 
-from common.common import amdsmi, amdsmi_path, find_cli_dir
-
+from common.common import amdsmi, amdsmi_path, fake_module, find_cli_dir, stub_modules_at_import
 
 # Locate the CLI dir and add it to sys.path (amdsmi_path first so an AMDSMI_PATH
 # override selects the matching install; see common.find_cli_dir). None ->
@@ -27,27 +27,36 @@ if _CLI_DIR and _CLI_DIR not in sys.path:
 
 # Required for when the amdgpu driver is not loaded. We are required to
 # fake the initialization module so the set/reset gpu CLI commands can be ran.
+# Installed at import because amdsmi_helpers does ``from amdsmi_init import *``
+# at load; tearDownModule puts the original back.
+_restore_amdsmi_init = None
 if "amdsmi_init" not in sys.modules:
-    import types as _types
-
     from amdsmi import amdsmi_exception as _amdsmi_exception
     from amdsmi import amdsmi_interface as _amdsmi_interface
 
-    _stub_amdsmi_init = _types.ModuleType("amdsmi_init")
-    _stub_amdsmi_init.AMDSMI_INIT_FLAG = 0
-    _stub_amdsmi_init.AMDSMI_INITIALIZED = True
-    _stub_amdsmi_init.amdsmi_interface = _amdsmi_interface
-    _stub_amdsmi_init.amdsmi_exception = _amdsmi_exception
-    sys.modules["amdsmi_init"] = _stub_amdsmi_init
+    _restore_amdsmi_init = stub_modules_at_import(
+        {
+            "amdsmi_init": fake_module(
+                "amdsmi_init",
+                AMDSMI_INIT_FLAG=0,
+                AMDSMI_INITIALIZED=True,
+                amdsmi_interface=_amdsmi_interface,
+                amdsmi_exception=_amdsmi_exception,
+            )
+        }
+    )
 
 # CLI absent (rare package-only layout) -> record the error and skip in setUpModule()
-# instead of failing collection with a hard ImportError.
+# instead of failing collection with a hard ImportError. The alias is declared Any
+# and bound separately from the import: the None only exists to defer that skip,
+# so no test ever sees it, and typing it Any keeps that out of every call site.
+cli_exc: Any = None
+_CLI_IMPORT_ERROR = None
 try:
-    import amdsmi_cli_exceptions as cli_exc  # noqa: E402
+    import amdsmi_cli_exceptions as _cli_exc_module  # noqa: E402
 
-    _CLI_IMPORT_ERROR = None
+    cli_exc = _cli_exc_module
 except ImportError as _cli_import_error:
-    cli_exc = None
     _CLI_IMPORT_ERROR = _cli_import_error
 
 from amdsmi import amdsmi_wrapper  # noqa: E402
@@ -60,14 +69,16 @@ from amdsmi import amdsmi_wrapper  # noqa: E402
 _SUBCOMMANDS_DIR = os.path.join(_CLI_DIR, "subcommands") if _CLI_DIR else None
 if _SUBCOMMANDS_DIR and _SUBCOMMANDS_DIR not in sys.path:
     sys.path.append(_SUBCOMMANDS_DIR)
+cli_set_value: Any = None
+AMDSMIParser: Any = None
+_CLI_DRIVE_SKIP = None
 try:
-    import set_value as cli_set_value  # noqa: E402
-    from amdsmi_parser import AMDSMIParser  # noqa: E402
+    import set_value as _set_value_module  # noqa: E402
+    from amdsmi_parser import AMDSMIParser as _AMDSMIParser  # noqa: E402
 
-    _CLI_DRIVE_SKIP = None
+    cli_set_value = _set_value_module
+    AMDSMIParser = _AMDSMIParser
 except ImportError as _cli_drive_import_error:
-    cli_set_value = None
-    AMDSMIParser = None
     _CLI_DRIVE_SKIP = (
         f"amd-smi CLI drive modules not importable ({_CLI_DIR}): {_cli_drive_import_error}"
     )
@@ -77,6 +88,11 @@ def setUpModule():
     """Skip the suite if the amd-smi CLI couldn't be imported (CLI not installed)."""
     if _CLI_IMPORT_ERROR is not None:
         raise unittest.SkipTest(f"amd-smi CLI not found ({_CLI_DIR}): {_CLI_IMPORT_ERROR}")
+
+
+def tearDownModule():
+    if _restore_amdsmi_init is not None:
+        _restore_amdsmi_init()
 
 
 class TestAmdSmiCliExitCodes(unittest.TestCase):
@@ -89,8 +105,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
     reserved 192-255 CLI-only code band.
     """
 
-    ExitCode = cli_exc.AmdSmiExitCode if cli_exc is not None else None
-    Severity = cli_exc.AmdSmiErrorSeverity if cli_exc is not None else None
+    ExitCode: Any = cli_exc.AmdSmiExitCode if cli_exc is not None else None
+    Severity: Any = cli_exc.AmdSmiErrorSeverity if cli_exc is not None else None
 
     # ---- AmdSmiErrorCollector / finalize ----
     def test_no_failures_resolve_to_success(self):
@@ -361,6 +377,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         import argparse
         import os
         from unittest import mock
+
         from amdsmi_helpers import AMDSMIHelpers
 
         # Import the set_value subcommand as a standalone module (it uses only
@@ -401,7 +418,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
             return _inner
 
-        cmd = set_value.SetValueCommands()
+        cmd: Any = set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
         cmd.logger = _FakeLogger()
         # Avoid the driver-backed core-id lookup.
@@ -441,6 +458,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         multi-FIELD path).
         """
         import argparse
+
         from amdsmi_helpers import AMDSMIHelpers
 
         class _FakeLogger:
@@ -492,6 +510,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         """
         import argparse
         import os
+
         from amdsmi_helpers import AMDSMIHelpers
 
         sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
@@ -499,7 +518,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             sys.path.append(sub_dir)
         import set_value
 
-        cmd = set_value.SetValueCommands()
+        cmd: Any = set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
 
         args = argparse.Namespace(gtt=8.0, gpu=["fake-gpu-handle"])
@@ -514,8 +533,9 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         INVAL). Drives the real confirm_out_of_spec_warning with a 'no' response;
         auto_respond bypasses the input() prompt so it doesn't block on a TTY.
         """
-        import io
         import contextlib
+        import io
+
         from amdsmi_helpers import AMDSMIHelpers
 
         helpers = AMDSMIHelpers()
@@ -539,6 +559,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         import argparse
         import os
         from unittest import mock
+
         from amdsmi_helpers import AMDSMIHelpers
 
         sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
@@ -568,7 +589,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             def get_error_info(self, detailed=True):
                 return f"status {self._code}"
 
-        cmd = set_value.SetValueCommands()
+        cmd: Any = set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
         cmd.logger = _FakeLogger()
         cmd.helpers.get_core_id_from_device_handle = lambda handle: 0
@@ -602,6 +623,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         if _CLI_DRIVE_SKIP:
             self.skipTest(_CLI_DRIVE_SKIP)
         import argparse
+
         from amdsmi_helpers import AMDSMIHelpers
 
         class _NoneArgs(argparse.Namespace):
@@ -613,7 +635,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         class _FakeLogger:
             format = "human"
 
-        cmd = cli_set_value.SetValueCommands()
+        cmd: Any = cli_set_value.SetValueCommands()
         cmd.helpers = AMDSMIHelpers()
         cmd.logger = _FakeLogger()
 
@@ -641,10 +663,14 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                 def get_output_format():
                     return "human"
 
-        action_cls = AMDSMIParser._level_select(_Host())
+        # Stand-ins for the parser: _level_select only reads helpers off its host,
+        # and the action never touches the parser argument on this path.
+        host: Any = _Host()
+        parser: Any = None
+        action_cls = AMDSMIParser._level_select(host)
         action = action_cls(option_strings=["-c", "--clk-level"], dest="clk_level")
         with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
-            action(None, argparse.Namespace(), ["badclk", "0"])
+            action(parser, argparse.Namespace(), ["badclk", "0"])
         self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
         message = str(ctx.exception)
         self.assertIn("badclk", message)
@@ -664,7 +690,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         class _FakeLogger:
             format = "human"
 
-        cmd = cli_set_value.SetValueCommands()
+        cmd: Any = cli_set_value.SetValueCommands()
         cmd.logger = _FakeLogger()
         with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
             cmd.set_cpu(argparse.Namespace(cpu=None))
@@ -681,7 +707,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         class _FakeLogger:
             format = "human"
 
-        cmd = cli_set_value.SetValueCommands()
+        cmd: Any = cli_set_value.SetValueCommands()
         cmd.logger = _FakeLogger()
         with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
             cmd.set_core(argparse.Namespace(core=None))

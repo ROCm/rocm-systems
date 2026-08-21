@@ -123,6 +123,82 @@ def find_cli_dir(*start_dirs):
     return None
 
 
+def add_class_cleanup(test_cls, func, *args):
+    """Run ``func`` after ``test_cls`` finishes.
+
+    Not ``addClassCleanup`` (3.8+, and Debian 10 ships 3.7). This runs off
+    ``tearDownClass``, which unittest skips when ``setUpClass`` raises, so a
+    class that dies mid-setup leaves its cleanups unrun.
+    """
+    # Own the list rather than inherit a base class's, so subclasses do not share.
+    cleanups = test_cls.__dict__.get("_pending_class_cleanups")
+    if cleanups is None:
+        cleanups = test_cls._pending_class_cleanups = []
+        previous = test_cls.tearDownClass.__func__
+
+        def _run_class_cleanups(cls):
+            try:
+                previous(cls)
+            finally:
+                while cleanups:  # last registered runs first, as addClassCleanup does
+                    cleanup, cleanup_args = cleanups.pop()
+                    cleanup(*cleanup_args)
+
+        test_cls.tearDownClass = classmethod(_run_class_cleanups)
+
+    cleanups.append((func, args))
+
+
+def fake_module(name, **attrs):
+    """Module object carrying *attrs*, for stubbing an import a test cannot satisfy.
+
+    setattr rather than direct assignment: a stub invents attributes the real
+    module type does not declare, which a type checker flags on every line.
+    Pass the result to ``stub_modules`` so it is restored afterwards.
+    """
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def stub_modules_at_import(modules):
+    """Replace ``sys.modules`` entries now; returns the callable that restores them.
+
+    ``modules`` maps a module name to its replacement; a ``None`` value removes the
+    name instead, so the next import re-resolves it. The caller owns the restore --
+    drive it from ``tearDownModule`` when the stub has to exist before the module's
+    own imports run (the CLI does ``from amdsmi_init import *`` at load, which is
+    too early for ``setUpClass``). Prefer ``stub_modules`` when a class can own it.
+    """
+    saved = {name: sys.modules.get(name) for name in modules}
+
+    def _restore():
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+    for name, module in modules.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+    return _restore
+
+
+def stub_modules(test_cls, modules):
+    """Replace ``sys.modules`` entries for the lifetime of ``test_cls``.
+
+    Same contract as ``stub_modules_at_import``, with the restore tied to the class
+    teardown instead of the caller. A stub that outlives its class corrupts every
+    later test module in the same interpreter, which is what the runner's isolation
+    guard reports as a leak.
+    """
+    add_class_cleanup(test_cls, stub_modules_at_import(modules))
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
