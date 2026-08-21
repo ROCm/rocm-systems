@@ -19,7 +19,6 @@
 #include "utils/flags.hpp"
 
 #include <assert.h>
-#include <stdio.h>
 #include <string.h>
 #include <algorithm>
 #include <atomic>
@@ -430,7 +429,8 @@ static struct Init {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (IS_LINUX && running.load(std::memory_order_acquire) != 0) {
       if (std::chrono::steady_clock::now() > deadline) {
-        fprintf(stderr, "hostcall listener failed to stop; continuing teardown\n");
+        ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+                "Hostcall listener failed to stop; continuing teardown");
         break;
       }
       amd::Os::yield();
