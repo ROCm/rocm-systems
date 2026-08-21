@@ -26,8 +26,8 @@ Owns three responsibilities:
     sys.path, and guards against a shadowing site-packages copy
     (see ROCM-1552 / PR #6359).
   * the ``Common`` helper base -- enum tables, ``Test_API_*`` drivers,
-    ``check_ret`` and friends, held as ``self.common`` by the API tests
-    (intentionally NOT a unittest.TestCase).
+    ``expect_status``/``status_sweep`` and the legacy ``check_ret``, held as
+    ``self.common`` by the API tests (intentionally NOT a unittest.TestCase).
   * the unittest runner machinery -- ``run_test_dir``,
     ``GTestSummaryRunner``, verbosity/-k/-l parsing and the help/legend
     printers used by the three top-level runners.
@@ -1053,19 +1053,15 @@ class Common:
             accept (str | list): every status treated as correct, as
                 ``AMDSMI_STATUS_*`` names or AmdSmiStatus members.
 
-        Yields:
-            SimpleNamespace: ``failed``, ``status_code``, ``status_name``,
-            ``accepted``, ``exception``. Reading it is optional; branch on
-            ``failed`` to skip work that a failed call made pointless.
-
         Raises:
             AssertionError: when no sweep is open to collect the failure.
+            ValueError: when *accept* names a status outside AMDSMI_STATUS_*.
             Exception: anything the block raised without a status code, which is
                 a bug in the test body rather than an API result.
         """
         outcome = self._new_status_outcome(msg, accept)
         try:
-            yield outcome
+            yield
         except Exception as exc:
             if not hasattr(exc, "get_error_code"):
                 raise  # no status attached: a bug in the test body, not a result
@@ -1086,7 +1082,7 @@ class Common:
 
             with self.common.status_sweep():
                 for i, gpu in enumerate(self.common.processors):
-                    for name, mask, _cond in common.POWER_PROFILE_PRESET_MASKS:
+                    for name, mask, _ in common.POWER_PROFILE_PRESET_MASKS:
                         with self.common.expect_status(msg, accept):
                             amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
 

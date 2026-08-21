@@ -137,7 +137,7 @@ class TestGpuPower(unittest.TestCase):
         refused = [
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,  # eg. guest devices, or sysfs node absent
             amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,  # eg. invalid input
-            amdsmi.AmdSmiStatus.NO_PERM,  # eg. ran w/o admin priv., or R/O sysfs
+            amdsmi.AmdSmiStatus.NO_PERM,  # eg. R/O sysfs in a container (EROFS)
         ]
         # All valid responses
         applied_or_refused = [amdsmi.AmdSmiStatus.SUCCESS, *refused]

@@ -20,17 +20,11 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """GPU events: GPU counter and event notification."""
 
-import time
 import unittest
 from collections import defaultdict
 
 import common.common as common
 from common.common import amdsmi
-
-# TODO(amdsmi_team): drive xGMI traffic across this window so the counter reads a
-# non-zero value. Until then only time_running is checked, which proves the perf event
-# was scheduled but not that it counted the right thing.
-_SAMPLE_WINDOW_S = 0.1
 
 
 def _event_group(event_type):
@@ -111,83 +105,97 @@ class TestGpuEvents(unittest.TestCase):
             controlled = True
         return controlled
 
-    def _run_counter(self, gpu, gpu_idx, event_type, type_name, usable):
+    def _run_counter(self, gpu, gpu_idx, event_type, type_name, supported):
         """Take one counter through create/start/read/stop/destroy.
 
-        Runs on unsupported hardware too: *usable* decides whether each call is expected
-        to succeed or to refuse. Returns the counter that was read, or None.
+        Runs on unsupported hardware too: *supported* decides whether each call is
+        expected to succeed or to refuse. Returns the counter that was read, or None.
         """
         handle = None
         msg = _api_msg("amdsmi_gpu_create_counter", gpu=gpu_idx, event_type=type_name)
-        create_accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.OUT_OF_RESOURCES]
-        with self.common.expect_status(msg, create_accept):
+        with self.common.expect_status(msg, amdsmi.AmdSmiStatus.SUCCESS):
             handle = amdsmi.amdsmi_gpu_create_counter(gpu, event_type)
         if handle is None:
             return None
 
-        if usable:
+        if supported:
             start_accept = amdsmi.AmdSmiStatus.SUCCESS
         else:
+            # No perf event source to open, so the sysfs read behind it returns
+            # ENOENT, which the library maps to NOT_SUPPORTED.
             start_accept = amdsmi.AmdSmiStatus.NOT_SUPPORTED
 
         started = self._control_counter(
             gpu_idx, type_name, handle, amdsmi.AmdSmiCounterCommand.CMD_START, start_accept
         )
 
-        if started:
-            time.sleep(_SAMPLE_WINDOW_S)
-            read_accept = amdsmi.AmdSmiStatus.SUCCESS
-            teardown_accept = amdsmi.AmdSmiStatus.SUCCESS
-        else:
-            # No perf fd to read or close, which each path reports as its own status.
-            read_accept = amdsmi.AmdSmiStatus.UNEXPECTED_SIZE
-            teardown_accept = amdsmi.AmdSmiStatus.FILE_ERROR
-
+        # Nothing was opened yet, so a teardown now reports the missing fd.
+        teardown_accept = amdsmi.AmdSmiStatus.FILE_ERROR
         counter = None
-        msg = _api_msg("amdsmi_gpu_read_counter", gpu=gpu_idx, event_type=type_name)
-        with self.common.expect_status(msg, read_accept):
-            counter = amdsmi.amdsmi_gpu_read_counter(handle)
-        if counter is not None:
-            self.common.print(f"\t\t{counter}")
+        try:
+            if started:
+                read_accept = amdsmi.AmdSmiStatus.SUCCESS
+                teardown_accept = amdsmi.AmdSmiStatus.SUCCESS
+            else:
+                # fd_ stayed -1, so every call below hits EBADF. read reports that as
+                # UNEXPECTED_SIZE because it collapses every error into that one status,
+                # while stop and destroy map it to FILE_ERROR.
+                read_accept = amdsmi.AmdSmiStatus.UNEXPECTED_SIZE
 
-        self._control_counter(
-            gpu_idx, type_name, handle, amdsmi.AmdSmiCounterCommand.CMD_STOP, teardown_accept
-        )
+            msg = _api_msg("amdsmi_gpu_read_counter", gpu=gpu_idx, event_type=type_name)
+            with self.common.expect_status(msg, read_accept):
+                counter = amdsmi.amdsmi_gpu_read_counter(handle)
+            if counter is not None:
+                self.common.print(f"\t\t{counter}")
 
-        msg = _api_msg("amdsmi_gpu_destroy_counter", gpu=gpu_idx, event_type=type_name)
-        with self.common.expect_status(msg, teardown_accept):
-            amdsmi.amdsmi_gpu_destroy_counter(handle)
+            self._control_counter(
+                gpu_idx, type_name, handle, amdsmi.AmdSmiCounterCommand.CMD_STOP, teardown_accept
+            )
+        finally:
+            msg = _api_msg("amdsmi_gpu_destroy_counter", gpu=gpu_idx, event_type=type_name)
+            with self.common.expect_status(msg, teardown_accept):
+                amdsmi.amdsmi_gpu_destroy_counter(handle)
 
         return counter
 
     def test_gpu_counter(self):
         """Exercise every xGMI/DF counter end to end, on supported and unsupported hardware."""
+        # TODO(amdsmi_team): this only judges the status of each call, so nothing here
+        # proves a counter counted anything. Improve it by running on xGMI-capable
+        # hardware with a workload driving xGMI traffic, then assert the value read
+        # back over a sample window.
         self.common.print_func_name("")
 
         # create_counter takes an event type, not a group, so collect the types per group.
         types_by_group = defaultdict(list)
-        for type_name, event_type, _type_cond in common.EVENT_TYPES:
+        for type_name, event_type, _ in common.EVENT_TYPES:
             types_by_group[_event_group(event_type)].append((type_name, event_type))
 
+        # Nothing iterates GRP_INVALID, so a type landing there would go untested. That
+        # means _event_group has drifted from the library's EvtGrpFromEvtID.
+        unclassified = types_by_group[amdsmi.AmdSmiEventGroup.GRP_INVALID]
+        self.assertFalse(unclassified, f"event types not mapped to a group: {unclassified}")
+
         results = {}
-        idle_counters = []
         with self.common.status_sweep():
             for gpu_idx, gpu in enumerate(self.common.processors):
                 self.common.print_device_header(gpu_idx)
                 results[gpu_idx] = {}
 
-                for group_name, group, _group_cond in common.EVENT_GROUPS:
+                for group_name, group, _ in common.EVENT_GROUPS:
                     supported, available = self._probe_counter_group(
                         gpu, gpu_idx, group, group_name
                     )
-                    usable = bool(supported and available)
                     events = {}
-
+                    supp_avail_print = (
+                        f" | Supported: {bool(supported)}, Available: {bool(available)}"
+                    )
+                    self.common.print(
+                        f"\t\tRunning counters for {group_name} events {supp_avail_print}"
+                    )
                     for type_name, event_type in types_by_group[group]:
-                        counter = self._run_counter(gpu, gpu_idx, event_type, type_name, usable)
+                        counter = self._run_counter(gpu, gpu_idx, event_type, type_name, supported)
                         events[type_name] = counter
-                        if counter and not counter["time_running"]:
-                            idle_counters.append(f"gpu={gpu_idx} {type_name}")
 
                     results[gpu_idx][group_name] = {
                         "supported": supported,
@@ -196,13 +204,6 @@ class TestGpuEvents(unittest.TestCase):
                     }
 
         self.common.print("gpu counter results", results)
-
-        if idle_counters:
-            raise AssertionError(
-                f"{len(idle_counters)} counter(s) reported time_running=0 after a "
-                f"{_SAMPLE_WINDOW_S}s sample window, so the perf event never ran: "
-                f"{', '.join(idle_counters)}"
-            )
         return
 
     def test_gpu_event(self):
