@@ -559,11 +559,13 @@ void GenerateUniqueFileName(std::string& name) {
 #else
   const auto pid = getpid();
 #endif
-  // Strip a trailing mkstemp-style "XXXXXX" template if present, then append a
+  // Strip only an exact trailing mkstemp-style "XXXXXX" template, then append a
   // process-unique suffix (e.g. "CompileSourceXXXXXX" -> "CompileSource1234_0").
-  const size_t last_non_x = name.find_last_not_of('X');
-  if (last_non_x != std::string::npos) {
-    name.resize(last_non_x + 1);
+  static constexpr char kTemplate[] = "XXXXXX";
+  static constexpr size_t kTemplateLen = sizeof(kTemplate) - 1;
+  if (name.size() >= kTemplateLen &&
+      name.compare(name.size() - kTemplateLen, kTemplateLen, kTemplate) == 0) {
+    name.resize(name.size() - kTemplateLen);
   }
   name += std::to_string(static_cast<int64_t>(pid)) + "_" +
           std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
