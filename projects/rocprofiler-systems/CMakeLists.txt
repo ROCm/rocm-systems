@@ -222,9 +222,9 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
     "Enable AI NIC profiling through AMD SMI" ON
 )
-rocprofiler_systems_add_option(ROCPROFSYS_USE_HIPFILE
-    "Enable hipFile GPU-direct storage I/O stats collection (requires hipFile headers)"
-    OFF
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_HIPFILE
+    "Build hipFile GPU-direct storage I/O telemetry support (auto-disabled when no new enough hipFile package is found)"
+    ON
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
     "Compiler specific language extensions" OFF
