@@ -546,6 +546,42 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
   return inventory;
 }
 
+ConSanMoiAutoReportInventory
+fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+  if (inventory.engine != ConSanMoiEngine::InlineShadow ||
+      !inventory.inline_diagnostic_count_adaptive) {
+    return inventory;
+  }
+
+  const ConSanMoiAutoReportPlan requested = plan_consan_moi_auto_report(inventory);
+  if (requested.complete() ||
+      requested.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
+      requested.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
+    return inventory;
+  }
+
+  const uint64_t minimum = std::min<uint64_t>(
+      inventory.diagnostic_count, std::max(kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+                                           kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
+  ConSanMoiAutoReportInventory candidate = inventory;
+  candidate.diagnostic_count = minimum;
+  if (!plan_consan_moi_auto_report(candidate).complete())
+    return candidate;
+
+  uint64_t fitting = minimum;
+  uint64_t rejected = inventory.diagnostic_count;
+  while (fitting < rejected) {
+    const uint64_t midpoint = fitting + (rejected - fitting + 1u) / 2u;
+    candidate.diagnostic_count = midpoint;
+    if (plan_consan_moi_auto_report(candidate).complete())
+      fitting = midpoint;
+    else
+      rejected = midpoint - 1u;
+  }
+  inventory.diagnostic_count = fitting;
+  return inventory;
+}
+
 std::optional<ConSanMoiReportLayoutOverride>
 consan_moi_auto_report_layout_override(const ConSanMoiAutoReportPlan &plan) {
   if (!plan.complete() || !plan.layout.valid || plan.required_bytes != plan.layout.required_bytes)

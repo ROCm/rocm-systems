@@ -216,6 +216,11 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_causal_snapshot_count = 0;
   uint64_t inline_acquired_epoch_token_count = 0;
   uint64_t inline_compact_token_mapping_count = 0;
+  /// Automatic inventories request one wave of diagnostic headroom per
+  /// logical range. Large objects may reduce only that headroom to the
+  /// largest capacity fitting the frozen report ceiling. Runtime saturation
+  /// remains visible and fail-closed.
+  bool inline_diagnostic_count_adaptive = false;
 };
 
 using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory::*;
@@ -346,6 +351,12 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
 /// bank per range remains. All other inventory dimensions remain exact.
 [[nodiscard]] ConSanMoiAutoReportInventory
 fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
+
+/// Reduces only an explicitly adaptive Inline Shadow diagnostic inventory to
+/// the largest capacity that fits the ordinary report ceiling. Exact-shadow
+/// and causal-metadata capacities remain unchanged.
+[[nodiscard]] ConSanMoiAutoReportInventory
+fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
 
 /// Extracts the bounded ordinary report requirements from one completed
 /// inventory transform. This does not allocate and deliberately does not try

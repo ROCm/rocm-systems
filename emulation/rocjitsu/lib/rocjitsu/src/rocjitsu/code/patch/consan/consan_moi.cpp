@@ -1190,10 +1190,13 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.diagnostic_count =
         std::max({inventory.diagnostic_count, diagnostic_headroom,
                   static_cast<uint64_t>(kConSanMoiInlineShadowDefaultDiagnosticCapacity)});
+    inventory.inline_diagnostic_count_adaptive = true;
   }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay)
     return fit_consan_moi_record_replay_auto_report_inventory(inventory);
-  return fit_consan_moi_sampled_auto_report_inventory(inventory);
+  if (options.moi_engine == ConSanMoiEngine::Sampled)
+    return fit_consan_moi_sampled_auto_report_inventory(inventory);
+  return fit_consan_moi_inline_auto_report_inventory(inventory);
 }
 
 } // namespace rocjitsu

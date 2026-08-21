@@ -535,6 +535,43 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksFitWithoutDroppingLogicalRange
             8u * kLogicalRanges);
 }
 
+TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
+  constexpr uint64_t kLogicalRanges = 135718u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .access_range_count = kLogicalRanges,
+      .diagnostic_count = kLogicalRanges * kConSanMoiInlineShadowDiagnosticHeadroomPerAccess,
+      .inline_lds_bytes = 4120u,
+      .inline_atomic_release_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_causal_snapshot_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_acquired_epoch_token_count = kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+      .inline_compact_token_mapping_count = kLogicalRanges,
+      .inline_diagnostic_count_adaptive = true,
+  };
+  const auto rejected = plan_consan_moi_auto_report(requested);
+  ASSERT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+
+  const auto fitted = fit_consan_moi_inline_auto_report_inventory(requested);
+  EXPECT_EQ(fitted.access_range_count, kLogicalRanges);
+  EXPECT_EQ(fitted.inline_lds_bytes, requested.inline_lds_bytes);
+  EXPECT_EQ(fitted.inline_compact_token_mapping_count, kLogicalRanges);
+  EXPECT_GE(fitted.diagnostic_count,
+            static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
+  EXPECT_LT(fitted.diagnostic_count, requested.diagnostic_count);
+  EXPECT_TRUE(plan_consan_moi_auto_report(fitted).complete());
+
+  auto one_more = fitted;
+  ++one_more.diagnostic_count;
+  EXPECT_EQ(plan_consan_moi_auto_report(one_more).outcome,
+            ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+
+  auto exact = requested;
+  exact.inline_diagnostic_count_adaptive = false;
+  EXPECT_EQ(fit_consan_moi_inline_auto_report_inventory(exact).diagnostic_count,
+            requested.diagnostic_count);
+}
+
 TEST(ConSanMoiAutoReportPlan, InlineCapacityChangesAtEveryLdsByte) {
   ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
