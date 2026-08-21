@@ -86,7 +86,7 @@ do_deps() {
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   $sudo apt-get update
   $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
-    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm
+    moreutils libgtest-dev libgmock-dev libfmt-dev lcov
 }
 
 do_rccl_configure() {
