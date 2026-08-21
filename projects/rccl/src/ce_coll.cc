@@ -155,6 +155,10 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
+  static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
+  static int64_t paramStaging = rcclParamCeArStagingBytes();
+  comm->ceColl.ceArMaxBytes     = (paramMax     >= 0) ? (size_t)paramMax     : comm->archThresholds->ceArMax;
+  comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
@@ -2114,7 +2118,7 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce()) return ncclSuccess;
 
-  maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
   ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
@@ -2148,7 +2152,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   const size_t shardElems = count / comm->nRanks;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;

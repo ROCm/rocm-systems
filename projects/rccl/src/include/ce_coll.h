@@ -22,11 +22,8 @@
 // scale-out MPI tests assert on this exact text.
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
-// Largest message eligible for the unregistered forced CE AllReduce path.
-#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
-
 // Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined; sizing each slot to NCCL_CE_AR_MAX_MSG_BYTES
+// larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
 // wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
 #define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
 
@@ -38,7 +35,7 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf.
+// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
   return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
 }
@@ -101,6 +98,8 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  size_t ceArMaxBytes;     // resolved at init: env var RCCL_CE_AR_MAX_MSG_BYTES > arch table ceArMax
+  size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.

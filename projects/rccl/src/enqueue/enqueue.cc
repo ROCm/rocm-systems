@@ -4366,9 +4366,23 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
       }
 
-      // Window registration type and CE eligibility, hoisted above the CE-init trigger below,
-      // which now consults hierCeAvailable. ceAllReduceFits is the size gate for CE AllReduce
-      // without symmetric registration: ceARTmpBuf holds at most NCCL_CE_AR_MAX_MSG_BYTES.
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
+      // ceCollTaskAppend path when user buffers are not symmetrically registered.
+      // Without this trigger, CE AllReduce-only workloads would never initialize
+      // the CE runtime (ceARTmpBuf stays NULL).
+      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
+          comm->nNodes == 1 && comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
+
+      // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
+      // comm->ceColl.ceArMaxBytes total bytes.
       bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
@@ -4413,9 +4427,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
-          // msgsize needs to be less than or equal to NCCL_CE_AR_MAX_MSG_BYTES
+          // msgsize needs to be less than or equal to comm->ceColl.ceArMaxBytes
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() ||
+          if (totalBytes > comm->ceColl.ceArMaxBytes || !rcclParamForceCeAllReduce() ||
               !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
