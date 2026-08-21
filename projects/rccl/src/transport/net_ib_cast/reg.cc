@@ -70,11 +70,11 @@ static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void*
 ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  assert(size > 0);
   // See the note in net_ib/reg.cc: a null comm here used to segfault inside the
-  // plugin rather than reporting the bad argument.
-  if (comm == NULL || mhandle == NULL) {
-    WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p", comm, (void*)mhandle);
+  // plugin rather than reporting the bad argument, and size == 0 met the same
+  // fate via the page-count math, so it is folded into the same check.
+  if (comm == NULL || mhandle == NULL || size == 0) {
+    WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
     return ncclInvalidArgument;
   }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;

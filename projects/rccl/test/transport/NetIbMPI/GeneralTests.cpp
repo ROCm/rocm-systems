@@ -819,52 +819,69 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
     }
 
     for (int iter = 0; iter < 3; iter++) {
-        // Iteration 3: abandoned listen-close
+        // Iteration 3: abandoned listen-close. Self-contained on rank 0 and
+        // nothing on rank 1 waits on it, so a failure here is recorded rather
+        // than made fatal: a fatal exit would skip this iteration's handshake
+        // below and strand rank 1 in its MPI_Recv.
         if (iter == 2) {
             if (rank == 0) {
                 void* abandonedListen = nullptr;
                 ncclNetHandle_t abandonedHandle;
-                ASSERT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
+                EXPECT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
                           ncclSuccess)
                     << "Iter 3: abandoned listen failed";
-                ASSERT_NE(abandonedListen, nullptr);
-                ASSERT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
+                EXPECT_NE(abandonedListen, nullptr);
+                EXPECT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
                     << "Iter 3: close abandoned listen failed";
             }
         }
 
         ConnectionPair pair;
-        ncclNetHandle_t handle;
+        // A failed listen on rank 0 must still reach rank 1: a fatal ASSERT_EQ
+        // here would return before the handle is ever sent, and rank 1's
+        // MPI_Recv below has no timeout, so it would block until the suite
+        // timeout instead of failing with this test. The status word makes the
+        // failure observable to both ranks instead.
+        struct ListenHandshake {
+            int status;  // 1 when rank 0's listener is ready and the handle is valid
+            ncclNetHandle_t handle;
+        } handshake = {};
 
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess)
-                << "Listen failed iter " << iter;
-            ASSERT_NE(pair.listenComm, nullptr);
-        }
-
-        if (rank == 0) {
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+            ncclResult_t local = CreateListenComm(mergedDev, &handshake.handle, &pair.listenComm);
+            handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            // Sent even on failure: the peer is waiting for this message.
+            MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0,
+            MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
         int connectFailed = 0;
         if (rank == 0) {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.recvComm && r == ncclSuccess)
-                r = AcceptConnection(pair.listenComm, &pair.recvComm);
-            if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;
+            } else {
+                ncclResult_t r = ncclSuccess;
+                while (!pair.recvComm && r == ncclSuccess)
+                    r = AcceptConnection(pair.listenComm, &pair.recvComm);
+                if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
+            }
         } else {
-            ncclResult_t r = ncclSuccess;
-            while (!pair.sendComm && r == ncclSuccess)
-                r = ConnectToRemote(mergedDev, &handle, &pair.sendComm);
-            if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            if (!handshake.status) {
+                connectFailed = 1;  // rank 0's listen failed
+            } else {
+                ncclResult_t r = ncclSuccess;
+                while (!pair.sendComm && r == ncclSuccess)
+                    r = ConnectToRemote(mergedDev, &handshake.handle, &pair.sendComm);
+                if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
+            }
         }
         MPI_Allreduce(MPI_IN_PLACE, &connectFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (connectFailed) {
             if (rank == 0 && pair.listenComm) CloseListenComm(pair.listenComm);
-            FAIL() << "IB QP connect/accept failed (cross-subnet node pair)";
+            FAIL() << "IB QP listen/connect/accept failed iter " << iter
+                   << " (cross-subnet node pair, or rank 0's listen failed)";
         }
 
         // Close: data comms first, then listen
