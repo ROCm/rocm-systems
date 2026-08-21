@@ -14,6 +14,7 @@ This example benchmarks various MPI communication patterns including point-to-po
 - `reduce.c` - MPI_Reduce example
 - `scatter-gather.c` - MPI_Scatter/MPI_Gather example
 - `send-recv.c` - MPI_Send/MPI_Recv example
+- `roctx-regions.cpp` - roctx region-filtering example (`ROCPROFSYS_SELECTED_REGIONS`)
 
 ## Prerequisites
 

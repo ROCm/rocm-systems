@@ -429,3 +429,63 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )
+
+
+# =============================================================================
+# Test Class: Region filtering vs MPI tracing
+# =============================================================================
+
+
+@pytest.mark.class_name("mpi-roctx-regions")
+class TestSelectiveRegionMPI(RocprofsysTest):
+    """Regression: region filtering must not switch MPI tracing off entirely.
+
+    ROCPROFSYS_SELECTED_REGIONS used to pause the gotcha that intercepts MPI_Init,
+    which is also what installs the MPI wrappers, so no MPI call was ever traced.
+
+    Code flow:
+        MPI_Bcast x8 (outside),
+        TracedRegion: MPI_Allreduce x8,
+        MPI_Bcast x8 (outside)
+    """
+
+    def test_no_filter(self, selective_region_env):
+        """No ROCPROFSYS_SELECTED_REGIONS — both phases traced."""
+        result = self.run_test(
+            "sys_run",
+            "mpi-roctx-regions",
+            env=selective_region_env,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="All MPI calls present",
+            categories=["mpi"],
+            pass_regex=["MPI_Allreduce", "MPI_Bcast"],
+        )
+
+    def test_region_filter(self, selective_region_env):
+        """ROCPROFSYS_SELECTED_REGIONS='TracedRegion'.
+
+        MPI_Allreduce present proves the MPI wrappers were installed at all;
+        MPI_Bcast absent proves they are gated to the selected region.
+        """
+        env = selective_region_env.copy()
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "TracedRegion"
+        result = self.run_test(
+            "sys_run",
+            "mpi-roctx-regions",
+            env=env,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Only in-region MPI calls traced",
+            categories=["mpi"],
+            pass_regex=["MPI_Allreduce"],
+            fail_regex=["MPI_Bcast"],
+        )
