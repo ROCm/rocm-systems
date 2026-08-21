@@ -3386,20 +3386,6 @@ tmp_file::open(std::ios::openmode _mode)
 }
 
 bool
-tmp_file::fopen(const char* _mode)
-{
-    LOG_DEBUG("Opening temporary file '{}'...", filename);
-
-    touch();
-
-    m_pid = getpid();
-    file  = filepath::fopen(filename, _mode);
-    if(file) fd = ::fileno(file);
-
-    return (file != nullptr && fd > 0);
-}
-
-bool
 tmp_file::flush()
 {
     if(m_pid != getpid()) return false;
@@ -3407,18 +3393,6 @@ tmp_file::flush()
     if(stream.is_open())
     {
         stream.flush();
-    }
-    else if(file != nullptr)
-    {
-        int _ret = fflush(file);
-        int _cnt = 0;
-        while(_ret == EAGAIN || _ret == EINTR)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-            _ret = fflush(file);
-            if(++_cnt > 10) break;
-        }
-        return (_ret == 0);
     }
     else if(fd > 0)
     {
@@ -3447,16 +3421,6 @@ tmp_file::close()
     {
         stream.close();
         return !stream.is_open();
-    }
-    else if(file != nullptr)
-    {
-        auto _ret = fclose(file);
-        if(_ret == 0)
-        {
-            file = nullptr;
-            fd   = -1;
-        }
-        return (_ret == 0);
     }
     else if(fd > 0)
     {
@@ -3489,9 +3453,7 @@ tmp_file::remove()
 
 tmp_file::operator bool() const
 {
-    return (m_pid == getpid()) &&
-           ((stream.is_open() && stream.good()) || (file != nullptr && fd > 0) ||
-            (file == nullptr && fd > 0));
+    return (m_pid == getpid()) && ((stream.is_open() && stream.good()) || fd > 0);
 }
 
 std::shared_ptr<tmp_file>
