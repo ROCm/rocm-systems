@@ -503,6 +503,10 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> indirect_saved_vcc_sgpr;
   std::optional<uint64_t> indirect_return_offset;
   std::optional<uint16_t> indirect_return_pc_sgpr;
+  /// Return-end SCC save used by a wave64 relay reservoir whose absolute
+  /// branch scratch is an endpoint-dead ordinary SGPR pair. Wave32 reservoirs
+  /// instead preserve SCC in inactive EXEC_HI and populate the VCC-save field.
+  std::optional<uint16_t> indirect_return_saved_scc_sgpr;
   std::optional<uint16_t> indirect_return_saved_vcc_sgpr;
   uint16_t indirect_required_sgpr_count = 0;
   /// Entry island paired with this MOI dense dispatcher. This explicit

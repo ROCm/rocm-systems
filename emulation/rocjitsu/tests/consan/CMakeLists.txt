@@ -429,6 +429,7 @@ function(rj_add_consan_device_conformance_cases)
             APPEND _device_workloads
             "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
+            "Gfx950Wave64LargeText|gfx950_wave64_large_text|ConSanDeviceGfx950Wave64LargeTextTest"
         )
     endif()
     if(NOT _device_TARGET STREQUAL "gfx1250")
@@ -678,6 +679,7 @@ function(rj_add_consan_device_fixture_targets target)
             APPEND _device_workload_sources
             "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
+            "gfx950_wave64_large_text|gfx950_wave64_large_text_test.hip"
         )
     endif()
     if(NOT target STREQUAL "gfx1250")

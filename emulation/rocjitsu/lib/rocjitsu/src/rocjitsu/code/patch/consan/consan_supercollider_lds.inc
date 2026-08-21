@@ -161,16 +161,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::vector<ScReservoirOwnerContext> reservoir_owner_contexts;
   if (decoder) {
     // Decoding only preflight candidates is a scalability fallback for truly
-    // large generated libraries.  Smaller bundled libraries still need the
-    // surrounding functions as potential relay donors; excluding them made a
-    // 1.8 MiB PyTorch helper lose all 27 otherwise-placeable sites.  Keep the
-    // complete CFG below this bound and retain the bounded path for the 23 MiB
-    // and 40 MiB top-k objects that motivated it.
-    constexpr uint64_t kScBoundedCfgMinimumImageBytes = 4u * 1024u * 1024u;
+    // large generated executable text. Smaller bundled libraries still need
+    // surrounding skipped kernels as potential relay donors. File size is
+    // not the relevant cost signal: large metadata/rodata must not hide a
+    // modest text section and create an artificial unbridgeable tail.
+    constexpr uint64_t kScBoundedCfgMinimumTextBytes = 4u * 1024u * 1024u;
+    uint64_t executable_text_bytes = 0u;
+    for (const Section *section : code_object.text_sections())
+      executable_text_bytes = saturated_add(executable_text_bytes, section->size());
     const bool restrict_to_preflight_candidates =
         result.functions.empty() && options.flavor == ConSanFlavor::SuperCollider &&
         !options.fault_dry_run && options.sc_perturb_kind == ConSanPerturbationKind::None &&
-        code_object.image_size() >= kScBoundedCfgMinimumImageBytes;
+        executable_text_bytes >= kScBoundedCfgMinimumTextBytes;
     std::vector<uint64_t> extra_leaders;
     if (restrict_to_preflight_candidates) {
       for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -328,24 +330,34 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::vector<uint32_t> host_original_words;
     DbiPatchPlacement host_placement;
   };
+  enum class ScRelayReservoirScratchKind : uint8_t {
+    Wave32Vcc,
+    OrdinarySgpr,
+  };
   struct ScRelayReservoirCandidate {
     uint64_t anchor_offset = 0;
     uint32_t original_size = 0;
     const BasicBlock *block = nullptr;
+    ScRelayReservoirScratchKind scratch_kind = ScRelayReservoirScratchKind::Wave32Vcc;
     uint16_t pc_sgpr_pair = 0;
     uint16_t saved_vcc_sgpr = 0;
+    uint16_t saved_scc_sgpr = 0;
     uint16_t return_pc_sgpr_pair = 0;
     uint16_t return_saved_vcc_sgpr = 0;
+    uint16_t return_saved_scc_sgpr = 0;
     uint16_t required_sgpr_count = 0;
     std::vector<uint64_t> owner_descriptor_file_offsets;
   };
   struct ScRelayReservoir {
     uint64_t anchor_offset = 0;
     uint32_t original_size = 0;
+    ScRelayReservoirScratchKind scratch_kind = ScRelayReservoirScratchKind::Wave32Vcc;
     uint16_t pc_sgpr_pair = 0;
     uint16_t saved_vcc_sgpr = 0;
+    uint16_t saved_scc_sgpr = 0;
     uint16_t return_pc_sgpr_pair = 0;
     uint16_t return_saved_vcc_sgpr = 0;
+    uint16_t return_saved_scc_sgpr = 0;
     uint16_t required_sgpr_count = 0;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     DbiPatchPlacement placement;
@@ -586,15 +598,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           ++end;
         }
         if (bytes >= 2u * sizeof(uint32_t))
-          relay_reservoir_candidates.push_back({.anchor_offset = run[begin].first,
-                                                .original_size = bytes,
-                                                .block = block,
-                                                .pc_sgpr_pair = 0,
-                                                .saved_vcc_sgpr = 0,
-                                                .return_pc_sgpr_pair = 0,
-                                                .return_saved_vcc_sgpr = 0,
-                                                .required_sgpr_count = 0,
-                                                .owner_descriptor_file_offsets = {}});
+          relay_reservoir_candidates.push_back(
+              {.anchor_offset = run[begin].first,
+               .original_size = bytes,
+               .block = block,
+               .scratch_kind = ScRelayReservoirScratchKind::Wave32Vcc,
+               .pc_sgpr_pair = 0,
+               .saved_vcc_sgpr = 0,
+               .saved_scc_sgpr = 0,
+               .return_pc_sgpr_pair = 0,
+               .return_saved_vcc_sgpr = 0,
+               .return_saved_scc_sgpr = 0,
+               .required_sgpr_count = 0,
+               .owner_descriptor_file_offsets = {}});
       }
       run.clear();
     };
@@ -647,9 +663,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (owners_it == reservoir_owners_by_block.end() || owners_it->second.empty())
       return true;
     const std::vector<const ScReservoirOwnerContext *> &owners = owners_it->second;
-    if (!std::ranges::all_of(owners,
-                             [](const auto *owner) { return owner->wavefront_size == 32u; }))
-      return true;
     const auto register_is_dead_at_endpoint = [&](const ScReservoirOwnerContext &owner,
                                                   RegisterRef reg, bool entry) {
       if (entry)
@@ -658,8 +671,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return !owner.liveness->any_live_before(*boundary, reg);
       return !owner.liveness->any_live_out(*candidate_block, reg);
     };
-    const auto find_saved_vcc_sgpr = [&](bool entry) -> std::optional<uint16_t> {
-      for (uint16_t sgpr = 0u; sgpr < 104u; ++sgpr) {
+    const auto find_dead_sgpr = [&](bool entry, uint16_t excluded_base,
+                                    uint16_t excluded_width) -> std::optional<uint16_t> {
+      for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+        if (sc_sgpr_ranges_overlap(sgpr, 1u, excluded_base, excluded_width))
+          continue;
         const RegisterRef ref{RegClass::SGPR, sgpr, 1};
         if (std::ranges::all_of(owners, [&](const auto *owner) {
               return register_is_dead_at_endpoint(*owner, ref, entry);
@@ -668,19 +684,50 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       return std::nullopt;
     };
-    const auto entry_saved_vcc = find_saved_vcc_sgpr(true);
-    if (!entry_saved_vcc)
-      return true;
-    const std::optional<uint16_t> return_saved_vcc = find_saved_vcc_sgpr(false);
-    if (!return_saved_vcc)
-      return true;
-    candidate.pc_sgpr_pair = kRdna4VccLo;
-    candidate.saved_vcc_sgpr = *entry_saved_vcc;
-    candidate.return_pc_sgpr_pair = kRdna4VccLo;
-    candidate.return_saved_vcc_sgpr = *return_saved_vcc;
-    candidate.required_sgpr_count =
-        std::max<uint16_t>(static_cast<uint16_t>(*entry_saved_vcc + 1u),
-                           static_cast<uint16_t>(*return_saved_vcc + 1u));
+    const bool every_owner_is_wave32 =
+        std::ranges::all_of(owners, [](const auto *owner) { return owner->wavefront_size == 32u; });
+    if (every_owner_is_wave32) {
+      const auto entry_saved_vcc = find_dead_sgpr(true, kRdna4VccLo, 2u);
+      const auto return_saved_vcc = find_dead_sgpr(false, kRdna4VccLo, 2u);
+      if (!entry_saved_vcc || !return_saved_vcc)
+        return true;
+      candidate.scratch_kind = ScRelayReservoirScratchKind::Wave32Vcc;
+      candidate.pc_sgpr_pair = kRdna4VccLo;
+      candidate.saved_vcc_sgpr = *entry_saved_vcc;
+      candidate.return_pc_sgpr_pair = kRdna4VccLo;
+      candidate.return_saved_vcc_sgpr = *return_saved_vcc;
+      candidate.required_sgpr_count =
+          std::max<uint16_t>(static_cast<uint16_t>(*entry_saved_vcc + 1u),
+                             static_cast<uint16_t>(*return_saved_vcc + 1u));
+    } else {
+      const auto find_dead_scalar_tuple =
+          [&](bool entry) -> std::optional<std::pair<uint16_t, uint16_t>> {
+        for (uint16_t pair = 0u; pair + 1u < REGISTER_SET_ALLOCATABLE_SGPRS; pair += 2u) {
+          const RegisterRef pair_ref{RegClass::SGPR, pair, 2u};
+          if (!std::ranges::all_of(owners, [&](const auto *owner) {
+                return register_is_dead_at_endpoint(*owner, pair_ref, entry);
+              }))
+            continue;
+          if (const auto saved_scc = find_dead_sgpr(entry, pair, 2u))
+            return std::pair(pair, *saved_scc);
+        }
+        return std::nullopt;
+      };
+      const auto entry_scratch = find_dead_scalar_tuple(true);
+      const auto return_scratch = find_dead_scalar_tuple(false);
+      if (!entry_scratch || !return_scratch)
+        return true;
+      candidate.scratch_kind = ScRelayReservoirScratchKind::OrdinarySgpr;
+      candidate.pc_sgpr_pair = entry_scratch->first;
+      candidate.saved_scc_sgpr = entry_scratch->second;
+      candidate.return_pc_sgpr_pair = return_scratch->first;
+      candidate.return_saved_scc_sgpr = return_scratch->second;
+      candidate.required_sgpr_count =
+          std::max({static_cast<uint16_t>(entry_scratch->first + 2u),
+                    static_cast<uint16_t>(entry_scratch->second + 1u),
+                    static_cast<uint16_t>(return_scratch->first + 2u),
+                    static_cast<uint16_t>(return_scratch->second + 1u)});
+    }
     for (const ScReservoirOwnerContext *owner : owners)
       candidate.owner_descriptor_file_offsets.push_back(owner->descriptor_file_offset);
     std::ranges::sort(candidate.owner_descriptor_file_offsets);
@@ -2334,12 +2381,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
 
     // A cut in pristine text needs more pristine vertices. Relocate a
-    // straight-line wave32 range with an indirect entry/return pair. Each
-    // endpoint uses VCC as the PC pair, saves VCC_LO in one endpoint-dead
-    // SGPR, and uses architecturally inactive EXEC_HI to preserve SCC. Expose
-    // only the skipped interior words as relay
-    // capacity. Exact replay and max flow remain the acceptance test for every
-    // trial.
+    // straight-line range with an indirect entry/return pair. Wave32 uses VCC
+    // as the PC pair and inactive EXEC_HI to preserve SCC. Wave64 instead uses
+    // an endpoint-dead ordinary SGPR pair and SCC-save SGPR. Expose only the
+    // skipped interior words as relay capacity. Exact replay and max flow
+    // remain the acceptance test for every trial.
     size_t last_ranked_reservoir_count = 0;
     size_t last_exact_reservoir_trial_count = 0;
     while (!relay_attempt->relay_plan.rejected_source_indices.empty()) {
@@ -2415,10 +2461,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto append_candidate_reservoir = [&](const ScRelayReservoirCandidate &candidate) {
         selected_relay_reservoirs.push_back({candidate.anchor_offset,
                                              candidate.original_size,
+                                             candidate.scratch_kind,
                                              candidate.pc_sgpr_pair,
                                              candidate.saved_vcc_sgpr,
+                                             candidate.saved_scc_sgpr,
                                              candidate.return_pc_sgpr_pair,
                                              candidate.return_saved_vcc_sgpr,
+                                             candidate.return_saved_scc_sgpr,
                                              candidate.required_sgpr_count,
                                              candidate.owner_descriptor_file_offsets,
                                              {}});
@@ -3084,9 +3133,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         placement->return_target = candidate->anchor_offset + candidate->original_size -
                                    kScRelayTailRestoreWords * sizeof(uint32_t);
         branch_selected_reservoirs.push_back(
-            {candidate->anchor_offset, candidate->original_size, candidate->pc_sgpr_pair,
-             candidate->saved_vcc_sgpr, candidate->return_pc_sgpr_pair,
-             candidate->return_saved_vcc_sgpr, candidate->required_sgpr_count,
+            {candidate->anchor_offset, candidate->original_size, candidate->scratch_kind,
+             candidate->pc_sgpr_pair, candidate->saved_vcc_sgpr, candidate->saved_scc_sgpr,
+             candidate->return_pc_sgpr_pair, candidate->return_saved_vcc_sgpr,
+             candidate->return_saved_scc_sgpr, candidate->required_sgpr_count,
              candidate->owner_descriptor_file_offsets, *placement});
         selected_branch_reservoir_candidates.insert(candidate);
         selected_any = true;
@@ -3896,10 +3946,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           continue;
         }
         std::vector<uint32_t> entry_words;
-        entry_words.push_back(build_s_mov_b32(reservoir.saved_vcc_sgpr, kRdna4VccLo, arch));
-        if (!append_lds_check_trap_indirect_jump(entry_words, reservoir.anchor_offset,
-                                                 reservoir.placement.body_offset,
-                                                 reservoir.pc_sgpr_pair, kRdna4ExecHi, arch) ||
+        const bool wave32_vcc = reservoir.scratch_kind == ScRelayReservoirScratchKind::Wave32Vcc;
+        entry_words.push_back(wave32_vcc
+                                  ? build_s_mov_b32(reservoir.saved_vcc_sgpr, kRdna4VccLo, arch)
+                                  : build_s_nop(0, arch));
+        if (!append_lds_check_trap_indirect_jump(
+                entry_words, reservoir.anchor_offset, reservoir.placement.body_offset,
+                reservoir.pc_sgpr_pair, wave32_vcc ? kRdna4ExecHi : reservoir.saved_scc_sgpr,
+                arch) ||
             entry_words.size() != kScRelayEntryWords ||
             reservoir.original_size < entry_words.size() * sizeof(uint32_t) ||
             reservoir.placement.return_target != reservoir.anchor_offset + reservoir.original_size -
@@ -3913,22 +3967,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         for (uint64_t offset = reservoir.anchor_offset + entry_words.size() * sizeof(uint32_t);
              offset < reservoir.placement.return_target; offset += sizeof(uint32_t))
           std::memcpy(new_text.data() + offset, &padding_nop, sizeof(padding_nop));
-        const uint32_t restore_return_vcc =
-            build_s_mov_b32(kRdna4VccLo, reservoir.return_saved_vcc_sgpr, arch);
-        std::memcpy(new_text.data() + reservoir.placement.return_target, &restore_return_vcc,
+        const uint32_t tail_word =
+            wave32_vcc ? build_s_mov_b32(kRdna4VccLo, reservoir.return_saved_vcc_sgpr, arch)
+                       : build_s_nop(0, arch);
+        std::memcpy(new_text.data() + reservoir.placement.return_target, &tail_word,
                     sizeof(uint32_t));
-        const uint32_t restore_entry_vcc =
-            build_s_mov_b32(kRdna4VccLo, reservoir.saved_vcc_sgpr, arch);
-        append_words(new_text, std::span<const uint32_t>(&restore_entry_vcc, 1u));
+        const uint32_t body_prefix =
+            wave32_vcc ? build_s_mov_b32(kRdna4VccLo, reservoir.saved_vcc_sgpr, arch)
+                       : build_s_nop(0, arch);
+        append_words(new_text, std::span<const uint32_t>(&body_prefix, 1u));
         new_text.insert(new_text.end(), pristine_text.begin() + reservoir.anchor_offset,
                         pristine_text.begin() + reservoir.anchor_offset + reservoir.original_size);
         std::vector<uint32_t> return_words;
-        return_words.push_back(build_s_mov_b32(reservoir.return_saved_vcc_sgpr, kRdna4VccLo, arch));
+        return_words.push_back(
+            wave32_vcc ? build_s_mov_b32(reservoir.return_saved_vcc_sgpr, kRdna4VccLo, arch)
+                       : build_s_nop(0, arch));
         if (!append_lds_check_trap_indirect_jump(
                 return_words,
                 reservoir.placement.body_offset + sizeof(uint32_t) + reservoir.original_size,
-                reservoir.placement.return_target, reservoir.return_pc_sgpr_pair, kRdna4ExecHi,
-                arch) ||
+                reservoir.placement.return_target, reservoir.return_pc_sgpr_pair,
+                wave32_vcc ? kRdna4ExecHi : reservoir.return_saved_scc_sgpr, arch) ||
             return_words.size() + 1u != kScRelayAppendedOverheadWords) {
           result.errors.emplace_back(
               "ConSan LDS check/trap could not encode its relay-reservoir return");
@@ -3944,9 +4002,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         info.trampoline_size =
             reservoir.original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t);
         info.indirect_pc_sgpr = reservoir.pc_sgpr_pair;
-        info.indirect_saved_vcc_sgpr = reservoir.saved_vcc_sgpr;
+        if (wave32_vcc)
+          info.indirect_saved_vcc_sgpr = reservoir.saved_vcc_sgpr;
+        else
+          info.indirect_saved_scc_sgpr = reservoir.saved_scc_sgpr;
         info.indirect_return_pc_sgpr = reservoir.return_pc_sgpr_pair;
-        info.indirect_return_saved_vcc_sgpr = reservoir.return_saved_vcc_sgpr;
+        if (wave32_vcc)
+          info.indirect_return_saved_vcc_sgpr = reservoir.return_saved_vcc_sgpr;
+        else
+          info.indirect_return_saved_scc_sgpr = reservoir.return_saved_scc_sgpr;
         info.indirect_required_sgpr_count = reservoir.required_sgpr_count;
         info.owner_descriptor_file_offsets = reservoir.owner_descriptor_file_offsets;
         result.patches.push_back(std::move(info));

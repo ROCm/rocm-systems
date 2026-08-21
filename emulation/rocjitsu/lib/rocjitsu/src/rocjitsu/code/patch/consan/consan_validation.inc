@@ -10,19 +10,26 @@ enum class BranchRelayReservoirShape : uint8_t {
 [[nodiscard]] BranchRelayReservoirShape branch_relay_reservoir_shape(const ConSanPatchInfo &patch) {
   if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
     return BranchRelayReservoirShape::Invalid;
-  const uint32_t indirect_field_count =
-      static_cast<uint32_t>(patch.indirect_pc_sgpr.has_value()) +
-      static_cast<uint32_t>(patch.indirect_saved_vcc_sgpr.has_value()) +
-      static_cast<uint32_t>(patch.indirect_return_pc_sgpr.has_value()) +
-      static_cast<uint32_t>(patch.indirect_return_saved_vcc_sgpr.has_value());
-  // Indirect reservoirs deliberately require the complete four-field schema.
-  // A future partial schema must receive its own explicit shape.
+  const bool has_any_indirect_field =
+      patch.indirect_pc_sgpr || patch.indirect_saved_scc_sgpr || patch.indirect_saved_vcc_sgpr ||
+      patch.indirect_return_pc_sgpr || patch.indirect_return_saved_scc_sgpr ||
+      patch.indirect_return_saved_vcc_sgpr;
+  const bool has_wave32_vcc_schema =
+      patch.indirect_pc_sgpr && patch.indirect_saved_vcc_sgpr && patch.indirect_return_pc_sgpr &&
+      patch.indirect_return_saved_vcc_sgpr && !patch.indirect_saved_scc_sgpr &&
+      !patch.indirect_return_saved_scc_sgpr;
+  const bool has_ordinary_scalar_schema =
+      patch.indirect_pc_sgpr && patch.indirect_saved_scc_sgpr && patch.indirect_return_pc_sgpr &&
+      patch.indirect_return_saved_scc_sgpr && !patch.indirect_saved_vcc_sgpr &&
+      !patch.indirect_return_saved_vcc_sgpr;
+  // Indirect reservoirs deliberately require one complete, unambiguous
+  // endpoint-resource schema.
   if (patch.original_size == 0u)
-    return indirect_field_count == 0u ? BranchRelayReservoirShape::GeneratedBank
-                                      : BranchRelayReservoirShape::Invalid;
-  if (indirect_field_count == 0u)
+    return !has_any_indirect_field ? BranchRelayReservoirShape::GeneratedBank
+                                   : BranchRelayReservoirShape::Invalid;
+  if (!has_any_indirect_field)
     return BranchRelayReservoirShape::DirectInstruction;
-  if (indirect_field_count == 4u)
+  if (has_wave32_vcc_schema || has_ordinary_scalar_schema)
     return BranchRelayReservoirShape::IndirectInstruction;
   return BranchRelayReservoirShape::Invalid;
 }
@@ -1379,8 +1386,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
             (kScRelayEntryWords + kScRelayTailRestoreWords + 1u) * sizeof(uint32_t) &&
         patch->trampoline_size ==
             patch->original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t) &&
-        patch->indirect_pc_sgpr && patch->indirect_saved_vcc_sgpr &&
-        patch->indirect_return_pc_sgpr && patch->indirect_return_saved_vcc_sgpr;
+        patch->indirect_pc_sgpr && patch->indirect_return_pc_sgpr;
     if (patch->phase != ConSanPatchPhase::Instrumentation ||
         patch->original_size > 512u * sizeof(uint32_t) ||
         patch->original_size % sizeof(uint32_t) != 0 ||
@@ -1496,28 +1502,36 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     }
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
-    expected_entry.push_back(build_s_mov_b32(*patch->indirect_saved_vcc_sgpr, kRdna4VccLo, arch));
+    const bool wave32_vcc = patch->indirect_saved_vcc_sgpr.has_value();
+    expected_entry.push_back(
+        wave32_vcc ? build_s_mov_b32(*patch->indirect_saved_vcc_sgpr, kRdna4VccLo, arch)
+                   : build_s_nop(0, arch));
     expected_return.push_back(
-        build_s_mov_b32(*patch->indirect_return_saved_vcc_sgpr, kRdna4VccLo, arch));
-    if (!append_lds_check_trap_indirect_jump(expected_entry, patch->anchor_offset,
-                                             patch->trampoline_offset, *patch->indirect_pc_sgpr,
-                                             kRdna4ExecHi, arch) ||
+        wave32_vcc ? build_s_mov_b32(*patch->indirect_return_saved_vcc_sgpr, kRdna4VccLo, arch)
+                   : build_s_nop(0, arch));
+    if (!append_lds_check_trap_indirect_jump(
+            expected_entry, patch->anchor_offset, patch->trampoline_offset,
+            *patch->indirect_pc_sgpr, wave32_vcc ? kRdna4ExecHi : *patch->indirect_saved_scc_sgpr,
+            arch) ||
         !append_lds_check_trap_indirect_jump(
             expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
             patch->anchor_offset + patch->original_size -
                 kScRelayTailRestoreWords * sizeof(uint32_t),
-            *patch->indirect_return_pc_sgpr, kRdna4ExecHi, arch) ||
+            *patch->indirect_return_pc_sgpr,
+            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr, arch) ||
         std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
                     expected_entry.size() * sizeof(uint32_t)) != 0 ||
         read_word(replacement_text, patch->trampoline_offset) !=
-            build_s_mov_b32(kRdna4VccLo, *patch->indirect_saved_vcc_sgpr, arch) ||
+            (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_saved_vcc_sgpr, arch)
+                        : build_s_nop(0, arch)) ||
         std::memcmp(expected_return.data(),
                     replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
                         patch->original_size,
                     expected_return.size() * sizeof(uint32_t)) != 0 ||
         read_word(replacement_text,
                   patch->anchor_offset + patch->original_size - sizeof(uint32_t)) !=
-            build_s_mov_b32(kRdna4VccLo, *patch->indirect_return_saved_vcc_sgpr, arch)) {
+            (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_return_saved_vcc_sgpr, arch)
+                        : build_s_nop(0, arch))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
       return errors;
     }

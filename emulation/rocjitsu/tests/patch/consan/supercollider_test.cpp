@@ -7559,6 +7559,100 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   }));
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64) {
+  constexpr size_t kTextWords = 33010u;
+  constexpr uint64_t kReservoirOffset = 65536u;
+  constexpr size_t kReservoirWords = 16u;
+  std::vector<uint32_t> text_words(kTextWords, build_s_mov_b32(10u, 10u, ROCJITSU_CODE_ARCH_CDNA4));
+  for (size_t site = 0; site < 3u; ++site) {
+    text_words[2u * site] = 0xD86C0000u;
+    text_words[2u * site + 1u] = 0x01000002u; // ds_read_b32 v1, v2
+  }
+  for (size_t word = 0; word < kReservoirWords; ++word) {
+    text_words[kReservoirOffset / sizeof(uint32_t) + word] =
+        build_s_mov_b32(10u, static_cast<uint16_t>(word), ROCJITSU_CODE_ARCH_CDNA4);
+  }
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 3u;
+  options.scratch_vgpr = 6u;
+  options.preapplied_reserved_ranges.push_back(
+      {.text_offset = 6u * sizeof(uint32_t),
+       .size = static_cast<uint32_t>(kReservoirOffset - 6u * sizeof(uint32_t))});
+  options.preapplied_reserved_ranges.push_back(
+      {.text_offset = kReservoirOffset + kReservoirWords * sizeof(uint32_t),
+       .size = static_cast<uint32_t>(
+           (kTextWords - kReservoirOffset / sizeof(uint32_t) - kReservoirWords - 1u) *
+           sizeof(uint32_t))});
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
+                               &ConSanPatchInfo::kind),
+            3u);
+  const auto reservoir = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
+  ASSERT_NE(reservoir, result.patches.end());
+  EXPECT_EQ(reservoir->anchor_offset, kReservoirOffset);
+  EXPECT_TRUE(reservoir->indirect_pc_sgpr.has_value());
+  EXPECT_TRUE(reservoir->indirect_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(reservoir->indirect_saved_vcc_sgpr.has_value());
+  EXPECT_TRUE(reservoir->indirect_return_pc_sgpr.has_value());
+  EXPECT_TRUE(reservoir->indirect_return_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
+  EXPECT_EQ(result.lds_relay_reservoir_telemetry.used_reservoir_count, 1u);
+}
+
+TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
+  const std::array<uint32_t, 7> candidate_kernel = {
+      0xD86C0000u,
+      0x01000002u, // ds_read_b32 v1, v2
+      0xD86C0000u,
+      0x03000004u, // ds_read_b32 v3, v4
+      0xD86C0000u,
+      0x05000006u, // ds_read_b32 v5, v6
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint32_t> skipped_kernel(33000u, build_s_mov_b32(10u, 10u, ROCJITSU_CODE_ARCH_CDNA4));
+  skipped_kernel.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      candidate_kernel, skipped_kernel, {}, /*vgpr_granulated=*/0u,
+      /*function_is_kernel=*/true);
+  // The old scalability gate used the whole file size and consequently
+  // excluded the second kernel from CFG/liveness analysis even though the
+  // executable text is only about 129 KiB. Trailing non-ELF payload models a
+  // library's large metadata without changing any executable range.
+  bytes.resize(4u * 1024u * 1024u + 1u, 0u);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.max_patches = 3u;
+  options.scratch_vgpr = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
+                               &ConSanPatchInfo::kind),
+            3u);
+  const auto reservoir = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
+  ASSERT_NE(reservoir, result.patches.end());
+  EXPECT_EQ(reservoir->anchor_offset, candidate_kernel.size() * sizeof(uint32_t));
+  EXPECT_TRUE(reservoir->indirect_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(reservoir->indirect_saved_vcc_sgpr.has_value());
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOfRange) {
   constexpr size_t kSiteCount = 160u;
   std::vector<uint32_t> text_words;
