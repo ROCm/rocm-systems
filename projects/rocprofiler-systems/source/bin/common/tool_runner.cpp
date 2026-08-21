@@ -463,6 +463,13 @@ tool_runner::apply_post_parse(parser_t& parser)
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
 
+    // An explicit --profile must beat a preset that enables flat profiling
+    // (trace-hpc, profile-only, profile-mpi). The preset writes
+    // ROCPROFSYS_FLAT_PROFILE while arguments are parsed and --profile only sets
+    // ROCPROFSYS_PROFILE, so without this the preset's flat mode would survive.
+    if(parser.exists("profile") && parser.get<bool>("profile"))
+        data.env.set(env_vars::FLAT_PROFILE, false);
+
     if(domain_state.export_config_requested)
     {
         rocprofsys::common_utils::export_config(

@@ -130,6 +130,22 @@ class TestPresets(RocprofsysTest):
             pass_regex=["ROCPROFSYS_FLAT_PROFILE=true"],
         )
 
+    def test_profile_flag_overrides_preset_flat_profile(self, target):
+        """An explicit --profile beats the preset's flat-profile default.
+
+        The preset writes ROCPROFSYS_FLAT_PROFILE during parsing, so --profile
+        has to clear it in post-parse to produce a call-stack profile.
+        """
+        _assert_baseline_output(
+            self,
+            target=target,
+            run_args=["--preset=trace-hpc", "--profile", "-v", "2", "--", "ls"],
+            pass_regex=[
+                "ROCPROFSYS_FLAT_PROFILE=false",
+                "ROCPROFSYS_PROFILE=true",
+            ],
+        )
+
 
 # ============================================================================
 # Legacy preset flag translation --preset=<name>

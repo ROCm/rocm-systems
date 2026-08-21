@@ -14,6 +14,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
   default. Pass `--profile` to get a call-stack-based profile instead.
 
+### Fixed
+
+- `--profile` is no longer ignored when combined with a preset that enables flat
+  profiling (`trace-hpc`, `profile-only`, `profile-mpi`). It now clears
+  `ROCPROFSYS_FLAT_PROFILE` so the requested call-stack profile is produced.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
