@@ -27,6 +27,12 @@ inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t da
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
 }
 
+inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
+  if (IsArchMatch(comm->archName, "gfx1250")) return kDdaAlltoAllGfx1250ThresholdBytes;
+  if (IsArchMatch(comm->archName, "gfx950")) return kDdaAlltoAllGfx950ThresholdBytes;
+  return kDdaAlltoAllGfx942ThresholdBytes;
+}
+
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
@@ -34,9 +40,7 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
-      kDdaAlltoAllGfx942ThresholdBytes,
-      kDdaAlltoAllGfx950ThresholdBytes,
-      kDdaAlltoAllGfx1250ThresholdBytes);
+      testDdaAlltoAllThreshold(comm));
 }
 
 // Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.

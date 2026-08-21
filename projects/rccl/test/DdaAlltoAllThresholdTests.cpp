@@ -22,11 +22,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx942_ExactlyAt4MbThreshold_Enabled)
 {
     mockComm_.reset("gfx942:sramecc+:xnack-");
     const size_t totalBytes = kDdaAlltoAllGfx942ThresholdBytes;
-    EXPECT_TRUE(rcclDdaEnabled(
-        mockComm_.get(),
-        totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes));
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), totalBytes, kDdaAlltoAllGfx942ThresholdBytes));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
@@ -35,11 +31,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx942_OneByteOverThreshold_Disabled)
 {
     mockComm_.reset("gfx942:sramecc+:xnack-");
     const size_t totalBytes = kDdaAlltoAllGfx942ThresholdBytes + 1;
-    EXPECT_FALSE(rcclDdaEnabled(
-        mockComm_.get(),
-        totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes));
+    EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), totalBytes, kDdaAlltoAllGfx942ThresholdBytes));
     EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
 }
@@ -48,11 +40,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_ExactlyAt4MbThreshold_Enabled)
 {
     mockComm_.reset("gfx950:sramecc+:xnack-");
     const size_t totalBytes = kDdaAlltoAllGfx950ThresholdBytes;
-    EXPECT_TRUE(rcclDdaEnabled(
-        mockComm_.get(),
-        totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes));
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), totalBytes, kDdaAlltoAllGfx950ThresholdBytes));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
@@ -61,15 +49,11 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
 {
     mockComm_.reset("gfx950:sramecc+:xnack-");
     const size_t overCap = kDdaAlltoAllGfx950ThresholdBytes + 1;
-    EXPECT_FALSE(rcclDdaEnabled(
-        mockComm_.get(),
-        overCap,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes));
+    EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), overCap, kDdaAlltoAllGfx950ThresholdBytes));
 
-    // Other collectives on gfx950 still honor the user threshold when gfx950Default is 0.
+    // Other collectives on gfx950 still honor RCCL_DDA_THRESHOLD when the cap is 0.
     const size_t eightMb = 8 * 1024 * 1024;
-    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), eightMb, 8388608, 0));
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), eightMb, 0));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
@@ -79,8 +63,6 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
     EXPECT_TRUE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes,
         kDdaAlltoAllGfx1250ThresholdBytes));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
@@ -93,8 +75,6 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverThreshold_Disabled)
     EXPECT_FALSE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes,
         kDdaAlltoAllGfx1250ThresholdBytes));
     EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
@@ -107,8 +87,6 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_AlltoAllIgnoresHighUserThreshold)
     EXPECT_FALSE(rcclDdaEnabled(
         mockComm_.get(),
         overCap,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes,
         kDdaAlltoAllGfx1250ThresholdBytes));
 }
 
@@ -186,10 +164,10 @@ TEST(DdaAlltoAllThreshold, Gfx1250_FallbackToUserThreshold)
             mockComm.reset("gfx1250:sramecc+:xnack-");
             const size_t eightMb = 8 * 1024 * 1024;
             const size_t twelveMb = 12 * 1024 * 1024;
-            // With RCCL_DDA_THRESHOLD=10MiB and gfx1250Default=0, 8MiB should pass.
-            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 8388608, 0, 0));
+            // With RCCL_DDA_THRESHOLD=10MiB and threshold=0, 8MiB should pass.
+            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 0));
             // But 12MiB should fail (over 10MiB threshold).
-            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 8388608, 0, 0));
+            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 0));
         },
         {{"RCCL_DDA_THRESHOLD", "10485760"}});  // 10 MiB
 }
@@ -204,10 +182,10 @@ TEST(DdaAlltoAllThreshold, Gfx950_FallbackToUserThreshold)
             mockComm.reset("gfx950:sramecc+:xnack-");
             const size_t eightMb = 8 * 1024 * 1024;
             const size_t twelveMb = 12 * 1024 * 1024;
-            // With RCCL_DDA_THRESHOLD=10MiB and gfx950Default=0, 8MiB should pass.
-            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 8388608, 0));
+            // With RCCL_DDA_THRESHOLD=10MiB and threshold=0, 8MiB should pass.
+            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), eightMb, 0));
             // But 12MiB should fail (over 10MiB threshold).
-            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 8388608, 0));
+            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), twelveMb, 0));
         },
         {{"RCCL_DDA_THRESHOLD", "10485760"}});  // 10 MiB
 }
@@ -221,8 +199,6 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_FourRanks_Enabled)
     EXPECT_TRUE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes,
         kDdaAlltoAllGfx1250ThresholdBytes));
 }
 
@@ -235,9 +211,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx942_FourRanks_Disabled)
     EXPECT_FALSE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        kDdaAlltoAllGfx942ThresholdBytes,
-        kDdaAlltoAllGfx950ThresholdBytes,
-        kDdaAlltoAllGfx1250ThresholdBytes));
+        kDdaAlltoAllGfx942ThresholdBytes));
 }
 
 } // namespace RcclUnitTesting

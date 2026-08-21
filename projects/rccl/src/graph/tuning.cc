@@ -1003,9 +1003,111 @@ static struct tuningModel tuning_model_9{
   },
 };
 
+
+// tuning_model_10: gfx1250 fabric (MNNVL topology).
+// Placeholder values based on gfx950 (tuning_model_6) -- validate from sweep data (AICOMRCCL-1756).
+static struct tuningModel tuning_model_10{
+  .hwLat =
+    {
+      /* NVLINK */
+      {/* Tree (LL/LL128/Simple)*/ {0.9, 0.9, 2.3}, /* Ring (LL/LL128/Simple)*/ {0.8, 0.8, 2.1},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 0.9}, /* CollNetChain (Simple)*/ {0.0, 0.0, 0.0}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* PCI */
+      {/* Tree (LL/LL128/Simple)*/ {2.2, 2.2, 5.7}, /* Ring (LL/LL128/Simple)*/ {2.2, 2.2, 5.7},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 5.7}, /* CollNetChain (Simple)*/ {0.0, 0.0, 5.7}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 5.7}},
+      /* NET */
+      {/* Tree (LL/LL128/Simple)*/ {10.5, 10.5, 25.0}, /* Ring (LL/LL128/Simple)*/ {9.5, 9.5, 320.0},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 10.5}, /* CollNetChain (Simple)*/ {0.0, 0.0, 0.0}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 320.0}},
+    },
+  .bwRatio =
+    {
+      /* 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.06, 0.06, 0.11}, /* Ring (LL/LL128/Simple)*/ {0.08, 0.08, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* more than 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.06, 0.06, 0.59}, /* Ring (LL/LL128/Simple)*/ {0.08, 0.08, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 1.00}},
+    },
+  .treeCorrectionFactor =
+    {
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9,
+        1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9,
+        1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 0.1, 0.9, 0.9, 0.1, 0.1,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,  0.1, 0.1, 0.1, 0.1,
+        0.1, 0.7, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 0.15, 0.6, 0.7, 0.6,
+      },
+    },
+  .ringCorrectionFactor =
+    {
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0,
+        0.4, 0.4, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0,
+        0.4, 0.4, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 5.5, 0.1, 0.1, 1.0, 1.0,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.9, 0.1, 1.0, 0.1, 0.6, 1.0, 1.0,
+      },
+    },
+  .llProtoRanges =
+    {
+      /*ReduceScatter*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
+      /*AllGather*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
+      /*AllReduce*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 262144, 1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {262144, 70640910, 3145728, 0}},
+      /*Reduce*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {16383, 16777216, 1, 0}},
+      /*Broadcast*/
+      {/*LL (min/max/factor/thread_threshold)*/ {0, 2048, 1, 0},
+       /*LL128 (min/max/factor/thread_threshold)*/ {2048, 16777216, 1, 0}},
+    },
+  .channelThresholds = {
+    /*ReduceScatter*/ {{512, 1024, 2},
+                       {1024, 2048, 4},
+                       {2048, 4096, 8},
+                       {4096, 65536, 16},
+                       {65536, 262144, 32},
+                       {262144, 524288, 40},
+                       {524288, 1048576, 48},
+                       {1048576, 2097152, 56},
+                       {2097152, 268435457, 64}},
+    /*AllGather*/
+    {{2048, 4096, 2},
+     {4096, 8192, 4},
+     {8192, 16384, 8},
+     {16384, 262144, 16},
+     {262144, 524288, 32},
+     {524288, 1048576, 40},
+     {1, 1, 48},
+     {1048576, 4194304, 56},
+     {4194304, 268435457, 64}},
+    /*AllReduce*/ {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+  },
+};
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
   tuning_model_5, tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9,
+  tuning_model_10,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1631,17 +1733,61 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   return ncclSuccess;
 }
 
+// Per-arch DDA/CE dispatch threshold tables.
+// Indexed by ncclFunc_t: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4, ...].
+// AR/AG compare total message bytes; RS compares rsShardBytes (per-rank recv).
+// gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
+static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
+  .ddaLLMax    = {0, 0, 32ULL*1024,        32ULL*1024,        32ULL*1024,        0, 0, 0},
+  .ddaLL128Max = {0, 0, 32ULL*1024*1024,   32ULL*1024*1024,   32ULL*1024*1024,   0, 0, 0},
+  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0},
+  .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
+  .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
+  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+// gfx950: DDA-IPC cap matches RCCL_DDA_THRESHOLD default (128 MiB). No fabric LL/LL128.
+static const rcclArchThresholds rcclArchThresholds_gfx950 = {
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0},
+  .ceArMin     = 4ULL   * 1024 * 1024,
+  .ceArMax     = 256ULL * 1024 * 1024,
+  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+// gfx942: DDA-IPC cap is the historical 8 MiB table value. No fabric LL/LL128.
+static const rcclArchThresholds rcclArchThresholds_gfx942 = {
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0},
+  .ceArMin     = 4ULL   * 1024 * 1024,
+  .ceArMax     = 256ULL * 1024 * 1024,
+  .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},
+  .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
+  if (gcn == nullptr) return nullptr;
+  if (IsArchMatch(gcn, "gfx1250")) return &rcclArchThresholds_gfx1250;
+  if (IsArchMatch(gcn, "gfx950")) return &rcclArchThresholds_gfx950;
+  if (IsArchMatch(gcn, "gfx942")) return &rcclArchThresholds_gfx942;
+  return nullptr;
+}
+
 /**
  * takes gfx arch name as C-style string and returns a tuning index to
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1030", 0},
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 10}, {"gfx1030", 0},
     {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},  {"gfx1250", 10},
     {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
