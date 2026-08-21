@@ -150,7 +150,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
       }
     }
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") &&
-             comm->nNodes == 1 &&
              (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather ||
               info->func == ncclFuncReduceScatter)) {
     // gfx1250 single-node Ring fallback protocol selection.
