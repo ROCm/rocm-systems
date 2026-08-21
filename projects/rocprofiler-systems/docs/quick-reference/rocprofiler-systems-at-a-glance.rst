@@ -10,7 +10,7 @@ ROCm Systems Profiler at a glance
 
 ROCm Systems Profiler (``rocprofiler-systems``) captures the entire application stack in a single, unified timeline: CPU function calls, GPU kernel dispatches, MPI collectives, OpenMP regions, memory allocations, OS scheduling events, and GPU telemetry such as temperature, power, utilization, and interconnect bandwidth.
 
-This system-wide view matters most when the GPU is only one part of a larger workload. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cross-domain interactions requires a tool that sees the full picture, not just the GPU in isolation.
+This system-wide view is especially useful when end-to-end performance depends on interactions across CPU, GPU, communication, and runtime - not on any single layer in isolation. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cross-domain interactions requires a tool that sees the full picture, not just the GPU in isolation.
 
 This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`../conceptual/rocprof-sys-feature-set`; for a narrative introduction to output formats, see :doc:`../what-is-rocprof-sys`
 
