@@ -14,7 +14,7 @@ import re
 import common
 import pytest
 
-from utils import mem_chart_gfx9, mem_chart_gfx11
+from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
@@ -696,6 +696,183 @@ class TestPlotMemChartGfx9:
         assert re.search(r"<-{3,}>", output)
 
 
+# =============================================================================
+# Tests for plot_mem_chart function (gfx1250)
+# =============================================================================
+
+
+class TestPlotMemChartGfx1250:
+    """Tests for gfx1250 plot_mem_chart - Instinct MI350 memory chart generation."""
+
+    def test_returns_string(self):
+        """Test that plot_mem_chart returns a non-empty string."""
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        result = mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_contains_complete_gfx1250_architecture(self):
+        """gfx1250 output contains every rendered memory component."""
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        output = common.strip_ansi(
+            mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        )
+        expected_components = (
+            "Kernel",
+            "TCP",
+            "LDS",
+            "GL0",
+            "SQC",
+            "GL1",
+            "GLARB",
+            "GL2",
+            "EA/DF",
+            "HBM",
+        )
+        for component in expected_components:
+            assert component in output, f"Missing gfx1250 component: {component}"
+
+    def test_contains_directional_connectors(self):
+        """gfx1250 output exposes directional bandwidth connectors."""
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        output = common.strip_ansi(
+            mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        )
+        assert re.search(r"<(?!-+>)-{3,}", output)
+        assert re.search(r"(?<![<-])-{3,}>", output)
+        assert re.search(r"<-{3,}>", output)
+
+    def test_contains_bandwidth_values(self):
+        """Output contains formatted bandwidth values."""
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        result = mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        assert "GB/s" in result
+
+    def test_empty_metrics(self):
+        """Empty metric dict still produces a non-empty chart (N/A placeholders)."""
+        result = mem_chart_gfx1250.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_partial_metrics(self):
+        """Partial metric dict still produces a non-empty chart."""
+        partial = {
+            "GL0-GL1 Read Bandwidth": 50e9,
+            "GL2-EA Read Bandwidth": 200e9,
+        }
+        result = mem_chart_gfx1250.plot_mem_chart(partial, chart_title=DEFAULT_TITLE)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_extreme_bandwidth_values(self):
+        """Test with TB/s bandwidth values."""
+        extreme = {
+            "DRAM Read Bandwidth": 10e12,
+            "DRAM Write Bandwidth": 5e12,
+        }
+        result = mem_chart_gfx1250.plot_mem_chart(extreme, chart_title=DEFAULT_TITLE)
+        assert "TB/s" in result
+
+    def test_zero_bandwidth_values(self):
+        """Test with zero bandwidth values."""
+        zero = {
+            "DRAM Read Bandwidth": 0,
+            "DRAM Write Bandwidth": 0,
+        }
+        result = mem_chart_gfx1250.plot_mem_chart(zero, chart_title=DEFAULT_TITLE)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_normalize_mem_chart_metrics_flat_ordered(self):
+        """Metrics are flattened to panel YAML order; extras dropped; missing None."""
+        raw = {"ICache Requests": 42.0, "noise_key": 99}
+        norm = mem_chart_gfx1250.normalize_mem_chart_metrics(raw)
+        assert list(norm.keys()) == list(mem_chart_gfx1250.MEM_CHART_PANEL_METRIC_KEYS)
+        assert norm["ICache Requests"] == 42.0
+        assert "noise_key" not in norm
+        assert norm["DRAM Read Bandwidth"] is None
+
+
+# =============================================================================
+# Tests for DEFAULT_SAMPLE_METRICS constant (gfx1250)
+# =============================================================================
+
+
+class TestDefaultSampleMetricsGfx1250:
+    """Tests for gfx1250 DEFAULT_SAMPLE_METRICS constant."""
+
+    def test_keys_match_panel_metric_keys(self):
+        """Keys match MEM_CHART_PANEL_METRIC_KEYS."""
+        assert set(mem_chart_gfx1250.DEFAULT_SAMPLE_METRICS) == set(
+            mem_chart_gfx1250.MEM_CHART_PANEL_METRIC_KEYS
+        )
+        assert len(mem_chart_gfx1250.DEFAULT_SAMPLE_METRICS) == len(
+            mem_chart_gfx1250.MEM_CHART_PANEL_METRIC_KEYS
+        )
+
+    def test_all_bandwidth_values_positive(self):
+        """All bandwidth values are non-negative."""
+        for key, value in mem_chart_gfx1250.DEFAULT_SAMPLE_METRICS.items():
+            if "Bandwidth" in key:
+                assert value >= 0, f"{key} should be non-negative"
+
+    def test_all_rate_values_in_range(self):
+        """Rate/percentage values are in valid 0-100 range."""
+        for key, value in mem_chart_gfx1250.DEFAULT_SAMPLE_METRICS.items():
+            if "Rate" in key or "Utilization" in key:
+                assert 0 <= value <= 100, f"{key} should be between 0 and 100"
+
+    def test_has_all_memory_hierarchy_levels(self):
+        """All memory hierarchy levels are represented."""
+        metrics = mem_chart_gfx1250.DEFAULT_SAMPLE_METRICS
+        assert any("ICache" in k for k in metrics)
+        assert any("LDS" in k for k in metrics)
+        assert any("GL0" in k for k in metrics)
+        assert any("GL1" in k for k in metrics)
+        assert any("GL2" in k for k in metrics)
+        assert any("DRAM" in k for k in metrics)
+
+
+# =============================================================================
+# Integration Tests (gfx1250)
+# =============================================================================
+
+
+class TestIntegrationGfx1250:
+    """Integration tests for complete gfx1250 workflows."""
+
+    def test_full_workflow_with_sample_data(self):
+        """Complete workflow with sample data produces substantial output."""
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        chart = mem_chart_gfx1250.plot_mem_chart(
+            metrics,
+            chart_title="3. Memory Chart (Normalization: per_dispatch)",
+        )
+        assert isinstance(chart, str)
+        assert len(chart) > 100
+        assert "Kernel" in chart
+        assert "Legend" in chart
+
+    def test_bandwidth_unit_consistency(self):
+        """Known GB/s bandwidth values are consistently formatted as GB/s."""
+        metrics = {
+            "GL0-GL1 Read Bandwidth": 100e9,
+            "GL0-GL1 Write Bandwidth": 50e9,
+            "GL2-EA Read Bandwidth": 200e9,
+            "DRAM Read Bandwidth": 512e9,
+            "DRAM Write Bandwidth": 384e9,
+        }
+        chart = mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        assert chart.count("GB/s") >= 5
+
+    def test_get_sample_metrics_returns_copy(self):
+        """get_sample_metrics returns a fresh copy each call."""
+        m1 = mem_chart_gfx1250.get_sample_metrics()
+        m2 = mem_chart_gfx1250.get_sample_metrics()
+        m1["DRAM Read Bandwidth"] = 0
+        assert m2["DRAM Read Bandwidth"] != 0
+
+
 @pytest.mark.parametrize(
     ("renderer", "metrics"),
     [
@@ -709,10 +886,15 @@ class TestPlotMemChartGfx9:
             dict(GFX9_SAMPLE_METRICS),
             id="gfx9",
         ),
+        pytest.param(
+            mem_chart_gfx1250.plot_mem_chart,
+            mem_chart_gfx1250.get_sample_metrics(),
+            id="gfx1250",
+        ),
     ],
 )
 def test_chart_title_appears_as_first_line(renderer, metrics):
-    """Both renderers print the caller's chart_title as the first line."""
+    """All renderers print the caller's chart_title as the first line."""
     chart_title = "7. Memory Chart (Normalization: per_kernel)"
     output = common.strip_ansi(renderer(metrics, chart_title=chart_title))
 
