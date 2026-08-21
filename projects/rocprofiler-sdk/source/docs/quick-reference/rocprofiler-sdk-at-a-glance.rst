@@ -4,9 +4,9 @@
 
 .. _rocprofiler-sdk-at-a-glance:
 
-==============================
+************************************************
 ROCprofiler-SDK at a glance
-==============================
+************************************************
 
 ROCprofiler-SDK is a profiling infrastructure for GPU compute applications on ROCm. It provides hardware performance counters, API tracing, PC sampling, thread trace, and streaming performance monitoring through a unified, context-based API. The ``rocprofv3`` command-line tool exposes all of these capabilities without requiring source code changes or tool library development.
 
