@@ -3421,7 +3421,7 @@ struct MoiArchitecturalSgprRange {
 };
 
 inline constexpr std::array kGfx1250ReservedOrdinarySgprRanges = {
-    MoiArchitecturalSgprRange{.base = 102u, .width = 2u},
+    MoiArchitecturalSgprRange{.base = 102u, .width = 4u},
 };
 
 struct MoiArchitecturalSgprLayout {
@@ -3441,8 +3441,10 @@ moi_architectural_sgpr_layout(rj_code_arch_t arch) {
     };
   }
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-    // RDNA4 retains ordinary physical SGPRs through s105, but scalar
-    // selectors s102:s103 alias FLAT_SCRATCH in persistent SALU state.
+    // gfx1250 scalar encodings below the ordinary operand limit still alias
+    // architectural state: s102:s103 are FLAT_SCRATCH and s104:s105 are
+    // XNACK_MASK. LLVM reserves both pairs even when kernel metadata reports a
+    // smaller ordinary allocation.
     return {
         .ordinary_limit = kMaxSgprs,
         .reserved_ordinary_ranges = kGfx1250ReservedOrdinarySgprRanges,
@@ -3475,8 +3477,8 @@ static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
                                                                       ROCJITSU_CODE_ARCH_CDNA4));
 static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
                                                                      ROCJITSU_CODE_ARCH_GFX1250));
-static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
-                                                                      ROCJITSU_CODE_ARCH_GFX1250));
+static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
+                                                                     ROCJITSU_CODE_ARCH_GFX1250));
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u,
                                                                       ROCJITSU_CODE_ARCH_GFX1250));
 static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA3).ordinary_limit == 102u);
@@ -3754,6 +3756,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
 
   const uint16_t count = moi_exec_save_sgpr_count(options, arch);
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
+  const auto overlaps_architectural_state = [&](uint16_t base, uint16_t width) {
+    return persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch);
+  };
   const auto intersects = [](const RegisterSet &set, uint16_t base, uint16_t width) {
     for (uint16_t i = 0; i < width; ++i)
       if (set.contains({RegClass::SGPR, static_cast<uint16_t>(base + i), 1u}))
@@ -3794,7 +3799,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       for (uint32_t base = util::align_up(liveness_search_floor, 2u); base + count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
-        if (intersects(unavailable, candidate, count) ||
+        if (overlaps_architectural_state(candidate, count) ||
+            intersects(unavailable, candidate, count) ||
             (options.moi_owner_sgpr &&
              range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
             (options.moi_dispatch_id_sgpr &&
@@ -3813,7 +3819,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
         instrumentation::is_admitted_arch(arch) && address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
-        return (options.moi_owner_sgpr &&
+        return overlaps_architectural_state(base, width) ||
+               (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
                (options.moi_dispatch_id_sgpr &&
                 range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
@@ -4070,7 +4077,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                                                               width, arch);
       };
       const auto reserved = [&](uint16_t base, uint16_t width) {
-        return (options.moi_owner_sgpr &&
+        return overlaps_architectural_state(base, width) ||
+               (options.moi_owner_sgpr &&
                 range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
                (options.moi_dispatch_id_sgpr &&
                 range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
@@ -4287,6 +4295,9 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
 
   uint32_t first = util::align_up(scalar_contexts.tail_floor, 2u);
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
+  const auto overlaps_architectural_state = [&](uint16_t base, uint16_t width) {
+    return persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch);
+  };
   const auto conflicts_with_cdna_vcc = [&](uint16_t base) {
     return moi_scalar_contexts_conflict_with_physical_vcc(scalar_contexts.summaries, base, count,
                                                           arch);
@@ -4308,7 +4319,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     // frame base even when those architectural roles are absent from ordinary
     // decoded operand liveness. Never assign either register to persistent
     // Inline scalar state.
-    if (conflicts_with_cdna_vcc(base) ||
+    if (overlaps_architectural_state(base, count) || conflicts_with_cdna_vcc(base) ||
         (options.moi_dynamic_stack_spill &&
          moi_sgpr_range_overlaps_dynamic_stack_state(base, count))) {
       continue;
@@ -4395,7 +4406,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     };
     const uint32_t liveness_search_floor = scalar_tail_covers_implicit_references ? first : 0u;
     for (uint32_t base = liveness_search_floor; base + count <= ordinary_sgpr_limit; base += 2u) {
-      if (unavailable_intersects(static_cast<uint16_t>(base)) ||
+      if (overlaps_architectural_state(static_cast<uint16_t>(base), count) ||
+          unavailable_intersects(static_cast<uint16_t>(base)) ||
           conflicts_with_cdna_vcc(static_cast<uint16_t>(base)) ||
           (options.moi_dynamic_stack_spill &&
            moi_sgpr_range_overlaps_dynamic_stack_state(static_cast<uint16_t>(base), count)) ||
@@ -4429,7 +4441,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
-      if ((options.moi_owner_sgpr &&
+      if (overlaps_architectural_state(candidate, count) ||
+          (options.moi_owner_sgpr &&
            range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
           (options.moi_dispatch_id_sgpr &&
            range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
@@ -4505,7 +4518,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       }
     }
     const auto overlaps_reserved = [&](uint16_t base, uint16_t width) {
-      return (options.moi_owner_sgpr && range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
+      return overlaps_architectural_state(base, width) ||
+             (options.moi_owner_sgpr && range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
              (options.moi_dispatch_id_sgpr &&
               range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
                              moi_dispatch_state_sgpr_count(options))) ||
@@ -4625,7 +4639,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
-      if ((options.moi_owner_sgpr &&
+      if (overlaps_architectural_state(candidate, count) ||
+          (options.moi_owner_sgpr &&
            range_overlaps(candidate, count, *options.moi_owner_sgpr, 1u)) ||
           (options.moi_dispatch_id_sgpr &&
            range_overlaps(candidate, count, *options.moi_dispatch_id_sgpr,
@@ -5147,11 +5162,18 @@ configure_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResu
 [[nodiscard]] bool validate_moi_ordinary_scalar_state(const ConSanOptions &options,
                                                       ConSanResult &result, rj_code_arch_t arch) {
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
-  const bool exec_invalid =
-      options.moi_exec_save_sgpr &&
-      static_cast<uint32_t>(*options.moi_exec_save_sgpr) + moi_exec_save_sgpr_count(options, arch) >
-          limit;
-  const bool owner_invalid = options.moi_owner_sgpr && *options.moi_owner_sgpr >= limit;
+  const auto overlaps_architectural_state = [&](std::optional<uint16_t> base, uint16_t width) {
+    return base && persistent_sgpr_range_overlaps_reserved_ordinary_range(*base, width, arch);
+  };
+  const bool exec_invalid = options.moi_exec_save_sgpr &&
+                            (static_cast<uint32_t>(*options.moi_exec_save_sgpr) +
+                                     moi_exec_save_sgpr_count(options, arch) >
+                                 limit ||
+                             overlaps_architectural_state(options.moi_exec_save_sgpr,
+                                                          moi_exec_save_sgpr_count(options, arch)));
+  const bool owner_invalid =
+      options.moi_owner_sgpr && (*options.moi_owner_sgpr >= limit ||
+                                 overlaps_architectural_state(options.moi_owner_sgpr, 1u));
   const auto persistent_workgroup_tuple_invalid = [&] {
     for (const std::optional<uint16_t> reg :
          {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
@@ -5179,17 +5201,26 @@ configure_record_replay_dispatch_id_overrides(ConSanOptions &options, ConSanResu
       persistent_workgroup_tuple_invalid;
   const bool inline_external_invalid =
       (options.moi_inline_indirect_pc_sgpr &&
-       static_cast<uint32_t>(*options.moi_inline_indirect_pc_sgpr) + 2u > limit) ||
+       (static_cast<uint32_t>(*options.moi_inline_indirect_pc_sgpr) + 2u > limit ||
+        overlaps_architectural_state(options.moi_inline_indirect_pc_sgpr, 2u))) ||
       (options.moi_inline_call_return_sgpr &&
-       static_cast<uint32_t>(*options.moi_inline_call_return_sgpr) + 2u > limit) ||
-      (options.moi_inline_dispatch_key_sgpr && *options.moi_inline_dispatch_key_sgpr >= limit) ||
-      (options.moi_inline_indirect_scc_sgpr && *options.moi_inline_indirect_scc_sgpr >= limit) ||
+       (static_cast<uint32_t>(*options.moi_inline_call_return_sgpr) + 2u > limit ||
+        overlaps_architectural_state(options.moi_inline_call_return_sgpr, 2u))) ||
+      (options.moi_inline_dispatch_key_sgpr &&
+       (*options.moi_inline_dispatch_key_sgpr >= limit ||
+        overlaps_architectural_state(options.moi_inline_dispatch_key_sgpr, 1u))) ||
+      (options.moi_inline_indirect_scc_sgpr &&
+       (*options.moi_inline_indirect_scc_sgpr >= limit ||
+        overlaps_architectural_state(options.moi_inline_indirect_scc_sgpr, 1u))) ||
       (options.moi_inline_visible_evidence_sgpr &&
-       *options.moi_inline_visible_evidence_sgpr >= limit) ||
+       (*options.moi_inline_visible_evidence_sgpr >= limit ||
+        overlaps_architectural_state(options.moi_inline_visible_evidence_sgpr, 1u))) ||
       (options.moi_record_replay_dispatch_key_sgpr &&
-       *options.moi_record_replay_dispatch_key_sgpr >= limit) ||
+       (*options.moi_record_replay_dispatch_key_sgpr >= limit ||
+        overlaps_architectural_state(options.moi_record_replay_dispatch_key_sgpr, 1u))) ||
       (options.moi_record_replay_call_return_sgpr &&
-       static_cast<uint32_t>(*options.moi_record_replay_call_return_sgpr) + 2u > limit);
+       (static_cast<uint32_t>(*options.moi_record_replay_call_return_sgpr) + 2u > limit ||
+        overlaps_architectural_state(options.moi_record_replay_call_return_sgpr, 2u)));
   const bool branch_only_scalar_invalid =
       options.moi_inline_branch_only_scalar_spill &&
       (options.moi_engine != ConSanMoiEngine::InlineShadow ||

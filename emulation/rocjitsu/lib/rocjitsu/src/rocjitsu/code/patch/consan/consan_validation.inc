@@ -3407,7 +3407,11 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       capture_low = *low;
       capture_high = *high;
     }
-    if (decoded_legacy_swap || decoded_cas_count < 4u || decoded_cas_count % 4u != 0u ||
+    // One composite-key partition body owns each generated cell. Its odd
+    // claim and even commit are the two required CAS operations; distinct
+    // address/access/mask groups revisit the same body at runtime rather than
+    // requiring a duplicated uniform/fallback transaction in the image.
+    if (decoded_legacy_swap || decoded_cas_count < 2u || decoded_cas_count % 2u != 0u ||
         exact_cas_count != decoded_cas_count ||
         count_pattern(*expected_dispatch_low_store) != transaction_count ||
         count_pattern(*expected_dispatch_high_store) != transaction_count ||

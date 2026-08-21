@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Native 12-byte LDS tuple publication. The aliasing destination/address is
-/// retained from framework-generated RDNA4/CDNA5 kernels: instrumentation must
-/// snapshot the address before the B96 load overwrites the same VGPR.
+/// Native 12-byte LDS tuple publication. The aliasing store source/address and
+/// load destination/address are retained from framework-generated
+/// RDNA4/CDNA5 kernels: instrumentation must preserve the shared operand before
+/// relocating either B96 access.
 
 #include "consan_device_test_support.h"
 
@@ -14,22 +15,21 @@ constexpr uint32_t kThreadCount = 2u * kWaveSize;
 
 struct DeviceState {
   uint32_t synchronize;
+  uint32_t tuple_address;
   uint32_t output[5];
   uint32_t control[kThreadCount];
 };
 
 __device__ __forceinline__ void store_b96(uint32_t address) {
-  constexpr uint32_t kValue0 = 0x13579bdfu;
   constexpr uint32_t kValue1 = 0x2468ace0u;
   constexpr uint32_t kValue2 = 0xa5a55a5au;
   asm volatile("v_mov_b32 v4, %0\n\t"
                "v_mov_b32 v5, %1\n\t"
                "v_mov_b32 v6, %2\n\t"
-               "v_mov_b32 v7, %3\n\t"
-               "ds_store_b96 v7, v[4:6]\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
+               "ds_store_b96 v4, v[4:6]\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :
-               : "v"(kValue0), "v"(kValue1), "v"(kValue2), "v"(address)
-               : "v4", "v5", "v6", "v7", "memory");
+               : "v"(address), "v"(kValue1), "v"(kValue2)
+               : "v4", "v5", "v6", "memory");
 }
 
 __device__ __forceinline__ uint3 load_b96_with_aliasing_address(uint32_t address) {
@@ -61,8 +61,10 @@ __global__ __launch_bounds__(kThreadCount) void rdna_b96_boundary_for_consan(Dev
 
   const uint32_t tuple_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&tuple_with_canaries[1]) & 0xffffu);
-  if (tid == 0u)
+  if (tid == 0u) {
+    state->tuple_address = tuple_address;
     store_b96(tuple_address);
+  }
   if (state->synchronize != 0u)
     __syncthreads();
   if (tid == kWaveSize) {
@@ -93,7 +95,8 @@ void run_rdna_b96_boundary(bool synchronize) {
     EXPECT_EQ(result.control[tid], 0xb9600000u | tid) << "thread=" << tid;
   if (!synchronize)
     return;
-  constexpr uint32_t expected[] = {0xfeed0001u, 0x13579bdfu, 0x2468ace0u, 0xa5a55a5au, 0xfeed0002u};
+  const uint32_t expected[] = {0xfeed0001u, result.tuple_address, 0x2468ace0u, 0xa5a55a5au,
+                               0xfeed0002u};
   for (uint32_t i = 0; i < 5u; ++i)
     EXPECT_EQ(result.output[i], expected[i]) << "element=" << i;
 }

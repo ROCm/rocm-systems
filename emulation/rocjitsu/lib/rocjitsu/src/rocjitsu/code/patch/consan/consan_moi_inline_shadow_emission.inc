@@ -617,67 +617,59 @@
     words.push_back(*narrow_capacity);
   }
 
-  const uint16_t compact_address_vgpr =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-          ? *options.scratch_vgpr
-          : static_cast<uint16_t>(*options.scratch_vgpr + 11u);
-  if (compact_local_diagnostic &&
-      !append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
-                                                compact_address_vgpr, arch)) {
+  // SLOT is dead once capacity admission has selected this record. Form its
+  // address once and keep it in a pair that every following field store can
+  // use with a static offset. The former external-shadow path rebuilt
+  // base+slot*stride for every field, replicating substantial address
+  // arithmetic in every access probe even though all stores target one cold
+  // diagnostic record.
+  const uint16_t diagnostic_address_vgpr = compact_local_diagnostic &&
+                                                   arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+                                                   arch != ROCJITSU_CODE_ARCH_CDNA4
+                                               ? static_cast<uint16_t>(*options.scratch_vgpr + 11u)
+                                               : *options.scratch_vgpr;
+  if (!append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
+                                                diagnostic_address_vgpr, arch)) {
     return false;
   }
 
   const auto store_literal = [&](size_t offset, uint32_t value) {
-    if (compact_local_diagnostic) {
-      // This path claims the freshly zeroed slot exactly once. Avoid writing
-      // fields whose ABI value is already zero, and use the one-word inline
-      // encoding for small constants. The full diagnostic record remains
-      // byte-for-byte compatible while hot exact probes stay compact enough
-      // for large code objects.
-      if (capture_first_diagnostic_only && value == 0u)
-        return true;
-      const auto store = instrumentation::build_flat_store_b32(compact_address_vgpr, tmp_vgpr, arch,
-                                                               static_cast<uint32_t>(offset));
-      if (!store)
-        return false;
-      if (value <= 64u) {
-        words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch));
-      } else {
-        const auto mov_value = instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch);
-        if (!mov_value)
-          return false;
-        words.insert(words.end(), mov_value->begin(), mov_value->end());
-      }
-      words.insert(words.end(), store->begin(), store->end());
+    // A first-diagnostic claim owns a freshly zeroed slot, so explicit zero
+    // stores are unnecessary. Other paths may reuse a bounded slot index and
+    // must overwrite every ABI field.
+    if (compact_local_diagnostic && capture_first_diagnostic_only && value == 0u)
       return true;
+    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr,
+                                                             arch, static_cast<uint32_t>(offset));
+    if (!store)
+      return false;
+    if (value <= 64u) {
+      words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch));
+    } else {
+      const auto mov_value = instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch);
+      if (!mov_value)
+        return false;
+      words.insert(words.end(), mov_value->begin(), mov_value->end());
     }
-    return append_dynamic_diagnostic_store_u32_literal(words, diagnostic_base + offset, value,
-                                                       slot_vgpr, *options.scratch_vgpr, arch);
+    words.insert(words.end(), store->begin(), store->end());
+    return true;
   };
   const auto store_vgpr = [&](size_t offset, uint16_t value_vgpr) {
-    if (compact_local_diagnostic) {
-      const auto store = instrumentation::build_flat_store_b32(compact_address_vgpr, value_vgpr,
-                                                               arch, static_cast<uint32_t>(offset));
-      if (!store)
-        return false;
-      words.insert(words.end(), store->begin(), store->end());
-      return true;
-    }
-    return append_dynamic_diagnostic_store_u32_vgpr(words, diagnostic_base + offset, value_vgpr,
-                                                    slot_vgpr, *options.scratch_vgpr, arch);
+    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, value_vgpr,
+                                                             arch, static_cast<uint32_t>(offset));
+    if (!store)
+      return false;
+    words.insert(words.end(), store->begin(), store->end());
+    return true;
   };
   const auto store_scalar = [&](size_t offset, uint16_t scalar_src) {
-    if (compact_local_diagnostic) {
-      words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch));
-      const auto store = instrumentation::build_flat_store_b32(compact_address_vgpr, tmp_vgpr, arch,
-                                                               static_cast<uint32_t>(offset));
-      if (!store)
-        return false;
-      words.insert(words.end(), store->begin(), store->end());
-      return true;
-    }
-    return append_dynamic_diagnostic_store_u32_scalar_src(
-        words, diagnostic_base + offset, scalar_src, slot_vgpr, *options.scratch_vgpr, arch);
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch));
+    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr,
+                                                             arch, static_cast<uint32_t>(offset));
+    if (!store)
+      return false;
+    words.insert(words.end(), store->begin(), store->end());
+    return true;
   };
   bool stored_generation = false;
   if (options.moi_track_atomics && options.moi_dispatch_id_sgpr) {
@@ -793,14 +785,9 @@
     words.insert(words.end(), align_cell->begin(), align_cell->end());
     if (relative_cell_index_vgpr) {
       // CDNA materializes the scale literal in the supplied helper VGPR. The
-      // compact local path has already converted SLOT into a fixed diagnostic
-      // record address, so SLOT is dead while address_lo_vgpr must remain
-      // intact for all following field stores.
-      const uint16_t scale_literal_vgpr =
-          compact_local_diagnostic &&
-                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
-              ? slot_vgpr
-              : address_lo_vgpr;
+      // The record address was formed once above, so SLOT is dead and can
+      // materialize CDNA's scale literal without clobbering that address pair.
+      const uint16_t scale_literal_vgpr = slot_vgpr;
       const auto scale_cell = instrumentation::build_v_mul_lo_u32_literal(
           tmp_vgpr, scale_literal_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr, arch);
       const auto add_cell = instrumentation::build_v_add_u32(
@@ -851,15 +838,9 @@
       }
       words.insert(words.end(), end->begin(), end->end());
       // CDNA4 materializes this literal in the supplied helper VGPR. The
-      // compact local path keeps its diagnostic-record address in
-      // address_lo_vgpr, while the already-consumed atomic slot is dead here.
-      // The external path rebuilds its address for each field and still needs
-      // SLOT as the dynamic diagnostic index.
-      const uint16_t negative_start_literal_vgpr =
-          compact_local_diagnostic &&
-                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
-              ? slot_vgpr
-              : address_lo_vgpr;
+      // already-consumed slot index is dead while the precomputed diagnostic
+      // address pair must remain intact for all following field stores.
+      const uint16_t negative_start_literal_vgpr = slot_vgpr;
       const auto negative_start = instrumentation::build_v_mul_lo_u32_literal(
           current_field_vgpr, negative_start_literal_vgpr, std::numeric_limits<uint32_t>::max(),
           current_field_vgpr, arch);
@@ -881,8 +862,7 @@
           return false;
         }
         const auto negative_relative_index = instrumentation::build_v_mul_lo_u32_literal(
-            tmp_vgpr, address_lo_vgpr, std::numeric_limits<uint32_t>::max(), current_field_vgpr,
-            arch);
+            tmp_vgpr, slot_vgpr, std::numeric_limits<uint32_t>::max(), current_field_vgpr, arch);
         const auto original_start = instrumentation::build_v_add_u32(
             current_value_vgpr, vector_source_vgpr(tmp_vgpr), current_value_vgpr, arch);
         if (!negative_relative_index || !original_start)
@@ -1805,14 +1785,9 @@
       instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch);
   const auto narrow_mask =
       instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  const auto low_mask_equal =
-      instrumentation::build_s_cmp_eq_u32(kRdna4ExecLo, group_exec_sgpr, arch);
-  const auto high_mask_equal = instrumentation::build_s_cmp_eq_u32(
-      static_cast<uint16_t>(kRdna4ExecLo + 1u), static_cast<uint16_t>(group_exec_sgpr + 1u), arch);
   if (!save_incoming_exec || !initialize_pending || !select_pending || !read_address ||
       !read_address_high || !read_value || !address_equal || !narrow_address || !save_group ||
-      !value_equal || !narrow_value || !read_mask || !mask_equal || !narrow_mask ||
-      !low_mask_equal || !high_mask_equal)
+      !value_equal || !narrow_value || !read_mask || !mask_equal || !narrow_mask)
     return false;
 
   words.push_back(*save_incoming_exec);
@@ -1847,7 +1822,6 @@
   words.push_back(*read_value);
   words.push_back(*address_equal);
   words.push_back(*narrow_address);
-  words.push_back(*save_group);
   if (options.moi_partition_mask_debug) {
     // Capture the current group's exchange address before diagnostics can
     // reuse working VGPRs. Each group overwrites this pair, matching the
@@ -1866,13 +1840,7 @@
   }
   words.push_back(*value_equal);
   words.push_back(*narrow_value);
-  words.push_back(*low_mask_equal);
-  const size_t low_value_fallback_branch = words.size();
-  words.push_back(0);
-  words.push_back(*high_mask_equal);
-  const size_t high_value_fallback_branch = words.size();
-  words.push_back(0);
-  failure.stage = "common provenance";
+  failure.stage = "composite-key provenance";
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
           relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
@@ -1884,20 +1852,21 @@
   words.push_back(*read_mask);
   words.push_back(*mask_equal);
   words.push_back(*narrow_mask);
-  words.push_back(*low_mask_equal);
-  const size_t low_mask_fallback_branch = words.size();
-  words.push_back(0);
-  words.push_back(*high_mask_equal);
-  const size_t high_mask_fallback_branch = words.size();
-  words.push_back(0);
-  const auto common_mask_nonzero =
+  // Partition pending lanes by their complete publication key. Address and
+  // packed access were selected above; exact-byte provenance contributes the
+  // final mask component here. Saving that subgroup directly avoids emitting
+  // a second copy of the complete versioned transaction for a nonuniform
+  // fallback. Distinct metadata simply remains in pending EXEC and is visited
+  // by the next bounded loop iteration.
+  words.push_back(*save_group);
+  const auto mask_nonzero =
       instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch);
-  const auto narrow_common_nonzero =
+  const auto narrow_nonzero =
       instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  if (!common_mask_nonzero || !narrow_common_nonzero)
+  if (!mask_nonzero || !narrow_nonzero)
     return false;
-  words.push_back(*common_mask_nonzero);
-  words.push_back(*narrow_common_nonzero);
+  words.push_back(*mask_nonzero);
+  words.push_back(*narrow_nonzero);
 
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       lane_rank_vgpr, group_exec_sgpr, scalar_positive_inline_u32(0), arch);
@@ -1908,16 +1877,12 @@
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
   const auto narrow_first =
       instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  const auto restore_group_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, group_exec_sgpr, arch);
   const auto save_publishers =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, kRdna4ExecLo, arch);
   const auto use_group_diagnostic_mask =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, group_exec_sgpr, arch);
-  const auto use_committed_diagnostic_mask =
-      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kRdna4ExecLo, arch);
-  if (!mbcnt_lo || !mbcnt_hi || !first_lane || !narrow_first || !restore_group_exec ||
-      !save_publishers || !use_group_diagnostic_mask || !use_committed_diagnostic_mask)
+  if (!mbcnt_lo || !mbcnt_hi || !first_lane || !narrow_first || !save_publishers ||
+      !use_group_diagnostic_mask)
     return false;
   words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
   words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
@@ -1927,63 +1892,16 @@
   if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
     return false;
   }
-  failure.stage = "common transaction";
+  failure.stage = "composite-key transaction";
   if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
                                                  current_low_vgpr, old_value_vgpr,
                                                  publisher_exec_sgpr, committed_exec_sgpr,
                                                  /*retry_contention=*/true, errors)) {
     return false;
   }
-  // A uniform representative stands for the complete metadata-identical
-  // address group. Retain that exact group as the diagnostic lane mask.
+  // The representative stands for the complete metadata-identical subgroup.
+  // Retain that exact subgroup as the diagnostic lane mask.
   words.push_back(*use_group_diagnostic_mask);
-  const size_t common_branch = words.size();
-  words.push_back(0);
-
-  const size_t fallback = words.size();
-  words.push_back(*restore_group_exec);
-  failure.stage = "fallback provenance";
-  if (!append_exact_byte_cell_provenance_base(
-          words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
-          relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
-          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow fallback could not encode exact byte-cell provenance");
-    return false;
-  }
-  words.push_back(build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(lane_rank_vgpr), arch));
-  // Metadata-distinct lanes sharing one address cannot all retain the same
-  // odd-version reservation concurrently. Publish one representative and
-  // shrink group_exec to that lane; the outer pending-mask loop then revisits
-  // the remaining lanes and serializes each complete metadata value.
-  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
-  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
-  words.push_back(*first_lane);
-  words.push_back(*narrow_first);
-  words.push_back(*save_group);
-  const auto fallback_mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-      scalar_positive_inline_u32(0u), current_high_vgpr, arch);
-  const auto narrow_fallback_nonzero =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  if (!fallback_mask_nonzero || !narrow_fallback_nonzero)
-    return false;
-  words.push_back(*fallback_mask_nonzero);
-  words.push_back(*narrow_fallback_nonzero);
-  words.push_back(*save_publishers);
-  if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
-    return false;
-  }
-  failure.stage = "fallback transaction";
-  if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
-                                                 current_low_vgpr, old_value_vgpr,
-                                                 publisher_exec_sgpr, committed_exec_sgpr,
-                                                 /*retry_contention=*/true, errors)) {
-    return false;
-  }
-  // Nonuniform metadata cannot be attributed to the whole group. EXEC now
-  // contains only committed, same-dispatch publishers admitted to diagnose.
-  words.push_back(*use_committed_diagnostic_mask);
-  const size_t diagnostic = words.size();
 
   // Counter updates and version-address CAS operations use the working address
   // pair. Restore it from the loop invariants before diagnostics and the next
@@ -2084,28 +2002,12 @@
       return std::nullopt;
     return static_cast<int16_t>(delta);
   };
-  const auto low_value_delta = branch_offset(low_value_fallback_branch, fallback);
-  const auto high_value_delta = branch_offset(high_value_fallback_branch, fallback);
-  const auto low_mask_delta = branch_offset(low_mask_fallback_branch, fallback);
-  const auto high_mask_delta = branch_offset(high_mask_fallback_branch, fallback);
-  const auto diagnostic_delta = branch_offset(common_branch, diagnostic);
   const auto loop_delta = branch_offset(loop_branch, loop);
-  if (!low_value_delta || !high_value_delta || !low_mask_delta || !high_mask_delta ||
-      !diagnostic_delta || !loop_delta)
+  if (!loop_delta)
     return false;
-  const auto low_value_branch = instrumentation::build_s_cbranch_scc0(*low_value_delta, arch);
-  const auto high_value_branch = instrumentation::build_s_cbranch_scc0(*high_value_delta, arch);
-  const auto low_mask_branch = instrumentation::build_s_cbranch_scc0(*low_mask_delta, arch);
-  const auto high_mask_branch = instrumentation::build_s_cbranch_scc0(*high_mask_delta, arch);
   const auto continue_loop = instrumentation::build_s_cbranch_execnz(*loop_delta, arch);
-  if (!low_value_branch || !high_value_branch || !low_mask_branch || !high_mask_branch ||
-      !continue_loop)
+  if (!continue_loop)
     return false;
-  words[low_value_fallback_branch] = *low_value_branch;
-  words[high_value_fallback_branch] = *high_value_branch;
-  words[low_mask_fallback_branch] = *low_mask_branch;
-  words[high_mask_fallback_branch] = *high_mask_branch;
-  words[common_branch] = build_s_branch(*diagnostic_delta, arch);
   words[loop_branch] = *continue_loop;
   failure.succeeded = true;
   return true;

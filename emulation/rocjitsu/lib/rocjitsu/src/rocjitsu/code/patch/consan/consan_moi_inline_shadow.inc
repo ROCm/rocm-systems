@@ -1095,12 +1095,26 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!placed_through_indirect_island) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
+      const bool needs_chainable_entry_patch =
+          options.moi_init_owner_epoch &&
+          std::ranges::any_of(
+              resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+                const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+                if (kernel == nullptr || kernel->entry_text_offset != candidate.text_offset) {
+                  return false;
+                }
+                return kernel->uses_dynamic_stack.value_or(false) ||
+                       options.automatic_moi_persistent_vgprs ||
+                       options.automatic_moi_persistent_sgprs;
+              });
       DbiPatchPlacementRequest placement_request;
       placement_request.anchor_offset = candidate.text_offset;
       placement_request.original_size = candidate.size;
       placement_request.body_size = patch_bytes;
       placement_request.inline_capacity =
-          spill || scalar_spill || private_layout || workgroup_shadow ? 0u : available_bytes;
+          spill || scalar_spill || private_layout || workgroup_shadow || needs_chainable_entry_patch
+              ? 0u
+              : available_bytes;
       std::string placement_error;
       placement = placement_planner.plan(placement_request, &placement_error);
       if (!placement) {

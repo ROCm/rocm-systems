@@ -1336,7 +1336,6 @@ RJ_DYNAMIC_RECORD_WRAPPERS(barrier, kDynamicBarrierRecordLayout)
 RJ_DYNAMIC_RECORD_WRAPPERS(access, kDynamicAccessRecordLayout)
 RJ_DYNAMIC_RECORD_WRAPPERS(atomic, kDynamicAtomicRecordLayout)
 RJ_DYNAMIC_RECORD_WRAPPERS(fence, kDynamicFenceRecordLayout)
-RJ_DYNAMIC_RECORD_WRAPPERS(diagnostic, kDynamicDiagnosticRecordLayout)
 #undef RJ_DYNAMIC_RECORD_WRAPPERS
 
 [[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,

@@ -819,7 +819,7 @@ that workaround consistently.
 |---|---|---|---|---|---|---|
 | P0 | PyTorch/Triton tensor-descriptor add, one-CTA and two-CTA variants | 🟩 Exact `a + b`; 29/29 accesses; current paired 1.19x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 1.33x | 🟩 Exact `a + b`; 29/29 accesses; 20/20 applicable barriers; current paired 2.16x | 🟩 Exact `a + b`; 29/29 accesses; 12/12 barriers; current paired 4.16x | All profiles accepted; proves tensor-descriptor and clustered dispatch, not cluster-memory opcodes. |
 | P0 | `torch.mode`, large rows | 🟩 Exact values/indices; 28,195/28,195 accesses; current paired 120.67x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 232.20x | 🟩 Exact values/indices; 28,939/28,939 accesses and 8,892/8,892 barrier members; current paired 203.53x | 🟩 Exact values/indices; 28,939/28,939 accesses and 4,446/4,446 barriers; current paired 341.90x | All four profile bundles accepted. |
-| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟨 Current exact FP64/BF16 oracles pass in 75.02 seconds with dynamic completeness and zero diagnostics; static coverage remains resource-incomplete at 153,748/161,244 accesses and 13,486/22,846 barriers | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟥 Adaptive diagnostic fitting repairs the 791 MB report request and produces a complete 134,217,696-byte plan, but current tip then rejects the first large object in 30.70 seconds because Inline Shadow would grow it to 632,217,600 bytes, beyond the standard 402,653,184-byte growth limit (`transform-error`, status 4112) | The RocJitsu `v_bcnt_u32_b32` accumulator fix restores the Record/Replay baseline and instrumented numeric oracles. Record/Replay and Sampled remain resource-incomplete; Inline Shadow's report plan now fits and exposes excessive per-site code growth. Current Inline Shadow artifact `rebase-20260821-gfx1250-pytorch-topk-inline-report-fit`. |
+| P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟨 Current exact FP64/BF16 oracles pass in 75.02 seconds with dynamic completeness and zero diagnostics; static coverage remains resource-incomplete at 153,748/161,244 accesses and 13,486/22,846 barriers | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟨 Current exact FP64/BF16 oracles pass in 89.29 seconds with dynamic completeness and zero diagnostics; static coverage remains resource-incomplete at 113,760/161,244 accesses and 9,148/11,423 barriers. The smaller BF16 object is complete at 48,224/48,224 accesses and 6,032/6,032 barriers | The InlineShadow architectural-SGPR exclusion fixes the all-zero BF16 result. Artifact `rebase-20260821-gfx1250-pytorch-topk-inline-architectural-sgprs` supersedes the red frontiers retained in `rebase-20260821-gfx1250-pytorch-topk-inline-branch-only-fix` and `rebase-20260821-gfx1250-pytorch-topk-inline-composite-Y7nTVO`. Record/Replay, Sampled, and InlineShadow remain resource-incomplete. |
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Current RocJitsu clean refresh passes exact counts in 3.41 seconds with 175/175 accesses and 168/168 split-barrier members; prior paired 72.00x and causal fault bundle retained | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
@@ -854,6 +854,29 @@ barriers.  The first object is incomplete at 105,524/113,020 accesses and
 aggregate row is therefore 153,748/161,244 accesses and 13,486/22,846
 barriers.  The loaded hook SHA-256 is
 `7b64edf75d40fb14de7178be673bfc0b03da37ce9df85eabdb8984e0bf561b7b`.
+
+### 2026-08-21 `torch.topk` InlineShadow architectural-SGPR fix
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-inline-architectural-sgprs`
+runs the exact FP64 and BF16 value/index oracles through the explicit RocJitsu
+`gfx1250.json` launcher.  Both pass under InlineShadow in 89.29 seconds with
+dynamic completeness, zero diagnostics, and loaded hook SHA-256
+`669981f6e21299650871f0e8e1e18433f2c2a46733f07ac82c04e82b41f40e2f`.
+
+The corrupting access was an address/data-aliasing `ds_store_b96`.  Its
+relocated call path selected first `s[102:103]`, then `s[104:105]`, for the
+generated `s_call_i64` return pair.  Both pairs are encodable ordinary SGPRs,
+but gfx1250 aliases them to the architectural `FLAT_SCRATCH` and `XNACK_MASK`
+registers.  The common gfx1250 scalar-selection and validation paths now
+exclude the complete `s[102:105]` range.  Host regressions cover both explicit
+and automatic selection, while the paired correct/incorrect B96 device
+contract preserves the address/data alias found in PyTorch.
+
+Static coverage remains resource-incomplete overall at 113,760/161,244
+accesses and 9,148/11,423 barriers.  The smaller BF16 object is fully covered
+at 48,224/48,224 accesses and 6,032/6,032 barriers; the larger object admits
+65,536/113,020 accesses and 3,116/5,391 barriers.
 
 ## Environment baseline
 

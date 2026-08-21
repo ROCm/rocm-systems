@@ -4994,7 +4994,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   }));
 }
 
-TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
+TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
   const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
     std::vector<uint32_t> words = {
         0xD8340000u,
@@ -5007,12 +5007,13 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
     return words;
   };
   // The first owner leaves only s0:s7 dead at its access. The second leaves
-  // only s98:s105 dead. Their union has no code-object-wide five-SGPR
-  // window, but each independent owner has a safe transient window.
+  // only s97:s105 dead. Their union has no code-object-wide five-SGPR
+  // window, but each independent owner has a safe transient window below the
+  // architectural aliases at s102:s105.
   const std::vector<uint32_t> first_words =
       make_owner(/*first_live=*/8u, /*last_live=*/105u, /*dead_destination=*/0u);
   const std::vector<uint32_t> second_words =
-      make_owner(/*first_live=*/0u, /*last_live=*/97u, /*dead_destination=*/97u);
+      make_owner(/*first_live=*/0u, /*last_live=*/96u, /*dead_destination=*/96u);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
       first_words, second_words, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
@@ -5033,11 +5034,24 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
-  EXPECT_FALSE(assignment.spill_backed);
-  EXPECT_FALSE(assignment.dispatch_id_sgpr);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 2u);
+  for (const ConSanMoiTransientSgprAssignment &assignment :
+       result.resolved_moi_transient_sgpr_assignments) {
+    SCOPED_TRACE(assignment.descriptor_file_offset);
+    EXPECT_LE(assignment.exec_save_sgpr + 5u, 102u);
+  }
+  EXPECT_EQ(std::ranges::count_if(result.resolved_moi_transient_sgpr_assignments,
+                                  [](const auto &assignment) {
+                                    return assignment.spill_backed &&
+                                           assignment.dispatch_id_sgpr.has_value();
+                                  }),
+            1u);
+  EXPECT_EQ(std::ranges::count_if(result.resolved_moi_transient_sgpr_assignments,
+                                  [](const auto &assignment) {
+                                    return !assignment.spill_backed &&
+                                           !assignment.dispatch_id_sgpr.has_value();
+                                  }),
+            1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u);
@@ -5072,10 +5086,10 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  // s101 is the highest guest reference, so the unguarded aligned allocator
-  // chooses s102:s103. The architectural-alias guard must skip directly to
-  // the only remaining ordinary pair.
-  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 104u);
+  // The full-pressure owner references the architectural s105 alias. The
+  // allocator must remain below the complete s102:s105 special range and use
+  // the highest safe ordinary pair.
+  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 100u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
                             [](const ConSanPatchInfo &patch) {
@@ -7041,7 +7055,7 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
             access_words.end());
 }
 
-TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsFlatScratchForPersistentEpoch) {
+TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsArchitecturalAliasesForPersistentEpoch) {
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
   std::vector<uint32_t> text_words = {
       0xD8340000u,
@@ -7068,7 +7082,7 @@ TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsFlatScratchForPersistentEpoch) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 104u);
+  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 100u);
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
   EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
@@ -7138,7 +7152,7 @@ TEST(ConSanMoi, Gfx1250RejectsExplicitPersistentStateInFlatScratch) {
   expect_special_alias_rejected(workgroup_options, "architectural special SGPR");
 }
 
-TEST(ConSanMoi, Gfx1250AcceptsConfiguredPersistentStateAboveFlatScratch) {
+TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateInXnackMask) {
   std::vector<uint32_t> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
@@ -7147,8 +7161,8 @@ TEST(ConSanMoi, Gfx1250AcceptsConfiguredPersistentStateAboveFlatScratch) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  // gfx1250 has no persistent XNACK_MASK selector at s104:s105, so this pair
-  // remains ordinary scalar state above the aliased FLAT_SCRATCH selectors.
+  // LLVM reserves s104:s105 as the gfx1250 XNACK_MASK pair even though the
+  // target does not expose a persistent XNACK selector to ordinary code.
   options.moi_persistent_owner_sgpr = 104u;
   options.moi_persistent_epoch_sgpr = 105u;
   options.moi_init_owner_epoch = true;
@@ -7158,10 +7172,9 @@ TEST(ConSanMoi, Gfx1250AcceptsConfiguredPersistentStateAboveFlatScratch) {
   const ConSanResult result = try_patch_consan(
       make_gfx1250_code_object(text_words, "gfx1250_explicit_state_above_flat_scratch"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("architectural special SGPR") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
@@ -7176,8 +7189,8 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   // s106:s107 are VCC and begin immediately after the ordinary s0:s105 file.
-  // This locks the limit boundary; the adjacent tests cover the reserved
-  // FLAT_SCRATCH subrange and the valid s104:s105 range below it.
+  // This locks the limit boundary; the adjacent tests cover both architectural
+  // alias pairs immediately below it.
   options.moi_persistent_owner_sgpr = 106u;
   options.moi_persistent_epoch_sgpr = 107u;
   options.moi_init_owner_epoch = true;

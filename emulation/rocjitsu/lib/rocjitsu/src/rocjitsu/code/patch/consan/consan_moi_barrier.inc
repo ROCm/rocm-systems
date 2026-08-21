@@ -1234,6 +1234,24 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + site.size;
+    // A branch-only scalar-spill owner has deliberately reserved no SGPRs for
+    // indirect control flow.  If even a branch at the start of the appended
+    // body could not return to the guest continuation, a real body (whose
+    // return is later still) cannot be encoded.  Classify that site as a
+    // placement omission before body construction: the builder reports
+    // malformed requested encodings as errors, whereas lack of a route for
+    // one otherwise-supported site must not abort the whole code object.
+    if (cave_text_offset >= return_text_offset &&
+        !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) &&
+        !moi_indirect_jump_sgprs(candidate_options)) {
+      result.warnings.emplace_back(
+          candidate_options.moi_inline_branch_only_scalar_spill
+              ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
+                    candidate.container_name
+              : "ConSan MOI inline-shadow barrier has no encodable far return in " +
+                    candidate.container_name);
+      continue;
+    }
     std::optional<std::vector<uint32_t>> cave_words = build_engine_barrier_body(
         planned, candidate_options, original_barrier_word, cave_text_offset, return_text_offset,
         std::nullopt, gfx1250_vgpr_msb_mode);
