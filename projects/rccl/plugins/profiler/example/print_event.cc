@@ -387,6 +387,19 @@ static void printCeBatchEvent(FILE* fh, struct ceBatch* event) {
           ceBatchId++, getpid(), 1, event->base.stopTs);
 }
 
+// Emits the GROUP span alone. The task events held by a group are also reachable
+// through its GroupApi -> CollApi chain.
+void printGroupEventSpan(FILE* fh, void* handle) {
+  if (handle == NULL || fh == NULL) return;
+  if (*(uint64_t *)handle != ncclProfileGroup) return;
+  struct group* g = (struct group *)handle;
+  // Pool slots are recycled without clearing stopTs, so a group still in flight
+  // can carry a stale timestamp from the slot's previous occupant.
+  if (g->startTs == 0 || g->stopTs < g->startTs) return;
+  printGroupEventHeader(fh, g);
+  printGroupEventTrailer(fh, g);
+}
+
 void printEvent(FILE* fh, void* handle) {
   if (handle == NULL || fh == NULL) return;
   uint64_t type = *(uint64_t *)handle;
