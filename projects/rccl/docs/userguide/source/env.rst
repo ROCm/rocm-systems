@@ -470,7 +470,7 @@ NCCL_TUNER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL tuner plugins. This setting will cause NCCL to look for the tuner plugin library using the following strategy:
  - If NCCL_TUNER_PLUGIN is set, attempt loading the library with name specified by NCCL_TUNER_PLUGIN;
- - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading librccl-net-<NCCL_TUNER_PLUGIN>.so;
+ - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading librccl-tuner-<NCCL_TUNER_PLUGIN>.so;
  - If NCCL_TUNER_PLUGIN is not set, attempt loading librccl-tuner.so;
  - If no plugin was found look for the tuner symbols in the net plugin (refer to ``NCCL_NET_PLUGIN``);
  - If no plugin was found (neither through NCCL_TUNER_PLUGIN nor NCCL_NET_PLUGIN), use internal tuner plugin.
