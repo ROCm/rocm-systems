@@ -80,6 +80,9 @@ typedef enum {
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
   RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
+  RCCL_A2A_PIVOT,       // AlltoAll pivot algorithm (large, aligned messages)
+  RCCL_A2A_GDA,         // AlltoAll via GDA/RocSHMEM
+  RCCL_A2A_GIN_SDMA,    // AlltoAll via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -176,6 +179,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision);
+// Single source of truth for AlltoAll selection: Pivot -> GDA -> DDA (LL/LL128/VMM/IPC) ->
+// CE registered -> HierCE -> CE scratch -> Ring fallback.
+ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
@@ -227,6 +235,8 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+// Pivot AlltoAll enabled (defined in collectives.cc)
+RCCL_PARAM_DECLARE(AlltoAllPivotEnable);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 
 // DDA threshold

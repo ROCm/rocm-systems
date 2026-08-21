@@ -385,97 +385,59 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 
   NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
 
-  size_t rankOffset = count * ncclTypeSize(datatype);
-  size_t rankAlign = rankOffset & ((~rankOffset) + 1);
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype,
+                               /*query=*/false, /*graphCapturingHint=*/false, &decision));
 
-  struct ncclInfo info;
-  if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
-      rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
-    info = {ncclFuncAlltoAllPivot,
-            "AlltoAllPivot",
-            sendbuff,
-            recvbuff,
-            count,
-            datatype,
-            ncclSum,
-            0,
-            comm,
-            stream, /* Args */
-            ALLTOALL_PIVOT_CHUNKSTEPS,
-            ALLTOALL_PIVOT_SLICESTEPS,
-            nullptr};
-  } else {
-#ifdef ENABLE_ROCSHMEM
-    size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
-    if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
-      struct ncclInfo info = {ncclFuncAlltoAllGda,
-                              "AlltoAllGda",
-                              sendbuff,
-                              recvbuff,
-                              count,
-                              datatype,
-                              ncclSum,
-                              0,
-                              comm,
-                              stream,
-                              ALLTOALL_PIVOT_CHUNKSTEPS,
-                              ALLTOALL_PIVOT_SLICESTEPS,
-                              nullptr};
-
+  switch (decision.algo) {
+    case RCCL_A2A_PIVOT: {
+      struct ncclInfo info = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
+                              sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+                              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
       return ncclEnqueueCheck(&info);
     }
-#endif // ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM
+    case RCCL_A2A_GDA: {
+      struct ncclInfo info = {ncclFuncAlltoAllGda, "AlltoAllGda",
+                              sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+                              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
+      return ncclEnqueueCheck(&info);
+    }
+#endif
 #if defined(ENABLE_ROCSHMEM_GIN)
-    // GIN LSA/SDMA is checked before DDA on purpose, so an eligible call takes this path even below
-    // the DDA threshold. It measured at parity or better on small sizes.
-    if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    case RCCL_A2A_GIN_SDMA:
       INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
            comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
       NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
       return ncclSuccess;
-    }
 #endif
-    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), a2aDdaMax)) {
-      if (IsArchMatch(comm->archName, "gfx1250")) {
-        const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
-        // AlltoAll LL/LL128 caps live in the arch table (env still overrides).
-        const size_t llThresh = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
-        const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
-        // Small-chunk fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= llThresh &&
-            ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
-          INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
-          NCCLCHECK(ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream));
-          return ncclSuccess;
-        }
-        // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= ll128Thresh &&
-            ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
-          INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
-          NCCLCHECK(ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream));
-          return ncclSuccess;
-        }
-        if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
-          INFO(NCCL_COLL, "AllToAll: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-          NCCLCHECK(ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream));
-          return ncclSuccess;
-        }
-      } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
-        NCCLCHECK(ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream));
-        return ncclSuccess;
-      }
-    }
-
-    info = {
-      ncclFuncAlltoAll,    "AlltoAll",         sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
-      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
-    };
+    case RCCL_DDA_FABRIC_LL:
+      INFO(NCCL_COLL, "AllToAll: DDA fabric LL: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+           comm->nRanks, comm->nNodes, count, (int)datatype, comm->nRanks * count * ncclTypeSize(datatype));
+      return ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream);
+    case RCCL_DDA_FABRIC_LL128:
+      INFO(NCCL_COLL, "AllToAll: DDA fabric LL128: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+           comm->nRanks, comm->nNodes, count, (int)datatype, comm->nRanks * count * ncclTypeSize(datatype));
+      return ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream);
+    case RCCL_DDA_FABRIC_VMM:
+      INFO(NCCL_COLL, "AllToAll: DDA fabric VMM: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+           comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+      return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
+    case RCCL_DDA_IPC:
+      return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
+    case RCCL_CE_REGISTERED:
+      // CE dispatch (registered, hierarchical, or scratch) handled in taskAppend() via ncclEnqueueCheck.
+      // Fall through to ring enqueue; enqueue.cc will route to CE.
+      break;
+    default:
+      break;
   }
+
+  // Ring fallback (and CE: enqueue.cc gates to CE when eligible).
+  struct ncclInfo info = {
+    ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+    ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
+  };
   return ncclEnqueueCheck(&info);
 }
 

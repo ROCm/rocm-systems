@@ -35,6 +35,8 @@ THE SOFTWARE.
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -547,6 +549,16 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     return ncclSuccess;
   }
 
+  if (coll == ncclFuncAlltoAll) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true,
+                                 /*graphCapturingHint=*/graphCapturing != 0, &decision));
+    *algo = decision.algo;
+    *protocol = decision.protocol;
+    *maxChannels = decision.nMaxChannels;
+    return ncclSuccess;
+  }
+
   // Other collectives: fall back to the size/algo query until they are migrated
   // onto rcclSelectXxx().
   return rcclGetAlgoInfo(comm, coll, count, dataType, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, algo,
@@ -654,6 +666,15 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       break;
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_PIVOT:
+      *algoName = "A2A-Pivot";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_GDA:
+      *algoName = "A2A-GDA";
+      break;
+    case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
+      *algoName = "A2A-GIN";
       break;
     default:
       WARN("Invalid algorithm value: %d", algo);
@@ -1389,6 +1410,137 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     decision->nMaxChannels = packed;
     decision->algo = task.algorithm;
 #endif
+  }
+  return ncclSuccess;
+}
+
+// Single source of truth for AlltoAll implementation selection. Runs the full
+// priority chain (Pivot -> GDA -> DDA LL/LL128/VMM/IPC -> CE registered ->
+// HierCE -> CE scratch -> Ring fallback) and returns the decision.
+//   query=false : live dispatch path (ncclAlltoAll_impl).
+//   query=true  : side-effect-free reporting for rcclGetCollImplInfo.
+//   graphCapturingHint (query=true only): suppresses CE paths under graph capture.
+ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                struct rcclCollDecision* decision) {
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  const size_t typeSize = ncclTypeSize(datatype);
+  const size_t rankOffset = count * typeSize;           // bytes per peer
+  const size_t totalBytes = comm->nRanks * rankOffset;  // total message bytes
+
+  // (1) Pivot: large, cache-line-aligned messages on pivot-enabled comms.
+  const size_t rankAlign = rankOffset & ((~rankOffset) + 1);
+  if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
+      rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
+    decision->algo = RCCL_A2A_PIVOT;
+    return ncclSuccess;
+  }
+
+  // (2) GDA (RocSHMEM) path.
+#ifdef ENABLE_ROCSHMEM
+  {
+    size_t msgSize = totalBytes;
+    if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
+      decision->algo = RCCL_A2A_GDA;
+      return ncclSuccess;
+    }
+  }
+#endif
+
+  // GIN LSA/SDMA is checked before DDA so an eligible call takes this path even
+  // below the DDA threshold (parity or better on small sizes).
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    decision->algo = RCCL_A2A_GIN_SDMA;
+    return ncclSuccess;
+  }
+#endif
+
+  // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
+  const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
+  if (rcclDdaEnabled(comm, totalBytes, a2aDdaMax)) {
+    if (IsArchMatch(comm->archName, "gfx1250")) {
+      const size_t llThresh   = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
+      const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
+      if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
+          ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        return ncclSuccess;
+      }
+      if (rcclParamDdaLL128() && ll128Thresh > 0 && totalBytes <= ll128Thresh &&
+          ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_LL128;
+        decision->protocol = NCCL_PROTO_LL128;
+        return ncclSuccess;
+      }
+      if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_VMM;
+        return ncclSuccess;
+      }
+    } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      decision->algo = RCCL_DDA_IPC;
+      return ncclSuccess;
+    }
+  }
+
+  // (4) CE registered: single-node, symmetric-registered buffers, CTA_POLICY_ZERO.
+  // CE dispatch lives in taskAppend(); live path returns RCCL_CE_REGISTERED and
+  // enqueues normally (mirroring rcclSelectAllGather).
+  const bool ceCapturing = query ? graphCapturingHint : false;  // live: enqueue.cc gates this
+  if (!ceCapturing) {
+    // For the query path we need winRegType; approximate from buffer pointer equality
+    // as a conservative check (registered if buffers differ, same heuristic as allgather query).
+    // Live path: enqueue.cc recomputes ncclCeAvailable() with the real winRegType.
+    ncclSymRegType_t queryRegType = (sendbuff != recvbuff) ? ncclSymSendNonregRecvReg : ncclSymSendRegRecvReg;
+    ncclSymRegType_t regType = query ? queryRegType : ncclSymSendNonregRecvReg;
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, regType)) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+
+    // (5) Hierarchical CE: multi-node, non-LSA-spanning.
+    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, regType)) {
+      decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
+      if (query) {
+        int a, p, ch;
+        NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+      return ncclSuccess;
+    }
+
+    // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
+    if (rcclParamForceCe() && comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, ncclSymSendNonregRecvNonreg)) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+  }
+
+  // (7) Ring fallback kernel. Query fills algo/proto/channels via getAlgoInfo.
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  if (query) {
+    struct ncclTaskColl task;
+    memset(&task, 0, sizeof(task));
+    task.func = ncclFuncAlltoAll;
+    task.sendbuff = sendbuff;
+    task.recvbuff = recvbuff;
+    task.count = count;
+    task.datatype = datatype;
+    NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, nullptr));
+    decision->protocol = task.protocol;
+    int packed = rcclKernelPackedChannels(comm, ncclFuncAlltoAll, count, datatype, task.protocol,
+                                          task.nMaxChannels);
+    decision->nMaxChannels = packed;
+    decision->algo = task.algorithm;
   }
   return ncclSuccess;
 }
