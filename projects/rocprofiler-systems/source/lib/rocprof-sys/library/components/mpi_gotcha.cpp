@@ -33,6 +33,13 @@ namespace component
 namespace
 {
 using mpip_bundle_t = tim::component_tuple<category_region<category::mpi>, comm_data>;
+using mpip_gotcha_t = mpip_handle<mpip_bundle_t, project::rocprofsys>::mpip_gotcha_t;
+
+// set_ready() only writes wrappers that are already installed, and the MPI wrappers are
+// installed from the MPI_Init audit, which runs after the initial pause. Remember the
+// requested state so activation can adopt it.
+std::mutex s_mpip_mutex;
+bool       s_mpip_paused = false;  // guarded by s_mpip_mutex
 
 struct comm_rank_data
 {
@@ -195,20 +202,20 @@ mpi_gotcha::shutdown()
     update();
 }
 
-std::mutex mpi_gotcha::s_mutex = {};
-
 void
-mpi_gotcha::pause()
+pause_mpip()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    mpi_gotcha_t::set_ready(false);
+    const std::scoped_lock<std::mutex> _lk{ s_mpip_mutex };
+    s_mpip_paused = true;
+    mpip_gotcha_t::set_ready(false);
 }
 
 void
-mpi_gotcha::resume()
+resume_mpip()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    mpi_gotcha_t::set_ready(true);
+    const std::scoped_lock<std::mutex> _lk{ s_mpip_mutex };
+    s_mpip_paused = false;
+    mpip_gotcha_t::set_ready(true);
 }
 
 bool
@@ -353,6 +360,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             configure_mpip<mpip_bundle_t, project::rocprofsys>(permit_bindings,
                                                                reject_bindings);
             mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
+
+            const std::scoped_lock<std::mutex> _lk{ s_mpip_mutex };
+            mpip_gotcha_t::set_ready(!s_mpip_paused);
         }
 
         const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
