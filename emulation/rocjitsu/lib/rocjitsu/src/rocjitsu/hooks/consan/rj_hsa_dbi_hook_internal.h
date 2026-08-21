@@ -719,6 +719,8 @@ struct AutoMoiReportSummary {
   uint64_t allocation_failure_count = 0;
   uint64_t capacity_failure_count = 0;
   uint64_t cleanup_failure_count = 0;
+  uint64_t fine_grained_snapshot_bytes = 0;
+  uint64_t coarse_grained_snapshot_bytes = 0;
   uint64_t visible_access_record_count = 0;
   uint64_t visible_barrier_record_count = 0;
   uint64_t visible_atomic_record_count = 0;

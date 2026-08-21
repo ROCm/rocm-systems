@@ -494,6 +494,8 @@ private:
 
   static void accumulate_summary(Summary &total, const Summary &entry) {
     total.buffer_count += entry.buffer_count;
+    total.fine_grained_snapshot_bytes += entry.fine_grained_snapshot_bytes;
+    total.coarse_grained_snapshot_bytes += entry.coarse_grained_snapshot_bytes;
     total.visible_access_record_count += entry.visible_access_record_count;
     total.visible_barrier_record_count += entry.visible_barrier_record_count;
     total.visible_atomic_record_count += entry.visible_atomic_record_count;
@@ -646,9 +648,16 @@ private:
       ++summary.inline_malformed_count;
     if (entry.sampled_patch_mapping_malformed)
       ++summary.sampled_patch_mapping_malformed_count;
-    std::vector<uint8_t> snapshot;
-    const void *report_ptr = entry.ptr;
-    if (!entry.fine_grained) {
+    // Summarization performs several full and sparse passes over large reports.
+    // Reading a fine-grained HSA allocation field by field can be orders of
+    // magnitude slower than one sequential copy into ordinary host memory.
+    // Snapshot both allocation kinds once after dispatch completion, then keep
+    // every parser and replay pass on cacheable process-local storage.
+    std::vector<uint8_t> snapshot(entry.size);
+    if (entry.fine_grained) {
+      std::memcpy(snapshot.data(), entry.ptr, entry.size);
+      summary.fine_grained_snapshot_bytes = entry.size;
+    } else {
       if (core == nullptr || core->hsa_memory_copy_fn == nullptr) {
         log_message(kLogInfo,
                     "ConSan MOI auto report reader=%llu needs hsa_memory_copy for "
@@ -656,7 +665,6 @@ private:
                     static_cast<unsigned long long>(entry.reader));
         return summary;
       }
-      snapshot.resize(entry.size);
       const hsa_status_t copy_status =
           core->hsa_memory_copy_fn(snapshot.data(), entry.ptr, entry.size);
       if (copy_status != HSA_STATUS_SUCCESS) {
@@ -664,8 +672,9 @@ private:
                     static_cast<unsigned long long>(entry.reader), static_cast<int>(copy_status));
         return summary;
       }
-      report_ptr = snapshot.data();
+      summary.coarse_grained_snapshot_bytes = entry.size;
     }
+    const void *report_ptr = snapshot.data();
 
     const auto *header = static_cast<const rocjitsu::ConSanMoiReportHeader *>(report_ptr);
     if (!rocjitsu::consan_moi_report_header_is_current(*header)) {

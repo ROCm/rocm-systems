@@ -5965,7 +5965,7 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceAcceptsAlreadyExactDiagnostic) {
   EXPECT_EQ(diagnostic.first_lds_byte_count, 2u);
 }
 
-TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
+TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotContracts) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -6004,9 +6004,14 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
        {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
         "replay_input_access=2", "conflict=true", "metadata_full=false",
         "diagnostic_capacity_exhausted=false", "diagnostic_capacity=1", "provenance_repaired=0",
-        "provenance_unresolved=0"}) {
+        "provenance_unresolved=0", "coarse_grained_snapshot_bytes=0"}) {
     EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
   }
+  ASSERT_FALSE(g_transform_override_report_sizes.empty());
+  const std::string fine_grained_snapshot =
+      "fine_grained_snapshot_bytes=" + std::to_string(g_transform_override_report_sizes.back());
+  EXPECT_NE(log.find(fine_grained_snapshot), std::string::npos) << fine_grained_snapshot << '\n'
+                                                                << log;
   const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
   for (std::string_view field :

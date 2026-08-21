@@ -2395,7 +2395,8 @@ public:
         "[rocjitsu-dbi-hooks] ConSan MOI report memory required_bytes=%llu "
         "allocated_bytes=%llu live_before_cleanup=%llu live_after_cleanup=%llu "
         "peak_live_bytes=%llu per_buffer_ceiling=%llu process_ceiling=%llu "
-        "allocation_failures=%llu capacity_failures=%llu cleanup_failures=%llu\n",
+        "allocation_failures=%llu capacity_failures=%llu cleanup_failures=%llu "
+        "fine_grained_snapshot_bytes=%llu coarse_grained_snapshot_bytes=%llu\n",
         static_cast<unsigned long long>(moi_report_summary.required_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.allocated_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes),
@@ -2406,7 +2407,9 @@ public:
         static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
         static_cast<unsigned long long>(moi_report_summary.allocation_failure_count),
         static_cast<unsigned long long>(moi_report_summary.capacity_failure_count),
-        static_cast<unsigned long long>(moi_report_summary.cleanup_failure_count));
+        static_cast<unsigned long long>(moi_report_summary.cleanup_failure_count),
+        static_cast<unsigned long long>(moi_report_summary.fine_grained_snapshot_bytes),
+        static_cast<unsigned long long>(moi_report_summary.coarse_grained_snapshot_bytes));
     std::fprintf(stderr,
                  "[rocjitsu-dbi-hooks] ConSan transform admission memory "
                  "live_bytes=%llu peak_reserved_bytes=%llu process_ceiling=%s\n",
