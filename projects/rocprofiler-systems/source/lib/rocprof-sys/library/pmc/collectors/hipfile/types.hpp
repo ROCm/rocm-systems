@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace rocprofsys::pmc::collectors::hipfile
 {
@@ -103,7 +104,7 @@ struct metric_desc
 {
     const char*   suffix;  ///< Track name suffix, e.g. "Read Bytes"
     const char*   unit;    ///< Matches the AMD SMI conventions: bytes, bytes/s, count
-    const char*   key;     ///< Token accepted by ROCPROFSYS_HIPFILE_METRICS
+    const char*   key;     ///< Group token for ROCPROFSYS_HIPFILE_METRICS
     std::uint32_t bit;     ///< Position in enabled_metrics
     double (*value)(const metrics&);  ///< Extractor, uniform over mixed field types
 };
@@ -112,35 +113,54 @@ struct metric_desc
 // accumulator and the NIC byte counters use, `bytes/s` as AMD SMI's instantaneous PCIe
 // bandwidth uses, `count` as the CPU collector's context switches and page faults use.
 inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
-    { { "Read Bytes", "bytes", "read_bytes", 0,
+    { { "Read Bytes", "bytes", "bytes", 0,
         [](const metrics& m) { return static_cast<double>(m.read_bytes); } },
-      { "Write Bytes", "bytes", "write_bytes", 1,
+      { "Write Bytes", "bytes", "bytes", 1,
         [](const metrics& m) { return static_cast<double>(m.write_bytes); } },
-      { "Read Ops", "count", "read_ops", 2,
+      { "Read Ops", "count", "ops", 2,
         [](const metrics& m) { return static_cast<double>(m.read_ops); } },
-      { "Write Ops", "count", "write_ops", 3,
+      { "Write Ops", "count", "ops", 3,
         [](const metrics& m) { return static_cast<double>(m.write_ops); } },
-      { "Fastpath Reads", "count", "fastpath_reads", 4,
+      { "Fastpath Reads", "count", "fastpath", 4,
         [](const metrics& m) { return static_cast<double>(m.fastpath_reads); } },
-      { "Fastpath Writes", "count", "fastpath_writes", 5,
+      { "Fastpath Writes", "count", "fastpath", 5,
         [](const metrics& m) { return static_cast<double>(m.fastpath_writes); } },
-      { "Fallback Reads", "count", "fallback_reads", 6,
+      { "Fallback Reads", "count", "fallback", 6,
         [](const metrics& m) { return static_cast<double>(m.fallback_reads); } },
-      { "Fallback Writes", "count", "fallback_writes", 7,
+      { "Fallback Writes", "count", "fallback", 7,
         [](const metrics& m) { return static_cast<double>(m.fallback_writes); } },
-      { "Unaligned Reads", "count", "unaligned_reads", 8,
+      { "Unaligned Reads", "count", "unaligned", 8,
         [](const metrics& m) { return static_cast<double>(m.unaligned_reads); } },
-      { "Unaligned Writes", "count", "unaligned_writes", 9,
+      { "Unaligned Writes", "count", "unaligned", 9,
         [](const metrics& m) { return static_cast<double>(m.unaligned_writes); } },
-      { "Read Errors", "count", "read_errors", 10,
+      { "Read Errors", "count", "errors", 10,
         [](const metrics& m) { return static_cast<double>(m.read_errors); } },
-      { "Write Errors", "count", "write_errors", 11,
+      { "Write Errors", "count", "errors", 11,
         [](const metrics& m) { return static_cast<double>(m.write_errors); } },
-      { "Read Bandwidth", "bytes/s", "read_bandwidth", 12,
+      { "Read Bandwidth", "bytes/s", "bandwidth", 12,
         [](const metrics& m) { return m.read_bandwidth; } },
-      { "Write Bandwidth", "bytes/s", "write_bandwidth", 13,
+      { "Write Bandwidth", "bytes/s", "bandwidth", 13,
         [](const metrics& m) { return m.write_bandwidth; } } }
 };
+
+/**
+ * @brief Bits of every metric in @p group, or 0 when the group is unknown.
+ *
+ * A key names a read/write pair rather than a single track, mirroring how
+ * ROCPROFSYS_AMD_SMI_METRICS groups its tokens (`power` covers current and average,
+ * `temp` covers hotspot and edge), so users select "fastpath" rather than spelling out
+ * both directions.
+ */
+[[nodiscard]] constexpr std::uint32_t
+metric_group_mask(std::string_view group) noexcept
+{
+    std::uint32_t mask = 0;
+    for(const auto& metric : METRIC_TABLE)
+    {
+        if(group == metric.key) mask |= (1U << metric.bit);
+    }
+    return mask;
+}
 
 /// @brief Perfetto/RocPD track name for a metric on a given GPU.
 [[nodiscard]] inline std::string
