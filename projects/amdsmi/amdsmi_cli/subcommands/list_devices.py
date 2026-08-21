@@ -384,20 +384,20 @@ class ListDevicesCommands:
         if switch:
             args.switch = switch
 
-        gpuCount = 0
+        gpu_count = 0
 
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles_gpus
             if isinstance(args.gpu, list):
-                gpuCount = len(args.gpu)
+                gpu_count = len(args.gpu)
         else:
             if isinstance(args.gpu, list):
-                gpuCount = len(args.gpu)
+                gpu_count = len(args.gpu)
                 self.logger.output = {}
                 self.logger.clear_multiple_devices_output()
 
-                if gpuCount > 0:
+                if gpu_count > 0:
                     self.list_gpu(args, False, gpu=args.gpu)
                     return
 
@@ -406,27 +406,56 @@ class ListDevicesCommands:
         if self.list_switchs(args):
             return
 
-        self.logger.output = {}
-        self.logger.clear_multiple_devices_output()
+        nic_count = 0
+        ainic_count = 0
+        switch_count = 0
 
-        if gpuCount > 0:
-            self.list_gpu(args, False, gpu=args.gpu)
-
-        self.logger.output = {}
-        self.logger.clear_multiple_devices_output()
-
+        # Find which devices are active
         if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
             nics, ainics = self._get_nics_from_args(args)
-            if len(nics) > 0:
-                self.list_brcm_nic(args, False, nic=nics)
-            if len(ainics) > 0:
-                self.list_ainic(args, False, nic=ainics)
+            nic_count = len(nics)
+            ainic_count = len(ainics)
+
+        if self.helpers.is_brcm_switch_initialized() and args.switch:
+            switch_count = 1
+
+        # Determine if more than 1 device is active
+        device_count = 0
+        if gpu_count > 0:
+            device_count += 1
+        if nic_count > 0:
+            device_count += 1
+        if ainic_count > 0:
+            device_count += 1
+        if switch_count > 0:
+            device_count += 1
+        if device_count > 1:
+            multiple_devices = True
 
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
 
-        if self.helpers.is_brcm_switch_initialized() and args.switch:
-            self.list_switch(args, False, switch=args.switch)
+        if gpu_count > 0:
+            self.list_gpu(args, multiple_devices, gpu=args.gpu)
+
+        if not multiple_devices:
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+
+        if nic_count > 0:
+            self.list_brcm_nic(args, multiple_devices, nic=nics)
+        if ainic_count > 0:
+            self.list_ainic(args, multiple_devices, nic=ainics)
+
+        if not multiple_devices:
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+
+        if switch_count > 0 and args.switch:
+            self.list_switch(args, multiple_devices, switch=args.switch)
+
+        if multiple_devices:
+            self.logger.print_output(multiple_device_enabled=multiple_devices)
 
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
