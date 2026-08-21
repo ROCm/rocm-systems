@@ -5909,7 +5909,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
-            kAccessCount);
+            kAccessCount)
+      << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u); // One relocatable host plus one appended return-PC dispatcher.
@@ -6130,6 +6131,20 @@ TEST(ConSanMoi, Cdna4FarInlineShadowAccessesShareExplicitKeyRelay) {
   EXPECT_GE(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u);
+  // Each reachability partition owns its relocated host. Reusing or partially
+  // overlapping the nine-word range corrupts one partition's literal-bearing
+  // indirect jump when the later host is emitted.
+  std::vector<std::pair<uint64_t, uint64_t>> host_ranges;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+        patch.original_size == 9u * sizeof(uint32_t)) {
+      host_ranges.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
+    }
+  }
+  ASSERT_GE(host_ranges.size(), 2u) << testing::PrintToString(result.patches);
+  std::ranges::sort(host_ranges);
+  for (size_t index = 1; index < host_ranges.size(); ++index)
+    EXPECT_LE(host_ranges[index - 1u].second, host_ranges[index].first);
 }
 
 TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {

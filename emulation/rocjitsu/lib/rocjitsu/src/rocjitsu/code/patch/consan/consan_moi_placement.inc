@@ -2546,11 +2546,12 @@ template <typename OverlapsReserved>
 [[nodiscard]] std::optional<MoiDenseRelayHost>
 find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                           std::span<const uint8_t> text, const MoiDenseRelayHostSearch &search,
-                          OverlapsReserved &&overlaps_reserved) {
+                          OverlapsReserved &&overlaps_reserved,
+                          std::span<const std::pair<uint64_t, uint64_t>> claimed_host_ranges = {}) {
   const std::vector<uint64_t> candidates = collect_moi_dense_relay_host_candidates(
       resource_state, search, std::forward<OverlapsReserved>(overlaps_reserved));
   return select_moi_dense_relay_host(resource_state, text, search.host_word_count, search.anchors,
-                                     candidates, search.owner_begin);
+                                     candidates, search.owner_begin, claimed_host_ranges);
 }
 
 [[nodiscard]] RegisterSet

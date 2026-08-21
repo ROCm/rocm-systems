@@ -317,6 +317,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         groups.back().second.candidates.push_back(candidate);
       }
     }
+    std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
     for (const auto &[key, group] : groups) {
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
@@ -421,7 +422,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                   .owner_proof = host_owner_proof,
                   .bootstrap_ranges = host_bootstrap_ranges,
               },
-              overlaps_instrumented_site);
+              overlaps_instrumented_site, claimed_dense_host_ranges);
         };
         std::optional<MoiDenseRelayHost> best_host;
         if (key.first) {
@@ -436,6 +437,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             best_host = find_container_host(*function);
         }
         if (best_host) {
+          claimed_dense_host_ranges.emplace_back(
+              best_host->host_offset, best_host->host_offset + kHostWords * sizeof(uint32_t));
           island = best_host->host_offset + sizeof(uint32_t);
           dense_entry_hosts.emplace(dispatcher,
                                     MoiDenseEntryHost{
