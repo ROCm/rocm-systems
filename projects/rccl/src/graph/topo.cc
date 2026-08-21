@@ -612,6 +612,7 @@ ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, 
 
 static ncclResult_t ncclTopoCheckMloPartBusId(int64_t busId) {
   // check that the bits used for mlopart information are free and always 0 to avoid collision.
+  // A PCI busId only occupies bits [35:0], so this can only fire on a malformed busId.
   if (busId & NCCL_TOPO_MLOPART_MASK) {
     WARN(
       "BusId 0x%lx has non-zero bits in MLOPart mask 0x%llx, cannot encode MLOPart partition index without collision",
@@ -1060,7 +1061,7 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
 
     if (nSibDevs > 1) {
       // Use a C2C bridge node to guarantee the total bw of the C2C link is shared between the devices.
-      // Note: pBusId is the dev busId; we have checked that the 2 last bits are 0 in ncclTopoAddGpuSub
+      // Note: pBusId is the dev busId; we have checked that the mlopart bits are 0 in ncclTopoAddGpuSub
       int64_t xc2cId = devNode->id & ~(int64_t)NCCL_TOPO_MLOPART_MASK;
       struct ncclTopoNode* xc2cNode = NULL;
       NCCLCHECK(ncclTopoGetNode(system, &xc2cNode, CXB, xc2cId));
