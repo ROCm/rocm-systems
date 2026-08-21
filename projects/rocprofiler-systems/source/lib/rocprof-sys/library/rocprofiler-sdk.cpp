@@ -2763,34 +2763,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         pmc::set_state(state::process::Active);
     }
 
-    // Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API on
-    // control_ctx, which requires the context available here in tool_init.
     assert(g_session);
-    if(!g_roctx_client)
-    {
-        const auto _domains = rocprofsys::delimit(
-            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-                .value_or(std::string{}),
-            " ,;:\t\n");
-        const auto has_marker_domain =
-            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
-                 _domains.end() ||
-             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
-        const auto roctx_traced_regions = config::get_trace_region();
-        const auto has_trace_regions    = !roctx_traced_regions.empty();
-
-        if(has_marker_domain || has_trace_regions)
-        {
-            const auto roctx_config = roctx_client_config{
-                .pause_resume_enabled   = has_marker_domain,
-                .use_perfetto           = config::get_use_perfetto(),
-                .use_timemory           = config::get_use_timemory(),
-                .perfetto_annotations   = config::get_perfetto_annotations(),
-                .selected_trace_regions = roctx_traced_regions,
-            };
-            g_roctx_client = std::make_shared<roctx_client<>>(g_session, roctx_config);
-        }
-    }
+    create_roctx_client();
 
     if(g_roctx_client)
     {
@@ -2895,6 +2869,33 @@ void
 bind_session(std::shared_ptr<control::session> sess)
 {
     g_session = std::move(sess);
+}
+
+void
+create_roctx_client()
+{
+    if(g_roctx_client || !g_session) return;
+
+    const auto _domains = rocprofsys::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
+    const auto has_marker_domain =
+        (std::find(_domains.begin(), _domains.end(), "marker_api") != _domains.end() ||
+         std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
+    const auto roctx_traced_regions = config::get_trace_region();
+    const auto has_trace_regions    = !roctx_traced_regions.empty();
+
+    if(!has_marker_domain && !has_trace_regions) return;
+
+    const auto roctx_config = roctx_client_config{
+        .pause_resume_enabled   = has_marker_domain,
+        .use_perfetto           = config::get_use_perfetto(),
+        .use_timemory           = config::get_use_timemory(),
+        .perfetto_annotations   = config::get_perfetto_annotations(),
+        .selected_trace_regions = roctx_traced_regions,
+    };
+    g_roctx_client = std::make_shared<roctx_client<>>(g_session, roctx_config);
 }
 
 void
