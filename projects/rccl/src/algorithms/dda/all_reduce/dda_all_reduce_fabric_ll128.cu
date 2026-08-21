@@ -16,6 +16,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 
@@ -154,9 +155,10 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (bytes % 8 != 0) {
     return false;
   }
-  // Use the runtime LL128 threshold (RCCL_DDA_LL128_THRESHOLD) as the cap.
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  if (ll128Thresh <= 0 || bytes > (size_t)ll128Thresh) {
+  // Cap by the resolved LL128 threshold (RCCL_DDA_LL128_THRESHOLD, else this
+  // arch's table, else the built-in default).
+  const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  if (ll128Thresh == 0 || bytes > ll128Thresh) {
     return false;
   }
   // Scratch is sized from the actual message (compact per-call slot stride), so

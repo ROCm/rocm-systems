@@ -58,10 +58,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   const int nRanks = comm->nRanks;
   const int64_t llEnabled = rcclParamDdaLL();
-  const int64_t llThresh = rcclParamDdaLLThreshold();
   const int64_t ll128Enabled = rcclParamDdaLL128();
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  const int64_t simpleThresh = rcclParamDdaThreshold();
+  // Size the scratch from the caps the dispatch path will actually apply
+  // (env override, else this arch's table). AllReduce stands in for AR/AG/RS,
+  // which share their caps; comm->archThresholds is set before this runs.
+  const int64_t llThresh = (int64_t)rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+  const int64_t ll128Thresh = (int64_t)rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  const int64_t simpleThresh = (int64_t)rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of

@@ -1734,35 +1734,36 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 }
 
 // Per-arch DDA/CE dispatch threshold tables.
-// Indexed by ncclFunc_t: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4, ...].
-// AR/AG compare total message bytes; RS compares rsShardBytes (per-rank recv).
+// DDA arrays: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4,
+//              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
+// AR/AG/A2A compare total message bytes; RS compares rsShardBytes (per-rank recv).
 // gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
-  .ddaLLMax    = {0, 0, 32ULL*1024,        32ULL*1024,        32ULL*1024,        0, 0, 0},
-  .ddaLL128Max = {0, 0, 32ULL*1024*1024,   32ULL*1024*1024,   32ULL*1024*1024,   0, 0, 0},
-  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0},
+  .ddaLLMax    = {0, 0, 32ULL*1024,        32ULL*1024,        32ULL*1024,        0, 0, 0, 32ULL*1024},
+  .ddaLL128Max = {0, 0, 32ULL*1024*1024,   32ULL*1024*1024,   32ULL*1024*1024,   0, 0, 0, 32ULL*1024*1024},
+  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
   .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
   .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},
   .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0},
 };
 
-// gfx950: DDA-IPC cap matches RCCL_DDA_THRESHOLD default (128 MiB). No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
-  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0},
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
   .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},
   .ll128Cutoff = {0, 0, 0, 0, 0, 0, 0, 0},
 };
 
-// gfx942: DDA-IPC cap is the historical 8 MiB table value. No fabric LL/LL128.
+// gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx942 = {
-  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0},
+  .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
   .llCutoff    = {0, 0, 0, 0, 0, 0, 0, 0},

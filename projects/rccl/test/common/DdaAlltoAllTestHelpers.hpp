@@ -28,9 +28,7 @@ inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t da
 }
 
 inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
-  if (IsArchMatch(comm->archName, "gfx1250")) return kDdaAlltoAllGfx1250ThresholdBytes;
-  if (IsArchMatch(comm->archName, "gfx950")) return kDdaAlltoAllGfx950ThresholdBytes;
-  return kDdaAlltoAllGfx942ThresholdBytes;
+  return rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
 }
 
 inline bool testRcclDdaAlltoAllThresholdEnabled(
