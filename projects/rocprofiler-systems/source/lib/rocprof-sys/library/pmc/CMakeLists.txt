@@ -51,3 +51,10 @@ if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
         PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
     )
 endif()
+
+if(ROCPROFSYS_BUILD_HIPFILE)
+    target_link_libraries(
+        rocprofiler-systems-pmc-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
+    )
+endif()
