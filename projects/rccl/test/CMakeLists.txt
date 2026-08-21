@@ -1018,6 +1018,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
+      transport/RmaMPI/RmaMultiSegmentMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
       transport/GinNicFusionMPITests.cpp
