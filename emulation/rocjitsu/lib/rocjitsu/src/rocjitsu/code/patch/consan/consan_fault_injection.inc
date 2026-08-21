@@ -1867,7 +1867,8 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   if (selected->execution_owners.empty()) {
-    result.errors.emplace_back("ConSan LDS address fault selected an access without an execution owner");
+    result.errors.emplace_back(
+        "ConSan LDS address fault selected an access without an execution owner");
     return;
   }
   const uint32_t address_bank =
@@ -2125,10 +2126,11 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
         site.mnemonic != "ds_read_i8_d16" && site.mnemonic != "ds_read_i8_d16_hi" &&
         site.mnemonic != "ds_read_u16_d16" && site.mnemonic != "ds_read_u16_d16_hi" &&
         site.mnemonic != "ds_read_b32" && site.mnemonic != "ds_read_b64" &&
-        site.mnemonic != "ds_read_b128" && site.mnemonic != "ds_read_i16" &&
-        site.mnemonic != "ds_read_u16" && site.mnemonic != "ds_read_b64_tr_b16" &&
-        site.mnemonic != "ds_read2_b32" && site.mnemonic != "ds_read2st64_b32" &&
-        site.mnemonic != "ds_read2_b64" && site.mnemonic != "ds_read2st64_b64")
+        site.mnemonic != "ds_read_b96" && site.mnemonic != "ds_read_b128" &&
+        site.mnemonic != "ds_read_i16" && site.mnemonic != "ds_read_u16" &&
+        site.mnemonic != "ds_read_b64_tr_b16" && site.mnemonic != "ds_read2_b32" &&
+        site.mnemonic != "ds_read2st64_b32" && site.mnemonic != "ds_read2_b64" &&
+        site.mnemonic != "ds_read2st64_b64")
       return false;
     if (site.dst_accvgpr) {
       return (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
@@ -2147,9 +2149,9 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
         site.mnemonic != "ds_store_2addr_stride64_b32" &&
         site.mnemonic != "ds_store_2addr_stride64_b64" && site.mnemonic != "ds_write_b32" &&
         site.mnemonic != "ds_write_b16" && site.mnemonic != "ds_write_b64" &&
-        site.mnemonic != "ds_write_b128" && site.mnemonic != "ds_write2_b32" &&
-        site.mnemonic != "ds_write2st64_b32" && site.mnemonic != "ds_write2_b64" &&
-        site.mnemonic != "ds_write2st64_b64")
+        site.mnemonic != "ds_write_b96" && site.mnemonic != "ds_write_b128" &&
+        site.mnemonic != "ds_write2_b32" && site.mnemonic != "ds_write2st64_b32" &&
+        site.mnemonic != "ds_write2_b64" && site.mnemonic != "ds_write2st64_b64")
       return false;
     const bool two_address = is_two_address_lds_store(site);
     if (two_address) {
@@ -2397,8 +2399,8 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
     constexpr uint32_t kRdna3FlatOpMask = 0x7fu << 18u;
     constexpr uint32_t kRdna3FlatDataMask = 0xffu << 8u;
     words[0] = (words[0] & ~kRdna3FlatOpMask) | (static_cast<uint32_t>(load_op) << 18u);
-    words[1] = (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) |
-               (static_cast<uint32_t>(vdst) << 24u);
+    words[1] =
+        (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) | (static_cast<uint32_t>(vdst) << 24u);
     return words;
   }
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {

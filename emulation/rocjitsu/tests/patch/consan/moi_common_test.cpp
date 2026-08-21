@@ -757,7 +757,7 @@ void expect_moi_engines_admit_native_b96_accesses(
             body, make_expected_literal_offset_store_words(
                       offsetof(ConSanMoiAccessRecord, lds_byte_count), 3u * sizeof(uint32_t),
                       *access_patch->scratch_vgpr,
-                      static_cast<uint16_t>(*access_patch->scratch_vgpr + 2u))));
+                      static_cast<uint16_t>(*access_patch->scratch_vgpr + 2u), arch)));
       } else if (engine == ConSanMoiEngine::InlineShadow) {
         const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
             *access_patch->scratch_vgpr, result.resolved_moi_exec_save_sgpr.has_value(),
@@ -2254,41 +2254,43 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
   }
+  for (std::string_view mnemonic : {"ds_read_b96", "ds_write_b96"}) {
+    SCOPED_TRACE(mnemonic);
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_GFX1250));
+  }
 }
 
-TEST(ConSanMoi, CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary) {
+TEST(ConSanMoi, CdnaMoiEnginesAdmitNativeB96Accesses) {
   constexpr auto cdna3_store = cdna3::build_ds(cdna3::kDsWriteB96Ds, {.addr = 0, .data0 = 1});
-  constexpr auto cdna3_load = cdna3::build_ds(cdna3::kDsReadB96Ds, {.addr = 0, .vdst = 1});
+  constexpr auto cdna3_load = cdna3::build_ds(cdna3::kDsReadB96Ds, {.addr = 0, .vdst = 4});
+  constexpr auto cdna3_aliasing_load = cdna3::build_ds(cdna3::kDsReadB96Ds, {.addr = 0, .vdst = 0});
   constexpr auto cdna4_store = cdna4::build_ds(cdna4::kDsWriteB96Ds, {.addr = 0, .data0 = 1});
-  constexpr auto cdna4_load = cdna4::build_ds(cdna4::kDsReadB96Ds, {.addr = 0, .vdst = 1});
-  const std::array cases = {
-      std::pair{make_cdna3_lds_code_object(std::array{cdna3_store[0], cdna3_store[1],
-                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)},
-                                           "cdna3_b96"),
-                std::string_view{"ds_write_b96"}},
-      std::pair{make_cdna3_lds_code_object(std::array{cdna3_load[0], cdna3_load[1],
-                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)},
-                                           "cdna3_b96"),
-                std::string_view{"ds_read_b96"}},
-      std::pair{make_cdna4_lds_code_object(std::array{cdna4_store[0], cdna4_store[1],
-                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
-                                           "cdna4_b96"),
-                std::string_view{"ds_write_b96"}},
-      std::pair{make_cdna4_lds_code_object(std::array{cdna4_load[0], cdna4_load[1],
-                                                      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
-                                           "cdna4_b96"),
-                std::string_view{"ds_read_b96"}},
+  constexpr auto cdna4_load = cdna4::build_ds(cdna4::kDsReadB96Ds, {.addr = 0, .vdst = 4});
+  constexpr auto cdna4_aliasing_load = cdna4::build_ds(cdna4::kDsReadB96Ds, {.addr = 0, .vdst = 0});
+  constexpr std::array cdna3_accesses = {
+      NativeB96Access{cdna3_store, "ds_write_b96", false},
+      NativeB96Access{cdna3_load, "ds_read_b96", false},
+      NativeB96Access{cdna3_aliasing_load, "ds_read_b96", true},
+  };
+  constexpr std::array cdna4_accesses = {
+      NativeB96Access{cdna4_store, "ds_write_b96", false},
+      NativeB96Access{cdna4_load, "ds_read_b96", false},
+      NativeB96Access{cdna4_aliasing_load, "ds_read_b96", true},
   };
 
-  for (const auto &[bytes, mnemonic] : cases) {
-    SCOPED_TRACE(mnemonic);
-    const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
-    const auto disposition = std::ranges::find(result.site_dispositions, mnemonic,
-                                               &ConSanSiteDispositionRecord::mnemonic);
-    ASSERT_NE(disposition, result.site_dispositions.end());
-    EXPECT_EQ(disposition->disposition, ConSanSiteDisposition::Unsupported);
-    EXPECT_EQ(disposition->reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
-  }
+  expect_moi_engines_admit_native_b96_accesses(
+      ROCJITSU_CODE_ARCH_CDNA3, cdna3_accesses, [](const auto &text_words) {
+        return make_cdna3_lds_code_object(text_words, "cdna3_native_b96_access");
+      });
+  expect_moi_engines_admit_native_b96_accesses(
+      ROCJITSU_CODE_ARCH_CDNA4, cdna4_accesses, [](const auto &text_words) {
+        return make_cdna4_lds_code_object(text_words, "cdna4_native_b96_access");
+      });
 }
 
 TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {

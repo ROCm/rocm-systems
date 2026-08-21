@@ -68,7 +68,7 @@ therefore intentional and are not target-parity gaps.
 
 | Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1100` / RDNA3 | `gfx1201` / RDNA4 | `gfx1250` |
 | --- | --- | --- | --- | --- | --- |
-| Native LDS single-range read/write | 8, 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
+| Native LDS single-range read/write | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
 | Native LDS dual-range read/write | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms |
 | Native LDS transpose read | Target-native admitted transpose forms | Target-native admitted transpose forms | Target-native admitted transpose forms | No equivalent claimed | Target-native admitted transpose forms |
 | Group-FLAT read/write | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms, including the encoded signed immediate |

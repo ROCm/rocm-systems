@@ -707,15 +707,15 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
                                                        rj_code_arch_t arch) {
-  // RDNA4 B96 is admitted as a family capability: both gfx1201 and gfx1250
-  // share the qualified three-dword resource plan and fixed-register lowering.
+  // CDNA3, CDNA4, and RDNA4 B96 are admitted as family capabilities. Their
+  // native spellings share the qualified three-dword resource plan and
+  // fixed-register lowering.
   // RDNA3/RDNA3.5 encode B96, but the qualified RDNA3 ConSan subset does not
   // admit that width.
-  // CDNA spells the operations ds_read_b96/ds_write_b96; they are absent from
-  // both admitted mnemonic lists, and
-  // CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary pins that
-  // transform boundary.
   if (is_rdna4_family_arch(arch) && equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
+    return true;
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      equals_any(mnemonic, {"ds_read_b96", "ds_write_b96"}))
     return true;
   return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
          ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&

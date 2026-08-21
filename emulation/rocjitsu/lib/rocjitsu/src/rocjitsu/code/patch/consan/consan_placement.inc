@@ -457,6 +457,9 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     case 64:
       base = 0xD8EC0000u;
       break;
+    case 96:
+      base = 0xD9FC0000u;
+      break;
     case 128:
       base = 0xD9FE0000u;
       break;

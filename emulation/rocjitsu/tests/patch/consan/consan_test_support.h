@@ -398,22 +398,23 @@ std::vector<uint32_t> make_expected_literal_store_words(uint64_t address, uint32
   return words;
 }
 
-std::vector<uint32_t> make_expected_offset_store_words(uint32_t byte_offset, uint16_t value_vgpr,
-                                                       uint16_t address_vgpr) {
-  const auto store = build_flat_store_b32_vaddr_vsrc(address_vgpr, value_vgpr,
-                                                     ROCJITSU_CODE_ARCH_RDNA4, byte_offset);
+std::vector<uint32_t>
+make_expected_offset_store_words(uint32_t byte_offset, uint16_t value_vgpr, uint16_t address_vgpr,
+                                 rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+  const auto store = build_flat_store_b32_vaddr_vsrc(address_vgpr, value_vgpr, arch, byte_offset);
   return store ? std::vector<uint32_t>(store->begin(), store->end()) : std::vector<uint32_t>{};
 }
 
-std::vector<uint32_t> make_expected_literal_offset_store_words(uint32_t byte_offset, uint32_t value,
-                                                               uint16_t address_vgpr,
-                                                               uint16_t value_vgpr) {
-  const auto materialize = build_v_mov_b32_e64_literal(value_vgpr, value, ROCJITSU_CODE_ARCH_RDNA4);
+std::vector<uint32_t>
+make_expected_literal_offset_store_words(uint32_t byte_offset, uint32_t value,
+                                         uint16_t address_vgpr, uint16_t value_vgpr,
+                                         rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+  const auto materialize = build_v_mov_b32_e64_literal(value_vgpr, value, arch);
   if (!materialize)
     return {};
   std::vector<uint32_t> words(materialize->begin(), materialize->end());
   const std::vector<uint32_t> store =
-      make_expected_offset_store_words(byte_offset, value_vgpr, address_vgpr);
+      make_expected_offset_store_words(byte_offset, value_vgpr, address_vgpr, arch);
   words.insert(words.end(), store.begin(), store.end());
   return words;
 }

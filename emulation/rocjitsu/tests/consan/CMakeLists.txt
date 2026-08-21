@@ -421,6 +421,7 @@ function(rj_add_consan_device_conformance_cases)
             _device_workloads
             "CdnaMfmaPipeline|cdna_mfma_pipeline|ConSanDeviceCdnaMfmaPipelineTest"
             "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
+            "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
@@ -689,6 +690,7 @@ function(rj_add_consan_device_fixture_targets target)
             _device_workload_sources
             "cdna_mfma_pipeline|cdna_mfma_pipeline_test.hip"
             "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
+            "cdna_b96_boundary|cdna_b96_boundary_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")

@@ -3493,6 +3493,32 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
+  constexpr auto store = cdna4::build_ds(cdna4::kDsWriteB96Ds, {.addr = 10, .data0 = 2});
+  std::vector<uint32_t> text_words = {store[0], store[1]};
+  text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "cdna4_store_b96");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 12;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
+  EXPECT_TRUE(result.final_validation_passed);
+
+  const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
+  constexpr auto readback = cdna4::build_ds(cdna4::kDsReadB96Ds, {.addr = 10, .vdst = 12});
+  EXPECT_EQ(rewritten_words[4], readback[0]);
+  EXPECT_EQ(rewritten_words[5], readback[1]);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};

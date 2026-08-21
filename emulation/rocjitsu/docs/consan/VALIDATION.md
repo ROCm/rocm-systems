@@ -29,9 +29,11 @@ generated-model, and Stream-K-style workloads. They cover cross-wave LDS
 handoff, a barrier reduction, shared helpers with multiple kernel owners,
 three-dimensional workgroup identity, dynamic private stacks, adjacent
 subword writes with overlapping reads, global atomic arrival, and a
-cross-wave race. Each clean test has an exact host-computed output oracle; the
-racy fixture also preserves exact independent output while requiring the
-applicable sanitizer evidence.
+cross-wave race. Target extensions include native 96-bit LDS tuple publication
+on CDNA3/CDNA4 and RDNA4/CDNA5, including an address/destination alias distilled
+from framework kernels. Each clean test has an exact host-computed output
+oracle; the racy fixture also preserves exact independent output while
+requiring the applicable sanitizer evidence.
 
 The contract is deliberately independent of the current prototype. Tests may
 require that the intended code object was instrumented, that semantic evidence
@@ -46,7 +48,7 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. This is
-200 simulator cases and 41 physical cases at the current workload count.
+1,140 simulator cases and 245 physical cases at the current workload count.
 
 The initial target-capability disposition is:
 
@@ -55,10 +57,11 @@ The initial target-capability disposition is:
 | Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms. |
 | Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
+| Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA4/CDNA5, including address/destination aliasing. |
 | Multi-owner helpers, multidimensional dispatch identity, and dynamic private stacks | Covered on all five targets. |
 | Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by the atomic-arrival workload. |
 | CDNA5 cluster barriers and ordered LDS atomics | Tracked extension gap; the common suite exercises ordinary workgroups and a global arrival atomic. |
-| Wider target-specific LDS forms and native VGLOBAL forms | Tracked extension gap; retain the existing host transformation coverage until an implementation-independent device oracle is reduced from an end-to-end workload. |
+| Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are now covered on every architecture where ConSan admits them. |
 
 “Tracked gap” is preferable to a fixture that merely recognizes the current
 patcher. Add an extension when its program can state a portable workload or
