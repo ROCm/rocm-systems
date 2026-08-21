@@ -939,6 +939,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+      break;
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
