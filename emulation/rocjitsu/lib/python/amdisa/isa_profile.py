@@ -564,6 +564,16 @@ class IsaProfile(ABC):
         return 3
 
     @property
+    def global_b8_transpose_kind(self) -> int:
+        """Cross-lane routing used by 8-bit B64 global transpose loads.
+
+        Current targets use the 16x16 WMMA routing. Keep this selection in
+        the ISA profile so a future architecture can change the global-load
+        routing without making mnemonic aliases disagree.
+        """
+        return 6
+
+    @property
     def cmpx_writes_vcc(self) -> bool:
         """True if V_CMPX instructions write both EXEC and VCC.
 
