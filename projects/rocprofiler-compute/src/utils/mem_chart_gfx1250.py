@@ -726,7 +726,8 @@ def create_mem_chart_diagram(
 
     # Print header
     console.print()
-    console.print(f"[Normalization: {normal_unit}]")
+    if normal_unit:
+        console.print(f"[Normalization: {normal_unit}]")
     console.print(
         " " * 24
         + "|"
@@ -1836,14 +1837,14 @@ def plot_mem_chart(
 
     create_mem_chart_diagram(
         "gfx1250",
-        chart_title,
+        "",
         flat,
         console,
         show_debug=False,
         compact=False,
     )
 
-    return buf.getvalue()
+    return f"{chart_title}\n{buf.getvalue()}"
 
 
 # ============================================================================

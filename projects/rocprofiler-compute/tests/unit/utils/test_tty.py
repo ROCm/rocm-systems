@@ -27,7 +27,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
-from utils.utils_common import is_gfx115x
+from utils.utils_common import is_gfx115x, is_gfx1250
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -404,6 +404,7 @@ def test_edge_cases_and_error_handling() -> None:
     [
         pytest.param("gfx1151", id="rdna35"),
         pytest.param("gfx942", id="cdna"),
+        pytest.param("gfx1250", id="gfx1250"),
     ],
 )
 def test_format_table_output_dispatches_memory_chart_renderer(
@@ -440,6 +441,10 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
         gfx9_stub,
     )
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        record("gfx1250", "rendered gfx1250 memory chart"),
+    )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
     content = format_table_output(
@@ -455,18 +460,19 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         gpu_arch=gpu_arch,
     )
 
-    expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
-    unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
+    if is_gfx115x(gpu_arch):
+        expected, return_value = "gfx11", "rendered RDNA3.5 memory chart"
+    elif is_gfx1250(gpu_arch):
+        expected, return_value = "gfx1250", "rendered gfx1250 memory chart"
+    else:
+        expected, return_value = "gfx9", "rendered CDNA memory chart"
+
     assert calls[expected] == {
         "mem_data": {"Metric A": 1},
         "chart_title": "7. Memory Chart (Normalization: per_wave)",
     }
-    assert unexpected not in calls
-    return_value = (
-        "rendered RDNA3.5 memory chart"
-        if is_gfx115x(gpu_arch)
-        else "rendered CDNA memory chart"
-    )
+    for other in {"gfx11", "gfx9", "gfx1250"} - {expected}:
+        assert other not in calls
     assert content == f"{return_value}\n"
 
 

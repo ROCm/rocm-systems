@@ -794,11 +794,15 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For single run and gfx11+, format BW metrics (Bytes/s) to human-readable
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
-    if is_single_run and is_gfx115x(gpu_arch) and "Unit" in df.columns:
+    if (
+        is_single_run
+        and (is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
+        and "Unit" in df.columns
+    ):
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
