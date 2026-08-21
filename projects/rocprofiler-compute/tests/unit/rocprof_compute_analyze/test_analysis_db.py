@@ -1149,7 +1149,12 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     code_object_stores = analyzer.add_pc_sampling_data(
-        "/fake/workload", workload, {}, {}, make_source_frame_collector(workload)
+        "/fake/workload",
+        workload,
+        {},
+        {},
+        make_source_frame_collector(workload),
+        sys_info=None,
     )
     db_session.commit()
 
@@ -1175,7 +1180,12 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info=None,
     )
     db_session.commit()
 
@@ -1200,7 +1210,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     } == {"WAITCNT"}
 
 
-def test_add_pc_sampling_data_inserts_wave_measurements_from_workload_sys_info(
+def test_add_pc_sampling_data_inserts_wave_measurements_from_sys_info(
     db_session,
 ):
     """Configured denominators populate percentages; absent ones stay null."""
@@ -1244,6 +1254,7 @@ def test_add_pc_sampling_data_inserts_wave_measurements_from_workload_sys_info(
             kernel_objs,
             {},
             make_source_frame_collector(workload, workload_path),
+            sys_info=sys_info_row,
         )
         db_session.commit()
 
@@ -1289,7 +1300,12 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
         workload_path: [first_tool_data, second_tool_data]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info=None,
     )
     db_session.commit()
 
@@ -2316,7 +2332,12 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info=None,
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2424,7 +2445,12 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload, workload_path)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info=None,
         )
         assert code_object_stores == {}
         analyzer.add_code_object_isa(
@@ -2495,7 +2521,12 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info=None,
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2582,7 +2613,12 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info=None,
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2725,7 +2761,12 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info=None,
     )
     db_session.commit()
 

@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 
 from pc_sampling.pc_sampling_analysis import (
-    InstructionLineRecord,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -473,7 +472,7 @@ def test_aggregate_empty_records_returns_columns() -> None:
     """Aggregating an empty record df returns the expected (empty) columns."""
     empty = load_pc_sample_records(make_tool_data())
     result = aggregate_pc_sample_records(
-        empty, group_by=["code_object_id", "code_object_offset"]
+        empty, group_by=["code_object_id", "code_object_offset"], sys_info=None
     )
     assert result.empty
     for column in ("count", "count_issued", "count_stalled", "stall_reason"):
@@ -501,7 +500,7 @@ def test_aggregate_counts_issued_and_stalled() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info=None
     )
     row = result.iloc[0]
     assert row["count"] == 2
@@ -516,7 +515,7 @@ def test_aggregate_host_trap_counts_are_none() -> None:
         make_tool_data(host_trap=[make_host_trap_record(1, 0x10, 0, dispatch_id=0)])
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info=None
     )
     row = result.iloc[0]
     assert row["count"] == 1
@@ -542,7 +541,7 @@ def test_aggregate_unknown_stall_key_dropped() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info=None
     )
     assert result.iloc[0]["stall_reason"] == {}
 
@@ -559,7 +558,9 @@ def test_aggregate_group_by_kernel_id_separates_shared_code_object() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset", "kernel_id"]
+        records,
+        group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info=None,
     )
     assert len(result) == 2
     assert set(result["kernel_id"]) == {100, 101}
@@ -742,7 +743,7 @@ def test_aggregate_wave_measurements_exclude_missing_fields_independently() -> N
 
 
 def test_aggregate_wave_measurements_are_none_without_sys_info() -> None:
-    """Omitted and explicit-None system information leave both values unknown."""
+    """Absent system information leaves both values unknown."""
     records = load_pc_sample_records(
         make_tool_data(
             stochastic=[
@@ -759,18 +760,14 @@ def test_aggregate_wave_measurements_are_none_without_sys_info() -> None:
     )
     group_by = ["code_object_id", "code_object_offset"]
 
-    results = [
-        aggregate_pc_sample_records(records, group_by=group_by),
-        aggregate_pc_sample_records(records, group_by=group_by, sys_info=None),
-    ]
+    result = aggregate_pc_sample_records(records, group_by=group_by, sys_info=None)
 
-    for result in results:
-        assert {
-            "active_thread_percent",
-            "wave_occupancy_percent",
-        }.issubset(result.columns)
-        assert result.iloc[0]["active_thread_percent"] is None
-        assert result.iloc[0]["wave_occupancy_percent"] is None
+    assert {
+        "active_thread_percent",
+        "wave_occupancy_percent",
+    }.issubset(result.columns)
+    assert result.iloc[0]["active_thread_percent"] is None
+    assert result.iloc[0]["wave_occupancy_percent"] is None
 
 
 @pytest.mark.parametrize(
@@ -930,29 +927,11 @@ def test_load_aggregated_pc_sampling_happy_path() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, sys_info=None)[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.instruction == "v_mov"
     assert line.source == "/s/a.cpp:1"
     assert line.kernel_name == "vecCopy"
-
-
-def test_instruction_line_record_wave_measurements_default_to_none() -> None:
-    """Callers that omit wave measurements retain a compatible null default."""
-    line = InstructionLineRecord(
-        code_object_offset=0x10,
-        kernel_name="vecCopy",
-        instruction="v_mov",
-        source="/s/a.cpp:1",
-        total_count=1,
-        issue_count=1,
-        stall_count=0,
-        stall_reasons={},
-        inst_types={"VALU": 1},
-    )
-
-    assert line.active_thread_percent is None
-    assert line.wave_occupancy_percent is None
 
 
 @pytest.mark.parametrize("method", ["host_trap", "stochastic"])
@@ -2222,14 +2201,14 @@ def test_aggregate_adds_inst_type_dict() -> None:
     )
     records_df = load_pc_sample_records(tool_data)
     aggregated = aggregate_pc_sample_records(
-        records_df, group_by=["code_object_id", "code_object_offset"]
+        records_df, group_by=["code_object_id", "code_object_offset"], sys_info=None
     )
     assert aggregated.iloc[0]["inst_type"] == {"VALU": 2, "FLAT": 1}
 
 
 def test_normalize_missing_tool_data_returns_empty() -> None:
     """An empty tool record yields no code-object records."""
-    assert load_aggregated_pc_sampling(make_tool_data()) == []
+    assert load_aggregated_pc_sampling(make_tool_data(), sys_info=None) == []
 
 
 def test_normalize_groups_by_code_object_with_catalog() -> None:
@@ -2257,7 +2236,10 @@ def test_normalize_groups_by_code_object_with_catalog() -> None:
             make_code_object(6, load_base=0x2000),
         ],
     )
-    records = {r.code_object_id: r for r in load_aggregated_pc_sampling(tool_data)}
+    records = {
+        r.code_object_id: r
+        for r in load_aggregated_pc_sampling(tool_data, sys_info=None)
+    }
     assert records[5].load_base == 0x1000
     assert len(records[5].instruction_lines) == 2
     assert len(records[6].instruction_lines) == 1
@@ -2281,7 +2263,7 @@ def test_normalize_attributes_line_to_kernel_via_dispatch() -> None:
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
         code_objects=[make_code_object(5)],
     )
-    lines = load_aggregated_pc_sampling(tool_data)[0].instruction_lines
+    lines = load_aggregated_pc_sampling(tool_data, sys_info=None)[0].instruction_lines
     by_offset = {line.code_object_offset: line.kernel_name for line in lines}
     assert by_offset[0x10] == "vecCopy"
     assert by_offset[0x20] == "vecAdd"
@@ -2315,7 +2297,7 @@ def test_normalize_instruction_line_counts_and_dicts() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, sys_info=None)[0].instruction_lines[0]
     assert line.code_object_offset == 0x10
     assert line.instruction == "v_mov"
     assert line.total_count == 2
@@ -2334,7 +2316,7 @@ def test_normalize_host_trap_line_has_null_issue_stall() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, sys_info=None)[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.issue_count is None
     assert line.stall_count is None
@@ -2368,7 +2350,7 @@ def test_normalize_unmapped_dispatch_yields_none_kernel() -> None:
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         code_objects=[make_code_object(999)],
     )
-    record = load_aggregated_pc_sampling(tool_data)[0]
+    record = load_aggregated_pc_sampling(tool_data, sys_info=None)[0]
     assert record.code_object_id == 999
     assert record.instruction_lines[0].kernel_name is None
 
