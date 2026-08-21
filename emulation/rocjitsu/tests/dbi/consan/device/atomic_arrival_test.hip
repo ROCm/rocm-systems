@@ -29,7 +29,7 @@ __global__ __launch_bounds__(128) void atomic_arrival_for_consan(DeviceState *st
     for (uint32_t i = 0; i < 8u; ++i)
       consan_device_test::store_lds_word(&partials[i], 0xc0ffee00u + i);
     state->release_ticket =
-        __hip_atomic_fetch_add(&state->handoff[0], 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+        __hip_atomic_fetch_add(&state->handoff[0], 1u, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
     // Release instrumentation publishes after the displaced atomic. Keep the
     // consumer out of its acquire probe until that trampoline has returned;
     // this readiness word is not itself the LDS synchronization contract.
@@ -40,13 +40,13 @@ __global__ __launch_bounds__(128) void atomic_arrival_for_consan(DeviceState *st
     while (*ready == 0u) {
     }
     if (state->synchronize) {
-      state->acquire_ticket = __hip_atomic_fetch_add(&state->handoff[0], 1u, __ATOMIC_ACQ_REL,
+      state->acquire_ticket = __hip_atomic_fetch_add(&state->handoff[0], 1u, __ATOMIC_ACQUIRE,
                                                      __HIP_MEMORY_SCOPE_AGENT);
     } else {
       // Acquiring a different atomic does not import the producer's LDS
       // writes. This is the small-scale wrong-address failure seen in
       // split-tile and Stream-K publication protocols.
-      state->acquire_ticket = __hip_atomic_fetch_add(&state->handoff[1], 1u, __ATOMIC_ACQ_REL,
+      state->acquire_ticket = __hip_atomic_fetch_add(&state->handoff[1], 1u, __ATOMIC_ACQUIRE,
                                                      __HIP_MEMORY_SCOPE_AGENT);
     }
     uint32_t sum = 0u;

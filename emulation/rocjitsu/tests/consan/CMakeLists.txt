@@ -667,6 +667,66 @@ function(rj_add_consan_device_conformance_cases)
         endforeach()
     endforeach()
 
+    if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
+        # Exercise the compiler's CDNA VGLOBAL release sequence, not only the
+        # FLAT encoding used by structural unit fixtures. The incorrect member
+        # starts from the same correct device workload and removes exactly its
+        # producer release edge; InlineShadow must then diagnose the consumer's
+        # LDS reads.
+        set(_atomic_order_common_environment
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=inline-shadow"
+            "RJ_CONSAN_POLICY=strict"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=atomic_arrival_for_consan"
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set(_atomic_order_correct_test_name
+            "${_device_PREFIX}.InlineShadowGlobalAtomicOrder.Correct"
+        )
+        rj_add_consan_hip_case(
+            NAME "${_atomic_order_correct_test_name}"
+            TARGET hip_consan_device_atomic_arrival_${_device_TARGET}_test
+            FILTER "ConSanDeviceAtomicArrivalTest.Correct"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 60
+            PASS_REGEX "visible_inline_atomic_releases=[1-9][0-9]*"
+            ENVIRONMENT
+                ${_atomic_order_common_environment}
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            LABELS ${_labels} inline-shadow fault clean
+        )
+        list(APPEND _instrumented_tests "${_atomic_order_correct_test_name}")
+
+        set(_atomic_order_incorrect_test_name
+            "${_device_PREFIX}.InlineShadowGlobalAtomicOrder.Incorrect"
+        )
+        rj_add_consan_hip_case(
+            NAME "${_atomic_order_incorrect_test_name}"
+            TARGET hip_consan_device_atomic_arrival_${_device_TARGET}_test
+            FILTER "ConSanDeviceAtomicArrivalTest.Correct"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 60
+            PASS_REGEX "visible_diagnostics=[1-9][0-9]*"
+            FAIL_REGEX
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS requested|mutation_installed=false"
+            ENVIRONMENT
+                ${_atomic_order_common_environment}
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1"
+                "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE=release"
+                "RJ_CONSAN_FAULT_ATOMIC_INDEX=1"
+                "RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE=1"
+            LABELS ${_labels} inline-shadow fault incorrect
+        )
+        list(APPEND _instrumented_tests "${_atomic_order_incorrect_test_name}")
+    endif()
+
     if(_device_PHYSICAL)
         set(_health_test_name "${_device_PREFIX}.PostInstrumentationHealth")
         rj_add_consan_hip_case(

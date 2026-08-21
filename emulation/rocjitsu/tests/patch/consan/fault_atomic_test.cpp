@@ -415,6 +415,53 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   }));
 }
 
+TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
+  // Pin the gfx950 compiler shape observed in the Stream-K arrival workload:
+  // buffer_wbl2; wait; global_atomic_add; wait; buffer_inv.
+  const std::array<uint32_t, 9> words = {
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDD098000u,
+      0x002E0100u, // global_atomic_add v0, v0, v1, s[46:47] sc0
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xE0A48000u,
+      0x00000000u, // buffer_inv sc1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(words, "global_atomic_order_fault");
+
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(consan_patch_succeeded(inventory));
+  ASSERT_EQ(inventory.fault_sites.size(), 1u);
+  EXPECT_EQ(inventory.fault_sites.front().kind, ConSanFaultSiteKind::Atomic);
+  EXPECT_EQ(inventory.fault_sites.front().mnemonic, "global_atomic_add");
+
+  ConSanOptions options = inventory_options;
+  options.fault_atomic_weaken_order = true;
+  options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
+  options.fault_site_identity = inventory.fault_sites.front().identity;
+  options.fault_require_exactly_one = true;
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("removed associated buffer_wbl2") != std::string::npos;
+  }));
+  ASSERT_FALSE(result.elf_bytes.empty());
+  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  const Section *text = replacement.text_sections().front();
+  std::array<uint32_t, 9> staged{};
+  std::memcpy(staged.data(), text->data(), sizeof(staged));
+  EXPECT_EQ(staged[0], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(staged[1], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(std::equal(words.begin() + 2, words.end(), staged.begin() + 2));
+}
+
 TEST(ConSan, FaultAtomicWeakenOrderExplicitEdgeFailsClosedWhenAbsent) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
   ConSanOptions options;

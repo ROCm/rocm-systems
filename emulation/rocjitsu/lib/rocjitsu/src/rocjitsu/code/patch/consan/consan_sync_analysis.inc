@@ -9,7 +9,8 @@ enum class AtomicFaultEncoding : uint8_t {
 [[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
                                                         rj_code_arch_t arch) {
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst))
+      ((mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst)) ||
+       (mnemonic.starts_with("global_atomic") && size == sizeof(cdna4::FlatGlblMachineInst))))
     return AtomicFaultEncoding::CdnaFlat;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
