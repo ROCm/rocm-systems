@@ -269,10 +269,12 @@ captured on the device's first use, which still precedes any traffic on it.
 By default the hardware counters are read exactly twice per *used* device for the
 whole run: once on first use (baseline) and once at exit (final). A rank
 registers every NIC it can enumerate but normally drives only one or two, and
-each read costs an `ethtool -S` subprocess, so devices the rank never connects
-over are not read at all and report `-1`. The periodic `hw_samples` time series
-is produced only when `RCCL_TELEMETRY_SAMPLE_MS > 0`, and even then it reads only
-IB sysfs files. The data path itself never reads sysfs or spawns a subprocess.
+each read is a direct `ioctl(SIOCETHTOOL)` (using `<linux/ethtool.h>` and
+`<net/if.h>`, no shell) plus a few IB sysfs reads, so devices the rank never
+connects over are not read at all and report `-1`. The periodic `hw_samples`
+time series is produced only when `RCCL_TELEMETRY_SAMPLE_MS > 0`, and even then
+it reads only IB sysfs files. The data path itself never reads sysfs or the NIC
+counters.
 
 ## Known limitations
 

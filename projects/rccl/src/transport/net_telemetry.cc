@@ -209,7 +209,7 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
  * set of congestion-relevant IB-sysfs counters plus the atomic SW byte
  * counters at a fixed interval. Only cheap file reads + atomic loads are
- * done (no ethtool/popen), so the hot path is undisturbed. The absolute
+ * done (no ethtool ioctl), so the hot path is undisturbed. The absolute
  * per-sample values are emitted as a "hw_samples" time series; rates are
  * computed offline by the trace merger. */
 
@@ -442,7 +442,7 @@ RCCL_TEL_HW_CONFIG(rcclHwConfigAinic, rcclHwcAinic, "ainic",
 /* ------------------------------------------------------------------ */
 /* RoCE counters exposed under                                         */
 /*   /sys/class/infiniband/<dev>/ports/<p>/hw_counters/                */
-/* PFC per-priority pause frames/duration come from `ethtool -S`.      */
+/* PFC per-priority pause frames/duration come from ethtool NIC stats. */
 
 static const RcclHwCounterDesc rcclHwcMlx5[] = {
   /* --- Canonical cross-driver counters (shared json_name, mlx5 sysfs key) --- */
@@ -497,7 +497,7 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
 };
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigMlx5, rcclHwcMlx5, "mlx5",
-  /* PFC per-priority pause frames + pause duration, from ethtool -S. */
+  /* PFC per-priority pause frames + pause duration, from ethtool NIC stats. */
   { "rx_prio%d_pause",          "tx_prio%d_pause",
     "rx_prio%d_pause_duration", "tx_prio%d_pause_duration" },
   /* RoCE bypasses the kernel netdev stack, so ethtool tx_bytes/rx_bytes miss
@@ -564,7 +564,7 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
 };
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
-  /* Broadcom bnxt_en per-priority pause frames via ethtool -S. */
+  /* Broadcom bnxt_en per-priority pause frames via ethtool NIC stats. */
   { "rx_prio%d_pause",  "tx_prio%d_pause",
     NULL,               NULL },
   /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters. */
@@ -948,9 +948,9 @@ int rcclTelemetryFlush(void) {
   rcclTelemetrySamplerStop();
 
   /* Only devices this rank actually used have a baseline to subtract, and
-   * reading the others would cost one `ethtool -S` subprocess each to produce
-   * counters that no baseline makes meaningful. They keep the -1/N/A values
-   * installed at registration. */
+   * reading the others would cost a full ethtool stats read (ioctl) each to
+   * produce counters that no baseline makes meaningful. They keep the -1/N/A
+   * values installed at registration. */
   for (int i = 0; i < rcclTelemetryNumDevs; i++) {
     if (!__atomic_load_n(&rcclTelemetryDevs[i].snap_taken, __ATOMIC_ACQUIRE)) continue;
     rcclTelemetryCollectHwCounters(&rcclTelemetryDevs[i]);

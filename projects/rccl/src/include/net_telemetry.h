@@ -27,8 +27,11 @@ extern "C" {
  *   <output_dir>/rccl_telemetry_<hostname>_<uid>_<pid>.json
  *   (output_dir defaults to /tmp)
  *
- * Supported hardware:
+ * Supported hardware (per-driver HW counter tables):
  *   - AMD AINIC (driver: ionic)
+ *   - Mellanox/NVIDIA (driver: mlx5)
+ *   - Broadcom Thor2 (driver: bnxt_re / bnxt_en)
+ * Software counters are transport-level and driver-independent.
  */
 
 /* One slot per device the transport can enumerate, since device_id doubles as
@@ -63,8 +66,9 @@ extern "C" {
 #endif
 
 /* Worst case of the file name telemetry appends to output_dir, which is
- * "/rccl_telemetry_<hostname>_<pid>.json" (20 covers the pid digits). */
-#define RCCL_TEL_FILENAME_MAX (sizeof("/rccl_telemetry__.json") + HOST_NAME_MAX + 20)
+ * "/rccl_telemetry_<hostname>_<uid>_<pid>.json" (40 covers the uid and pid
+ * digits). */
+#define RCCL_TEL_FILENAME_MAX (sizeof("/rccl_telemetry___.json") + HOST_NAME_MAX + 40)
 
 /* Device names as sysfs exposes them: IBV_SYSFS_NAME_MAX is 64 for the RoCE
  * device, and IFNAMSIZ (16) bounds the netdev name, so one buffer covers both
@@ -422,10 +426,10 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
    *
    * The baseline is taken on first use of the device (the first channel setup
    * on it) rather than at registration: a rank registers every NIC it can see
-   * but normally drives only one or two, and each baseline costs an
-   * `ethtool -S` subprocess. Flush skips devices that never got a baseline, so
-   * their hw_counters stay at the -1 (N/A) that registration installed instead
-   * of being reported as bogus absolute values. */
+   * but normally drives only one or two, and each baseline costs a full ethtool
+   * stats read (ioctl) plus IB-sysfs reads. Flush skips devices that never got a
+   * baseline, so their hw_counters stay at the -1 (N/A) that registration
+   * installed instead of being reported as bogus absolute values. */
   int snap_taken;
 
   /* Baselines for hw_counters[]/pfc_*[] — captured on first use of the device,
