@@ -308,11 +308,8 @@ def test_pc_sampling_analyze_csv_output(
         assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
         assert set(csv_pc_sampling["pid"]) == {698961}
-        percent_columns = [
-            "wave_occupancy_percent",
-            "active_thread_percent",
-        ]
-        assert csv_pc_sampling[percent_columns].notna().all().all()
+        assert csv_pc_sampling["wave_occupancy_percent"].notna().all()
+        assert csv_pc_sampling["active_thread_percent"].notna().all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {
@@ -322,21 +319,21 @@ def test_pc_sampling_analyze_csv_output(
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
 
-        isa_percent_columns = [
-            "Wave occupancy percent",
-            "Active thread percent",
-        ]
         isa_csv_paths = sorted((csv_dir / "per_kernel_pc_sampling").rglob("*.csv"))
         assert isa_csv_paths
         has_populated_sample_metrics = False
         for isa_csv_path in isa_csv_paths:
             isa_rows = pd.read_csv(isa_csv_path)
-            if not set(isa_percent_columns) <= set(isa_rows.columns):
+            if "Wave occupancy percent" not in isa_rows.columns:
+                continue
+            if "Active thread percent" not in isa_rows.columns:
                 continue
             sampled_isa_rows = isa_rows.loc[isa_rows["Total count"].notna()]
+            if sampled_isa_rows.empty:
+                continue
             if (
-                not sampled_isa_rows.empty
-                and sampled_isa_rows[isa_percent_columns].notna().all().all()
+                sampled_isa_rows["Wave occupancy percent"].notna().all()
+                and sampled_isa_rows["Active thread percent"].notna().all()
             ):
                 has_populated_sample_metrics = True
                 break
