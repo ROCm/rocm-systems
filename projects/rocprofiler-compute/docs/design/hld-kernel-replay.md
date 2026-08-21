@@ -8,12 +8,9 @@
 counters into groups small enough to fit a single hardware pass. However many groups fall out of
 that packing is how many counter-collection passes the run needs.
 
-The profiling layer can drive either `rocprofv3` or `rocprofiler-sdk`. On the `rocprofiler-sdk`
-path, `rocprof-compute` can also preload its own **native collector**, which takes over counter
-collection and leaves the SDK tool library handling tracing. So the native collector is a sub-mode
-of the `rocprofiler-sdk` configuration, not a third backend. It is unavailable in three cases: the
-user opted out of it, the backend is `rocprofv3`, or the installed ROCm predates the version that
-supports it.
+`rocprof-compute` can preload its own **native collector**, which takes over counter collection
+while tracing runs in a separate context. The native collector is unavailable in two cases: the
+user declined it, or the installed ROCm predates the version that supports it.
 
 Every configuration consumes the same buckets. Application replay works across all of them.
 Iteration multiplexing already depends on the native collector and hard-errors without it.
@@ -31,9 +28,10 @@ without borrowing counters from neighbouring dispatches.
 
 Counter collection never runs on its own. Every counter invocation has to produce kernel-dispatch
 records, because those records carry the kernel counts and durations. Under native collection the
-work is split: the native collector owns counters, while the SDK tool library does kernel dispatch
-tracing and adds marker or ROCTx tracing for a framework-selected run. That split matters here — the
-trace records come from a context the native collector can control but does not itself emit.
+work is split: the native collector owns counters, while kernel dispatch tracing and marker or
+ROCTx tracing for a framework-selected run happen in a separate tracing context. That split matters
+here — the trace records come from a context the native collector can control but does not itself
+emit.
 
 The native collector also subscribes to code-object tracing, but those events describe load-time
 objects rather than individual dispatches, so kernel replay does not multiply them. PC sampling runs
@@ -179,10 +177,10 @@ flowchart LR
 - For *N* counter buckets, kernel-replay mode shall use one workload invocation for counter
   collection and collect one bucket in each of *N* passes for every replay-eligible dispatch. No
   user-supplied pass count shall be required.
-- Kernel replay shall require the native collector. When the selected configuration cannot supply
-  it — because the native collector was declined, because the backend is `rocprofv3`, or because the
-  installed ROCm does not support it — kernel replay shall produce a hard error naming the unmet
-  condition, before any workload runs.
+- Kernel replay shall require the native collector. The `rocprofv3` backend and `--no-native-tool`
+  are unsupported configurations. When the selected configuration cannot supply the native
+  collector — because it was declined, or because the installed ROCm does not support it — kernel
+  replay shall produce a hard error naming the unmet condition, before any workload runs.
 - Kernel replay shall preserve the counter bucket membership used by application replay. The pass
   count shall equal the bucket count, every bucket shall fit one hardware pass, and `_ACCUM`
   pairing, TCC grouping, and same-bucket priority shall remain unchanged.
@@ -361,9 +359,9 @@ knowable at the same moment. So rejection happens in two places:
 - **Flag conflict**, decidable from the arguments alone: kernel replay selected while the native
   collector is declined. Rejected immediately, before any discovery and before the workload directory
   is created.
-- **Capability failure**, decidable only once discovery has resolved the backend, the ROCm version,
-  and the native library: a `rocprofv3` backend, an unsupported ROCm version, or a library that
-  cannot be resolved. Rejected later, but still before the workload runs.
+- **Capability failure**, decidable only once discovery has resolved the ROCm version and the
+  native library: an unsupported ROCm version, or a library that cannot be resolved. Rejected
+  later, but still before the workload runs.
 
 Both are hard errors. The split is not incidental — a reader needs to know that a capability failure
 leaves a workload directory behind, whereas a flag conflict leaves nothing.
@@ -387,7 +385,7 @@ none quietly turns a multi-bucket request into a single pass.
 | Condition | Required behavior |
 | --- | --- |
 | Native collector declined while kernel replay is selected | Hard error from the argument combination alone, before discovery. |
-| Native collector unavailable: `rocprofv3` backend, unsupported ROCm version, or unresolvable library | Hard error after discovery, naming which of the three conditions failed. |
+| Native collector unavailable: unsupported ROCm version or unresolvable library | Hard error after discovery, naming which of the two conditions failed. |
 | SDK below the supported version floor | Hard error stating the required version. This is distinct from the ROCm version the native collector needs, so the diagnostic has to say which one is unmet. The numeric floor is pending upstream merge. |
 | Iteration multiplexing, live attach, or PC sampling selected with kernel replay | Hard error before profiling starts. |
 | Missing or empty per-agent profile vector | Diagnose the agent/profile mismatch and reject the profile; never return one as a fallback. |
@@ -458,8 +456,8 @@ normalization, and the analysis boundary that should not have moved.
   multiplexing, live attach, PC sampling, roofline selection, the multi-rank warning, and the
   default-off behavior.
 - **Configuration rejection.** Cover each unmet native-collector condition on its own — declined
-  native collector, `rocprofv3` backend, unsupported ROCm version, unresolvable library. Each must
-  fail before profiling starts, with a diagnostic naming that specific condition.
+  native collector, unsupported ROCm version, unresolvable library. Each must fail before profiling
+  starts, with a diagnostic naming that specific condition.
 - **Failure paths.** Cover an unsupported SDK, a missing profile vector, a declined snapshot, and an
   upstream abort. Each case has to prove no one-pass fallback happened.
 
@@ -481,9 +479,9 @@ plainly that partial results are unusable. A snapshot-decline diagnostic additio
 application replay.
 
 A configuration diagnostic has to name the specific unmet condition instead of reporting that the
-native collector is unavailable. One message covering a `rocprofv3` backend, an unsupported ROCm
-version, and an unresolvable library leaves the user with no action to take, because the remedy is
-different in each case.
+native collector is unavailable. One message covering both an unsupported ROCm version and an
+unresolvable library leaves the user with no action to take, because the remedy is different in
+each case.
 
 ## Open questions
 
@@ -492,10 +490,5 @@ different in each case.
 - **Marker and ROCTx semantics.** Host regions are emitted once but span every replay pass, so their
    durations include replay overhead and are not comparable with a non-replay run. Reject the
    combination, or correct the duration?
-- **Extending kernel replay beyond the native collector.** `rocprofv3` and `rocprofiler-sdk` without
-   the native collector run the SDK's own tool library, which `rocprof-compute` cannot instrument.
-   Neither the pass-0 trace stop nor the filter decision at `pass_count_cb` has an equivalent there,
-   and filter resolution happens inside that library. Whether support would need upstream changes or
-   post-run reconstruction is unresolved.
 - **Cache-related counter validity.** Can cache-related metrics be trusted at all, given that cache
    state is not restored between replay passes?
