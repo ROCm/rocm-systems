@@ -25,6 +25,8 @@ import pandas as pd
 import pytest
 import torch
 
+from torch_trace_kernel_names import normalize_kernel_name, normalize_kernel_names
+
 
 class CoverageTensorArg(NamedTuple):
     """Tensor slot with a specific factory for structurally-constrained inputs."""
@@ -3791,22 +3793,6 @@ def multiline_coverage_failure_warning(
     if rest > 0:
         lines.append(f"… and {rest} more (see pytest -s for full list).")
     return "\n".join(lines)
-
-
-# torch.profiler reports AMD kernel names with trailing descriptor suffixes,
-# either bracketed ("[clone .kd]") or bare (".kd"); rocprof-compute reports the
-# plain symbol. A name can carry more than one, so the group repeats.
-_KERNEL_CLONE_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
-
-
-def normalize_kernel_name(name: str) -> str:
-    """Remove the trailing kernel-descriptor suffixes from a kernel name."""
-    return _KERNEL_CLONE_SUFFIX_RE.sub("", name).strip()
-
-
-def normalize_kernel_names(names: Set[str]) -> Set[str]:
-    """Normalize every kernel name in a set."""
-    return {normalize_kernel_name(name) for name in names}
 
 
 def compare_single_op(
