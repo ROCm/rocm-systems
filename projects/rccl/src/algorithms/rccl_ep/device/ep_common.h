@@ -11,14 +11,14 @@
 #ifndef RCCL_EP_COMMON_H_
 #define RCCL_EP_COMMON_H_
 
-#include <hip/hip_runtime.h>
-#include <hip/hip_bf16.h>
-#include <hip/hip_fp8.h>
 #include <cstdint>
 
-#include "device/hip_prims.h"
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp8.h>
+#include <hip/hip_runtime.h>
 #include <nccl_device.h>
 
+#include "device/hip_prims.h"
 #include "include/ep_layout.h"
 
 namespace rccl_ep {

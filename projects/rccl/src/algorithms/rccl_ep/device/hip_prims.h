@@ -11,8 +11,9 @@
 #ifndef RCCL_EP_HIP_PRIMS_H_
 #define RCCL_EP_HIP_PRIMS_H_
 
-#include <hip/hip_runtime.h>
 #include <cstdint>
+
+#include <hip/hip_runtime.h>
 
 namespace rccl_ep {
 

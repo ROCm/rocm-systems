@@ -105,12 +105,13 @@ __global__ void combine_impl(EpConfig cfg,
           dst[h] = __float2bfloat16(acc);
         }
       }
-      if (in_w)
+      if (in_w) {
         for (int k = 0; k < K; ++k) {
           if (recv_topk[(size_t)i * K + k] < 0) continue;
           const int row = row_map[(size_t)i * K + k];
           if (row >= 0 && lane == 0) w.cw()[slot * K + k] = in_w[row];
         }
+      }
     } else if (grouped) {
       // Grouped mode sends ONE row per token, so index by slot rather than by
       // (slot, k). The expanded layout is K times larger, and scattering single
@@ -120,8 +121,9 @@ __global__ void combine_impl(EpConfig cfg,
       // The origin needs its own top-k weights back; every rank that received
       // this token holds an identical copy of the full row, so whichever
       // arrives last wins and the result is the same either way.
-      if (in_w)
+      if (in_w) {
         for (int k = lane; k < K; k += kWarpSize) w.cw()[slot * K + k] = in_w[(size_t)i * K + k];
+      }
     } else {
       for (int k = 0; k < K; ++k) {
         if (recv_topk[(size_t)i * K + k] < 0) continue;  // not ours

@@ -12,8 +12,8 @@
 #ifndef RCCL_EP_LAYOUT_H_
 #define RCCL_EP_LAYOUT_H_
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace rccl_ep {
 

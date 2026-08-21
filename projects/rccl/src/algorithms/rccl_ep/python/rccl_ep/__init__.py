@@ -44,24 +44,27 @@ def _lib():
         lib = ctypes.CDLL(path, mode=ctypes.RTLD_LOCAL)
         P, I = ctypes.c_size_t, ctypes.c_int
         lib.ep_create.restype = ctypes.c_void_p
-        lib.ep_create.argtypes = [I, I, ctypes.c_char_p, I, I, I]
+        # The unique id is an opaque binary blob, not a string: raw pointers
+        # rather than c_char_p, which is for NUL-terminated data.
+        lib.ep_create.argtypes = [I, I, ctypes.c_void_p, I, I, I]
         lib.ep_configure.argtypes = [ctypes.c_void_p, I, I]
         lib.ep_window_bytes.restype = ctypes.c_size_t
         lib.ep_window_bytes.argtypes = [ctypes.c_void_p]
         lib.ep_destroy.argtypes = [ctypes.c_void_p]
-        lib.ep_barrier.argtypes = [ctypes.c_void_p]
-        lib.ep_plan.argtypes = [ctypes.c_void_p, P, I, P, P, P]
+        # Every data-path entry takes the caller's stream as a trailing argument.
+        lib.ep_barrier.argtypes = [ctypes.c_void_p, P]
+        lib.ep_plan.argtypes = [ctypes.c_void_p, P, I, P, P, P, P]
         lib.ep_dispatch.restype = I
-        lib.ep_dispatch.argtypes = [ctypes.c_void_p, P, P, P, P, I, P, P, I, I, P, P, P, P, P]
-        lib.ep_recv_counts.argtypes = [ctypes.c_void_p, P]
-        lib.ep_expert_counts.argtypes = [ctypes.c_void_p, P, I, P]
+        lib.ep_dispatch.argtypes = [ctypes.c_void_p, P, P, P, P, I, P, P, I, I, P, P, P, P, P, P]
+        lib.ep_recv_counts.argtypes = [ctypes.c_void_p, P, P]
+        lib.ep_expert_counts.argtypes = [ctypes.c_void_p, P, I, P, P]
         lib.ep_expand_build.restype = I
-        lib.ep_expand_build.argtypes = [ctypes.c_void_p, P, I, I, P, P, P, P, P]
+        lib.ep_expand_build.argtypes = [ctypes.c_void_p, P, I, I, P, P, P, P, P, P]
         lib.ep_expand_scatter.argtypes = [ctypes.c_void_p, I, P, P, P, P, I, P, P,
-                                          I, I, P, I, I, P, P, I]
+                                          I, I, P, I, I, P, P, I, P]
         lib.ep_combine.restype = I
-        lib.ep_combine.argtypes = [ctypes.c_void_p, P, P, P, P, P, I, P, I, P, P, I, P, P, I]
-        lib.ep_get_unique_id.argtypes = [ctypes.c_char_p]
+        lib.ep_combine.argtypes = [ctypes.c_void_p, P, P, P, P, P, I, P, I, P, P, I, P, P, I, P]
+        lib.ep_get_unique_id.argtypes = [ctypes.c_void_p]
         lib.ep_unique_id_size.restype = I
         _LIB = lib
     return _LIB
@@ -188,8 +191,10 @@ class ElasticBuffer:
         lib = _lib()
         n = lib.ep_unique_id_size()
         buf = ctypes.create_string_buffer(n)
-        if self.rank_idx == 0:
-            lib.ep_get_unique_id(buf)
+        # Unchecked, a failure here broadcasts the zero-filled buffer and every
+        # rank hangs inside ncclCommInitRank on an id that is not one.
+        if self.rank_idx == 0 and lib.ep_get_unique_id(buf) != 0:
+            raise RuntimeError("ep_get_unique_id failed")
         # The bootstrap group may be gloo (CPU-only) or nccl (GPU-only), and
         # neither accepts the other's tensors, so follow the backend.
         t = torch.frombuffer(bytearray(buf.raw), dtype=torch.uint8).clone()
@@ -227,7 +232,7 @@ class ElasticBuffer:
         return EventOverlap(ev)
 
     def barrier(self):
-        _lib().ep_barrier(self._h)
+        _lib().ep_barrier(self._h, torch.cuda.current_stream().cuda_stream)
 
     def destroy(self):
         if getattr(self, "_h", None):
@@ -289,11 +294,32 @@ class ElasticBuffer:
         x, x_sf = x if use_fp8 else (x, None)
         cached = handle is not None
 
+        # `async_with_compute_stream` and `allocate_on_comm_stream` are accepted
+        # for API compatibility and ignored: the data path is synchronous on the
+        # caller's stream rather than overlapped on a private comm stream.
+        if previous_event is not None:
+            previous_event.current_stream_wait()
+        stream = torch.cuda.current_stream().cuda_stream
+
         if cached:
             topk_idx = handle.topk_idx if topk_idx is None else topk_idx
             num_experts = self.num_experts
-            expert_alignment = kwargs.get("expert_alignment", handle.expert_alignment)
+            # A cached call replays the handle's plan verbatim, so the alignment
+            # it was built with is the only one that keeps the replay exact.
+            expert_alignment = handle.expert_alignment
+        if num_experts is None:
+            num_experts = self.num_experts
+            if num_experts is None:
+                raise ValueError(
+                    "num_experts must be passed to dispatch() or to the "
+                    "ElasticBuffer constructor")
+
         num_tokens = x.shape[0]
+        if num_tokens > self.num_max_tokens_per_rank:
+            raise ValueError(
+                f"num_tokens {num_tokens} exceeds num_max_tokens_per_rank "
+                f"{self.num_max_tokens_per_rank}")
+
         num_topk = topk_idx.shape[1]
         self._configure(num_experts, num_topk)
 
@@ -320,8 +346,9 @@ class ElasticBuffer:
             # Dense slot -> token map, so the send kernel skips no iterations.
             send_list = torch.empty((self.num_ranks, num_tokens), dtype=torch.int32, device=x.device)
             sendc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
-            lib.ep_plan(self._h, ti32.data_ptr(), num_tokens, slot.data_ptr(),
-                        send_list.data_ptr(), sendc.data_ptr())
+            if lib.ep_plan(self._h, ti32.data_ptr(), num_tokens, slot.data_ptr(),
+                           send_list.data_ptr(), sendc.data_ptr(), stream) != 0:
+                raise RuntimeError("ep_plan failed")
             h.slot, h.sendc, h.send_list = slot, sendc, send_list
 
         cap = self.num_ranks * self.num_max_tokens_per_rank
@@ -338,7 +365,7 @@ class ElasticBuffer:
                             num_tokens, send_list.data_ptr(), sendc.data_ptr(),
                             1 if use_fp8 else 0, num_sms,
                             rx.data_ptr(), _ptr(rsf), rtk.data_ptr(), rtw.data_ptr(),
-                            rsrc.data_ptr())
+                            rsrc.data_ptr(), stream)
         if n < 0:
             raise RuntimeError("ep_dispatch failed")
 
@@ -348,7 +375,7 @@ class ElasticBuffer:
 
         # Per-source-rank prefix sum.
         rc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
-        lib.ep_recv_counts(self._h, rc.data_ptr())
+        lib.ep_recv_counts(self._h, rc.data_ptr(), stream)
         h.psum_num_recv_tokens_per_scaleup_rank = torch.cumsum(rc, 0).to(torch.int32)
         h.dst_buffer_slot_idx = slot
 
@@ -356,7 +383,7 @@ class ElasticBuffer:
         counts = torch.zeros((epr,), dtype=torch.int32, device=x.device)
 
         if not do_expand:
-            lib.ep_expert_counts(self._h, rtk.data_ptr(), n, counts.data_ptr())
+            lib.ep_expert_counts(self._h, rtk.data_ptr(), n, counts.data_ptr(), stream)
             h.expanded = False
             self._expert_metadata(h, counts, expert_alignment)
             # recv_src_metadata: column 0 is src_token_global_idx (the only
@@ -379,7 +406,7 @@ class ElasticBuffer:
         row_map = torch.empty((n, num_topk), dtype=torch.int32, device=x.device)
         rows = lib.ep_expand_build(self._h, rtk.data_ptr(), n, expert_alignment,
                                    counts.data_ptr(), offsets.data_ptr(), psum.data_ptr(),
-                                   hist.data_ptr(), row_map.data_ptr())
+                                   hist.data_ptr(), row_map.data_ptr(), stream)
         if rows < 0:
             raise RuntimeError("ep_expand_build failed")
 
@@ -404,7 +431,7 @@ class ElasticBuffer:
                               row_map.data_ptr(), n,
                               ex.data_ptr(), _ptr(esf), sf_rs, sf_cs, ew.data_ptr(),
                               1 if do_zero_padding else 0, expert_alignment,
-                              counts.data_ptr(), offsets.data_ptr(), num_sms)
+                              counts.data_ptr(), offsets.data_ptr(), num_sms, stream)
 
         h.expanded = True
         h.row_map, h.expert_offsets, h.num_expanded_rows = row_map, offsets, rows
@@ -424,8 +451,13 @@ class ElasticBuffer:
     def combine(self, x, handle, topk_weights=None, bias=None,
                 num_sms=0, num_qps=0, async_with_compute_stream=0,
                 allocate_on_comm_stream=0, previous_event=None, **kwargs):
-        assert handle is not None, "combine requires the handle returned by dispatch"
+        if handle is None:
+            raise ValueError("combine requires the handle returned by dispatch")
         lib = _lib()
+        # See dispatch(): the comm-stream arguments are accepted and ignored.
+        if previous_event is not None:
+            previous_event.current_stream_wait()
+        stream = torch.cuda.current_stream().cuda_stream
         num_tokens = handle.num_tokens
         x = x.contiguous()
         b0, b1 = (bias, None)
@@ -450,7 +482,7 @@ class ElasticBuffer:
                             handle.num_recv,
                             handle.topk_idx_i32.data_ptr(), num_tokens,
                             _ptr(b0), _ptr(b1), grouped,
-                            out.data_ptr(), _ptr(out_w), num_sms)
+                            out.data_ptr(), _ptr(out_w), num_sms, stream)
         if rc != 0:
             raise RuntimeError("ep_combine failed")
         return out, out_w, EventOverlap()
