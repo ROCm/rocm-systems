@@ -389,7 +389,7 @@ typedef enum {
   AMDSMI_STATUS_NO_SLOT = 33,            //!< No more free slot
   AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,  //!< Processor driver not loaded
   // Data and size errors
-  AMDSMI_STATUS_MORE_DATA = 39,  //!< There is more data than the buffer size the user passed
+  AMDSMI_STATUS_MORE_DATA = 39,  //!< More data is available than fits in the caller-supplied buffer
   AMDSMI_STATUS_NO_DATA = 40,    //!< No data was found for a given input
   AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,  //!< Not enough resources were available for the operation
   AMDSMI_STATUS_UNEXPECTED_SIZE = 42,    //!< An unexpected amount of data was read
@@ -6222,10 +6222,12 @@ amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_hand
  *
  *  @param[in] status The error status for which a description is desired
  *
- *  @param[in,out] status_string A pointer to a const char * which will be made
- *  to point to a description of the provided error code
+ *  @param[out] status_string A pointer to a const char * which will be made
+ *  to point to a description of the provided error code.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *  ::AMDSMI_STATUS_INVAL if @p status_string is null,
+ *  ::AMDSMI_STATUS_UNKNOWN_ERROR if @p status is not a recognized status code
  */
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string);
 

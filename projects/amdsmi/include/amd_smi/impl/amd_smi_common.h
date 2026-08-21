@@ -42,7 +42,7 @@ extern "C" {
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
-const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
+inline const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
     {RSMI_STATUS_INVALID_ARGS, AMDSMI_STATUS_INVAL},
     {RSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
@@ -70,7 +70,7 @@ const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
 };
 
-const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
+inline const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
     {0, AMDSMI_VRAM_TYPE_UNKNOWN}, {1, AMDSMI_VRAM_TYPE_GDDR1},  {2, AMDSMI_VRAM_TYPE_DDR2},
     {3, AMDSMI_VRAM_TYPE_GDDR3},   {4, AMDSMI_VRAM_TYPE_GDDR4},  {5, AMDSMI_VRAM_TYPE_GDDR5},
     {6, AMDSMI_VRAM_TYPE_HBM},     {7, AMDSMI_VRAM_TYPE_DDR3},   {8, AMDSMI_VRAM_TYPE_DDR4},
@@ -78,13 +78,22 @@ const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
     {12, AMDSMI_VRAM_TYPE_LPDDR5}, {13, AMDSMI_VRAM_TYPE_HBM3E},
 };
 
-amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
+inline amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
+  amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+
+  auto search = rsmi_status_map.find(status);
+  if (search != rsmi_status_map.end()) {
+    amdsmi_status = search->second;
+  }
+
+  return amdsmi_status;
+}
 
 amdsmi_vram_type_t vram_type_value(unsigned type);
 
 #ifdef ENABLE_ESMI_LIB
 // Define a map of esmi status codes to amdsmi status codes
-const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
+inline const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
     {ESMI_SUCCESS, AMDSMI_STATUS_SUCCESS},
     {ESMI_INITIALIZED, AMDSMI_STATUS_SUCCESS},
     {ESMI_INVALID_INPUT, AMDSMI_STATUS_INVAL},
@@ -113,7 +122,7 @@ amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
 #endif
 
 // Define a map of smi nic status codes to amdsmi status codes
-const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
+inline const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
     {SMI_NIC_STATUS_ERROR, AMDSMI_STATUS_API_FAILED},
     {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},

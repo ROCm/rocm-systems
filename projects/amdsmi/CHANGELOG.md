@@ -262,6 +262,10 @@ GPU: 0
 - **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
   - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
 
+- **Fixed `amdsmi_status_code_to_string()` returning `AMDSMI_STATUS_UNKNOWN_ERROR` for valid status codes**.  
+  - Added the missing `case` entries for `AMDSMI_STATUS_TIMEOUT` and `AMDSMI_STATUS_MORE_DATA`, which previously fell through to the unknown-error description.
+  - Calling with a null `status_string` now returns `AMDSMI_STATUS_INVAL` instead of dereferencing the null pointer.
+
 - **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
   - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
   - `amdsmi_get_gpu_vram_info()` now reads the VRAM vendor from sysfs first and treats the DRM ioctl (VRAM type/bit width/bandwidth) as best effort, so the vendor is still returned when the DRM path is unavailable.
