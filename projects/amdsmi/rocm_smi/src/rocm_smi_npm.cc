@@ -1,9 +1,6 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
- * See LICENSE file for full license text.
- */
-
 #include "rocm_smi/rocm_smi_npm.h"
 
 #include <cerrno>
