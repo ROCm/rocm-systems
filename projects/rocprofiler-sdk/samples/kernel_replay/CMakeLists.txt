@@ -29,9 +29,10 @@ set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
+rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 
 function(add_kernel_replay_sample NAME CLIENT_SRC)
-    cmake_parse_arguments(arg "PC_SAMPLING" "" "" ${ARGN})
+    cmake_parse_arguments(arg "PC_SAMPLING;SPM" "" "ENVIRONMENT" ${ARGN})
 
     add_library(${NAME}-client SHARED)
     target_sources(${NAME}-client PRIVATE ${CLIENT_SRC} client.hpp)
@@ -46,15 +47,21 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                                           rocprofiler-sdk::samples-build-flags)
 
     rocprofiler_samples_get_preload_env(PRELOAD_ENV ${NAME}-client)
-    set(_env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
+    set(_env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV} ${arg_ENVIRONMENT})
     if(arg_PC_SAMPLING)
         list(APPEND _env "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON")
+    endif()
+    if(arg_SPM)
+        list(APPEND _env "ROCPROFILER_SPM_BETA_ENABLED=True")
     endif()
 
     add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${NAME}>)
     set(_disabled "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
     if(arg_PC_SAMPLING)
         set(_disabled "${IS_PC_SAMPLING_DISABLED}")
+    endif()
+    if(arg_SPM AND IS_SPM_DISABLED)
+        set(_disabled ON)
     endif()
     set_tests_properties(
         ${NAME}
@@ -67,7 +74,7 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                    FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                    SKIP_REGULAR_EXPRESSION
-                   "PC sampling unavailable"
+                   "PC sampling unavailable|SPM unavailable|ATT unavailable"
                    DISABLED
                    "${_disabled}")
 endfunction()
@@ -76,4 +83,10 @@ add_kernel_replay_sample(kernel-replay-basic basic_client.cpp)
 add_kernel_replay_sample(kernel-replay-counters counters_client.cpp)
 add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
+add_kernel_replay_sample(
+    kernel-replay-services-first service_sequence_client.cpp PC_SAMPLING SPM
+    ENVIRONMENT "KR_SERVICE_ORDER=services-first")
+add_kernel_replay_sample(
+    kernel-replay-services-last service_sequence_client.cpp PC_SAMPLING SPM
+    ENVIRONMENT "KR_SERVICE_ORDER=services-last")
 add_kernel_replay_sample(kernel-replay-opt-out opt_out_client.cpp)

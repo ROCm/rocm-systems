@@ -140,7 +140,8 @@ In-tree examples
 ================
 
 * ``samples/kernel_replay/`` — user-facing tools: basic replay, per-pass counter groups, counters
-  then PC sampling, per-dispatch opt-out.
+  then PC sampling, PC sampling/ATT/SPM sequenced before or after counter passes, and per-dispatch
+  opt-out. Incompatible services occupy separate passes.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
   out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
 * ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts
