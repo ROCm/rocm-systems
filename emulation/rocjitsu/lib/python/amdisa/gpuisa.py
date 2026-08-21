@@ -243,6 +243,8 @@ class Instruction(InstBase):
             classes. ``None`` means encoding provenance is unknown; modifier
             generation rejects that state, so synthetic VOP instructions must
             provide an explicit set.
+        source_addition: Additions provenance for a repository-supplied instruction,
+            or ``None`` when the instruction came from the base MR ISA XML.
     """
 
     def __init__(
@@ -253,12 +255,14 @@ class Instruction(InstBase):
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
         available_encodings: frozenset[str] | None = None,
+        source_addition: IsaAdditionProvenance | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
         self.available_encodings = available_encodings
+        self.source_addition = source_addition
 
     @cached_property
     def fmt_name(self) -> str:
@@ -332,6 +336,14 @@ class DecodeTableEntry:
     decode_func: str | None = None
 
 
+@dataclass(frozen=True)
+class IsaAdditionProvenance:
+    """Identity and source path for one applied ISA additions document."""
+
+    identifier: str
+    path: str
+
+
 class IsaSpec:
     """Internal representation of a machine-readable ISA spec.
 
@@ -357,6 +369,8 @@ class IsaSpec:
             encoding conditions indicate an implied literal DWORD.
             Populated during parsing using the profile's
             ``is_implied_literal_encoding()`` method.
+        applied_additions: Ordered provenance for ISA additions documents
+            merged into this specification.
     """
 
     def __init__(
@@ -380,6 +394,7 @@ class IsaSpec:
             2, profile.max_enc_bits
         )
         self.alt_encs_with_implied_literal: set[str] = set()
+        self.applied_additions: tuple[IsaAdditionProvenance, ...] = ()
         # Every fieldless operand type observed while parsing this spec.
         # Consumed by fieldless_policy.validate_fieldless_taxonomy.
         self.fieldless_operand_types: set[str] = set()

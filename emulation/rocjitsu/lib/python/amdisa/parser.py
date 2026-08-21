@@ -33,9 +33,9 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
    by checking instruction semantics that require the old value.
 """
 
+from collections.abc import Sequence
 import re
 import xml.etree.ElementTree as elem_tree
-
 
 from amdisa import xml_schema as xs
 from amdisa.gpuisa import (
@@ -48,6 +48,12 @@ from amdisa.gpuisa import (
     OperandNamePattern,
     OperandSelector,
     synthesize_fieldless_name,
+)
+from amdisa.isa_additions import (
+    ADDITION_SOURCE_ATTR,
+    IsaAdditionError,
+    apply_isa_additions,
+    parse_encoding_identifier_mask as _parse_enc_id_masks,
 )
 from amdisa.fieldless_policy import validate_fieldless_taxonomy
 from amdisa.isa_profile import IsaProfile
@@ -91,50 +97,6 @@ def _fill_padding_gaps(
             pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
         pads.append(MicrocodeField(pad_name, pad_bit_cnt, next_bit_off))
     return pads
-
-
-def _parse_enc_id_masks(
-    enc_id_mask: str,
-    max_enc_bits: int,
-    enc_field_bit_cnt: int,
-    op_field_bit_cnt: int,
-) -> tuple[tuple[int, int], tuple[int, int], int]:
-    """Parse an encoding identifier mask into (flat_enc_mask, op_mask, dont_care_bits).
-
-    The encoding identifier mask is a binary string where '1' bits mark the
-    encoding field and '0' bits separate encoding from opcode. This function
-    derives the slice positions for the encoding field and opcode field, plus
-    the number of don't-care bits available in the primary decode table index.
-
-    Args:
-        enc_id_mask: Binary string identifier mask (e.g. '111111111000000000000000').
-        max_enc_bits: Maximum bits for the primary decode table index.
-        enc_field_bit_cnt: Bit width of the encoding identifier field.
-        op_field_bit_cnt: Bit width of the opcode field.
-
-    Returns:
-        Tuple of (flat_enc_mask, op_mask, dont_care_bits) where each mask is
-        a (start, end) slice pair into the identifier string.
-    """
-    bit_masks = [(x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)]
-    flat_enc_mask = bit_masks[0]
-    if len(bit_masks) == 1:
-        op_mask = (
-            bit_masks[0][0] + enc_field_bit_cnt,
-            bit_masks[0][0] + enc_field_bit_cnt + op_field_bit_cnt,
-        )
-        if (flat_enc_mask[1] - flat_enc_mask[0]) > max_enc_bits:
-            flat_enc_mask = (
-                flat_enc_mask[0],
-                flat_enc_mask[0] + max_enc_bits,
-            )
-    else:
-        op_mask = (
-            bit_masks[1][0],
-            bit_masks[1][0] + op_field_bit_cnt,
-        )
-    dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
-    return flat_enc_mask, op_mask, dont_care_bits
 
 
 def _uniquify_fieldless_names(opnds: list[Operand]) -> None:
@@ -331,6 +293,8 @@ class Parser:
     Attributes:
         isa_xml: Path to XML file for the ISA specification.
         profile: ISA-specific encoding rules used during parsing.
+        addition_xmls: Ordered ISA additions XML paths to validate and merge
+            before decode-table and instruction parsing.
         tree: XML element tree obtained by parsing the XML file.
         root: Root of the XML element tree.
         isa_spec: ISA specification object.
@@ -339,7 +303,12 @@ class Parser:
         operand_types_node: Element tree node pointing to the operand types.
     """
 
-    def __init__(self, isa_xml: str, profile: IsaProfile) -> None:
+    def __init__(
+        self,
+        isa_xml: str,
+        profile: IsaProfile,
+        addition_xmls: Sequence[str] = (),
+    ) -> None:
         self.isa_xml = isa_xml
         self.profile = profile
         self.tree = elem_tree.parse(self.isa_xml)
@@ -366,6 +335,8 @@ class Parser:
             generated_dir_name,
             cpp_namespace,
         )
+        self.addition_xmls = tuple(addition_xmls)
+        self._addition_by_id = {}
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)
@@ -377,13 +348,54 @@ class Parser:
         Returns:
             Populated IsaSpec object.
         """
+        self.isa_spec.applied_additions = apply_isa_additions(
+            self.root, self.addition_xmls, self.profile
+        )
+        self._addition_by_id = {
+            addition.identifier: addition
+            for addition in self.isa_spec.applied_additions
+        }
         self.parse_encodings()
         self.parse_insts()
+        self._validate_addition_decode_reachability()
         self.parse_operand_types()
         self._inject_compat_insts()
         self._collect_fieldless_operand_types()
         validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
+
+    def _validate_addition_decode_reachability(self) -> None:
+        """Check the final decode pointers for every active added instruction form."""
+        for inst_node in self.insts_node:
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            if addition_id is None:
+                continue
+            provenance = self._addition_by_id[addition_id]
+            inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            for inst_enc_node in xs.get_node(inst_node, xs.INST_ENCODINGS):
+                enc_name = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_NAME)
+                )
+                if enc_name in self.profile.skip_encodings:
+                    continue
+                condition = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_COND)
+                )
+                if self.profile.skip_inst_encoding(enc_name, condition):
+                    continue
+                opcode = int(xs.get_node_text(xs.get_node(inst_enc_node, xs.OPCODE)))
+                pointers = self.isa_spec.encoding_map[enc_name].primary_dt_ptrs
+                if (
+                    pointers is None
+                    or opcode >= len(pointers)
+                    or pointers[opcode] == -1
+                ):
+                    raise IsaAdditionError(
+                        f'{provenance.path}: additions document {addition_id!r} '
+                        f'instruction {inst_name!r} encoding {enc_name!r} '
+                        f'opcode {opcode} is '
+                        'unreachable in the final primary decode table'
+                    )
 
     def implicit_operand_accesses(
         self, operand_type: str
@@ -1176,6 +1188,10 @@ class Parser:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
             inst_encs_node = xs.get_node(inst_node, xs.INST_ENCODINGS)
             inst_name = inst_name_node.text
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            source_addition = (
+                self._addition_by_id.get(addition_id) if addition_id else None
+            )
             available_encodings = frozenset(
                 xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
                 for inst_enc_node in inst_encs_node
@@ -1261,6 +1277,7 @@ class Parser:
                     opnds,
                     is_implied_literal,
                     available_encodings,
+                    source_addition,
                 )
 
                 # Implied-literal instructions go to the parent encoding's
