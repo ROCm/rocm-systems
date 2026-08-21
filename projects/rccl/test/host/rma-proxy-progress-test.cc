@@ -205,6 +205,9 @@ protected:
     std::deque<uint64_t> seqStore_;
     // doneSeq storage for in-progress descriptors under completion polling.
     std::deque<uint64_t> doneSeqStore_;
+    // Backing storage for group descriptors' ops arrays (deque keeps element
+    // vectors stable so ops.data() stays valid).
+    std::deque<std::vector<ncclRmaPutSignalOp>> groupOpsStore_;
 
     void SetUp() override {
         comm_ = std::make_unique<ncclComm>();
@@ -289,6 +292,41 @@ protected:
         inflight_[targetRank]++;
 
         ncclIntruQueueEnqueue(&inProgress_[peer], d.get());
+        ncclRmaProxyDesc* raw = d.get();
+        descs_.push_back(std::move(d));
+        return raw;
+    }
+
+    // Allocate a Ready pending PutSignalGroup descriptor whose ops target the
+    // ranks in `targets`, and place it at the current pending head for `peer`.
+    ncclRmaProxyDesc* PushPendingPutGroup(int peer,
+                                          std::vector<uint32_t> targets) {
+        auto d = std::make_unique<ncclRmaProxyDesc>();
+        std::memset(d.get(), 0, sizeof(ncclRmaProxyDesc));
+        d->rmaDescType = ncclRmaDescTypePutSignalGroup;
+        d->rmaDescState = ncclRmaDescStateReady;
+
+        groupOpsStore_.emplace_back(targets.size());
+        std::vector<ncclRmaPutSignalOp>& ops = groupOpsStore_.back();
+        for (size_t i = 0; i < targets.size(); i++) {
+            ops[i].targetRank = static_cast<int>(targets[i]);
+            ops[i].signal.op = 0;
+            ops[i].request = nullptr;
+        }
+        d->putSignalGroup.nOps = static_cast<int>(targets.size());
+        d->putSignalGroup.ops = ops.data();
+        d->putSignalGroup.nIssued = 0;
+        d->putSignalGroup.nCompleted = 0;
+
+        uint32_t pi = pis_[peer];
+        d->opSeq = pi;
+        seqStore_.push_back(pi);          // readyVal == opSeq -> ready
+        d->readySeq = &seqStore_.back();
+
+        uint32_t idx = pi & (ctx_->queueSize - 1);
+        circular_[static_cast<size_t>(peer) * kQueueSize + idx] = d.get();
+        pis_[peer] = pi + 1;
+
         ncclRmaProxyDesc* raw = d.get();
         descs_.push_back(std::move(d));
         return raw;
@@ -393,6 +431,19 @@ TEST_F(RmaProxyProgressTest, IssuePutSignal_NullRequestOnSuccess_ReturnsError) {
     // The defensive guard rejects it rather than counting a bogus credit.
     EXPECT_EQ(ncclRmaProxyIssuePutSignal(&rma_, ctx_.get(), &op), ncclInternalError);
     EXPECT_EQ(inflight_[target], 0u);
+}
+
+TEST_F(RmaProxyProgressTest, GroupPut_AllOpsFit_MovesToInProgressAndAdvancesCI) {
+    const int peer = 1;
+
+    // A group of ops with enough credit for all of them.
+    ncclRmaProxyDesc* desc = PushPendingPutGroup(peer, {1, 1});
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+
+    EXPECT_EQ(net_.issueCalls, 2);            // both ops issued in one pass
+    EXPECT_EQ(InProgressHead(peer), desc);    // group moved to in-progress
+    EXPECT_EQ(cis_[peer], 1u);                // consumer index advanced once
 }
 
 }  // namespace
