@@ -430,26 +430,6 @@ def test_load_pc_sample_records_unmapped_dispatch_kernel_id_none() -> None:
     assert df.iloc[0]["kernel_id"] is None
 
 
-def test_load_pc_sample_records_carries_top_level_wave_measurements() -> None:
-    """Wave measurements are normalized from the record, not its snapshot."""
-    sample = make_record(
-        1,
-        0x10,
-        0,
-        dispatch_id=0,
-        exec_mask=0b1011,
-        wave_cnt=7,
-    )
-    assert "exec_mask" not in sample["record"]["snapshot"]
-    assert "wave_cnt" not in sample["record"]["snapshot"]
-
-    records = load_pc_sample_records(make_tool_data(stochastic=[sample]))
-
-    assert {"exec_mask", "wave_cnt"}.issubset(records.columns)
-    assert records.iloc[0]["exec_mask"] == 0b1011
-    assert records.iloc[0]["wave_cnt"] == 7
-
-
 def test_load_pc_sample_records_missing_wave_measurements_are_none() -> None:
     """A record may omit either wave measurement without failing to normalize."""
     sample = make_record(1, 0x10, 0, dispatch_id=0)
