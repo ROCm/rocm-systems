@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <memory>
 #include <new>
+#include <utility>
 
 namespace {
 
@@ -29,6 +30,12 @@ using nccl_dda_detail::kDdaNranks;
 
 /** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
+
+// Single source of the launch geometry: grid/block for `count` elements of
+// `typeSize` bytes, capped by the scratch-derived block count.
+static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSize) {
+  return meta::comms::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
+}
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
@@ -53,8 +60,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
          kDdaNranks);
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  auto gridBlock = ddaAllReduceIpcGeom(count, sizeof(T));
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -131,6 +137,12 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     }
   }
   return true;
+}
+
+uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  (void)comm;
+  const auto grid = ddaAllReduceIpcGeom(count, ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

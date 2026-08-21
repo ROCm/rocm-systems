@@ -769,6 +769,82 @@ class SetValueCommands:
             return  # Skip printing when there are multiple devices
         self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    @staticmethod
+    def _check_opposing_bound(clk_tuple, lim_type, clk_type, val):
+        """Validate a clk-limit request against its opposing extremum.
+
+        A min-set is checked against ``max_clk`` and a max-set against
+        ``min_clk``. When the opposing bound is unavailable (``"N/A"``) the
+        comparison is skipped so the reachable cap stays settable. Returns an
+        error message when the request is out of range, otherwise ``None``.
+        """
+        if lim_type == "min":
+            bound = clk_tuple["max_clk"]
+            if not isinstance(bound, int):
+                logging.debug(
+                    "max clock limit for %s unavailable; skipping min<=max validation", clk_type
+                )
+                return None
+            if val > bound:
+                return f"Cannot set {clk_type} min value greater than max ({bound}MHz)"
+            return None
+
+        bound = clk_tuple["min_clk"]
+        if not isinstance(bound, int):
+            logging.debug(
+                "min clock limit for %s unavailable; skipping max>=min validation", clk_type
+            )
+            return None
+        if val < bound:
+            return f"Cannot set {clk_type} max value less than min ({bound}MHz)"
+        return None
+
+    @staticmethod
+    def _snap_clk_limit_to_dpm(gpu_handle, amdsmi_clk_type, requested_mhz, min_mhz=None):
+        """Snap a requested ``max`` clk-limit down to the nearest DPM level.
+
+        Returns the largest DPM frequency (MHz) <= ``requested_mhz`` so the cap
+        never exceeds the request, or ``None`` when no level is reachable (the
+        caller then keeps the raw request). ``min_mhz``, when an int, drops DPM
+        levels below the reported minimum so a snap never lands under the floor.
+
+        ``max``-only and ``mclk``/``fclk``-only: ``sclk`` is continuous (applied
+        exactly) and ``min`` requests are never snapped.
+        """
+        try:
+            # Assumes amdsmi_get_clk_freq reports the settable DPM table (what
+            # the driver clamps a cap to), not transient perf freqs. Holds on
+            # the targeted MI parts; revisit if a platform reports otherwise.
+            freq_info = amdsmi_interface.amdsmi_get_clk_freq(gpu_handle, amdsmi_clk_type)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("amdsmi_get_clk_freq failed for snap-to-DPM | %s", e.get_error_info())
+            return None
+        # amdsmi_get_clk_freq returns frequencies in Hz.
+        hz_list = freq_info.get("frequency")
+        if not hz_list:
+            logging.debug(
+                "no DPM frequency list for %s; leaving %dMHz request unsnapped",
+                amdsmi_clk_type,
+                requested_mhz,
+            )
+            return None
+        # Floor Hz->MHz (never round up) so the cap can't exceed the request;
+        # DPM tables are integer-MHz in practice, so this is exact there.
+        mhz_levels = sorted({int(f // 1_000_000) for f in hz_list if f > 0})
+        eligible = [m for m in mhz_levels if m <= requested_mhz]
+        if isinstance(min_mhz, int):
+            # Never snap below the reported minimum (can empty the list -> None).
+            eligible = [m for m in eligible if m >= min_mhz]
+        if not eligible:
+            logging.debug(
+                "no reachable DPM level in [%s, %d]MHz for %s; leaving unsnapped",
+                min_mhz,
+                requested_mhz,
+                amdsmi_clk_type,
+            )
+            return None
+        return eligible[-1]
+
     def set_gpu(
         self,
         args,
@@ -1608,31 +1684,47 @@ class SetValueCommands:
                     return
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
 
-                if lim_type == "min":
-                    amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MIN
-                    if isinstance(clk_tuple["max_clk"], int) and val > clk_tuple["max_clk"]:
-                        self.logger.store_output(
-                            args.gpu,
-                            "clk_limit",
-                            f"Cannot set {args.clk_limit.clk_type} min value greater than max ({clk_tuple['max_clk']}MHz)",
-                        )
-                        self.logger.print_output()
-                        self.logger.clear_multiple_devices_output()
-                        return
+                # A min-set is sanity-checked against max_clk and a max-set
+                # against min_clk. When the opposing bound is unavailable
+                # ("N/A"), that comparison is skipped so the reachable cap
+                # stays settable.
+                bound_error = self._check_opposing_bound(clk_tuple, lim_type, clk_type, val)
+                if bound_error is not None:
+                    self.logger.store_output(args.gpu, "clk_limit", bound_error)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
+                if lim_type == "min":
                     if val == clk_tuple["min_clk"]:
                         val_changed = False  # Clock limit value did not changed
                 elif lim_type == "max":
-                    amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MAX
-                    if isinstance(clk_tuple["min_clk"], int) and val < clk_tuple["min_clk"]:
-                        self.logger.store_output(
-                            args.gpu,
-                            "clk_limit",
-                            f"Cannot set {args.clk_limit.clk_type} max value less than min ({clk_tuple['min_clk']}MHz)",
+                    # Snap max down to the largest selectable DPM level for
+                    # clocks that only expose a discrete DPM table (mclk, fclk).
+                    # The driver does not clamp caps that fall between those
+                    # levels, so an unaligned request could otherwise run at the
+                    # next-higher level. sclk (GFX) supports a continuous
+                    # frequency range, so its requested value is honored as-is
+                    # and never snapped.
+                    # This is a CLI-side workaround: if the driver is later
+                    # changed to clamp discrete-DPM caps downward itself, this
+                    # snap can be removed.
+                    # Skip the DPM query when the request already equals max_clk
+                    # (an exact top level -- nothing to snap). min_clk is passed
+                    # so the snap never lands below the reported minimum.
+                    if clk_type in ("mclk", "fclk") and val != clk_tuple["max_clk"]:
+                        snapped_val = self._snap_clk_limit_to_dpm(
+                            args.gpu, amdsmi_clk_type, val, clk_tuple["min_clk"]
                         )
-                        self.logger.print_output()
-                        self.logger.clear_multiple_devices_output()
-                        return
+                        if snapped_val is not None and snapped_val != val:
+                            logging.debug(
+                                "snapping %s max from %dMHz to %dMHz "
+                                "(nearest reachable DPM level <= requested)",
+                                clk_type,
+                                val,
+                                snapped_val,
+                            )
+                            val = snapped_val
                     if val == clk_tuple["max_clk"]:
                         val_changed = False  # Clock limit value did not changed
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -1688,15 +1780,24 @@ class SetValueCommands:
                 self.logger.clear_multiple_devices_output()
                 return
 
+            # report the post-snap value so the CLI message and
+            # ``metric --clock`` MAX_CLK readback match what the driver
+            # actually enforces; annotate when a snap-down occurred.
+            requested_val = args.clk_limit.val
+            snapped_suffix = ""
+            if lim_type == "max" and val != requested_val:
+                snapped_suffix = (
+                    f" (requested {requested_val}MHz; snapped down to nearest reachable DPM level)"
+                )
             if val_changed:
                 self.logger.store_output(
                     args.gpu,
                     "clk_limit",
-                    f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz",
+                    f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {val}MHz{snapped_suffix}",
                 )
             else:
                 self.logger.store_output(
-                    args.gpu, "clk_limit", f"Clock limit is already set to {args.clk_limit.val}MHz"
+                    args.gpu, "clk_limit", f"Clock limit is already set to {val}MHz{snapped_suffix}"
                 )
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()

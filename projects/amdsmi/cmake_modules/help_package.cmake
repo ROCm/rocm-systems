@@ -65,6 +65,10 @@ function(generic_package)
         if(CXX_SUPPORTS_WTRAMPOLINES)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtrampolines" PARENT_SCOPE)
         endif()
+        check_cxx_compiler_flag("-Werror=stringop-overflow" CXX_SUPPORTS_STRINGOP_OVERFLOW)
+        if(CXX_SUPPORTS_STRINGOP_OVERFLOW)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=stringop-overflow" PARENT_SCOPE)
+        endif()
     endif()
 
     # Clang does not set the build-id

@@ -126,6 +126,12 @@ contract:
   Contract_DeviceIdentity_HipChooseDevice_NullArgs_AreRejected:
     <<: *level_0
     tags: [device_identity]
+  Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [device_identity]
   Contract_DeviceIdentity_HipDeviceCanAccessPeer_Default_SelfQueryReturnsBoolean:
     <<: *level_0
     tags: [device_identity]
@@ -1501,6 +1507,12 @@ contract:
     <<: *level_0
     tags: [device_lifecycle]
   Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected:
     <<: *level_0
     tags: [device_lifecycle]
   Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeavesDeviceUsable:

@@ -43,6 +43,10 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -71,6 +75,7 @@ get_hash_id(Tp&& _val)
     else
         return get_hash_id(*_val);
 }
+
 }  // namespace
 
 PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3* conn)
@@ -85,8 +90,13 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     auto shmem_size_hint = config.perfetto_shmem_size_hint;
     auto buffer_size_kb  = config.perfetto_buffer_size;
 
+    // The rocpd path sets perfetto_buffer_size directly through the pybind binding
+    // and never runs output_config::parse_env(), so validate here before narrowing
+    // to Perfetto's uint32_t size_kb.
+    tool::defaults::validate_perfetto_buffer_size(buffer_size_kb);
+
     auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(buffer_size_kb);
+    buffer_config->set_size_kb(static_cast<uint32_t>(buffer_size_kb));
 
     args.supports_multiple_data_source_instances = true;
     // track_event_cfg.clear_disabled_categories();
@@ -124,6 +134,15 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
 
     tracing_session->Setup(cfg);
     tracing_session->StartBlocking();
+}
+
+::perfetto::StaticString
+PerfettoSession::get_static_event_name(const std::string& value) const
+{
+    // emplace() is a no-op when the name is already cached; the returned iterator
+    // points to storage that stays valid for the whole PerfettoSession lifetime,
+    // which is what perfetto::StaticString interning requires.
+    return ::perfetto::StaticString{static_event_names.emplace(value).first->c_str()};
 }
 
 PerfettoSession::~PerfettoSession()
@@ -452,7 +471,7 @@ write_perfetto(
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
                     _category,
-                    ::perfetto::DynamicString{_name},
+                    perfetto_session.get_static_event_name(_name),
                     track,
                     itr.start,
                     ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -540,7 +559,7 @@ write_perfetto(
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_INSTANT(_category,
-                                    ::perfetto::DynamicString{_name},
+                                    perfetto_session.get_static_event_name(_name),
                                     track,
                                     itr.timestamp,
                                     ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -584,7 +603,7 @@ write_perfetto(
                 auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
                 auto dst_agent_index = agent_data.at(itr.dst_agent_abs_index).second;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                                  ::perfetto::DynamicString{itr.name},
+                                  perfetto_session.get_static_event_name(itr.name),
                                   *_track,
                                   itr.start,
                                   ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -820,7 +839,7 @@ write_perfetto(
                 auto _name =
                     (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                                  ::perfetto::DynamicString{_name},
+                                  perfetto_session.get_static_event_name(_name),
                                   *_track,
                                   current.start,
                                   ::perfetto::Flow::Global(current.stack_id ^ uuid_pid),
