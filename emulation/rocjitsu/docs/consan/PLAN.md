@@ -15,10 +15,12 @@ structure.
 **Status: the device tier is operational; residual coverage and end-to-end
 qualification work remains**
 
-The latest fetched `origin/develop` is contained in the current branch. Keep
-that current-base property true at qualification checkpoints; a develop merge
-is not complete until its integration breakage is repaired and protected by
-focused regressions.
+The immediate starting action for this phase is to merge the already-fetched
+`origin/develop` into the current branch with a merge commit. Repair every
+resulting build or test failure, and protect each behavioral integration defect
+with a focused host-unit or device regression. Keep that current-base property
+true at later qualification checkpoints; a develop merge is not complete until
+its integration breakage is repaired and regression-tested.
 
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
@@ -38,9 +40,10 @@ or implementation choices.
 
 ### Working loop and priority rules
 
-1. Start from a current base: merge the latest `origin/develop` with a merge
-   commit, then repair and regression-test any integration breakage before
-   treating later validation evidence as current.
+1. Start from a current base: merge the already-fetched `origin/develop` now
+   with a merge commit, then repair and regression-test any integration
+   breakage before treating later validation evidence as current. Repeat this
+   current-base check at qualification checkpoints.
 2. Keep both [STATUS_CDNA4.md](STATUS_CDNA4.md) and
    [STATUS_GFX1250.md](STATUS_GFX1250.md) live. Update the relevant ledger in
    the same change whenever an investigation changes what is known about a
@@ -56,9 +59,12 @@ or implementation choices.
    move to the next useful target. A tactically slow higher-priority cell must
    not prevent progress on other cells, but it remains an explicit exit item.
 5. For every defect or useful end-to-end idiom encountered, make the durable
-   result a focused host-unit test, checked-in device test, or both. The
-   prototype fix and a status-cell promotion support that deliverable; neither
-   replaces it. If an investigation genuinely cannot yield a focused checked-in
+   result a focused host-unit test, checked-in device test, or both. Studying an
+   end-to-end workload is not finished when its prototype fix works: reduce its
+   relevant compiler, ISA, resource-pressure, control-flow, memory, or
+   synchronization behavior into a quick checked-in contract. The prototype
+   fix and a status-cell promotion support that deliverable; neither replaces
+   it. If an investigation genuinely cannot yield a focused checked-in
    regression, record the concrete reason instead of silently losing the
    evidence.
 6. Generalize every new and existing test by behavior rather than by its source
@@ -98,13 +104,14 @@ or implementation choices.
    coverage is incomplete, even when the corresponding end-to-end cell passes.
    When no faithful reduction is possible, leave an explicit rationale in the
    relevant plan or status ledger.
-5. Make a deliberate pass over all existing ConSan host and device tests to
-   identify architecture-local tests whose underlying idea is cross-cutting.
-   Transport each useful contract to every semantically applicable target,
-   adapting the device code and target-native instruction forms as needed.
-   Do not stop at historical `gfx950`-to-`gfx942` ports: consider CDNA3/4/5 and
-   RDNA3/4 for every behavior, and record a capability-based reason for each
-   target where the contract is not applicable.
+5. Make a deliberate, suite-wide pass over all existing ConSan host and device
+   tests to identify architecture-local tests whose underlying idea is
+   cross-cutting. Transport each useful contract to every semantically
+   applicable target, adapting the device code and target-native instruction
+   forms as needed. The originating architecture does not define the coverage
+   boundary: do not stop at historical `gfx950`-to-`gfx942` ports. Consider
+   CDNA3/4/5 and RDNA3/4 for every behavior, and record a capability-based
+   reason for each target where the contract is not applicable.
 6. Stay tactical about latency. If a reproducer is abnormally slow, first ask
    whether the slowness itself is a defect that can be debugged or reduced.
    Avoid repeated long waits that provide no new information; defer a slow cell
@@ -128,8 +135,9 @@ or implementation choices.
 
 ### Exit criteria
 
-- The branch includes the latest `origin/develop`, and all integration breakage
-  is repaired with focused regression coverage.
+- The branch includes the already-fetched current `origin/develop` and remains
+  current at the final qualification point. All integration breakage is
+  repaired with focused regression coverage.
 - The host-unit and device suites comprehensively cover the behavior required
   by the current end-to-end corpus, Aorta, and the target capability audit.
   Every fixed defect has a regression, and every device scenario remains
