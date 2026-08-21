@@ -524,22 +524,50 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   return spill;
 }
 
+// Descriptor patches are applied after text growth, so the active descriptor
+// offset must be recovered by stable kernel name. Large generated libraries
+// have thousands of long, common-prefix names; indexing both sides once keeps
+// each descriptor requirement lookup constant-time.
+class MoiActiveKernelResolver {
+public:
+  MoiActiveKernelResolver(const ConSanResult &result, const AmdGpuCodeObject &code_object) {
+    result_kernels_by_descriptor_.reserve(result.kernels.size());
+    for (const ConSanKernelInfo &kernel : result.kernels)
+      result_kernels_by_descriptor_.emplace(kernel.descriptor_file_offset, &kernel);
+    active_kernels_by_name_.reserve(code_object.kernels().size());
+    for (const AmdGpuKernelInfo &kernel : code_object.kernels())
+      active_kernels_by_name_.emplace(kernel.name, &kernel);
+  }
+
+  [[nodiscard]] const ConSanKernelInfo *result_kernel(uint64_t descriptor_offset) const {
+    const auto it = result_kernels_by_descriptor_.find(descriptor_offset);
+    return it == result_kernels_by_descriptor_.end() ? nullptr : it->second;
+  }
+
+  [[nodiscard]] const AmdGpuKernelInfo *active_kernel(const ConSanKernelInfo &kernel) const {
+    const auto it = active_kernels_by_name_.find(kernel.name);
+    return it == active_kernels_by_name_.end() ? nullptr : it->second;
+  }
+
+private:
+  std::unordered_map<uint64_t, const ConSanKernelInfo *> result_kernels_by_descriptor_;
+  std::unordered_map<std::string_view, const AmdGpuKernelInfo *> active_kernels_by_name_;
+};
+
 [[nodiscard]] bool
 apply_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
                               std::span<const uint8_t> image, const ConSanResult &result,
                               const MoiDescriptorVgprRequirements &requirements,
                               rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_count] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
     if (kernel == nullptr) {
       errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
       return false;
     }
-    const auto active_kernel =
-        std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
-          return candidate.name == kernel->name;
-        });
-    if (active_kernel == code_object.kernels().end()) {
+    const AmdGpuKernelInfo *active_kernel = kernel_resolver.active_kernel(*kernel);
+    if (active_kernel == nullptr) {
       errors.emplace_back("ConSan MOI resource plan could not resolve an active descriptor");
       return false;
     }
@@ -557,16 +585,13 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
                                     const MoiDescriptorPrivateRequirements &requirements,
                                     std::vector<std::string> &errors) {
   (void)image;
+  const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-    const auto active_kernel =
-        kernel == nullptr
-            ? code_object.kernels().end()
-            : std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
-                return candidate.name == kernel->name;
-              });
+    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
+    const AmdGpuKernelInfo *active_kernel =
+        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (kernel == nullptr || active_kernel == code_object.kernels().end() ||
+    if (kernel == nullptr || active_kernel == nullptr ||
         active_kernel->descriptor_file_offset > current_image.size() ||
         sizeof(KD) > current_image.size() - active_kernel->descriptor_file_offset) {
       errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
@@ -593,15 +618,12 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
 [[nodiscard]] bool apply_sgpr_descriptor_requirements(
     CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
     const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
+  const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_count] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-    const auto active_kernel =
-        kernel == nullptr
-            ? code_object.kernels().end()
-            : std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
-                return candidate.name == kernel->name;
-              });
-    if (active_kernel == code_object.kernels().end()) {
+    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
+    const AmdGpuKernelInfo *active_kernel =
+        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
+    if (active_kernel == nullptr) {
       errors.emplace_back("ConSan MOI scalar plan could not resolve an active descriptor");
       return false;
     }
@@ -633,15 +655,12 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
     CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
     const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
     rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-    const auto active_kernel =
-        kernel == nullptr
-            ? code_object.kernels().end()
-            : std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
-                return candidate.name == kernel->name;
-              });
-    if (active_kernel == code_object.kernels().end()) {
+    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
+    const AmdGpuKernelInfo *active_kernel =
+        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
+    if (active_kernel == nullptr) {
       errors.emplace_back("ConSan MOI LDS plan could not resolve an active descriptor");
       return false;
     }

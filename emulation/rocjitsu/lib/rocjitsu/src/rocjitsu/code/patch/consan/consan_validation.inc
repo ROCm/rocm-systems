@@ -3987,20 +3987,36 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   const bool text_relocated =
       original.text_sections().front()->size() != replacement.text_sections().front()->size();
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+  std::unordered_map<std::string_view, const AmdGpuKernelInfo *> replacement_kernels_by_name;
+  replacement_kernels_by_name.reserve(replacement.kernels().size());
+  for (const AmdGpuKernelInfo &kernel : replacement.kernels())
+    replacement_kernels_by_name.emplace(kernel.name, &kernel);
+  // This predicate describes the whole transform, not an individual kernel.
+  // Computing it inside the kernel loop made final validation quadratic in a
+  // large library's kernel and patch counts.
+  const bool has_unscoped_resource_growth =
+      std::ranges::any_of(
+          result.resource_plans,
+          [&](const ConSanCandidateResourcePlan &plan) {
+            return plan.owner_descriptor_file_offsets.empty() && plan_has_emitted_patch(plan) &&
+                   (plan.source == ConSanRegisterAllocationSource::DescriptorGrowth ||
+                    plan.source == ConSanRegisterAllocationSource::SpillRequired);
+          }) ||
+      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
+      });
   for (const AmdGpuKernelInfo &original_kernel : original.kernels()) {
-    const auto replacement_it =
-        std::ranges::find_if(replacement.kernels(), [&](const AmdGpuKernelInfo &kernel) {
-          return kernel.name == original_kernel.name;
-        });
-    if (replacement_it == replacement.kernels().end())
+    const auto replacement_it = replacement_kernels_by_name.find(original_kernel.name);
+    if (replacement_it == replacement_kernels_by_name.end())
       continue;
+    const AmdGpuKernelInfo &replacement_kernel = *replacement_it->second;
     KernelDescriptor original_descriptor{};
     KernelDescriptor replacement_descriptor{};
     std::memcpy(&original_descriptor,
                 original.image_data() + original_kernel.descriptor_file_offset,
                 sizeof(original_descriptor));
     std::memcpy(&replacement_descriptor,
-                replacement.image_data() + replacement_it->descriptor_file_offset,
+                replacement.image_data() + replacement_kernel.descriptor_file_offset,
                 sizeof(replacement_descriptor));
     DescriptorRequirement requirement = requirements[original_kernel.name];
     const bool descriptor_resources_changed =
@@ -4016,17 +4032,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       requirement.required_private_bytes =
           std::max(requirement.required_private_bytes, unscoped_required_private_bytes);
     }
-    const bool has_unscoped_resource_growth =
-        std::ranges::any_of(
-            result.resource_plans,
-            [&](const ConSanCandidateResourcePlan &plan) {
-              return plan.owner_descriptor_file_offsets.empty() && plan_has_emitted_patch(plan) &&
-                     (plan.source == ConSanRegisterAllocationSource::DescriptorGrowth ||
-                      plan.source == ConSanRegisterAllocationSource::SpillRequired);
-            }) ||
-        std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-          return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
-        });
     KernelDescriptor normalized = replacement_descriptor;
     const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
     const bool requires_full_workgroup_id =
@@ -4186,12 +4191,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           "ConSan final validation found an unplanned descriptor delta for kernel '" +
           original_kernel.name + "' (original offset " +
           std::to_string(original_kernel.descriptor_file_offset) + ", replacement offset " +
-          std::to_string(replacement_it->descriptor_file_offset) + ")");
+          std::to_string(replacement_kernel.descriptor_file_offset) + ")");
       continue;
     }
     if (requirement.required_vgpr_count != 0) {
       const std::optional<uint16_t> actual_vgprs = descriptor_vgpr_allocation_count(
-          result.elf_bytes, replacement_it->descriptor_file_offset, arch);
+          result.elf_bytes, replacement_kernel.descriptor_file_offset, arch);
       if (!actual_vgprs || *actual_vgprs < requirement.required_vgpr_count) {
         errors.emplace_back(
             "ConSan final validation found insufficient descriptor VGPRs for kernel '" +
@@ -4215,12 +4220,15 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
     if (requirement.required_private_bytes == 0)
       continue;
-    std::vector<uint8_t> descriptor_probe(result.elf_bytes);
+    // Probe only the descriptor under validation. Copying the complete patched
+    // image once per spill-owning kernel made this check scale as image bytes
+    // times owner count for large generated libraries.
+    std::vector<uint8_t> descriptor_probe(sizeof(replacement_descriptor));
     const major_image_ownership::ScopedOwner descriptor_probe_owner(
         major_image_ownership::OwnerKind::DescriptorProbe, descriptor_probe);
+    std::memcpy(descriptor_probe.data(), &replacement_descriptor, sizeof(replacement_descriptor));
     const SpillDescriptorUpdate descriptor_update = update_kernel_descriptor_for_spills(
-        descriptor_probe, replacement_it->descriptor_file_offset,
-        requirement.required_private_bytes);
+        descriptor_probe, /*descriptor_file_offset=*/0, requirement.required_private_bytes);
     if (descriptor_update != SpillDescriptorUpdate::Unchanged) {
       errors.emplace_back(
           "ConSan final validation found insufficient spill descriptor state for kernel '" +

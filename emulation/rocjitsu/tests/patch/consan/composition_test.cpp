@@ -293,7 +293,12 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count(),
     };
   };
-  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
+  const char *engine_name = std::getenv("RJ_CONSAN_BENCHMARK_ENGINE");
+  const ConSanMoiEngine engine =
+      engine_name != nullptr && std::string_view(engine_name) == "sampled"
+          ? ConSanMoiEngine::Sampled
+          : ConSanMoiEngine::RecordReplay;
+  ConSanOptions inventory_options = moi_options(engine);
   // Match the standard hook profile used for large E2E objects. The unit-test
   // defaults deliberately select only one site and would make this benchmark
   // measure a different transformation.
@@ -301,7 +306,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   inventory_options.moi_track_atomics = true;
   inventory_options.max_patches = 65'536;
   inventory_options.max_patches_is_expert_limit = false;
-  inventory_options.moi_runtime_sample_stride = 65'536;
+  inventory_options.moi_runtime_sample_stride = engine == ConSanMoiEngine::Sampled ? 256u : 65'536u;
   const auto [inventory, inventory_ms] =
       timed([&] { return try_patch_consan(bytes, inventory_options); });
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);

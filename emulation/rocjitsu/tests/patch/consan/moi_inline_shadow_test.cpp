@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "embedded_schema.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -741,7 +742,9 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
+  major_image_ownership::ScopedMeasurement measurement;
   const ConSanResult result = try_patch_consan(bytes, options);
+  const major_image_ownership::Measurement observed = measurement.snapshot();
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
@@ -766,6 +769,11 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   EXPECT_GT(patch->workgroup_shadow_size, 0u);
   EXPECT_FALSE(patch->workgroup_shadow_lazy_initialization);
   EXPECT_EQ(patch->workgroup_shadow_validity_size, 0u);
+
+  const auto &validation = observed.phase(major_image_ownership::Phase::FinalValidation);
+  EXPECT_EQ(validation.max_bytes_by_kind[static_cast<size_t>(
+                major_image_ownership::OwnerKind::DescriptorProbe)],
+            sizeof(KD));
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);

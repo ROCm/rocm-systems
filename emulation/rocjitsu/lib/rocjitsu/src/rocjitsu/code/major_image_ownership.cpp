@@ -97,6 +97,8 @@ void observe(State &state) noexcept {
     return;
   PhaseMeasurement &phase = state.measurement.phases[static_cast<size_t>(state.phase) - 1u];
   phase.observed_owner_mask |= observed_mask;
+  for (size_t index = 0; index < by_kind.size(); ++index)
+    phase.max_bytes_by_kind[index] = std::max(phase.max_bytes_by_kind[index], by_kind[index]);
   if (total > phase.peak_bytes) {
     phase.peak_bytes = total;
     phase.bytes_at_peak = by_kind;

@@ -669,6 +669,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
 
 void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           const ConSanOptions &options, rj_code_arch_t arch,
+                                          MoiResourcePlanningState &resource_state,
                                           ConSanResult &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
@@ -717,7 +718,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         "ConSan MOI sampled barrier sync currently attaches only the first logical range of a "
         "multi-range access");
   }
-  MoiResourcePlanningState resource_state(bytes, arch, options, result);
   if (!resource_state.valid) {
     result.warnings.emplace_back("ConSan MOI sampled barrier sync lacks a complete kernel CFG");
     return;
@@ -1662,6 +1662,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
 
 void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          const ConSanOptions &options, rj_code_arch_t arch,
+                                         MoiResourcePlanningState &resource_state,
                                          ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
@@ -1812,7 +1813,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   for (ConSanPatchInfo &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
 
-  MoiResourcePlanningState resource_state(bytes, arch, options, result);
   if (!resource_state.valid) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync lacks a complete kernel CFG");
     return;

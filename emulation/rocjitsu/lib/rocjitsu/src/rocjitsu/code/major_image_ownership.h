@@ -41,6 +41,7 @@ inline constexpr size_t kMeasuredPhaseCount = static_cast<size_t>(Phase::Count) 
 struct PhaseMeasurement {
   uint64_t peak_bytes = 0;
   std::array<uint64_t, kOwnerKindCount> bytes_at_peak{};
+  std::array<uint64_t, kOwnerKindCount> max_bytes_by_kind{};
   uint64_t observed_owner_mask = 0;
 };
 
