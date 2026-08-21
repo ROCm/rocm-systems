@@ -106,7 +106,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* arWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  static int64_t paramMax = rcclParamCeArMaxMsgBytes();
+  comm->ceColl.ceArMaxBytes = (paramMax >= 0) ? (size_t)paramMax : comm->archThresholds->ceArMax;
+  size_t maxChunkBytes = comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks;
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
@@ -1741,7 +1743,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   const size_t shardElems = count / comm->nRanks;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
