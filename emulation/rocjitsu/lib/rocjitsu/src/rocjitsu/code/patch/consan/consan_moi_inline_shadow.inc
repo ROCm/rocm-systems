@@ -580,9 +580,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                      ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
                  alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
         });
-    // A normal full-width plan may itself require spilling. Only the selected
-    // operand-recovery alternative proves that its smaller window contains
-    // the clobbered guest address and can omit the dedicated snapshot VGPR.
+    // A normal full-width plan may itself require spilling. The selected
+    // operand-recovery alternative proves that the smaller window can either
+    // reload an overlapping address or leave a disjoint address intact until
+    // the deferred guest load.
     const uint16_t expected_scratch_count =
         selected_reduced_spill_recovery
             ? inline_shadow_spill_backed_scratch_count(options, candidate, arch)

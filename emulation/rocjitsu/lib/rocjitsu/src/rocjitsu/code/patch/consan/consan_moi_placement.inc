@@ -3027,22 +3027,12 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
           candidate.text_offset, candidate.kernel_descriptor_file_offset, spill_scratch_count,
           &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
-      // The reduced window omits the dedicated address snapshot because the
-      // original address is expected to be authoritative in that window's
-      // private spill slot. A generic forced-spill plan is free to choose a
-      // different window, though. In that case the reduced plan would place
-      // its fallback snapshot immediately beyond the saved window and could
-      // silently clobber a live guest VGPR. Keep the original, full-width plan
-      // unless this alternative actually spills the clobbered address.
-      if (spill_plan.source == ConSanRegisterAllocationSource::SpillRequired &&
-          (!spill_plan.scratch_vgpr || !candidate.addr_vgpr ||
-           !range_overlaps(*candidate.addr_vgpr, 1u, *spill_plan.scratch_vgpr,
-                           spill_plan.scratch_vgpr_count))) {
-        spill_plan.source = ConSanRegisterAllocationSource::Unsupported;
-        spill_plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
-        spill_plan.scratch_vgpr.reset();
-        spill_plan.required_vgpr_count = spill_plan.current_vgpr_count;
-      }
+      // The reduced window omits the dedicated address snapshot. If it spills
+      // the clobbered address, emission recovers the value from its private
+      // slot. If it is disjoint, InlineShadow can consume the original address
+      // in place because the application load is deferred until after the
+      // instrumentation and spill restore. Both cases therefore fit the same
+      // compact transaction window.
       const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
       const ConSanResourcePlanAlternative alternative{
           .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,

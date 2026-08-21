@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// CDNA max-then-sum reduction distilled from PyTorch softmax kernels whose
+/// compiler-generated LDS loads overwrite their own address VGPR. The paired
+/// workloads differ only in the publication barrier.
+
+#include "consan_device_test_support.h"
+
+namespace {
+
+constexpr uint32_t kWaveSize = 64u;
+constexpr uint32_t kThreadCount = 2u * kWaveSize;
+
+struct DeviceState {
+  uint32_t synchronize;
+  uint32_t maximum;
+  uint32_t denominator;
+  uint32_t ordinary_live[kThreadCount];
+  uint32_t accumulator_live[kThreadCount];
+  uint32_t control[kThreadCount];
+};
+
+__device__ __forceinline__ uint32_t load_lds_clobbering_address(volatile uint32_t *address) {
+  uint32_t address_and_value =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+  // Tying the output to the address produces the compiler idiom at issue:
+  //     ds_read_b32 vN, vN
+  // The loaded value replaces the byte address in the same physical VGPR.
+  asm volatile("ds_read_b32 %0, %0\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_waitcnt lgkmcnt(0)\n\t"
+               : "+v"(address_and_value)
+               :
+               : "memory");
+  return address_and_value;
+}
+
+__global__
+__launch_bounds__(kThreadCount) void cdna_clobbering_lds_reduction_for_consan(DeviceState *state) {
+  __shared__ volatile uint32_t partial[2];
+  const uint32_t tid = threadIdx.x;
+  const uint32_t lane = tid & (kWaveSize - 1u);
+  const uint32_t wave = tid / kWaveSize;
+  const uint32_t sentinel = 0xc1000000u | tid;
+  register uint32_t ordinary_live asm("v23") = sentinel;
+  asm volatile("v_accvgpr_write_b32 a0, %0\n\t" : : "v"(ordinary_live) : "a0", "memory");
+
+  if (lane == 0u) {
+    consan_device_test::store_lds_word(&partial[wave], wave == 0u ? 8u : 32u);
+  }
+  if (state->synchronize != 0u)
+    __syncthreads();
+
+  if (tid == 0u) {
+    const uint32_t first = load_lds_clobbering_address(&partial[0]);
+    const uint32_t second = load_lds_clobbering_address(&partial[1]);
+    state->maximum = first > second ? first : second;
+    state->denominator = first + second;
+  }
+  uint32_t accumulator_live = 0u;
+  asm volatile("v_accvgpr_read_b32 %0, a0\n\t" : "=v"(accumulator_live) : : "a0", "memory");
+  state->ordinary_live[tid] = ordinary_live;
+  state->accumulator_live[tid] = accumulator_live;
+  state->control[tid] = 0xc10b0000u | tid;
+}
+
+void run_cdna_clobbering_lds_reduction(bool synchronize) {
+  DeviceState initial{};
+  initial.synchronize = synchronize ? 1u : 0u;
+  DeviceState *device_state = nullptr;
+  HIP_ASSERT(hipMalloc(&device_state, sizeof(DeviceState)));
+  HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
+  cdna_clobbering_lds_reduction_for_consan<<<1, kThreadCount>>>(device_state);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  DeviceState result{};
+  HIP_ASSERT(hipMemcpy(&result, device_state, sizeof(DeviceState), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_state));
+  for (uint32_t tid = 0u; tid < kThreadCount; ++tid) {
+    EXPECT_EQ(result.ordinary_live[tid], 0xc1000000u | tid) << "thread=" << tid;
+    EXPECT_EQ(result.accumulator_live[tid], 0xc1000000u | tid) << "thread=" << tid;
+    EXPECT_EQ(result.control[tid], 0xc10b0000u | tid) << "thread=" << tid;
+  }
+  if (synchronize) {
+    EXPECT_EQ(result.maximum, 32u);
+    EXPECT_EQ(result.denominator, 40u);
+  }
+}
+
+TEST(ConSanDeviceCdnaClobberingLdsReductionTest, Correct) {
+  run_cdna_clobbering_lds_reduction(true);
+}
+
+TEST(ConSanDeviceCdnaClobberingLdsReductionTest, Incorrect) {
+  run_cdna_clobbering_lds_reduction(false);
+}
+
+} // namespace

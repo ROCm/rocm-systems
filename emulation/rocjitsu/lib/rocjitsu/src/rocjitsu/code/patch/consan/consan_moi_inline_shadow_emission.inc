@@ -2496,6 +2496,10 @@
               source_is_spilled(*lds_byte_offset_vgpr)
           ? lds_byte_offset_vgpr
           : std::nullopt;
+  const bool compact_spill_keeps_disjoint_clobbered_address =
+      spill != nullptr && scratch_count == spill_scratch_count &&
+      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      moi_load_clobbers_address(candidate) && !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (materialize_flat_offset) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
@@ -2505,7 +2509,8 @@
     // spill slot reloads the offset again before diagnostics. This phase
     // sharing keeps the minimum native CDNA access window at 16 VGPRs.
     saved_lds_byte_offset_vgpr = cas_expected_vgpr;
-  } else if (moi_load_clobbers_address(candidate)) {
+  } else if (moi_load_clobbers_address(candidate) &&
+             !compact_spill_keeps_disjoint_clobbered_address) {
     saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),

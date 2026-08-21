@@ -1534,6 +1534,99 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
   }
 }
 
+TEST(ConSanMoi, CdnaInlineShadowClobberingLoadUsesDisjointCompactSpillWindow) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    std::vector<uint32_t> guest;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto load = build_cdna3_ds_load_b32(
+          /*vdst=*/32u, /*vaddr=*/32u, /*byte_offset=*/0u, arch);
+      ASSERT_TRUE(load);
+      guest.assign(load->begin(), load->end());
+    } else {
+      constexpr auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 32u, .vdst = 32u});
+      guest.assign(load.begin(), load.end());
+    }
+    std::vector<uint32_t> text_words(1200u, build_s_nop(0, arch));
+    std::copy(guest.begin(), guest.end(), text_words.begin());
+    text_words.back() = build_s_endpgm(arch);
+
+    constexpr std::string_view kKernelName = "disjoint_compact_clobbering_load";
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, kKernelName, /*vgpr_granulated=*/5u)
+            : make_cdna4_lds_code_object(text_words, kKernelName, /*vgpr_granulated=*/5u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      // v0:v39 are ordinary and v40:v47 are live accumulators. The persistent
+      // values split those ordinary VGPRs so v0:v15 is the only compact
+      // 16-register spill window, while no full 17-register window exists.
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 9u);
+    });
+    append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/false,
+                                /*sgpr_count=*/0u,
+                                /*private_segment_fixed_size=*/std::nullopt,
+                                /*required_workgroup_size=*/std::nullopt,
+                                /*has_dynamic_lds=*/true,
+                                /*additional_kernel_names=*/{}, /*agpr_count=*/8u,
+                                /*vgpr_count=*/34u);
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.force_vgpr_spill = true;
+    options.moi_owner_vgpr = 16u;
+    options.moi_epoch_vgpr = 17u;
+    options.moi_workgroup_key_vgpr = 33u;
+    options.moi_exec_save_sgpr = 40u;
+    options.moi_track_atomics = false;
+    options.moi_track_barriers = false;
+    options.moi_report_buffer_address = 0x100000000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
+                                 << " plans=" << testing::PrintToString(result.resource_plans)
+                                 << " dispositions="
+                                 << testing::PrintToString(result.site_dispositions);
+    ASSERT_EQ(result.resource_plans.size(), 1u);
+    const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+    EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(plan.scratch_vgpr, 0u);
+    EXPECT_EQ(plan.scratch_vgpr_count, 16u);
+    const auto recovery = std::ranges::find(
+        plan.alternatives, ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+        &ConSanResourcePlanAlternative::kind);
+    ASSERT_NE(recovery, plan.alternatives.end());
+    EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, *recovery),
+              ConSanResourcePlanAlternativeOutcome::Selected);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    EXPECT_EQ(patch->spilled_vgpr_count, 16u);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> cave_words =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    const auto out_of_window_snapshot = std::ranges::find(
+        cave_words, build_v_mov_b32_e32(/*vdst=*/16u, vector_source_vgpr(/*vsrc=*/32u), arch));
+    EXPECT_EQ(out_of_window_snapshot, cave_words.end());
+    const auto restore_v15 = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                 ? build_cdna3_address_free_scratch_load_b32(
+                                       /*vdst=*/15u, 15u * sizeof(uint32_t), arch)
+                                 : build_cdna4_address_free_scratch_load_b32(
+                                       /*vdst=*/15u, 15u * sizeof(uint32_t), arch);
+    ASSERT_TRUE(restore_v15);
+    const auto restore_position = std::ranges::search(cave_words, *restore_v15).begin();
+    const auto guest_position = std::ranges::search(cave_words, guest).begin();
+    ASSERT_NE(restore_position, cave_words.end());
+    ASSERT_NE(guest_position, cave_words.end());
+    EXPECT_LT(restore_position, guest_position)
+        << "the application load must execute after its disjoint spill window is restored";
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
 TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoundary) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(arch);
@@ -1922,7 +2015,7 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
   }
 }
 
-TEST(ConSanMoi, CdnaInlineShadowPreservesSnapshotOutsideReducedSpillWindow) {
+TEST(ConSanMoi, CdnaInlineShadowKeepsDisjointClobberedAddressInPlace) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(arch);
     std::vector<uint32_t> guest;
@@ -1967,49 +2060,33 @@ TEST(ConSanMoi, CdnaInlineShadowPreservesSnapshotOutsideReducedSpillWindow) {
     const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
     ASSERT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
     ASSERT_EQ(plan.scratch_vgpr, 0u);
-    EXPECT_EQ(plan.scratch_vgpr_count, 19u);
+    EXPECT_EQ(plan.scratch_vgpr_count, 18u);
     const auto reduced = std::ranges::find(
         plan.alternatives, ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
         &ConSanResourcePlanAlternative::kind);
     ASSERT_NE(reduced, plan.alternatives.end());
     EXPECT_EQ(reduced->scratch_vgpr_count, 18u);
-    EXPECT_EQ(reduced->source, ConSanRegisterAllocationSource::Unsupported);
-    EXPECT_EQ(reduced->reason, ConSanRegisterPlanReason::ForbiddenOverlap);
+    EXPECT_EQ(reduced->source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(reduced->reason, ConSanRegisterPlanReason::None);
     EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, *reduced),
-              ConSanResourcePlanAlternativeOutcome::Rejected);
+              ConSanResourcePlanAlternativeOutcome::Selected);
 
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
     ASSERT_EQ(patch->scratch_vgpr, 0u);
-    ASSERT_EQ(patch->spilled_vgpr_count, 19u);
+    ASSERT_EQ(patch->spilled_vgpr_count, 18u);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
     const std::vector<uint32_t> cave_words =
         text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-    constexpr uint32_t kSnapshotSlot = 18u * sizeof(uint32_t);
-    const auto save_snapshot =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? build_cdna3_address_free_scratch_store_b32(/*vsrc=*/18u, kSnapshotSlot, arch)
-            : build_cdna4_address_free_scratch_store_b32(/*vsrc=*/18u, kSnapshotSlot, arch);
-    const auto restore_snapshot =
-        arch == ROCJITSU_CODE_ARCH_CDNA3
-            ? build_cdna3_address_free_scratch_load_b32(/*vdst=*/18u, kSnapshotSlot, arch)
-            : build_cdna4_address_free_scratch_load_b32(/*vdst=*/18u, kSnapshotSlot, arch);
-    ASSERT_TRUE(save_snapshot && restore_snapshot);
-    const auto save_position = std::ranges::search(cave_words, *save_snapshot).begin();
-    const auto snapshot_position = std::ranges::find(
+    const auto out_of_window_snapshot = std::ranges::find(
         cave_words, build_v_mov_b32_e32(/*vdst=*/18u, vector_source_vgpr(/*vsrc=*/32u), arch));
-    const auto restore_position = std::ranges::search(cave_words, *restore_snapshot).begin();
     const auto guest_position = std::ranges::search(cave_words, guest).begin();
-    ASSERT_NE(save_position, cave_words.end());
-    ASSERT_NE(snapshot_position, cave_words.end());
-    ASSERT_NE(restore_position, cave_words.end());
     ASSERT_NE(guest_position, cave_words.end());
-    EXPECT_LT(save_position, snapshot_position);
-    EXPECT_LT(snapshot_position, restore_position);
-    EXPECT_LT(restore_position, guest_position);
+    EXPECT_EQ(out_of_window_snapshot, cave_words.end())
+        << "the compact spill must consume a disjoint address in place rather than clobbering v18";
     EXPECT_TRUE(result.final_validation_passed);
   }
 }

@@ -426,6 +426,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaDenseSccRoutes|cdna_dense_scc_routes|ConSanDeviceCdnaDenseSccRoutesTest|no-record-replay"
             "CdnaIndependentScalarProofs|cdna_sampled_independent_scalar_proofs|ConSanDeviceCdnaSampledIndependentScalarProofsTest|sampled-only"
             "CdnaB16SccRoute|cdna_b16_scc_route|ConSanDeviceCdnaB16SccRouteTest"
+            "CdnaClobberingLdsReduction|cdna_clobbering_lds_reduction|ConSanDeviceCdnaClobberingLdsReductionTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
@@ -550,6 +551,8 @@ function(rj_add_consan_device_conformance_cases)
             )
             set(_correct_environment ${_common_environment})
             set(_incorrect_environment ${_common_environment})
+            set(_correct_pass_regex_args)
+            set(_incorrect_pass_regex_args)
             if(NOT _mode_value STREQUAL "supercollider")
                 list(
                     APPEND _correct_environment
@@ -632,6 +635,35 @@ function(rj_add_consan_device_conformance_cases)
                 )
             endif()
 
+            if(
+                _workload_name STREQUAL "CdnaClobberingLdsReduction"
+                AND _mode_value STREQUAL "inline-shadow"
+            )
+                # Preserve the E2E resource cliff: live ordinary and
+                # accumulator state bounds the register bank while the tied
+                # LDS load requires compact spill-backed address handling.
+                list(
+                    APPEND _correct_environment
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                )
+                list(
+                    APPEND _incorrect_environment
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                )
+                set(
+                    _compact_recovery_regex
+                    "kind=spill_backed_operand_recovery.*scratch_count=16.*outcome=selected"
+                )
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "${_compact_recovery_regex}"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "${_compact_recovery_regex}"
+                )
+            endif()
+
             set(_correct_test_name
                 "${_device_PREFIX}.${_mode_name}${_workload_name}.Correct"
             )
@@ -643,6 +675,7 @@ function(rj_add_consan_device_conformance_cases)
                 ${_config_args}
                 ${_resource_lock_args}
                 TIMEOUT 60
+                ${_correct_pass_regex_args}
                 ENVIRONMENT ${_correct_environment}
                 LABELS ${_labels} "${_mode_value}" clean
             )
@@ -667,6 +700,7 @@ function(rj_add_consan_device_conformance_cases)
                 ${_config_args}
                 ${_resource_lock_args}
                 TIMEOUT 60
+                ${_incorrect_pass_regex_args}
                 ENVIRONMENT ${_incorrect_environment}
                 LABELS ${_incorrect_labels}
             )
@@ -782,6 +816,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_dense_scc_routes|cdna_dense_scc_routes_test.hip"
             "cdna_sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
             "cdna_b16_scc_route|cdna_b16_scc_route_test.hip"
+            "cdna_clobbering_lds_reduction|cdna_clobbering_lds_reduction_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")
