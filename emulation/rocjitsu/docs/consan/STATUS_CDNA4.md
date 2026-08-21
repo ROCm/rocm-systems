@@ -1633,7 +1633,45 @@ above), not from renaming architecture-specific source.
 | P1 | `torch.sort` over segmented rows | 🟧 Current exact oracle passes in 26.40 seconds with dynamic completeness and zero mismatches, but static coverage is incomplete at 2,005/45,340 supported accesses | 🟥 The current ordinary 30-second run reaches object transformation before timeout and emits no final oracle or analysis verdict | 🟧 A current 60-second diagnostic completes in 43.67 seconds with the exact oracle, dynamic completeness, complete 5,422/5,422 barrier coverage, and 52,904/56,884 accesses patched; the 3,980 placement/lowering omissions and ordinary 30-second latency remain | 🟥 The repaired long-return guard completes in 58.05 seconds with complete 56,884/56,884 access and 6,032/6,032 barrier coverage, dynamic evidence, and no diagnostics. Sorted values are exact, but the index oracle still fails at 744 elements: rows 0, 2, and 3 retain mostly identity indices while row 1 is exact | Current Sampled artifact `rebase-20260821-gfx950-pytorch-sort-sampled-diagnostic60` establishes useful current-tip evidence and lifts that cell from red to orange. Inline artifact `rebase-20260821-gfx950-pytorch-sort-inline-empty-exec-long-return-fix` proves that the 900-second dispatch hang is fixed and isolates the residual index corruption. Current all-profile artifact `rebase-20260821-gfx950-pytorch-sort-all-current` retains the other frontiers. Earlier Record/Replay artifact `consan-gfx950-pytorch-sort-rr-dense-host-fix-20260722-195514` remains historical evidence for exact execution and fuller coverage under a longer 46.84-second run. |
 | P1 | `torch.histc` with a shared-memory-sized bin count | 🟧 Current exact oracle and dynamic execution pass with 102/102 supported accesses patched, but the aggregate analysis/static verdict is incomplete | 🟨 Current target-bounded stride-1 row passes the exact oracle in 146.47 seconds with complete 179/179 accesses plus 84/84 barriers, 352 visible records, zero diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault refresh remain | 🟨 Current exact oracle passes in 7.71 seconds with complete 179/179 access plus 84/84 barrier coverage, zero forbidden diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Current exact oracle passes in 28.95 seconds with complete 179/179 access plus 84/84 barrier coverage and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Current all-profile artifact `rebase-20260820-gfx950-pytorch-histc-all-X38XO3` records the original selection regression and clean rows; `rebase-20260820-gfx950-pytorch-histc-rr-stride-fix-ZJHioX` records its accepted repair. The earlier green bundle remains useful comparison evidence, but paired/fault refresh is required at the repaired current tip. |
 | P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟧 Exact collision-count oracles and dynamic execution pass in 7.05 seconds, but analysis/static coverage is incomplete with no applicable site | 🟨 Exact oracles pass in 8.41 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 8.48 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 10.49 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | Current all-profile artifact `rebase-20260820-gfx950-pytorch-scatter-reduce-all-76lDCB`. The collision updates are relaxed singleton atomics, so—as on gfx1250—the ordered-atomic fault modes are typed N/A rather than causal coverage obligations. |
-| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟧 The repaired longer diagnostic passes the exact 3-4-5 norm and CPU-softmax oracle, is dynamically complete, and patches all 4,436/4,436 supported accesses. Static analysis remains incomplete because a separate library contains 384 unsupported accesses, and the 60.87-second device execution plus transformation still exceeds the ordinary 30-second contract | 🟥 The current ordinary 30-second run reaches the 856-kernel object inventory before timeout and emits no final oracle or analysis verdict | 🟥 The exact 3-4-5 norm and CPU-softmax oracle completes in 24.23 seconds, but the ordinary 30-second process contract expires before teardown emits the ConSan analysis verdict | 🟥 The current ordinary 30-second run completes inventory and allocates the 73,113,592-byte report, then times out during object transformation before an oracle or analysis verdict | Current SuperCollider diagnostic artifact `rebase-20260821-gfx950-pytorch-norm-softmax-sc-wave64-text-gate` proves the wave64 relay-reservoir and executable-text gate repairs. Current all-profile artifact `rebase-20260821-gfx950-pytorch-norm-softmax-all-current` retains the other current-tip frontiers. Earlier diagnostic artifact `consan-gfx950-pytorch-norm-softmax-rr-log2-diagnostic-20260722-195952` retains the longer-run Record/Replay scalar-placement failure. |
+| P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟧 The repaired longer diagnostic passes the exact 3-4-5 norm and CPU-softmax oracle, is dynamically complete, and patches all 4,436/4,436 supported accesses. Static analysis remains incomplete because a separate library contains 384 unsupported accesses, and the 60.87-second device execution plus transformation still exceeds the ordinary 30-second contract | 🟥 The current ordinary 30-second run reaches the 856-kernel object inventory before timeout and emits no final oracle or analysis verdict | 🟨 The current physical-gfx950 row passes the exact 3-4-5 norm and CPU-softmax oracle and the ordinary 30-second contract in 28.98 seconds. It has complete 4,820/4,820 access plus 2,030/2,030 barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; paired overhead, reviewed-fault, and clean-provenance acceptance remain | 🟥 The current ordinary 30-second run completes inventory and allocates the 73,113,592-byte report, then times out during object transformation before an oracle or analysis verdict | Current Sampled artifact `rebase-20260821-gfx950-pytorch-norm-softmax-sampled-sparse-semantic-final` proves bounded sparse-report teardown and lifts the cell from red to yellow. Current SuperCollider diagnostic artifact `rebase-20260821-gfx950-pytorch-norm-softmax-sc-wave64-text-gate` proves the wave64 relay-reservoir and executable-text gate repairs. Current all-profile artifact `rebase-20260821-gfx950-pytorch-norm-softmax-all-current` retains the other current-tip frontiers. Earlier diagnostic artifact `consan-gfx950-pytorch-norm-softmax-rr-log2-diagnostic-20260722-195952` retains the longer-run Record/Replay scalar-placement failure. |
+
+### 2026-08-21 PyTorch norm/softmax Sampled sparse-report repair
+
+The retained pre-fix artifact
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx950-pytorch-norm-softmax-all-current`
+passes the exact oracle after 24.23 seconds of device execution, then reaches
+the ordinary 30-second bound before emitting an analysis verdict. Its last
+complete report has 46,080 allocated Sampled slots but zero claimed windows,
+zero visible entries, and zero pending acquires. The host reader nevertheless
+walked the entire capacity. This isolates teardown, rather than device
+execution or transformation, as the live latency failure.
+
+The reader now treats the committed `sampled_causal_window_count` as the
+number of `Ready` publications it must observe. An empty sparse report reads
+zero slots, and a nonempty sparse report stops after finding its committed
+windows. Deferred acquire-release reconstruction is linearized at the same
+time: visible release slots are indexed once, and each relevant owner bank is
+scanned once instead of once per visible entry. Direct-before-release-before-
+acquire sync composition and malformed-duplicate handling remain unchanged.
+
+Final-code artifact
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx950-pytorch-norm-softmax-sampled-sparse-semantic-final`
+uses hook SHA-256
+`08143831681f0c6b57a057a2138e3c32d80d8502509c8abc57ec7ddda04e59cd`.
+It exits successfully in 28.98 seconds; the exact 3-4-5 norm and CPU-softmax
+oracle passes after 24.17 seconds of device execution. Both large reports
+record zero examined watchpoint slots despite capacities of 46,080 and 14,368.
+The final verdict is complete for all 4,820 accesses and 2,030 barriers, with
+zero diagnostics or dynamic-incomplete evidence.
+
+Focused host regressions pin both complexity contracts: an empty allocated
+report examines zero capacity slots, while two visible entries sharing a
+pending owner bank examine one causal-window capacity rather than two. All 186
+hook tests pass. The checked-in two-stage-softmax pair already owns the
+device-level reduction/global-intermediate behavior, and the Sampled Stream-K
+pairs own acquire-release publication. Their 18 selected correct/incorrect
+rows pass on all five RocJitsu targets plus physical gfx950 in 0.94 seconds, so
+this host-teardown defect does not justify a duplicate device workload.
 
 ### 2026-08-21 PyTorch `sort` Inline empty-wave scalar-spill diagnosis
 

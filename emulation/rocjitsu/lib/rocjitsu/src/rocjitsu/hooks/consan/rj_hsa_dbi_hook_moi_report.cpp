@@ -951,20 +951,31 @@ private:
       uint32_t index = 0;
       rocjitsu::ConSanMoiSampledWatchpointEntry entry;
       rocjitsu::ConSanMoiSampledSyncDecodeResult sync;
+      uint64_t packed_watchpoint = 0;
+      uint64_t generation = 0;
       uint64_t dispatch_id = 0;
       uint32_t workgroup_x = 0;
       uint32_t workgroup_y = 0;
       uint32_t workgroup_z = 0;
       uint32_t epoch = 0;
+      uint32_t cluster_workgroup_id = 0;
+      bool sync_snapshot_usable = true;
     };
     std::vector<SampledEntry> visible_sampled;
     uint32_t visible_sampled_sync_metadata = 0;
+    uint64_t sampled_watchpoint_slots_examined = 0;
     uint64_t sampled_pending_release_slots_examined = 0;
     const auto *sampled_words = reinterpret_cast<const volatile uint32_t *>(sampled);
     const uint32_t active_sampled_generation =
         static_cast<uint32_t>(header->generation) &
         rocjitsu::consan_moi_sampled_watchpoint::max_generation;
-    for (uint32_t i = 0; i < sampled_watchpoint_capacity; ++i) {
+    const uint32_t sampled_ready_window_target =
+        std::min(header->sampled_causal_window_count, sampled_watchpoint_capacity);
+    uint32_t sampled_ready_windows_examined = 0;
+    for (uint32_t i = 0; i < sampled_watchpoint_capacity &&
+                         sampled_ready_windows_examined < sampled_ready_window_target;
+         ++i) {
+      ++sampled_watchpoint_slots_examined;
       if (i >= sampled_causal_window_capacity) {
         ++summary.sampled_malformed_snapshot_count;
         continue;
@@ -1021,6 +1032,8 @@ private:
         ++summary.sampled_incomplete_snapshot_count;
         continue;
       }
+      if (publication_state == rocjitsu::ConSanMoiSampledCausalPublicationState::Ready)
+        ++sampled_ready_windows_examined;
       if (publication_state != rocjitsu::ConSanMoiSampledCausalPublicationState::Ready ||
           window_generation != header->generation ||
           window_epoch > rocjitsu::consan_moi_sampled_watchpoint::max_epoch ||
@@ -1054,88 +1067,6 @@ private:
         ++summary.sampled_malformed_snapshot_count;
         continue;
       }
-      if (snapshot.state == rocjitsu::ConSanMoiSampledSnapshotState::Stable &&
-          sampled_pending_acquire_owner_bank_count != 0u &&
-          header->sampled_pending_acquire_count != 0u) {
-        // A deferred acquire-release RMW carries a statically proven route
-        // back to its preceding release-side access. Search only the same
-        // owner's bank for each possible acquire window; exact identity and
-        // route checks keep unrelated hashed entries from qualifying it.
-        if (sync.classification == rocjitsu::ConSanMoiSampledSyncClassification::Empty &&
-            i != std::numeric_limits<uint32_t>::max()) {
-          std::optional<rocjitsu::ConSanMoiSampledSyncDecodeResult> release_sync;
-          for (uint32_t acquire_slot = 0; acquire_slot < sampled_causal_window_capacity;
-               ++acquire_slot) {
-            ++sampled_pending_release_slots_examined;
-            const uint32_t release_pending_index =
-                acquire_slot * sampled_pending_acquire_owner_bank_count +
-                (snapshot.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
-            const auto release_pending = read_sampled_pending_acquire(release_pending_index);
-            if (release_pending.slot.reserved != i + 1u)
-              continue;
-            const auto release_join = rocjitsu::consan_moi_sampled_join_pending_release(
-                release_pending,
-                {window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
-                 window_first_entry, window_entry_count, state_after, window_cluster_workgroup_id},
-                static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u), i,
-                acquire_slot);
-            if (release_join.state == rocjitsu::ConSanMoiSampledPendingAcquireState::Ready) {
-              if (release_sync) {
-                ++summary.sampled_malformed_sync_count;
-                sync_snapshot_usable = false;
-                release_sync.reset();
-                break;
-              }
-              release_sync = release_join.sync;
-            }
-          }
-          if (release_sync)
-            sync = *release_sync;
-        }
-
-        const uint32_t pending_index =
-            i * sampled_pending_acquire_owner_bank_count +
-            (snapshot.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
-        if (pending_index >= sampled_pending_acquire_capacity) {
-          ++summary.sampled_malformed_sync_count;
-          sync_snapshot_usable = false;
-          continue;
-        }
-        const auto pending_view = read_sampled_pending_acquire(pending_index);
-        const auto pending_join = rocjitsu::consan_moi_sampled_join_pending_acquire(
-            pending_view,
-            {window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
-             window_first_entry, window_entry_count, state_after, window_cluster_workgroup_id},
-            static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u), i);
-        switch (pending_join.state) {
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::Empty:
-          break;
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::Ready:
-          if (sync.classification == rocjitsu::ConSanMoiSampledSyncClassification::Empty)
-            sync = pending_join.sync;
-          else {
-            ++summary.sampled_malformed_sync_count;
-            sync_snapshot_usable = false;
-          }
-          break;
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::Publishing:
-          ++summary.sampled_incomplete_snapshot_count;
-          ++summary.sampled_malformed_sync_count;
-          sync_snapshot_usable = false;
-          break;
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::ChangedDuringRead:
-          ++summary.sampled_changed_snapshot_count;
-          ++summary.sampled_malformed_sync_count;
-          sync_snapshot_usable = false;
-          break;
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::Malformed:
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::IdentityMismatch:
-        case rocjitsu::ConSanMoiSampledPendingAcquireState::FutureEpoch:
-          ++summary.sampled_malformed_sync_count;
-          sync_snapshot_usable = false;
-          break;
-        }
-      }
       const bool has_sync =
           sync.classification != rocjitsu::ConSanMoiSampledSyncClassification::Empty;
       if (has_sync && sync_snapshot_usable) {
@@ -1152,12 +1083,11 @@ private:
           ++summary.sampled_malformed_snapshot_count;
           break;
         }
-        if (sync_snapshot_usable && has_sync)
-          ++visible_sampled_sync_metadata;
         visible_sampled.push_back(
-            {i, snapshot.entry,
-             sync_snapshot_usable ? sync : rocjitsu::ConSanMoiSampledSyncDecodeResult{},
-             window_dispatch_id, window_x, window_y, window_z, window_epoch});
+            {i, snapshot.entry, sync,
+             static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u),
+             window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
+             window_cluster_workgroup_id, sync_snapshot_usable});
         break;
       case rocjitsu::ConSanMoiSampledSnapshotState::StaleGeneration:
         ++summary.sampled_stale_snapshot_count;
@@ -1177,6 +1107,139 @@ private:
         break;
       }
     }
+    // A deferred acquire-release RMW carries a statically proven route back to
+    // its preceding release-side access. The old report reader searched the
+    // entire causal-window capacity once per visible access. Large framework
+    // objects can publish thousands of visible entries, turning teardown into
+    // a quadratic scan after the device result is already available. Index
+    // visible release slots once, then scan each relevant owner bank once.
+    if (header->sampled_pending_acquire_count != 0u &&
+        sampled_pending_acquire_owner_bank_count != 0u && !visible_sampled.empty()) {
+      const size_t missing_visible = visible_sampled.size();
+      std::vector<size_t> visible_by_slot(sampled_watchpoint_capacity, missing_visible);
+      std::array<bool, kConSanMoiSampledPendingAcquireOwnerBankCount> relevant_owner_banks{};
+      for (size_t visible_index = 0; visible_index < visible_sampled.size(); ++visible_index) {
+        const SampledEntry &entry = visible_sampled[visible_index];
+        if (entry.index >= visible_by_slot.size())
+          continue;
+        visible_by_slot[entry.index] = visible_index;
+        relevant_owner_banks[entry.entry.owner_id &
+                             (sampled_pending_acquire_owner_bank_count - 1u)] = true;
+      }
+      std::vector<bool> release_sync_attached(visible_sampled.size(), false);
+      std::vector<bool> release_sync_rejected(visible_sampled.size(), false);
+      for (uint32_t acquire_slot = 0; acquire_slot < sampled_causal_window_capacity;
+           ++acquire_slot) {
+        for (uint32_t owner_bank = 0; owner_bank < sampled_pending_acquire_owner_bank_count;
+             ++owner_bank) {
+          if (!relevant_owner_banks[owner_bank])
+            continue;
+          const uint32_t pending_index =
+              acquire_slot * sampled_pending_acquire_owner_bank_count + owner_bank;
+          ++sampled_pending_release_slots_examined;
+          const volatile auto &pending = sampled_pending_acquires[pending_index];
+          const uint32_t version_before = pending.version;
+          if (version_before == 0u || (version_before & 1u) != 0u)
+            continue;
+          const uint32_t reserved = pending.reserved;
+          const uint32_t version_after = pending.version;
+          if (version_before != version_after || reserved == 0u)
+            continue;
+          const uint32_t release_slot = reserved - 1u;
+          if (release_slot >= visible_by_slot.size())
+            continue;
+          const size_t visible_index = visible_by_slot[release_slot];
+          if (visible_index == missing_visible || release_sync_rejected[visible_index])
+            continue;
+          SampledEntry &release = visible_sampled[visible_index];
+          if ((release.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u)) !=
+              owner_bank)
+            continue;
+          if (release.sync.classification != rocjitsu::ConSanMoiSampledSyncClassification::Empty)
+            continue;
+          const auto release_pending = read_sampled_pending_acquire(pending_index);
+          const auto release_join = rocjitsu::consan_moi_sampled_join_pending_release(
+              release_pending,
+              {release.generation, release.dispatch_id, release.workgroup_x, release.workgroup_y,
+               release.workgroup_z, release.epoch, release.index, 1u,
+               static_cast<uint32_t>(rocjitsu::ConSanMoiSampledCausalPublicationState::Ready),
+               release.cluster_workgroup_id},
+              release.packed_watchpoint, release.index, acquire_slot);
+          if (release_join.state != rocjitsu::ConSanMoiSampledPendingAcquireState::Ready)
+            continue;
+          if (release_sync_attached[visible_index]) {
+            ++summary.sampled_malformed_sync_count;
+            release.sync = {};
+            release.sync_snapshot_usable = false;
+            release_sync_rejected[visible_index] = true;
+            continue;
+          }
+          release.sync = release_join.sync;
+          release_sync_attached[visible_index] = true;
+        }
+      }
+    }
+    // Preserve the original composition order: a deferred release fills only
+    // empty direct metadata for its release-side access, then the acquire-side
+    // join rejects a second sync role on the same access as malformed.
+    if (header->sampled_pending_acquire_count != 0u &&
+        sampled_pending_acquire_owner_bank_count != 0u) {
+      for (SampledEntry &entry : visible_sampled) {
+        const uint32_t pending_index =
+            entry.index * sampled_pending_acquire_owner_bank_count +
+            (entry.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
+        if (pending_index >= sampled_pending_acquire_capacity) {
+          ++summary.sampled_malformed_sync_count;
+          entry.sync_snapshot_usable = false;
+          continue;
+        }
+        const auto pending_view = read_sampled_pending_acquire(pending_index);
+        const auto pending_join = rocjitsu::consan_moi_sampled_join_pending_acquire(
+            pending_view,
+            {entry.generation, entry.dispatch_id, entry.workgroup_x, entry.workgroup_y,
+             entry.workgroup_z, entry.epoch, entry.index, 1u,
+             static_cast<uint32_t>(rocjitsu::ConSanMoiSampledCausalPublicationState::Ready),
+             entry.cluster_workgroup_id},
+            entry.packed_watchpoint, entry.index);
+        switch (pending_join.state) {
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::Empty:
+          break;
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::Ready:
+          if (entry.sync.classification == rocjitsu::ConSanMoiSampledSyncClassification::Empty)
+            entry.sync = pending_join.sync;
+          else {
+            ++summary.sampled_malformed_sync_count;
+            entry.sync_snapshot_usable = false;
+          }
+          break;
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::Publishing:
+          ++summary.sampled_incomplete_snapshot_count;
+          ++summary.sampled_malformed_sync_count;
+          entry.sync_snapshot_usable = false;
+          break;
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::ChangedDuringRead:
+          ++summary.sampled_changed_snapshot_count;
+          ++summary.sampled_malformed_sync_count;
+          entry.sync_snapshot_usable = false;
+          break;
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::Malformed:
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::IdentityMismatch:
+        case rocjitsu::ConSanMoiSampledPendingAcquireState::FutureEpoch:
+          ++summary.sampled_malformed_sync_count;
+          entry.sync_snapshot_usable = false;
+          break;
+        }
+      }
+    }
+    for (SampledEntry &entry : visible_sampled) {
+      if (!entry.sync_snapshot_usable)
+        entry.sync = {};
+    }
+    visible_sampled_sync_metadata =
+        static_cast<uint32_t>(std::ranges::count_if(visible_sampled, [](const SampledEntry &entry) {
+          return entry.sync_snapshot_usable &&
+                 entry.sync.classification != rocjitsu::ConSanMoiSampledSyncClassification::Empty;
+        }));
     uint32_t sampled_conflicts = 0;
     // A collision or capacity drop can leave a valid-looking first half in a
     // slot while discarding a different second publisher. Without per-slot
@@ -1318,6 +1381,7 @@ private:
         "inline_undercoverage=%llu inline_overflow=%llu "
         "inline_unsupported=%llu inline_malformed=%llu "
         "sampled_watchpoints=%u visible_sampled=%zu sampled_sync_capacity=%u "
+        "sampled_watchpoint_slots_examined=%llu "
         "visible_sampled_sync=%u sampled_unsupported_sync=%u sampled_malformed_sync=%llu "
         "sampled_pending_acquire_capacity=%u sampled_pending_acquires=%u "
         "sampled_pending_acquire_contention=%u "
@@ -1378,6 +1442,7 @@ private:
         static_cast<unsigned long long>(summary.inline_unsupported_count),
         static_cast<unsigned long long>(summary.inline_malformed_count),
         sampled_watchpoint_capacity, visible_sampled.size(), sampled_sync_metadata_capacity,
+        static_cast<unsigned long long>(sampled_watchpoint_slots_examined),
         visible_sampled_sync_metadata, header->sampled_unsupported_sync_count,
         static_cast<unsigned long long>(summary.sampled_malformed_sync_count),
         header->sampled_pending_acquire_capacity, header->sampled_pending_acquire_count,
