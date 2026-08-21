@@ -95,10 +95,10 @@ engine-specific resource/control path is the behavior under test. The current
 registered `consan-device` matrix is 1,637 tests, including the 24-row Sampled
 dual-address pair, the 24-row empty-EXEC scalar-spill pair, four physical
 module-load lifecycle rows, and the physical post-instrumentation health row.
-The preceding 1,306-row simulator matrix was fully green; all 20 new simulator
-rows and four physical rows pass in the focused dual-address checkpoint. A
-fresh 1,326-row simulator pass, 311-row physical refresh, and one-command
-1,637-row timing run remain before the result can be frozen.
+The fresh 1,326-row simulator matrix is fully green in 55.08 seconds; the four
+new physical rows also pass in the focused dual-address checkpoint. A 311-row
+physical refresh and one-command 1,637-row timing run remain before the result
+can be frozen.
 
 | Scenario | Workload-derived contract | Status |
 | --- | --- | --- |
@@ -372,10 +372,8 @@ artificially slower or to fill a time quota.
   coverage.
 
 The preceding 1,549-test matrix passes in **539.56 seconds (8m59.56s)** on this
-host at `-j64`. The preceding 1,306-row simulator tier passes in 54.96 seconds,
-and the 20 new simulator rows pass in the focused checkpoint; a fresh
-1,326-row simulator run and whole 1,637-row timing refresh including serialized
-physical gfx950 remain.
+host at `-j64`. The current 1,326-row simulator tier passes in 55.08 seconds; a
+whole 1,637-row timing refresh including serialized physical gfx950 remains.
 The preceding full run
 consumed **1,745.90 seconds** aggregate child CPU: 944.37s user and 801.53s
 system. CTest's summed duration remains a concurrency-insensitive test-capacity
@@ -685,10 +683,10 @@ main synchronization, atomic, pipeline, selection/reduction, resource,
 cluster/TDM, and repeated-dispatch idioms distilled from `VALIDATION.md` and
 Aorta. Every pair runs through the baseline and each engine declared
 semantically applicable in RocJitsu; CDNA4 repeats the same coverage on the
-physical `gfx950`. The preceding 1,306-row simulator checkpoint passes without
-expected-failure exemptions, and the 24 new dual-address rows pass separately.
-A fresh 1,326-row simulator checkpoint, physical refresh, and whole 1,637-row
-timing run remain. On the current reference host, the preceding full
+physical `gfx950`. A fresh 1,326-row simulator checkpoint passes without
+expected-failure exemptions, and the four new physical dual-address rows pass
+separately. A physical refresh and whole 1,637-row timing run remain. On the
+current reference host, the preceding full
 `ctest -j64 -L consan-device` matrix completed in 539.56 seconds (944.37
 seconds user CPU plus 801.53 seconds system CPU), inside the 5--20-minute review
 budget.
