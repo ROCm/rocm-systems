@@ -5408,11 +5408,17 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Validate the buffer holds a full header before dereferencing any header field
+  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
+       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
   const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if (cper->record_length > buf_size) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec
-       << buf_size << " is smaller than cper record length " << std::dec << cper->record_length
-       << "\n";
+  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
+       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   } else if (strncmp(cper->signature, "CPER", 4) != 0) {
@@ -5422,7 +5428,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper)) {
+  for (int afid : cper_decode(cper, buf_size)) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }

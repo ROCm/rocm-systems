@@ -6131,7 +6131,16 @@ typedef struct {
  *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
  * for all AF Ids.
  *
+ *  @note A section whose offset or register count falls outside the record is skipped and the
+ *  remaining sections still decode, so a partial AF ID list returns ::AMDSMI_STATUS_SUCCESS.
+ *  The caller cannot tell an empty list from a malformed record.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_INVAL @p cper_buffer, @p afids, or @p num_afids is NULL, or @p buf_size
+ *  or @p *num_afids is zero
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE @p buf_size is smaller than a CPER header, or the
+ *  record's own length field is smaller than a CPER header or larger than @p buf_size
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA @p cper_buffer does not start with a CPER signature
  */
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
                                            uint32_t* num_afids);
@@ -6174,6 +6183,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  *
  * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
  * entry_count == 0 and buf_size == 0.
+ *
+ * A record the library cannot parse is dropped and the scan continues, so a short entry_count
+ * does not distinguish "the ring held fewer records" from "some records were malformed". The
+ * dropped records are named in the debug log.
  *
  * @ingroup tagRasInfo
  *
