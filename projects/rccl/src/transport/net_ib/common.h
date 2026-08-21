@@ -33,6 +33,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "multiseg.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -193,6 +194,9 @@ struct ncclIbRequestCompletionRecord {
   bool completions[NCCL_IB_MAX_QPS];
 };
 
+// Forward declaration; full definition (with multi-segment fields) is below.
+struct ncclIbMrHandle;
+
 struct ncclIbRequest {
   struct ncclIbNetCommBase* base;
   int type;
@@ -219,6 +223,10 @@ struct ncclIbRequest {
       int size;
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
+      // Local MR handle for this send; used by the multi-segment WR builder to
+      // resolve the per-segment local lkey. NULL/single-segment
+      // handles use lkeys[] directly on the fast path.
+      struct ncclIbMrHandle* mh;
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
     } send;
@@ -253,7 +261,22 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
+  // Multi-segment (AIRUNTIME-2351 classic-path follow-up). The
+  // receiver publishes its full segment layout so the sender can split RDMA
+  // writes at the receiver's physical segment boundaries. nSegments == 1 (or 0)
+  // means a single contiguous MR and segStart/segRkeys are unused. Extending
+  // this element changes the CTS-FIFO wire format: both peers must run a build
+  // with the same NCCL_IB_MAX_SEGMENTS.
+  uint32_t nSegments;
+  uint32_t pad;
+  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];                  // receiver VA per segment
+  uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
+
+// Worst-case work requests posted for one multi-recv send on a single QP: each
+// request's chunk may be split at every local and remote segment boundary it
+// spans. Single-segment sends use exactly one WR per request.
+#define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -333,10 +356,37 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-// Wrapper to track an MR per-device, if needed
+
+// NCCL_IB_MAX_SEGMENTS (cap on physical segments per registered buffer) is
+// defined in multiseg.h so the wire-protocol structs above and the pure helpers
+// can both reference it.
+//
+// Wrapper to track an MR per-device, if needed.
+//
+// Single-segment buffers (the common case) use only mrs[]; nSegments == 1.
+// Multi-segment cuMem/VMM buffers register one dma-buf MR per physical segment
+// per device; segStart/segLen describe the segment VA layout and segMrs holds
+// the per-segment, per-device MRs. mrs[] aliases segment 0 for compatibility
+// with the single-segment fast path.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
+  int nSegments;                                             // 1 = legacy single MR
+  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];                  // VA start of each segment
+  size_t    segLen[NCCL_IB_MAX_SEGMENTS];                    // bytes per segment
+  ibv_mr*   segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
+
+// Select the MR covering [addr, addr+len) for device devIndex.
+// - Single-segment handles return the legacy mrs[devIndex].
+// - Multi-segment handles return the containing segment's MR, or NULL if the
+//   range is not fully contained in one physical segment.
+static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h,
+                                       uintptr_t addr, size_t len, int devIndex) {
+  if (h == NULL) return NULL;
+  if (h->nSegments <= 1) return h->mrs[devIndex];
+  int s = ncclIbSegmentIndexForRange(h->nSegments, h->segStart, h->segLen, addr, len);
+  return (s < 0) ? NULL : h->segMrs[s][devIndex];
+}
 
 // Forward declaration
 struct ncclIbResiliency;
@@ -440,8 +490,11 @@ struct ncclIbSendComm {
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // A multi-segment send may split one request's per-QP chunk into up to one WR
+  // per local+remote segment boundary crossing. Size the WR/SGE pools
+  // for the worst case; single-segment sends use exactly one WR per request.
+  struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -593,6 +646,7 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
 ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle);
+ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
@@ -613,6 +667,11 @@ ncclResult_t ncclIbAcceptImpl(void* listenComm, void** recvComm, ncclNetDeviceHa
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm);
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
+// Register a multi-segment cuMem/VMM buffer as one dma-buf MR per physical
+// segment (per device), returning a composite ncclIbMrHandle (AIRUNTIME-2351
+// classic-path follow-up). The caller exports one dma-buf fd per segment.
+ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens,
+                                       uint64_t* segOffsets, int* segFds, int type, void** mhandle);
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle);
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request);
