@@ -12,11 +12,10 @@ aligned the ``CU %``/``SDMA`` columns and dropped the redundant ``%`` suffix.
 
 import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path, find_cli_dir
+from common.common import amdsmi_path, find_cli_dir, stub_modules
 
 # Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
 # matching install; see common.find_cli_dir). None -> setUpClass skips.
@@ -27,11 +26,11 @@ LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 _BOX_INNER_WIDTH = 78
 
 
-def _install_fake_helpers():
-    """Register a stub ``amdsmi_helpers`` so ``amdsmi_logger`` imports cleanly."""
+def _fake_helpers():
+    """Build a stub ``amdsmi_helpers`` so ``amdsmi_logger`` imports cleanly."""
     module = types.ModuleType("amdsmi_helpers")
     module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = module
+    return module
 
 
 def _load_logger_module():
@@ -66,19 +65,8 @@ class TestProcessTableFormat(unittest.TestCase):
             raise unittest.SkipTest(
                 f"amd-smi CLI not found ({LOGGER_PATH or _CLI_DIR}): amdsmi_logger.py not present"
             )
-        # Snapshot the real amdsmi_helpers so tearDownClass can undo the stub.
-        # Otherwise the empty stub leaks into later test modules (e.g. the real
-        # AMDSMIHelpers imported by test_cli_exit_codes) and breaks them.
-        cls._saved_amdsmi_helpers = sys.modules.get("amdsmi_helpers")
-        _install_fake_helpers()
+        stub_modules(cls, {"amdsmi_helpers": _fake_helpers()})
         cls.logger = _load_logger_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._saved_amdsmi_helpers is not None:
-            sys.modules["amdsmi_helpers"] = cls._saved_amdsmi_helpers
-        else:
-            sys.modules.pop("amdsmi_helpers", None)
 
     def _assert_boxed(self, line):
         self.assertTrue(line.startswith("|") and line.endswith("|"), line)

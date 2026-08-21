@@ -25,7 +25,7 @@ import unittest
 # the in-tree source checkout (resolved first below). Keeps this file runnable
 # from a plain checkout even when no matching amdsmi is installed.
 try:
-    from common.common import amdsmi_path
+    from common.common import amdsmi_path, stub_modules
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
 
@@ -77,11 +77,11 @@ class _FakeLibraryException(Exception):
         return self._message
 
 
-def _install_fake_amdsmi():
-    """Register a stub ``amdsmi`` package so ``set_value.py`` imports cleanly.
+def _build_fake_amdsmi():
+    """Build a stub ``amdsmi`` package so ``set_value.py`` imports cleanly.
 
-    Returns the fake ``amdsmi_interface`` module so individual tests can swap in
-    per-case ``amdsmi_get_clk_freq`` return values or side effects.
+    Returns the name -> module mapping for ``common.stub_modules``; tests reach the
+    fake ``amdsmi_interface`` through it to swap per-case return values.
     """
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
@@ -101,11 +101,12 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi.amdsmi_wrapper": wrapper,
+    }
 
 
 def _load_set_value_module():
@@ -126,30 +127,14 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
     # entry to prove the helper sorts the levels and filters out f <= 0.
     FCLK_DPM_HZ = [1600_000_000, 0, 1200_000_000, 2000_000_000, 1900_000_000]
 
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi.amdsmi_wrapper",
-    )
-
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        # Snapshot any real amdsmi already loaded so the stub does not leak into
-        # sibling suites sharing the interpreter; restored in tearDownClass.
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _snap(self, requested_mhz, frequency, min_mhz=None):
         # Shared harness: point the stubbed C entry point at a fixed DPM table
@@ -306,14 +291,13 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
     ``N/A`` opposing-bound skip that keeps the requested limit settable.
     """
 
-    _SAVED_MODULE_NAMES = TestSnapClkLimitToDpm._SAVED_MODULE_NAMES
-
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
-        cls.interface = _install_fake_amdsmi()
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         # Extra surface the set_gpu clk-limit branch touches beyond the snap
         # helper: the clock-info entry point, the set entry point, the clk-type
         # enum, and the BDF lookup used only to build error strings.
@@ -321,14 +305,6 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM = 4
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_clk_limit(
         self, clk_type, lim_type, val, min_clk, max_clk, dpm_hz=(), freq_raises=False

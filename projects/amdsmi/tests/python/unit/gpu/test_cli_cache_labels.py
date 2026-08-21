@@ -21,26 +21,14 @@ import argparse
 import copy
 import importlib.util
 import os
-import sys
-import types
 import unittest
 
-from common.common import amdsmi_path, find_cli_dir
+from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
 
 # Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
 # matching install; see common.find_cli_dir). None -> setUpClass skips.
 _CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
-
-# Modules the fakes below replace. Snapshotted around the suite so a real copy
-# loaded by a sibling test is never left shadowed by a stub.
-_CLI_MODULES = (
-    "amdsmi",
-    "amdsmi.amdsmi_interface",
-    "amdsmi.amdsmi_exception",
-    "amdsmi_helpers",
-    "amdsmi_cli_exceptions",
-)
 
 # gfx950 (MI350) cache layout captured live: four L1 variants plus L2 and L3.
 # Mirrors the per-entry dict shape returned by ``amdsmi_get_gpu_cache_info``.
@@ -102,44 +90,40 @@ class _FakeLibraryException(Exception):
         return str(self)
 
 
-def _install_fake_modules():
-    """Register a stub ``amdsmi`` package plus the sibling CLI modules.
+def _build_fake_modules():
+    """Build a stub ``amdsmi`` package plus the sibling CLI modules.
 
-    Returns the fake ``amdsmi_interface`` so tests can swap the cache payload.
+    Returns the name -> module mapping for ``common.stub_modules``.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
 
     def _get_cache_info(_handle):
         return {"cache": copy.deepcopy(_GFX950_CACHE)}
 
-    interface.amdsmi_get_gpu_cache_info = _get_cache_info
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
+    interface = fake_module("amdsmi.amdsmi_interface", amdsmi_get_gpu_cache_info=_get_cache_info)
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     # ``static.py`` imports these sibling names at load time; the cache path
     # never instantiates them (the test injects a fake helpers object).
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = object
-    sys.modules["amdsmi_helpers"] = helpers_mod
-
-    exceptions_mod = types.ModuleType("amdsmi_cli_exceptions")
-    exceptions_mod.AmdSmiInvalidParameterException = type(
-        "AmdSmiInvalidParameterException", (Exception,), {}
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=object)
+    exceptions_mod = fake_module(
+        "amdsmi_cli_exceptions",
+        AmdSmiInvalidParameterException=type("AmdSmiInvalidParameterException", (Exception,), {}),
     )
-    sys.modules["amdsmi_cli_exceptions"] = exceptions_mod
 
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi_helpers": helpers_mod,
+        "amdsmi_cli_exceptions": exceptions_mod,
+    }
 
 
 def _load_static_module():
     spec = importlib.util.spec_from_file_location("static_under_test", STATIC_PATH)
+    if spec is None or spec.loader is None:
+        raise unittest.SkipTest(f"amd-smi CLI static.py is not loadable ({STATIC_PATH})")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -227,17 +211,10 @@ class TestCliCacheLabels(unittest.TestCase):
             raise unittest.SkipTest(
                 f"amd-smi CLI not found ({STATIC_PATH or _CLI_DIR}): static.py not present"
             )
-        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
-        cls.interface = _install_fake_modules()
+        modules = _build_fake_modules()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.static_module = _load_static_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, mod in getattr(cls, "_saved_modules", {}).items():
-            if mod is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = mod
 
     def _run_cache(self, fmt):
         commands = object.__new__(self.static_module.StaticCommands)
