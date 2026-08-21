@@ -320,13 +320,6 @@ DecodeResult decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode,
 }
 } // namespace detail
 
-void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
-
 BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XyMubuf)),
@@ -393,13 +386,6 @@ DecodeResult decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode,
   return std::make_unique<BufferLoadFormatD16XyzMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
-}
 
 BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -1131,13 +1117,6 @@ DecodeResult decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode,
 }
 } // namespace detail
 
-void BufferLoadUbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
-
 BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadUbyteD16HiMubuf)),
@@ -1170,13 +1149,6 @@ DecodeResult decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode,
   return std::make_unique<BufferLoadUbyteD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadUbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1211,13 +1183,6 @@ DecodeResult decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode,
 }
 } // namespace detail
 
-void BufferLoadSbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
-
 BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadSbyteD16HiMubuf)),
@@ -1250,13 +1215,6 @@ DecodeResult decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode,
   return std::make_unique<BufferLoadSbyteD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadSbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1291,13 +1249,6 @@ DecodeResult decodeBufferLoadShortD16Mubuf(const MachineInst *opcode,
 }
 } // namespace detail
 
-void BufferLoadShortD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
-
 BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadShortD16HiMubuf)),
@@ -1330,13 +1281,6 @@ DecodeResult decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode,
   return std::make_unique<BufferLoadShortD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadShortD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -1371,13 +1315,6 @@ DecodeResult decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode,
   return std::make_unique<BufferLoadFormatD16HiXMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),

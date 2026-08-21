@@ -30,7 +30,7 @@ namespace {
     return {semantic_expand_rules_cdna4_to_cdna3(), {}};
   // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
   // profile only for that explicit revision pair.
-  if (guest == ROCJITSU_CODE_ARCH_GFX1250 && host == ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (guest == ROCJITSU_CODE_ARCH_CDNA5 && host == ROCJITSU_CODE_ARCH_CDNA5 &&
       input_revision == ProcessorRevision::Gfx1250B0 &&
       output_revision == ProcessorRevision::Gfx1250A0)
     return rewrite_registry_gfx1250_b0_to_a0();

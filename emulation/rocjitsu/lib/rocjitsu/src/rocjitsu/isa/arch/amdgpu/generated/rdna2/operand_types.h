@@ -454,6 +454,7 @@ enum OpSelVgprOrLds {
 [[nodiscard]] constexpr bool is_vgpr_operand_type(OperandType t) {
   switch (t) {
   case OperandType::OPR_SRC:
+  case OperandType::OPR_SRC_NOLDS:
   case OperandType::OPR_SRC_SIMPLE:
   case OperandType::OPR_SRC_VGPR:
   case OperandType::OPR_VGPR:

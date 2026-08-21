@@ -300,16 +300,61 @@ void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  constexpr uint64_t kPcSignBit = 1ULL << 47;
+  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  uint64_t target = encoded & kPcAddressMask;
+  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
+    target = wf.code_load_bias() + static_cast<int32_t>(encoded);
+  else if (target & kPcSignBit)
+    target |= ~kPcAddressMask;
+  wf.pc = target - size_;
 }
 
 void SSwapPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  constexpr uint64_t kPcSignBit = 1ULL << 47;
   uint64_t next_pc = wf.pc + size_;
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
+  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  uint64_t target = encoded & kPcAddressMask;
+  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
+    target = next_pc - 20 + static_cast<int32_t>(encoded);
+  else if (target & kPcSignBit)
+    target |= ~kPcAddressMask;
+  wf.pc = target - size_;
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
-void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - size_;
+
+  // Returning from the handler puts the interrupted EXEC back. The handler runs
+  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
+  // MSG_INTERRUPT -- and restoring that is part of returning, not part of
+  // stopping for a debugger: a handler that returns without stopping the wave
+  // used to leave its mask installed, so the application ran on with every lane
+  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees
+  // lanes that converged out of a branch reported active again) and is
+  // permanent, because nothing later puts the application's mask back.
+  if (wf.in_trap_handler())
+    wf.set_exec(wf.trap_saved_exec());
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  if ((wf.status_raw() & kStatusHalt) != 0) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
+  }
+}
 
 void SAddPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);

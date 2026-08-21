@@ -82,7 +82,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
-#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -1774,11 +1773,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       mem_flags.Value = 0;
       mem_flags.ui32.CoarseGrain = 1;
       mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
         mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -2634,7 +2633,6 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
-  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -3099,11 +3097,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
-// its handle in tool_libs_ gives it the normal reverse-order OnUnload and
-// CloseTools handling without dedicated runtime state.
+// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
+// and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {

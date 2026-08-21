@@ -741,6 +741,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VSmfmacF3232x32x32Bf8Fp8Vop3pMfma>,
     &execute_with_backend<VSmfmacF3232x32x32Fp8Bf8Vop3pMfma>,
     &execute_with_backend<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>,
+    &execute_with_backend<VMfmaScaleF3216x16x128F8f6f4Vop3px2>,
+    &execute_with_backend<VMfmaScaleF3232x32x64F8f6f4Vop3px2>,
     &execute_with_backend<VNopVop3>,
     &execute_with_backend<VMovB32Vop3>,
     &execute_with_backend<VReadfirstlaneB32Vop3>,
