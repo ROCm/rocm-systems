@@ -88,6 +88,12 @@ def test_single_node(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+
+                # Multi-node AllGather moves data with send/recv, so the dump carries p2p
+                # records alongside the collective ones; only the latter name a collective.
+                if "coll_perf" not in record:
+                    continue
+
                 assert record["coll_perf"]["coll"] == "AllGather", \
                     f"Record at line {lineno} in {dump_file} should be AllGather, got '{record['coll_perf']['coll']}'"
                 assert record["header"]["n_ranks"] == 8, \
@@ -170,6 +176,9 @@ def test_single_node_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+
+                if "coll_perf" not in record:
+                    continue
 
                 # Validate standard fields
                 assert record["coll_perf"]["coll"] == "AllGather", \
@@ -280,6 +289,10 @@ def test_multinode(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+
+                if "coll_perf" not in record:
+                    continue
+
                 assert record["coll_perf"]["coll"] == "AllGather", \
                     f"Record at line {lineno} in {dump_file} should be AllGather, got '{record['coll_perf']['coll']}'"
                 assert record["header"]["n_ranks"] == total_processes, \
@@ -397,6 +410,9 @@ def test_multinode_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+
+                if "coll_perf" not in record:
+                    continue
 
                 # Validate standard fields
                 assert record["coll_perf"]["coll"] == "AllGather", \

@@ -1607,10 +1607,11 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
-  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
-  for (uint32_t i = 0; i < nCh; i++) {
+  // Indexed by channelId, so scan every slot rather than assuming the channels used are
+  // packed into [0, nChannels). Pool entries are zeroed on allocation.
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {
       if (gpuExecTimeUsecs > maxKernelExecTimeUsecs) {
@@ -1697,10 +1698,13 @@ static uint64_t calculateMaxKernelExecTimeUsecsP2p(struct inspectorP2pInfo *p2pI
   uint64_t maxExecTimeUsecs = 0;
   bool hasGpuTiming = false;
 
-  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  uint32_t nCh = (p2pInfo->nChannels < MAX_CHANNELS) ? p2pInfo->nChannels : MAX_CHANNELS;
-  for (uint32_t i = 0; i < nCh; i++) {
+  // Kernel-channel state is stored at kernelCh[channelId], and P2P channel ids are spread
+  // across the p2p channel space rather than packed into [0, nChannels), so scan every slot
+  // and skip the ones no event wrote. Pool entries are zeroed on allocation, so an untouched
+  // slot cannot hold stale timings.
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &p2pInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
 
     if (gpuExecTimeUsecs > 0) {
@@ -1717,8 +1721,9 @@ static uint64_t calculateMaxKernelExecTimeUsecsP2p(struct inspectorP2pInfo *p2pI
   }
 
   // Fall back to CPU timestamps
-  for (uint32_t i = 0; i < nCh; i++) {
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &p2pInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
     if (kernelCh->tsCompletedUsec > kernelCh->tsStartUsec) {
       uint64_t cpuExecTimeUsecs = kernelCh->tsCompletedUsec - kernelCh->tsStartUsec;
       if (cpuExecTimeUsecs > maxExecTimeUsecs) {
