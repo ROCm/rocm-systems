@@ -10,7 +10,7 @@
 // specializations, so this suite unit-tests the GDA AllToAll device path
 // without a live network.
 //
-// The real rocshmem::QueuePair device methods (put_nbi/atomic_nofetch/quiet) are
+// The real rocshmem::QueuePair device methods (put_nbi/atomic_add/quiet) are
 // only declared in queue_pair_device.h (defined in rocSHMEM device bitcode).
 // This translation unit supplies inline stub definitions so the suite links
 // against no librocshmem device code, mirroring how Suite H shadows the SDMA
@@ -36,7 +36,7 @@
 // --------------------------------------------------------------------------
 // Stub definitions for rocshmem::QueuePair device methods.
 //   put_nbi       : byte-copy laddr -> raddr (observe data landing at remote VA)
-//   atomic_nofetch: atomic add into the remote signal word (observe signal deliver)
+//   atomic_add   : atomic add into the remote signal word (observe signal deliver)
 //   quiet         : bump a device-global call counter (observe completion sync)
 // Non-RDC build: these must be defined in the same TU as the kernels that
 // (via the inlined template) call them.
@@ -53,13 +53,13 @@ __device__ void QueuePair::put_nbi(void* raddr, uint32_t /*rkey*/, const void* l
   for (size_t i = 0; i < length; ++i) d[i] = s[i];
 }
 
-// Matches queue_pair_device.h: atomic_nofetch(void* dest, uint32_t rkey, int64_t
-// value, int64_t cond, ActiveWFInfo&). The template's signal path calls this
-// (gin_rocshmem_gda.h:54,101); cond/rkey are unused by the byte-accurate stub.
-__device__ void QueuePair::atomic_nofetch(void* dest, uint32_t /*rkey*/, int64_t value, int64_t /*cond*/,
-                                          ActiveWFInfo& /*wf_info*/) {
-  if (dest == nullptr) return;
-  atomicAdd(reinterpret_cast<unsigned long long*>(dest), static_cast<unsigned long long>(value));
+// Matches queue_pair_device.h: atomic_add(void* raddr, uint32_t rkey, int64_t
+// value, ActiveWFInfo&, bool fence). The template's signal path calls this
+// (gin_rocshmem_gda.h:54,101); rkey/fence are unused by the byte-accurate stub.
+__device__ void QueuePair::atomic_add(void* raddr, uint32_t /*rkey*/, int64_t value, ActiveWFInfo& /*wf_info*/,
+                                      bool /*fence*/) {
+  if (raddr == nullptr) return;
+  atomicAdd(reinterpret_cast<unsigned long long*>(raddr), static_cast<unsigned long long>(value));
 }
 
 __device__ void QueuePair::quiet(ActiveWFInfo& /*wf_info*/) {
@@ -428,15 +428,15 @@ TEST_F(GinRocshmemGdaTemplateTest, Flush_QuietsAllPeers) {
 __global__ void kernelGetReset(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
-  uint64_t* sig = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
-  if (sig) sig[0] = 55;
+  ncclGinOffsetPtr sigOff = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  if (sigOff.ptr) sigOff.ptr[0] = 55;
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   desc.indexedSignal.signalId = 0;
   ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, desc);
 
-  uint64_t* ctr = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
-  if (ctr) ctr[0] = 77;
+  ncclGinOffsetPtr ctrOff = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  if (ctrOff.ptr) ctrOff.ptr[0] = 77;
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
 }
 
@@ -455,8 +455,8 @@ TEST_F(GinRocshmemGdaTemplateTest, GetReset_SignalAndCounter) {
 __global__ void kernelResetSignalNone(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
-  uint64_t* sig = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
-  if (sig) sig[0] = 42;
+  ncclGinOffsetPtr sigOff = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
+  if (sigOff.ptr) sigOff.ptr[0] = 42;
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_NONE;
   ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, desc);
