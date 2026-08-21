@@ -6,9 +6,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Usable two ways: on its own, or via add_subdirectory() from a parent that has
-# already declared a project with the HIP language enabled. Nothing in RCCL's
-# build references this directory, so the standalone path is the one that runs
-# today, and it is the only one that defaults the build type.
+# already declared a project with the HIP language enabled. No RCCL library
+# target builds these sources -- the unit tests only consume the headers -- so
+# the standalone path is the one that runs today, and it is the only one that
+# defaults the build type.
 if(NOT PROJECT_NAME)
   project(rccl_ep LANGUAGES CXX HIP)
   set(RCCL_EP_STANDALONE TRUE)
