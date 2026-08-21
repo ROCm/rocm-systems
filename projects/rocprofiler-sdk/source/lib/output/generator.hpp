@@ -132,6 +132,26 @@ generator<Tp>::resize(size_t sz)
     std::iota(m_pos.begin(), m_pos.end(), 0);
 }
 
+/// Trivial generator holding no elements. Useful as a stand-in for a real
+/// generator when a data source is unavailable (e.g. a table/view that does
+/// not exist in older schema versions) but the API requires a valid
+/// `const generator<Tp>&` rather than a nullable pointer.
+template <typename Tp>
+struct empty_generator : public generator<Tp>
+{
+    empty_generator()
+    : generator<Tp>{size_t{0}}
+    {}
+    ~empty_generator() override = default;
+
+    empty_generator(const empty_generator&)     = delete;
+    empty_generator(empty_generator&&) noexcept = delete;
+    empty_generator& operator=(const empty_generator&) = delete;
+    empty_generator& operator=(empty_generator&&) noexcept = delete;
+
+    std::vector<Tp> get(size_t) const override { return {}; }
+};
+
 template <typename Tp>
 struct file_generator : public generator<Tp>
 {
