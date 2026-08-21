@@ -248,9 +248,20 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       has_cluster_workgroup_id);
   const uint64_t access_island_word_count =
       options.moi_runtime_sample_stride > 1u ? sampled_access_island_words : kIndirectIslandWords;
-  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250
-                                          ? std::max<uint64_t>(20u, access_island_word_count)
-                                          : access_island_word_count;
+  // A large explicit-key object can place its appended bodies outside SOPP
+  // reach of the early dense dispatchers. Each long dispatch arm then needs
+  // its comparison and conditional branch in addition to the complete
+  // indirect-jump envelope. Use the same conservative large-object relay
+  // width as Record/Replay and Inline Shadow; compact objects retain their
+  // smaller layout so nearby bodies are not needlessly displaced.
+  constexpr size_t kLargeExplicitKeyRelayCandidateCount = 1024u;
+  const bool needs_large_explicit_key_relay =
+      arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+      candidates.size() >= kLargeExplicitKeyRelayCandidateCount;
+  const uint64_t ordinary_access_relay_words =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 20u : (needs_large_explicit_key_relay ? 20u : 10u);
+  const uint64_t access_relay_words =
+      std::max(ordinary_access_relay_words, access_island_word_count);
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(

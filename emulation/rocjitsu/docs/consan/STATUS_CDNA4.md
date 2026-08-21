@@ -642,7 +642,44 @@ The HipKittens rows remain explicit enablement work.
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🟨 Current physical strict run passes all 65,536 exact output checks with complete 64/64 supported LDS-access coverage, zero check mismatches, and complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Physical strict stride-1 clean run passes all 65,536 exact checks with complete 64/64 accesses and 5/5 barriers, 49,152 committed accesses plus 60 barrier records, zero diagnostics/conflicts/drops, and complete static/dynamic verdicts; the standard cadence selects no workgroup, and paired overhead/reviewed-fault evidence remain | 🟨 Physical strict stride-1 run passes all 65,536 exact checks with complete 64/64 accesses and 4/4 applicable barriers, 256 samples plus 4 synchronization records, zero diagnostics, and complete static/dynamic verdicts; the standard offset-0 cadence selects no workgroup, and paired overhead/reviewed-fault evidence remain | 🟨 Current physical strict run passes all 65,536 exact checks in 17.11 seconds with complete 64/64 access and 5/5 barrier coverage, 294,912 visible evidence events, zero diagnostics or malformed/incomplete state, and complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Explicit gfx950 four-wave microscaling GEMM. A current clean build succeeds despite the portable corpus skip, and the physical exact oracle passes all 65,536 outputs. |
 | P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🟨 Current physical strict run preserves the exact zero-error oracle, patches all 32/32 supported LDS accesses, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟧 Current physical standard-profile run preserves the exact oracle and patches all 32/32 accesses plus 3/3 barriers, but the stride-65,536 cadence selects no workgroup and the required-records contract rejects zero visible evidence.  A stride-1 diagnostic also reaches the exact oracle, then reaches the 120-second bound during dense replay/teardown | 🟨 Current physical stride-1 diagnostic preserves the exact oracle, patches all 32/32 accesses plus 3/3 barriers, publishes 192 samples plus 3 synchronization records with zero diagnostics, and reports complete static/dynamic verdicts; the standard stride-256 cadence selects no workgroup, and paired-overhead/reviewed-fault acceptance remain | 🟨 Current physical standard-profile run preserves the exact oracle in 18.53 seconds, patches all 32/32 accesses plus 3/3 barriers, publishes 4,800,512 visible evidence events with zero diagnostics or incomplete state, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | Current-tip evidence is retained under `consan-gfx950-streamk-current-20260821/simple`; the older four-profile provenance evidence remains under the `consan-gfx950-streamk-*-provenance-20260724` artifact roots.  The former instrumentation and placement failures are fixed; Record/Replay still needs a usable sampling cadence. |
 | P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🟨 Current physical strict run preserves the exact zero-error oracle, patches all 80/80 supported LDS accesses, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟧 After preserving the access pass's compact barrier-relay reservation, a current physical standard-profile run preserves the exact oracle and patches all 80/80 accesses plus all 5/5 barriers with complete static coverage; the process still reaches the 120-second bound during replay/teardown before a final dynamic verdict | 🟨 Current physical standard-profile run preserves the exact oracle in 0.55 seconds, patches all 80/80 accesses plus 5/5 barriers, publishes 28 visible samples with zero diagnostics, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | 🟨 Current physical standard-profile run preserves the exact oracle in 17.72 seconds, patches all 80/80 accesses plus 5/5 barriers, publishes 10,485,760 visible evidence events with zero diagnostics or incomplete state, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | Current-tip evidence is retained under `consan-gfx950-streamk-current-20260821/two-tile`; the former Sampled and Inline Shadow resource/placement failures and the Record/Replay 4/5 barrier-relay gap are fixed.  Record/Replay retains bounded replay latency. |
-| P2 | `rocblas_sgemm` compact exact cases | 🩶 Baseline exact; profile unassessed | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifacts `consan-gfx950-rocblas-sgemm-rr-assessment-20260722/run.log` and `run-verbose.log`; preflight finds 49,435 access ranges and 2,558,464 barrier records before strict policy terminates with exit code 92.  Per-owner persistent tuples are a medium-sized gap, so this bounded red row is not an easy-cell candidate. |
+| P2 | `rocblas_sgemm` compact exact cases | 🟧 Current physical strict run passes the exact `Square_64x64` oracle in 25.264 seconds, but patches only 2,027/49,435 supported LDS accesses; 47,408 sites fail placement or lowering, so static and analysis verdicts are incomplete | 🟥 The exact `Square_64x64` baseline passes, but strict Record/Replay rejects the 7,240,872-byte rocBLAS object before the oracle: a code-object-global persistent owner/epoch tuple cannot fit the heterogeneous per-kernel CDNA4 AccVGPR boundaries | 🟨 Current physical stride-1 diagnostic passes the exact oracle in 14.698 seconds with complete 49,435/49,435 access and 4,995/4,995 barrier coverage, 96 visible samples, zero diagnostics, and complete static/analysis/dynamic verdicts; the standard stride-256 cadence still selects no workgroup, and paired-overhead/reviewed-fault evidence remain | 🟥 Current physical strict Inline Shadow rejects the rocBLAS code object before the oracle: the inventory retry throws `Invalid instruction opcode: truncated instruction encoding` and fail-closed policy exits 92 | Current evidence is retained under `consan-validation/rebase-20260821-gfx950-rocblas-sgemm-current`; older Record/Replay artifacts remain under `consan-gfx950-rocblas-sgemm-rr-assessment-20260722`.  This large heterogeneous library object remains a placement and sampling frontier rather than an easy-cell candidate. |
+
+### 2026-08-21 rocBLAS SGEMM current assessment
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260821-gfx950-rocblas-sgemm-current`
+records a physical-gfx950 baseline and strict SuperCollider run of corpus
+revision `aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4` against the workspace's
+freshly composed TheRock rocBLAS artifact.  The baseline and instrumented
+`RocblasGemmTest.Square_64x64` exact oracles pass in 0.315 and 25.264 seconds.
+The 7,240,872-byte rocBLAS code object contains 49,435 supported LDS accesses,
+of which SuperCollider patches 2,027; the other 47,408 fail placement or
+lowering.  The workload result and dynamic report are complete, but static and
+analysis verdicts are not, so the cell is orange rather than accepted.
+
+The strict standard-v1 Sampled run passes the exact oracle in 14.445 seconds
+and patches all 49,435 accesses plus all 4,995 applicable barriers.  Its
+stride-256 cadence selects no workgroup, however, leaving zero visible evidence
+and causing the required-records gate to exit 86.  The prescribed stride-1
+diagnostic initially rejected before execution because the sampled probe's
+dense dispatcher reserved only its indirect-jump words, not the comparison and
+conditional branch needed by a far explicit-key target.  The focused
+`Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes` host regression
+reproduces the 1,024-site failure.  After giving large explicit-key Sampled
+objects the existing conservative relay envelope used by the other MOI
+engines, that same physical diagnostic passes the exact oracle in 14.698
+seconds with 49,435/49,435 accesses, 4,995/4,995 barriers, 96 visible samples,
+zero diagnostics, and complete static, analysis, and dynamic verdicts.  The
+cell is yellow because the standard cadence, paired overhead, and reviewed
+fault remain.  The candidate is based on source revision `1b93fbe9f75e`; the
+loaded fixed hook SHA-256 is
+`5643e546e24fb2cf50c304980fe1fd037d76455115190c15ec5b50b42e6f4f40`.
+
+The strict standard-v1 Inline Shadow run rejects the rocBLAS code object before
+the exact oracle.  Its first inventory sizes a 134,217,672-byte report, but the
+subsequent patch/inventory retry throws `Invalid instruction opcode: truncated
+instruction encoding`; strict fail-closed policy terminates with exit 92.  The
+cell is red rather than inheriting its baseline result.
 
 ### 2026-08-20 current HipKittens compile and baseline assessment
 

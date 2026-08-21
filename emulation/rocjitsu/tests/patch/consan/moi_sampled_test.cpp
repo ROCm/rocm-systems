@@ -6278,6 +6278,46 @@ TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
   })) << testing::PrintToString(result.warnings);
 }
 
+TEST(ConSanMoi, Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 1024u;
+  std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+  for (uint32_t index = 0u; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2u, /*vdata=*/3u, index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    text_words.insert(text_words.end(), access->begin(), access->end());
+  }
+  // The appended access bank places early dense dispatchers more than SOPP
+  // reach from their bodies. Each dispatch arm therefore needs its compare and
+  // conditional branch in addition to a full indirect-jump envelope.
+  text_words.resize(33'000u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_large_sampled_dense"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount)
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 65u;
