@@ -6103,7 +6103,7 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   const auto store = build_cdna4_ds_store_b32(
       /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
   ASSERT_TRUE(store);
-  std::vector<uint32_t> text_words(kTextWords, build_s_mov_b32(10u, 10u, kArch));
+  std::vector<uint32_t> text_words(kTextWords, build_s_mov_b32(8u, 8u, kArch));
   for (size_t site = 0; site < kSiteCount; ++site)
     std::ranges::copy(*store, text_words.begin() + 2u * site);
   // A small linker-style NOP cave is enough to select the local-island path,
@@ -6113,8 +6113,21 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
     text_words[word] = build_s_nop(0u, kArch);
   text_words.back() = build_s_endpgm(kArch);
 
-  const std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "cdna4_rocblas_dense_lds");
+  // Package the dense owner beside a large unrelated kernel, as PyTorch and
+  // rocBLAS do. Dense-host discovery must search the owner's instruction
+  // slice rather than rescan unrelated executable text for every subgroup.
+  std::vector<uint32_t> unrelated_words(100000u, build_s_mov_b32(0u, 0u, kArch));
+  unrelated_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      text_words, unrelated_words, {}, /*vgpr_granulated=*/0u,
+      /*function_is_kernel=*/true);
+  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
+    // Sixteen allocated SGPRs put CDNA's physical VCC at s[10:11]. The dense
+    // router needs ordinary scratch through that boundary and must therefore
+    // move the allocation tail to the next quantum.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 1u);
+  });
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_lds_check_trap = true;
@@ -6136,7 +6149,21 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
     return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher &&
            patch.sc_dense_explicit_key_sgpr.has_value();
   });
-  EXPECT_NE(explicit_dispatcher, result.patches.end());
+  ASSERT_NE(explicit_dispatcher, result.patches.end());
+  ASSERT_TRUE(explicit_dispatcher->indirect_pc_sgpr);
+  EXPECT_EQ(*explicit_dispatcher->indirect_pc_sgpr, 10u);
+  EXPECT_GE(explicit_dispatcher->indirect_required_sgpr_count, 12u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto kernel = std::ranges::find(patched.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  ASSERT_NE(kernel, patched.kernels().end());
+  KD descriptor{};
+  std::memcpy(&descriptor, result.elf_bytes.data() + kernel->descriptor_file_offset,
+              sizeof(descriptor));
+  const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
+      descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  EXPECT_EQ(sgpr_granulated, 2u); // 24 SGPRs; physical VCC moves to s[18:19].
 }
 
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {

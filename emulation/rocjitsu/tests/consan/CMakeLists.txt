@@ -432,6 +432,7 @@ function(rj_add_consan_device_conformance_cases)
         list(
             APPEND _device_workloads
             "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
+            "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
             "Gfx950Wave64LargeText|gfx950_wave64_large_text|ConSanDeviceGfx950Wave64LargeTextTest"
         )
@@ -529,6 +530,12 @@ function(rj_add_consan_device_conformance_cases)
                 if(
                     _workload_feature STREQUAL "sampled-only"
                     AND NOT _mode_value STREQUAL "sampled"
+                )
+                    continue()
+                endif()
+                if(
+                    _workload_feature STREQUAL "supercollider-only"
+                    AND NOT _mode_value STREQUAL "supercollider"
                 )
                     continue()
                 endif()
@@ -781,6 +788,7 @@ function(rj_add_consan_device_fixture_targets target)
         list(
             APPEND _device_workload_sources
             "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
+            "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
             "gfx950_wave64_large_text|gfx950_wave64_large_text_test.hip"
         )

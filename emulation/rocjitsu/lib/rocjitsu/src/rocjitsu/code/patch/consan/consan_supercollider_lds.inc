@@ -1597,8 +1597,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const bool is_large_majority_stranded =
       indirect_island_unreachable_site_count >= kDenseCallMinimumStrandedSites &&
       indirect_island_unreachable_site_count > supported_candidate_count / 2u;
-  const bool supports_dense_call =
-      arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
+  const bool supports_dense_call = arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
   if (supports_dense_call && (exceeds_absolute_relay_bound || is_large_majority_stranded)) {
     struct DenseSeedGroup {
       uint64_t container_entry_text_offset = 0;
@@ -1787,13 +1786,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::vector<uint32_t> best_displaced_words;
       uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
       size_t largest_host_prefix_words = 0;
-      for (const Instruction *instruction : ordered_instructions) {
-        if (instruction == nullptr)
-          continue;
+      const auto container_instruction_begin = std::ranges::lower_bound(
+          ordered_instructions, container_begin, {},
+          [](const Instruction *instruction) { return instruction->src_loc(); });
+      for (auto instruction_it = container_instruction_begin;
+           instruction_it != ordered_instructions.end(); ++instruction_it) {
+        const Instruction *instruction = *instruction_it;
         const uint64_t host_offset = instruction->src_loc();
         const uint64_t host_bytes = kDenseEntryHostWords * sizeof(uint32_t);
-        if (host_offset < container_begin || host_offset > container_end ||
-            host_bytes > container_end - host_offset ||
+        if (host_offset >= container_end)
+          break;
+        if (host_bytes > container_end - host_offset ||
             std::ranges::any_of(dense_reserved_host_ranges,
                                 [&](const auto &range) {
                                   return host_offset < range.second &&

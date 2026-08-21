@@ -324,18 +324,18 @@ CTest names make the pairing visible, for example `...Reduction.Correct` and
 selected across all applicable architectures. One pair/backend application is
 ten rows: correct and incorrect under the baseline and four ConSan flavors.
 The 18 common pairs contribute 1,080 rows across the five RocJitsu targets plus
-physical `gfx950`. The non-rectangular target extensions contribute 456 rows,
+physical `gfx950`. The non-rectangular target extensions contribute 464 rows,
 including the 24 baseline/Inline rows in the generalized empty-EXEC
 scalar-spill pair. The physical module-load reduction contributes four rows
-and the physical health check contributes one, for 1,541 total.
+and the physical health check contributes one, for 1,549 total.
 
 The per-configuration arithmetic is:
 
 | Configuration | Pairs | Rows |
 | --- | ---: | ---: |
 | RocJitsu `gfx942` | 28 | 258; the dense-SCC pair omits unsupported Record/Replay rows |
-| RocJitsu `gfx950` | 31 | 288; the dense-SCC pair omits unsupported Record/Replay rows |
-| Physical `gfx950` | 32 | 293, including four module-load rows and health |
+| RocJitsu `gfx950` | 32 | 292; the dense-SCC pair omits unsupported Record/Replay rows and the production-threshold pair is SuperCollider-only |
+| Physical `gfx950` | 33 | 297, including four module-load rows and health |
 | RocJitsu `gfx1100` | 22 | 214 |
 | RocJitsu `gfx1201` | 24 | 234 |
 | RocJitsu `gfx1250` | 26 | 254 |
@@ -400,6 +400,9 @@ contracts:
   early sites cannot reach appended relays; and
 - CDNA4 Record/Replay restoration of guest SCC between a dense dispatch-key
   comparison and a directly reached B16 access body.
+- CDNA descriptor SGPR growth borrowing the six-register physical
+  VCC/XNACK/FLAT_SCRATCH tail for a production-scale SuperCollider return-PC
+  pair.
 
 These implementation findings remain covered by device or focused unit
 regressions. Any future red cell receives the same treatment: fix the owning
@@ -466,8 +469,11 @@ external availability gap.
 
 ### CDNA4 (`gfx950`)
 
-**Implemented evidence:** 28 pair names run twice--278 RocJitsu rows and 278
-physical rows--followed by four physical module-load rows and a health check.
+**Implemented evidence:** 31 pair names contribute 288 RocJitsu rows. Physical
+gfx950 repeats those rows, then adds four module-load rows and a health check,
+for 293 `ConSanDeviceGfx950Physical` rows. Four additional generalized
+scalar-spill execution rows per backend bring the configuration totals to 292
+and 297 respectively.
 Alongside the CDNA3 MFMA,
 full-bank Stream-K, B96, group-FLAT, and common VGLOBAL contracts, the CDNA4-only
 `CdnaAccvgprB128` pair performs a native B128 LDS load directly into AccVGPRs
@@ -488,6 +494,13 @@ competition reduced from the physical two-tile Tensile Stream-K E2E workload.
 The two dense-SCC pairs add the corresponding pressure and B16 control-flow
 shapes on both backends; the latter specifically guards the Record/Replay
 dispatcher bug reduced from hip-moi D128-pressure.
+`CdnaSuperColliderDenseThreshold` separately crosses SuperCollider's
+production 1,024-stranded-site threshold with 1,040 static LDS writes and a
+long scalar tail distilled from PyTorch radix sort. Its correct and incorrect
+members run under baseline and SuperCollider on gfx950 simulation and physical
+gfx950. They pin exact results, diagnostic behavior, and the CDNA descriptor
+growth that keeps dense return-PC scratch below the physical special-register
+tail without making the generalized all-engine fixture artificially large.
 
 **Defects now guarded:** the common and target pairs reproduce the reduced
 wide-load spill-window corruption, the AccVGPR-boundary entry-state bug, and
@@ -607,10 +620,11 @@ levels. Eighteen common and twenty family/target pair names cover the main
 synchronization, atomic, pipeline, selection/reduction, resource, cluster/TDM,
 and repeated-dispatch idioms distilled from `VALIDATION.md` and Aorta. Every
 applicable pair runs through the baseline and all four engines in RocJitsu;
-CDNA4 repeats the same coverage on the physical `gfx950`. All 1,541 rows pass
+CDNA4 repeats the same coverage on the physical `gfx950`. All 1,549 rows pass
 without expected-failure exemptions. On the current reference host, the full
-`ctest -j64 -L consan-device` matrix completes in 553.71 seconds, inside the
-5--20-minute review budget.
+`ctest -j64 -L consan-device` matrix completes in 539.56 seconds (944.37
+seconds user CPU plus 801.53 seconds system CPU), inside the 5--20-minute
+review budget.
 
 This materially shrinks, but cannot eliminate, regression risk. The remaining
 gaps are narrower uncommon instruction forms, production-size placement,

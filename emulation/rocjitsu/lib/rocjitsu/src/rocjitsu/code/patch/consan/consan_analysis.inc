@@ -111,14 +111,28 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
 [[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
                                                    rj_code_arch_t arch) {
   constexpr uint32_t kSgprGranularity = 8u;
-  constexpr uint32_t kMaxRdna4OrdinarySgprs = 106u;
-  if (required_count == 0 || required_count > kMaxRdna4OrdinarySgprs)
+  constexpr uint32_t kCdnaAllocationTailSgprs = 6u;
+  constexpr uint32_t kMaxRdnaOrdinarySgprs = 106u;
+  constexpr uint32_t kMaxCdnaOrdinarySgprs = 102u;
+  const uint32_t max_ordinary_sgprs =
+      is_cdna_arch(arch) ? kMaxCdnaOrdinarySgprs : kMaxRdnaOrdinarySgprs;
+  if (required_count == 0 || required_count > max_ordinary_sgprs)
     return false;
-  if (required_count <= descriptor_sgpr_allocation_count(desc, arch))
+
+  // CDNA's descriptor count includes a six-register allocation tail for
+  // VCC/XNACK/FLAT_SCRATCH. Ordinary temporaries cannot borrow those slots:
+  // for example, a 16-SGPR allocation physically places VCC at s[10:11].
+  // Grow far enough to keep the complete tail above the highest new ordinary
+  // SGPR. RDNA's special registers have fixed architectural indices.
+  const uint32_t required_allocation =
+      static_cast<uint32_t>(required_count) + (is_cdna_arch(arch) ? kCdnaAllocationTailSgprs : 0u);
+  if (required_allocation <= descriptor_sgpr_allocation_count(desc, arch))
     return true;
-  const uint32_t rounded = (static_cast<uint32_t>(required_count) + kSgprGranularity - 1u) /
-                           kSgprGranularity * kSgprGranularity;
-  if (rounded > kMaxRdna4OrdinarySgprs)
+  const uint32_t rounded =
+      (required_allocation + kSgprGranularity - 1u) / kSgprGranularity * kSgprGranularity;
+  const uint32_t max_allocation =
+      max_ordinary_sgprs + (is_cdna_arch(arch) ? kCdnaAllocationTailSgprs : 0u);
+  if (rounded > (max_allocation + kSgprGranularity - 1u) / kSgprGranularity * kSgprGranularity)
     return false;
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   (rounded / kSgprGranularity - 1u));
