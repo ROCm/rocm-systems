@@ -1641,14 +1641,16 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
         const uint32_t ck = 2u * group + which;
         const uint8_t value = static_cast<uint8_t>(1u + ((row * 3u + group + which * 2u) % 7u));
         compressed_a[row][ck] = value;
-        const uint32_t lane = row + 16u * ((ck >> 3) & 1u);
-        const uint32_t slot = (ck & 7u) + 8u * (ck >> 4);
-        write_byte(kA, lane, slot, value);
+        const uint32_t a_lane = row + 16u * ((ck >> 4) & 1u);
+        const uint32_t a_slot = (ck & 15u) + 16u * (ck >> 5);
+        write_byte(kA, a_lane, a_slot, value);
 
-        const uint32_t word = slot / 16;
-        const uint32_t shift = 2u * (slot % 16);
-        const uint32_t old = cu.read_vgpr(base + kIndex + word, lane);
-        cu.write_vgpr(base + kIndex + word, lane, old | ((pair[which] & 3u) << shift));
+        const uint32_t index_lane = row + 16u * (ck / 32u);
+        const uint32_t index_slot = ck % 32u;
+        const uint32_t word = index_slot / 16;
+        const uint32_t shift = 2u * (index_slot % 16);
+        const uint32_t old = cu.read_vgpr(base + kIndex + word, index_lane);
+        cu.write_vgpr(base + kIndex + word, index_lane, old | ((pair[which] & 3u) << shift));
       }
     }
 
@@ -1656,8 +1658,8 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
     for (uint32_t col = 0; col < 16; ++col) {
       const uint8_t value = static_cast<uint8_t>(1u + ((k * 5u + col * 3u) % 11u));
       dense_b[col][k] = value;
-      const uint32_t lane = col + 16u * ((k >> 4) & 1u);
-      const uint32_t slot = (k & 15u) + 16u * (k >> 5);
+      const uint32_t lane = col + 16u * ((k >> 5) & 1u);
+      const uint32_t slot = (k & 31u) + 32u * (k >> 6);
       write_byte(kB, lane, slot, value);
     }
 

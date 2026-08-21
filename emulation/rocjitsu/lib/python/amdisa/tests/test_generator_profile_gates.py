@@ -254,6 +254,39 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
 
 
 @pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 3),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 3),
+    ],
+)
+def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> None:
+    names = ('DS_LOAD_TR8_B64', 'DS_LOAD_B64_TR_B8', 'DS_LOAD_TR_B64')
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VDS',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+def test_gfx1250_ds_b8_transpose_uses_profile_routing(
+    gfx1250_generated_root: Path,
+) -> None:
+    vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
+    body = _generated_method_body(vds, 'DsLoadTr8B64Vds', 'DsLoadB96Vds')
+    assert 'd->transpose = 3;' in body
+
+
+@pytest.mark.parametrize(
     ('name', 'elem_size', 'scale', 'dst_dwords'),
     [
         ('DS_STOREXCHG_2ADDR_RTN_B32', 4, '4U', 1),
