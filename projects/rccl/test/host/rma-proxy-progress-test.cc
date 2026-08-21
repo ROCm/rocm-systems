@@ -233,6 +233,37 @@ protected:
         return raw;
     }
 
+    // Allocate a single Ready-typed PutSignal descriptor with an explicit
+    // opSeq and a caller-owned *shared* readySeq location, placed at the
+    // current pending head for `peer`. This mirrors production, where every
+    // pending desc for a peer reads one per-peer readySeq that the GPU advances
+    // monotonically (rma_proxy_launch.cc: readySeq = &readySeqs[peer]; the GPU
+    // stores desc->opSeq into it once the desc's data is ready). A desc is
+    // "ready" only once *sharedReady >= opSeq. Bumps pis[peer] so the circular
+    // buffer reports non-empty; opSeq is independent of the buffer index.
+    ncclRmaProxyDesc* PushPendingPutSignalShared(int peer, uint32_t targetRank,
+                                                 uint64_t opSeq,
+                                                 uint64_t* sharedReady) {
+        auto d = std::make_unique<ncclRmaProxyDesc>();
+        std::memset(d.get(), 0, sizeof(ncclRmaProxyDesc));
+        d->rmaDescType = ncclRmaDescTypePutSignal;
+        d->rmaDescState = ncclRmaDescStateReady;
+        d->putSignal.targetRank = static_cast<int>(targetRank);
+        d->putSignal.signal.op = 0;
+        d->putSignal.request = nullptr;
+        d->opSeq = opSeq;
+        d->readySeq = sharedReady;
+
+        uint32_t pi = pis_[peer];
+        uint32_t idx = pi & (ctx_->queueSize - 1);
+        circular_[static_cast<size_t>(peer) * kQueueSize + idx] = d.get();
+        pis_[peer] = pi + 1;
+
+        ncclRmaProxyDesc* raw = d.get();
+        descs_.push_back(std::move(d));
+        return raw;
+    }
+
     // Allocate a single PutSignal descriptor already issued to the network
     // (a live request from FakeNet) and enqueue it on `peer`'s in-progress
     // queue, bumping inflightRequests[targetRank] to match. Gives the desc a
@@ -555,6 +586,87 @@ TEST_F(RmaProxyProgressTest, Completion_NoInflightCredit_ReturnsErrorWithoutUnde
     EXPECT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
               ncclInternalError);
     EXPECT_EQ(inflight_[target], 0u);          // guard prevents underflow
+}
+
+// Readiness gating on the pending scan. Every pending desc for a peer reads one
+// shared, monotonically-advanced readySeq; a desc is issued only once
+// readySeq >= its opSeq (rma_proxy_progress.cc: `if (readySeq < opSeq) break`).
+// Because the descs sit in a FIFO circular buffer consumed head-first, a head
+// whose data the GPU has not yet marked ready blocks every op queued behind it.
+// Raising readySeq one opSeq at a time releases the descs strictly in order.
+TEST_F(RmaProxyProgressTest, PendingScan_ReadySeqGatesIssueInFifoOrder) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    // One shared per-peer readiness counter, initially behind both ops.
+    uint64_t readySeq = 0;
+    PushPendingPutSignalShared(peer, target, /*opSeq=*/1, &readySeq);
+    PushPendingPutSignalShared(peer, target, /*opSeq=*/2, &readySeq);
+
+    // GPU hasn't signalled readiness for the head: the scan stops at the head
+    // even though the buffer is non-empty -- nothing issues, CI stays put.
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 0);
+    EXPECT_EQ(cis_[peer], 0u);
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+
+    // Readiness advances to cover only the head (opSeq 1): the head issues and
+    // moves to in-progress, but the second op (opSeq 2 > readySeq) is gated and
+    // held behind it -- FIFO order preserved.
+    readySeq = 1;
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 1);
+    EXPECT_EQ(cis_[peer], 1u);
+
+    // Readiness advances to cover the second op: it now issues too.
+    readySeq = 2;
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 2);
+    EXPECT_EQ(cis_[peer], 2u);
+}
+
+// Head-of-line completion gate. The in-progress queue drains head-first: while
+// the head op is still outstanding, completion polling must not "peek behind"
+// it (rma_proxy_progress.cc: `if (!fullyDone) break`). Completing a later op
+// first therefore publishes nothing; only once the head completes does the poll
+// drain in FIFO order, publishing each doneSeq and destroying each desc.
+TEST_F(RmaProxyProgressTest, Completion_HeadOfLineGate_DrainsInFifoOrder) {
+    const int peer = 1;
+    const uint32_t target = 1;
+    const uint64_t headSeq = 3;
+    const uint64_t tailSeq = 4;
+
+    ncclRmaProxyDesc* head = PushInProgressPutSignal(peer, target, headSeq);
+    ncclRmaProxyDesc* tail = PushInProgressPutSignal(peer, target, tailSeq);
+
+    std::vector<ncclRmaProxyDesc*> destroyOrder;
+    ScopedHook destroy(g_rmaDestroyDesc,
+        [&](struct ncclComm*, struct ncclRmaProxyDesc** d) -> ncclResult_t {
+            destroyOrder.push_back(*d);
+            *d = nullptr;
+            return ncclSuccess;
+        });
+
+    // Complete the *tail* op only. The head is still outstanding, so the poll
+    // stops at the head and publishes/destroys nothing behind it.
+    net_.completeRequest(tail->putSignal.request);
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
+              ncclSuccess);
+    EXPECT_EQ(InProgressHead(peer), head);       // head still at the front
+    EXPECT_TRUE(destroyOrder.empty());           // nothing drained
+    EXPECT_EQ(doneSeqStore_[0], ~headSeq);       // head doneSeq unpublished
+    EXPECT_EQ(doneSeqStore_[1], ~tailSeq);       // tail doneSeq unpublished
+
+    // Completing the head unblocks the queue: both drain in FIFO order.
+    net_.completeRequest(head->putSignal.request);
+    ASSERT_EQ(ncclRmaProxyPollNonPersistCompletion(&rma_, ctx_.get(), peer),
+              ncclSuccess);
+    EXPECT_EQ(InProgressHead(peer), nullptr);              // fully drained
+    ASSERT_EQ(destroyOrder.size(), 2u);
+    EXPECT_EQ(destroyOrder[0], head);                      // head first
+    EXPECT_EQ(destroyOrder[1], tail);                      // then tail
+    EXPECT_EQ(doneSeqStore_[0], headSeq);                  // both published
+    EXPECT_EQ(doneSeqStore_[1], tailSeq);
 }
 
 }  // namespace
