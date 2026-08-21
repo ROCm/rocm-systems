@@ -33,12 +33,6 @@ namespace common
 {
 /// Size of a SHA-256 digest, in bytes.
 constexpr size_t SHA256_DIGEST_SIZE = 32;
-/// SHA-256 compression block size, in bytes.
-constexpr size_t SHA256_BLOCK_SIZE = 64;
-
-/// Zero a buffer without the optimiser eliding it.
-void
-secure_zero(void* p, size_t n);
 
 // --- SHA-256 Implementation ---
 class sha256
@@ -50,8 +44,7 @@ public:
     void update(const uint8_t* data, size_t len);
     void update(const std::string& data);
 
-    void finalize();
-
+    void        finalize();
     std::string hexdigest();
 
     /// State words in host byte order. Prefer digest() for bytes.

@@ -23,15 +23,12 @@
 #include "lib/common/sha256.hpp"
 
 // Stub out rocprofiler's logging when absent, so this also builds standalone.
-#if defined(__has_include)
-#    if __has_include("lib/common/logging.hpp")
-#        include "lib/common/logging.hpp"
-#    endif
-#endif
-#if !defined(ROCP_CI_LOG_IF)
+#if defined(ROCPROFILER_SDK_SHA256_STANDALONE)
 #    include <iostream>
 #    define ROCP_CI_LOG_IF(LEVEL, COND)                                                            \
-        if(false) ::std::cerr
+        if(COND) ::std::cerr
+#else
+#    include "lib/common/logging.hpp"
 #endif
 
 #include <array>
@@ -45,6 +42,9 @@ namespace rocprofiler
 {
 namespace common
 {
+namespace
+{
+/// Zero a buffer without the optimiser eliding it.
 void
 secure_zero(void* p, size_t n)
 {
@@ -52,6 +52,7 @@ secure_zero(void* p, size_t n)
     while(n-- > 0)
         *q++ = 0;
 }
+}  // namespace
 
 sha256::sha256() { reset(); }
 
@@ -249,13 +250,13 @@ void
 sha256::reset()
 {
     m_state     = {0x6a09e667,
-               0xbb67ae85,
-               0x3c6ef372,
-               0xa54ff53a,
-               0x510e527f,
-               0x9b05688c,
-               0x1f83d9ab,
-               0x5be0cd19};
+                   0xbb67ae85,
+                   0x3c6ef372,
+                   0xa54ff53a,
+                   0x510e527f,
+                   0x9b05688c,
+                   0x1f83d9ab,
+                   0x5be0cd19};
     m_data      = {};
     m_datalen   = 0;
     m_bitlen    = 0;
