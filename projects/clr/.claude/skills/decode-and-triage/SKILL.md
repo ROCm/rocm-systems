@@ -172,19 +172,28 @@ native. Use `--no-replay` for metadata-only (no GPU).
 | `PASS` | Replay completed; D2H checks passed |
 | `MAF` | GPU memory access fault during replay |
 | `FAIL` | Replay finished but validation failed (e.g. D2H mismatch) |
-| `ABORT` | Replay stopped early (fatal API, version mismatch, queue abort, user abort) |
+| `ABORT` | Replay stopped early (fatal API, version mismatch, queue abort, user abort, replay process killed by a signal) |
 | `HANG` | Replay made no progress and the runner had to stop it (see `HRR_REPLAY_TIMEOUT`) |
 | `UNKNOWN` | Insufficient signal to classify (e.g. metadata-only triage, missing log) |
 
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
 summary — do not invent a fault type.
 
+A fault on the GPU and a crash of the replay process are different findings.
+The runtime's `Memory access fault by GPU node-N ... on address 0x...` line is
+the GPU one: outcome `MAF`, fault class `illegal_memory_access`, or
+`read_only_page_fault` when the reason names a read-only page. The replay
+process dying on a signal without printing any of that is the host one: outcome
+`ABORT`, fault class `replay_crashed`, and it implicates no kernel, because
+nothing about the workload was established. Report that as a failed run rather
+than as the user's defect.
+
 An HSA queue abort (`HSA_STATUS_ERROR_EXCEPTION`, `ABORTED`, `MEMORY_FAULT`) is
 not a hang: `MEMORY_FAULT` is a fault and the other two are hardware exceptions,
 which an out-of-bounds access raises. The abort line carries the kernel but no
 faulting address, so read the kernel from there. A genuine hang shows up as no
-progress against the clock, which needs a replay timeout this skill does not
-have; do not report one on the strength of an HSA status alone.
+progress against the clock, which is what `HRR_REPLAY_TIMEOUT` reports; do not
+report one on the strength of an HSA status alone.
 
 ### A faulting ATen kernel needs the original failure signature
 

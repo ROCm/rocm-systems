@@ -125,6 +125,37 @@ def _bash_at_least(major: int, minor: int) -> bool:
 
 
 @unittest.skipUnless(shutil.which("bash"), "bash is required")
+class RecordReplayStopTests(unittest.TestCase):
+    """A stop the replay does not explain itself has to reach the log.
+
+    Both cases end the log mid-stream. Without the marker the analyzer reads
+    that truncation as insufficient signal and then looks for a kernel to
+    blame, which reports a crash of the replay as a fault in the workload.
+    """
+
+    def _record(self, rc: int) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "replay.log"
+            log.write_text("[HRR] Replaying 5 events\n", encoding="utf-8")
+            script = (
+                f'{_shell_function("record_replay_stop")}\n'
+                f'record_replay_stop {rc} "{log}" >/dev/null\n'
+            )
+            subprocess.run(["bash", "-c", script], check=True)
+            return log.read_text(encoding="utf-8")
+
+    def test_a_timeout_is_recorded_as_a_timeout(self) -> None:
+        self.assertIn("replay timed out after", self._record(124))
+
+    def test_a_signal_death_is_recorded_with_its_signal(self) -> None:
+        self.assertIn("replay killed by signal 11", self._record(139))
+
+    def test_an_ordinary_failure_adds_nothing(self) -> None:
+        """A replay that exits with an error has already said why in the log."""
+        self.assertEqual(self._record(1), "[HRR] Replaying 5 events\n")
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash is required")
 class LibraryPathTests(unittest.TestCase):
     def test_packaged_playback_puts_its_own_lib_on_the_path(self) -> None:
         """A playback shipped as bin/ and lib/ siblings, not a CLR build tree.

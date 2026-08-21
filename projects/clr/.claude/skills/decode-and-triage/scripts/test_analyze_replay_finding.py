@@ -57,6 +57,18 @@ Reason: Write access to a read-only page
         self.assertEqual(finding.fault_class, "read_only_page_fault")
         self.assertEqual(finding.outcome, "MAF")
 
+    def test_a_gpu_fault_outranks_the_signal_that_killed_the_process(self) -> None:
+        """A memory fault aborts the process, so both markers are in the log."""
+        text = (
+            "Memory access fault by GPU node-2 (Agent handle: 0x1) on address "
+            "0x7f91da000000. Reason: Unknown.\n"
+            "[triage] replay killed by signal 6\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "sample.log", finding)
+        self.assertEqual(finding.outcome, "MAF")
+        self.assertEqual(finding.fault_class, "illegal_memory_access")
+
     def test_to_dict_json_serializable(self) -> None:
         finding = arf.Finding(outcome="PASS", fault_class="replay_pass")
         payload = json.dumps(finding.to_dict())
@@ -124,6 +136,31 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.kernel_name, "crash_oob")
         self.assertEqual(finding.archive_complete, "no")
         self.assertTrue(any("inferred from the archive" in n for n in finding.notes))
+
+    def test_a_crashed_replay_implicates_no_kernel(self) -> None:
+        """A signal death is a failed run, not a verdict on the workload.
+
+        This archive holds exactly one kernel, so the inference that serves a
+        real fault would otherwise hand that kernel over as the culprit for a
+        crash of the replay process itself.
+        """
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(
+            "[HRR] Replaying 5 events\n[triage] replay killed by signal 11\n",
+            "replay.log",
+            finding,
+        )
+        arf.parse_text(
+            (self.FIXTURES / "info_crash.txt").read_text(encoding="utf-8"),
+            "info_crash.txt",
+            finding,
+        )
+        finding = arf.finalize(finding)
+        self.assertEqual(finding.outcome, "ABORT")
+        self.assertEqual(finding.fault_class, "replay_crashed")
+        self.assertEqual(finding.replay_signal, 11)
+        self.assertIsNone(finding.kernel_name)
+        self.assertTrue(any("killed by signal 11" in n for n in finding.notes))
 
     def test_short_memory_fault_form_still_names_the_kernel(self) -> None:
         """Some ROCm builds omit `host:` and start the bracket at `GPU index:`."""

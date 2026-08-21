@@ -136,6 +136,24 @@ replay_sync_args() {
   echo "--sync-after-launch"
 }
 
+# A stop the replay does not explain itself has to be recorded here, because
+# the log just ends where the process died. The analyzer would read that
+# truncation as insufficient signal and then go looking for a kernel to blame
+# for it, which is how a crash of the replay process ends up reported as a
+# workload fault. 124 is what `timeout` reports; above 128 the shell is
+# reporting death by signal 128+N. A signal is not on its own a verdict: a GPU
+# memory fault also aborts, and there the log's own fault line is the better
+# answer, so the classifier ranks these markers last.
+record_replay_stop() {
+  local rc="$1" log="$2"
+  [[ -n "$log" ]] || return 0
+  if [[ "$rc" == "124" ]]; then
+    echo "[triage] replay timed out after ${HRR_REPLAY_TIMEOUT:-1800}s" | tee -a "$log"
+  elif (( rc > 128 )); then
+    echo "[triage] replay killed by signal $((rc - 128))" | tee -a "$log"
+  fi
+}
+
 run_native_replay() {
   local play="$1" log="$2" gpu sync_args=()
   setup_library_path "$play"
@@ -159,12 +177,6 @@ run_native_replay() {
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
     ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  # 124 is what `timeout` reports when it had to stop the process. Record it in
-  # the log so the finding says hang rather than inheriting whatever partial
-  # output the replay had managed to print.
-  if [[ "$rc" == "124" ]]; then
-    echo "[triage] replay timed out after ${timeout_s}s" | tee -a "$log"
-  fi
   # Deliberately not re-enabling `set -e` here. The caller wraps this call in
   # `set +e` precisely so a failing replay is survivable, and restores `set -e`
   # afterwards. Re-arming it inside the function made the non-zero return fatal,
@@ -255,11 +267,13 @@ fi
 
 if [[ "$mode" == "docker" ]]; then
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
-  set +e; "$REPLAY_DOCKER" --archive "$ARCHIVE" --log "$LOG" --gpu "$REPLAY_GPU"; set -e
+  set +e; "$REPLAY_DOCKER" --archive "$ARCHIVE" --log "$LOG" --gpu "$REPLAY_GPU"; replay_rc=$?; set -e
+  record_replay_stop "$replay_rc" "$LOG"
 elif [[ "$mode" == "native" ]]; then
   LOG="$WORKDIR/hrr-replay-${name}-${ts}.log"
   GPU="$REPLAY_GPU"
-  set +e; run_native_replay "$HRR_PLAYBACK" "$LOG"; set -e
+  set +e; run_native_replay "$HRR_PLAYBACK" "$LOG"; replay_rc=$?; set -e
+  record_replay_stop "$replay_rc" "$LOG"
 fi
 
 CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")

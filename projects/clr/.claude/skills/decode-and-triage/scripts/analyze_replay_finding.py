@@ -41,6 +41,10 @@ RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
 # This is the only signal a hang leaves: it makes no progress and prints
 # nothing, so without the marker the archive yields no finding at all.
 RE_REPLAY_TIMEOUT = re.compile(r"replay timed out after (\d+)s")
+# The replay process dying on a signal leaves the log truncated and nothing
+# else, so the runner records it the same way. Read on its own it says the run
+# failed, not that the workload did: no kernel was established as at fault.
+RE_REPLAY_SIGNAL = re.compile(r"replay killed by signal (\d+)")
 # A queue abort carries its own bracket, with the kernel but no faulting
 # address, so the memory-fault regex above cannot see it. Observed on an
 # out-of-bounds ATen gather, where this was the only line naming the culprit.
@@ -116,6 +120,7 @@ class Finding:
     grid: str | None = None
     workgroup: str | None = None
     gpu_node: str | None = None
+    replay_signal: int | None = None
     last_progress_kernel: str | None = None
     last_event_kernel: str | None = None
     kernels_launched: int | None = None
@@ -176,8 +181,8 @@ def _classify(text: str, finding: Finding) -> str:
     # and EXCEPTION is a hardware exception, which an out-of-bounds access
     # raises. Reporting either as a hang sends the reader after stalled work
     # that never existed and drops the kernel the abort just named. A real hang
-    # shows up as no progress against the clock, which needs a replay timeout
-    # this skill does not have yet.
+    # shows up as no progress against the clock, which is what the replay
+    # timeout above reports.
     hsa = RE_HSA_STATUS.search(text)
     if hsa and not RE_PASS.search(text):
         return (
@@ -189,6 +194,12 @@ def _classify(text: str, finding: Finding) -> str:
         return "nan_inf_divergence"
     if "Replay aborted" in text or "aborting replay" in text:
         return "replay_aborted"
+    # Last, so that a log which explains its own stop is believed first: a
+    # memory fault also dies on a signal, and there the fault line is the
+    # answer. On its own the signal says the replay process died without
+    # reaching a verdict, which is a failure of the run and not of the workload.
+    if RE_REPLAY_SIGNAL.search(text):
+        return "replay_crashed"
     return "unknown"
 
 
@@ -256,6 +267,10 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         note = f"the queue aborted with HSA_STATUS_ERROR_{m.group(1)}"
         if note not in finding.notes:
             finding.notes.append(note)
+
+    m = RE_REPLAY_SIGNAL.search(text)
+    if m:
+        finding.replay_signal = int(m.group(1))
 
     m = RE_VERSION_MISMATCH.search(text)
     if m:
@@ -358,6 +373,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         "aborting replay" in text
         or RE_FATAL_EVENT.search(text)
         or RE_VERSION_MISMATCH.search(text)
+        or RE_REPLAY_SIGNAL.search(text)
     ):
         new_outcome = "ABORT"
     elif finding.outcome == "UNKNOWN":
@@ -381,6 +397,21 @@ def finalize(finding: Finding) -> Finding:
         finding.kernel_name = None
         finding.kernel_family = None
         finding.last_event_kernel = None
+        return finding
+
+    # The replay process died without reaching a verdict, so nothing here is a
+    # statement about the workload. Inferring a kernel from the archive would
+    # hand over a culprit for a crash of the replay itself.
+    if finding.fault_class == "replay_crashed":
+        finding.kernel_name = None
+        finding.kernel_family = None
+        finding.notes.append(
+            f"the replay process was killed by signal {finding.replay_signal} "
+            f"without printing a verdict, so no kernel is implicated and the "
+            f"workload is untested. Re-run the replay; if it dies the same way "
+            f"again, this is a defect in hrr-playback or its environment rather "
+            f"than in the captured workload."
+        )
         return finding
 
     # Under --sync-after-launch the last launch to start is the one that
