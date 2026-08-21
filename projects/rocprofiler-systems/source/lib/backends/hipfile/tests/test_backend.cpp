@@ -210,6 +210,47 @@ TEST_F(HipFileBackendTest, availability_recovers_after_failure)
     EXPECT_TRUE(backend.is_available());
 }
 
+// ── Runtime version guard ───────────────────────────────────────────────────
+
+TEST_F(HipFileBackendTest, old_runtime_reports_unavailable_and_zeros)
+{
+    gpu(0).read_bytes               = 4096;
+    mock_wrapper::version_supported = false;
+
+    mock_backend backend{};
+    const auto&  snapshot = backend.get_stats(TS_1);
+
+    EXPECT_FALSE(backend.is_available());
+    EXPECT_EQ(snapshot.per_gpu[0].read_bytes, 0U);
+}
+
+TEST_F(HipFileBackendTest, old_runtime_never_calls_the_stats_api)
+{
+    // The point of the guard: a libhipfile predating the stats API does not export
+    // hipFileGetStatsL3, so the call must not be attempted at all.
+    mock_wrapper::version_supported = false;
+
+    mock_backend backend{};
+    const auto&  first  = backend.get_stats(TS_1);
+    const auto&  second = backend.get_stats(TS_2);
+
+    EXPECT_EQ(mock_wrapper::call_count, 0U);
+    EXPECT_EQ(first.per_gpu[0].read_bytes, 0U);
+    EXPECT_EQ(second.per_gpu[0].read_bytes, 0U);
+}
+
+TEST_F(HipFileBackendTest, supported_runtime_queries_normally)
+{
+    mock_wrapper::version_supported = true;
+    gpu(0).read_bytes               = 2048;
+
+    mock_backend backend{};
+
+    EXPECT_EQ(backend.get_stats(TS_1).per_gpu[0].read_bytes, 2048U);
+    EXPECT_TRUE(backend.is_available());
+    EXPECT_EQ(mock_wrapper::call_count, 1U);
+}
+
 TEST_F(HipFileBackendTest, inactive_gpu_slots_are_zero_filled)
 {
     gpu(3).read_bytes = 4096;

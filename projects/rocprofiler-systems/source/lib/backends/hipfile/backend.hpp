@@ -24,6 +24,7 @@ template <typename T>
 concept wrapper_policy =
     requires { typename T::stats_l3_t; } && requires(typename T::stats_l3_t* out) {
         { T::get_stats_l3(out) } -> std::convertible_to<bool>;
+        { T::runtime_version_supported() } -> std::convertible_to<bool>;
         { T::MAX_GPU_SLOTS } -> std::convertible_to<std::size_t>;
     };
 
@@ -73,11 +74,21 @@ public:
 private:
     [[nodiscard]] stats_snapshot query()
     {
+        stats_snapshot out{};
+
+        // A libhipfile older than the headers were built against carries no stats API, so
+        // there is nothing to call. Treated as unavailable rather than as an error, which
+        // leaves a gap in the tracks instead of a run of misleading zeros.
+        if(!Wrapper::runtime_version_supported())
+        {
+            m_available = false;
+            return out;
+        }
+
         typename Wrapper::stats_l3_t raw{};
 
         m_available = Wrapper::get_stats_l3(&raw);
 
-        stats_snapshot out{};
         if(!m_available) return out;
 
         const auto slots = std::min<std::size_t>(Wrapper::MAX_GPU_SLOTS, MAX_GPUS);

@@ -20,10 +20,23 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems-logger
         hip::hipfile
 )
 
+# The wrapper re-checks the minimum version at compile time (against hipfile.h) and at
+# run time (against the loaded libhipfile), so the number find_package() enforces is
+# pushed down here instead of being restated in the header, where the two could drift.
+string(REPLACE "." ";" _hipfile_min_version "${ROCPROFSYS_HIPFILE_MIN_VERSION}")
+list(GET _hipfile_min_version 0 _hipfile_min_version_major)
+list(GET _hipfile_min_version 1 _hipfile_min_version_minor)
+list(GET _hipfile_min_version 2 _hipfile_min_version_patch)
+
 target_compile_definitions(
     rocprofiler-systems-hipfile-backend
-    INTERFACE ROCPROFSYS_BUILD_HIPFILE=1
+    INTERFACE
+        ROCPROFSYS_BUILD_HIPFILE=1
+        ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR=${_hipfile_min_version_major}
+        ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR=${_hipfile_min_version_minor}
+        ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH=${_hipfile_min_version_patch}
 )

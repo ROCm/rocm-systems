@@ -10,6 +10,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -252,6 +254,66 @@ TEST_F(HipFileCollectorTest, disabled_metrics_are_not_emitted)
 
     ASSERT_EQ(stub_cache::samples.size(), 1U);
     EXPECT_EQ(stub_cache::samples.front().metric, "Read Bytes");
+}
+
+TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
+{
+    stub_settings::visible_gpus          = 1;
+    stub_settings::hipfile_metrics.value = metric_group_mask("fastpath");
+
+    setup_and_config();
+    m_collector->sample(static_cast<std::int64_t>(TS_1));
+
+    ASSERT_EQ(stub_cache::samples.size(), 2U);
+    EXPECT_EQ(stub_cache::for_metric("Fastpath Reads").size(), 1U);
+    EXPECT_EQ(stub_cache::for_metric("Fastpath Writes").size(), 1U);
+}
+
+// ── Metric groups ───────────────────────────────────────────────────────────
+
+constexpr std::array<const char*, 7> ALL_GROUPS{ "bytes",    "ops",    "fastpath",
+                                                 "fallback", "errors", "unaligned",
+                                                 "bandwidth" };
+
+TEST(HipFileMetricGroups, each_group_covers_exactly_one_read_and_one_write)
+{
+    for(const auto* group : ALL_GROUPS)
+        EXPECT_EQ(std::popcount(metric_group_mask(group)), 2) << group;
+}
+
+TEST(HipFileMetricGroups, groups_partition_the_metric_table)
+{
+    // Every track reachable through exactly one group: no metric is orphaned (and so
+    // unselectable) and none is claimed twice.
+    std::uint32_t combined = 0;
+    int           bits     = 0;
+    for(const auto* group : ALL_GROUPS)
+    {
+        combined |= metric_group_mask(group);
+        bits += std::popcount(metric_group_mask(group));
+    }
+
+    EXPECT_EQ(combined, ALL_HIPFILE_METRICS);
+    EXPECT_EQ(bits, static_cast<int>(HIPFILE_METRICS_COUNT));
+}
+
+TEST(HipFileMetricGroups, default_selection_is_fastpath_fallback_and_bandwidth)
+{
+    // Mirrors the default registered for ROCPROFSYS_HIPFILE_METRICS in config.cpp.
+    const auto defaults = metric_group_mask("fastpath") | metric_group_mask("fallback") |
+                          metric_group_mask("bandwidth");
+
+    EXPECT_EQ(std::popcount(defaults), 6);
+    EXPECT_NE(defaults & metric_group_mask("bandwidth"), 0U);
+    EXPECT_EQ(defaults & metric_group_mask("bytes"), 0U);
+}
+
+TEST(HipFileMetricGroups, unknown_group_selects_nothing)
+{
+    EXPECT_EQ(metric_group_mask(""), 0U);
+    EXPECT_EQ(metric_group_mask("nonsense"), 0U);
+    // The per-track spellings were replaced by group names, so they must not resolve.
+    EXPECT_EQ(metric_group_mask("read_bytes"), 0U);
 }
 
 TEST_F(HipFileCollectorTest, no_metrics_enabled_emits_nothing)

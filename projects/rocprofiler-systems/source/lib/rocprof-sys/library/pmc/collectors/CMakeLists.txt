@@ -36,8 +36,8 @@ else()
     endif()
 endif()
 
-# Conditionally compile hipFile collector when the hipFile package was found
-# (ROCPROFSYS_BUILD_HIPFILE is set in cmake/Packages.cmake).
+# Conditionally compile hipFile collector when hipFile support is being built
+# (the option defaults to ON and cmake/Packages.cmake demotes it if no package was found).
 if(ROCPROFSYS_BUILD_HIPFILE)
     add_subdirectory(hipfile)
 else()
