@@ -47,6 +47,9 @@ void
 bind_session(std::shared_ptr<control::session> sess);
 
 void
+create_roctx_client();
+
+void
 reset_sdk_session_guards();
 
 std::vector<hardware_counter_info>
