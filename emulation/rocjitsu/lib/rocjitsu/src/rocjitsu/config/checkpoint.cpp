@@ -206,8 +206,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                 ": the wave is in a trap handler or stopped for a debugger, and that state "
                 "is not part of the checkpoint format");
 
-          auto sgprs_vec =
-              builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
+          auto sgprs_vec = builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base, w->num_sgprs()),
+                                                w->num_sgprs());
           auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.

@@ -1088,11 +1088,35 @@ set(RJ_HIP_TEST_CONFIG
     CACHE FILEPATH
     "rocjitsu config used by basic HIP smoke tests"
 )
+set(_rj_removed_cdna4_kmd_config
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+)
+if(RJ_HIP_TEST_CONFIG STREQUAL _rj_removed_cdna4_kmd_config)
+    set(
+        RJ_HIP_TEST_CONFIG
+        "${RJ_CDNA4_KMD_CONFIG}"
+        CACHE FILEPATH
+        "rocjitsu config used by basic HIP smoke tests"
+        FORCE
+    )
+endif()
 set(RJ_HIP_TEST_2GPU_CONFIG
     "${RJ_CDNA4_KMD_2GPU_CONFIG}"
     CACHE FILEPATH
     "rocjitsu config used by basic two-GPU HIP tests"
 )
+set(_rj_removed_cdna4_kmd_2gpu_config
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+)
+if(RJ_HIP_TEST_2GPU_CONFIG STREQUAL _rj_removed_cdna4_kmd_2gpu_config)
+    set(
+        RJ_HIP_TEST_2GPU_CONFIG
+        "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+        CACHE FILEPATH
+        "rocjitsu config used by basic two-GPU HIP tests"
+        FORCE
+    )
+endif()
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
 get_filename_component(

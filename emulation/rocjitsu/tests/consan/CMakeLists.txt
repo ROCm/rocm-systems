@@ -114,7 +114,7 @@ function(rj_add_consan_gfx1250_jakub_sim_test build_dir)
             --rocjitsu
             "$<TARGET_FILE:rocjitsu_bin>"
             --config
-            "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
+            "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         # The target manifest allows 90 seconds for the producer-skew payload;
         # leave room for the separately bounded pre/post health probes.
@@ -2475,7 +2475,7 @@ function(rj_add_consan_hip_tests)
         rj_add_consan_device_conformance_cases(
             PREFIX "ConSanDeviceGfx950Sim"
             TARGET gfx950
-            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
         )
         rj_add_hip_test(
                 hip_consan_lds_gfx950_test
@@ -2500,7 +2500,7 @@ function(rj_add_consan_hip_tests)
             PREFIX "ConSanGfx950Sim"
             LDS_TARGET hip_consan_lds_gfx950_test
             MOI_TARGET hip_consan_moi_gfx950_test
-            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
             ARCH_LABEL gfx950
         )
         # Keep cross-compiled gfx950 fixtures available on other hosts,
@@ -2872,7 +2872,7 @@ function(rj_add_consan_hip_tests)
         rj_add_consan_device_conformance_cases(
             PREFIX "ConSanDeviceGfx1250Sim"
             TARGET gfx1250
-            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
         )
         # Keep native gfx1250 code objects available on every host so the
         # target-specific ConSan path can be regression-tested in simulation.
@@ -2894,7 +2894,7 @@ function(rj_add_consan_hip_tests)
             PREFIX "ConSanGfx1250Sim"
             LDS_TARGET hip_consan_lds_gfx1250_test
             MOI_TARGET hip_consan_moi_gfx1250_test
-            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
         )
     endif()
     rj_add_consan_device_fixture_targets(gfx1201)

@@ -20,7 +20,7 @@ std::vector<uint8_t> make_lds_address_fault_code_object(rj_code_arch_t arch) {
     return make_cdna4_lds_code_object(words, "lds_address_fault");
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(words, "lds_address_fault");
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_gfx1250_code_object(words, "lds_address_fault");
   default:
     return {};
@@ -167,7 +167,7 @@ TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
       ROCJITSU_CODE_ARCH_CDNA3,
       ROCJITSU_CODE_ARCH_CDNA4,
       ROCJITSU_CODE_ARCH_RDNA4,
-      ROCJITSU_CODE_ARCH_GFX1250,
+      ROCJITSU_CODE_ARCH_CDNA5,
   };
   for (rj_code_arch_t arch : targets) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -299,7 +299,7 @@ TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
 TEST(ConSan, Gfx1250TwoAddressLdsAccessIsNotAdvertisedForExactAddressRewrite) {
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
   const std::array<uint32_t, 3> words = {load[0], load[1],
-                                         build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                         build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_address_fault_inventory");
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;

@@ -193,7 +193,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
 
   const std::optional<uint16_t> vgpr_msb_mode =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
                                      candidate.container_entry_text_offset,
                                      candidate.site.file_offset)
@@ -364,7 +364,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
     std::vector<std::string> &errors) {
   const bool publish_visible_evidence = visible_evidence_scratch_vgpr.has_value();
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   if (publish_visible_evidence &&
@@ -601,7 +601,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   }
 
   std::vector<uint32_t> words;
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
@@ -1195,7 +1195,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
     const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-        arch == ROCJITSU_CODE_ARCH_GFX1250
+        arch == ROCJITSU_CODE_ARCH_CDNA5
             ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                        candidate.container_entry_text_offset, site.file_offset)
             : std::nullopt;
@@ -1311,7 +1311,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const bool has_spill_backed_dense_router =
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
-            arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+            arch == ROCJITSU_CODE_ARCH_CDNA5 ||
             ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
               arch == ROCJITSU_CODE_ARCH_RDNA4) &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
@@ -1504,7 +1504,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     access_relay_boundaries.erase(unique_boundary_end.begin(), unique_boundary_end.end());
 
     std::map<std::vector<uint64_t>, std::vector<ReusableDenseAccessRelay>> reusable_access_relays;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       for (size_t patch_index = 0; patch_index < result.patches.size(); ++patch_index) {
         const ConSanPatchInfo &dispatcher = result.patches[patch_index];
         if (dispatcher.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
@@ -1530,7 +1530,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       // gfx1250 access relays already derive their dispatch key from the call
       // return PC. RDNA4 access relays use an explicit two-word key and must
       // retain their separate one-word barrier router.
-      if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+      if (arch != ROCJITSU_CODE_ARCH_CDNA5)
         return std::nullopt;
       const auto found = reusable_access_relays.find(owners);
       if (found == reusable_access_relays.end())
@@ -1574,7 +1574,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
         if (arch == ROCJITSU_CODE_ARCH_RDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
@@ -1615,7 +1615,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                     sizeof(original_barrier_word));
         const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-            arch == ROCJITSU_CODE_ARCH_GFX1250
+            arch == ROCJITSU_CODE_ARCH_CDNA5
                 ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
@@ -1812,7 +1812,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
         if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
             arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
@@ -1886,7 +1886,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                     sizeof(original_barrier_word));
         const BarrierRecordCandidate &candidate = planned.candidate;
         const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-            arch == ROCJITSU_CODE_ARCH_GFX1250
+            arch == ROCJITSU_CODE_ARCH_CDNA5
                 ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
                                            candidate.container_entry_text_offset, site.file_offset)
                 : std::nullopt;
@@ -1957,7 +1957,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(
             build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_CDNA5) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1970,7 +1970,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
 
       const auto append_dispatch_target = [&](uint64_t caller_return, uint64_t target) -> bool {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !derive_key_at_entry) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !derive_key_at_entry) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
                                             jump_pc_sgpr, call_return_sgpr, arch))
             return false;
@@ -2179,7 +2179,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (!options.moi_track_barriers)
     return;
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-      arch != ROCJITSU_CODE_ARCH_GFX1250 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
       arch != ROCJITSU_CODE_ARCH_CDNA4) {
     result.warnings.emplace_back(
         "ConSan MOI barrier record patch does not support this architecture");

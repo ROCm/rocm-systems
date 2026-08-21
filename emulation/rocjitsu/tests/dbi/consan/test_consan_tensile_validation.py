@@ -622,7 +622,7 @@ class TensileValidationTest(unittest.TestCase):
             / "emulation"
             / "rocjitsu"
             / "configs"
-            / "gfx950_cdna4.json",
+            / "gfx950_mi355x.json",
         )
 
     def test_default_config_resolves_therock_workspace_layout(self) -> None:
@@ -634,7 +634,7 @@ class TensileValidationTest(unittest.TestCase):
                 / "emulation"
                 / "rocjitsu"
                 / "configs"
-                / "gfx1250.json"
+                / "gfx1250_mi455x.json"
             )
             config.parent.mkdir(parents=True)
             config.write_text("{}\n", encoding="utf-8")

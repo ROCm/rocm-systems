@@ -685,7 +685,7 @@ commands record the prefix verbatim wherever it was applied. For example:
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target gfx1250 inventory --workload jakub-attention \
   --artifact-root "$CONSAN_ARTIFACT_ROOT" \
-  --launcher-json '["rocjitsu", "--config", "gfx1250.json", "--"]'
+  --launcher-json '["rocjitsu", "--config", "gfx1250_mi455x.json", "--"]'
 ```
 
 This runs each admitted fault family separately with

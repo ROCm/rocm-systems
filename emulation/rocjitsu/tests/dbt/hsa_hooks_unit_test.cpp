@@ -180,7 +180,7 @@ TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
   const auto estimate =
       rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
   ASSERT_TRUE(estimate);
-  EXPECT_EQ(estimate->reservation_bytes, 4831838312u);
+  EXPECT_EQ(estimate->reservation_bytes, 5033164904u);
 }
 
 TEST(ConSanTransformMemoryTest, ReportsGoverningCompositePhaseForDefaultGrowth) {
@@ -3955,7 +3955,7 @@ TEST(HsaHooksUnitTest, ConSanLogsSharedNamesForParsedTypedIdentities) {
       TargetCase{ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_ARCH_CDNA3, "gfx942", "cdna3"},
       TargetCase{ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4, "gfx950", "cdna4"},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", "rdna4"},
-      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "gfx1250"},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", "cdna5"},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_ARCH_INVALID, "gfx1200", "rdna4"},
       TargetCase{ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_ARCH_INVALID, "invalid", "invalid"},
   };
@@ -4336,7 +4336,7 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesArchitectureAwareB96Support) {
   ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     testing::internal::CaptureStderr();
     run_hook_load_case(kConSanHookProfiles[1], false, b96_require_patch_result_for_arch(arch),

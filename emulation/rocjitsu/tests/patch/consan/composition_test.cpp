@@ -1089,21 +1089,21 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
 TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33000u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/100, /*ssrc0=*/100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 32u;
   const size_t dropped_pair_word = cursor;
-  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = build_s_mov_b32(/*sdst=*/1, /*ssrc0=*/1, ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/1, /*ssrc0=*/1, ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
     text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_inline_fault");
 
@@ -1157,8 +1157,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   std::memcpy(dropped.data(),
               patched.text_sections().front()->data() + dropped_pair_word * sizeof(uint32_t),
               sizeof(dropped));
-  EXPECT_EQ(dropped[0], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_EQ(dropped[1], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(dropped[0], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(dropped[1], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 } // namespace

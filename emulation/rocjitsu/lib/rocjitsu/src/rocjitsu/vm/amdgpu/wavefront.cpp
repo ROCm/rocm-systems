@@ -71,7 +71,7 @@ uint32_t Wavefront::hw_id1_raw() const {
 
   const rj_code_arch_t arch = cu_.arch();
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) {
     throw std::runtime_error("HW_ID1 is only modeled for GFX11/GFX12-family targets");
   }
   const HwId1TopologyLocation location = topology_location(cu_);
@@ -81,7 +81,7 @@ uint32_t Wavefront::hw_id1_raw() const {
   uint32_t wgp_id = 0;
   uint32_t shader_array_id = 0;
   uint32_t shader_engine_id = 0;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // GFX12.1 models four SIMDs in each CU and eight CUs in each shader
     // array. A ShaderEngine component contains both arrays, so its sixteen
     // CUs split evenly across SA_ID. The HW_ID1 layout has no SE_ID field.

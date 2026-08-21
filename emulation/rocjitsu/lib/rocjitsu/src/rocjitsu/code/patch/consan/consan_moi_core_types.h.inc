@@ -45,7 +45,7 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
   // gfx1250 follows the simulator configuration rather than duplicating a
   // provisional architectural limit in ConSan. Earlier targets retain the
   // 64 KiB limit used by the original planner.
-  return arch == ROCJITSU_CODE_ARCH_GFX1250
+  return arch == ROCJITSU_CODE_ARCH_CDNA5
              ? static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u
              : 64u * 1024u;
 }
@@ -291,10 +291,8 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
                                                 uint16_t vcc_save_sgpr, uint16_t scc_save_sgpr,
                                                 rj_code_arch_t arch);
 
-[[nodiscard]] constexpr ConSanMoiInlineAtomicSupport
-classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
-                                          ConSanMoiAtomicEventKind event_kind,
-                                          rj_code_arch_t arch) {
+[[nodiscard]] constexpr ConSanMoiInlineAtomicSupport classify_consan_moi_inline_atomic_support(
+    const ConSanAtomicSite &site, ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch) {
   const bool is_flat = site.mnemonic.starts_with("flat_atomic");
   const bool is_vglobal = site.mnemonic.starts_with("global_atomic");
   if (!is_flat && !is_vglobal)
@@ -305,20 +303,17 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
   const bool is_cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
   const bool is_rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
-  const bool is_gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
-  const bool gfx12_flat_encoding =
-      is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) && site.raw_saddr &&
-      *site.raw_saddr == 0x7cu;
-  const bool cdna_flat_encoding =
-      is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) && site.raw_saddr &&
-      *site.raw_saddr == 0u;
+  const bool is_gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool gfx12_flat_encoding = is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) &&
+                                   site.raw_saddr && *site.raw_saddr == 0x7cu;
+  const bool cdna_flat_encoding = is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) &&
+                                  site.raw_saddr && *site.raw_saddr == 0u;
   const bool rdna3_flat_encoding = is_flat && is_rdna3 && site.size == 2u * sizeof(uint32_t) &&
                                    site.raw_saddr && *site.raw_saddr == kRdna3FlatNoSaddrEncoding;
   const bool cdna_vglobal_saddr =
-      site.raw_saddr &&
-      (*site.raw_saddr == kCdnaGlobalNoSaddrEncoding ||
-       (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr && *site.saddr_sgpr <= 104u &&
-        (*site.saddr_sgpr & 1u) == 0u));
+      site.raw_saddr && (*site.raw_saddr == kCdnaGlobalNoSaddrEncoding ||
+                         (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
+                          *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
   const bool cdna_vglobal_encoding =
       is_vglobal && is_cdna && site.size == 2u * sizeof(uint32_t) && cdna_vglobal_saddr;
   const bool rdna3_vglobal_saddr =
@@ -327,8 +322,7 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
                           *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
   const bool rdna3_vglobal_encoding =
       is_vglobal && is_rdna3 && site.size == 2u * sizeof(uint32_t) && rdna3_vglobal_saddr;
-  const bool gfx12_vglobal_encoding =
-      is_vglobal && is_gfx12 && site.size == 3u * sizeof(uint32_t);
+  const bool gfx12_vglobal_encoding = is_vglobal && is_gfx12 && site.size == 3u * sizeof(uint32_t);
   const bool vglobal_encoding =
       cdna_vglobal_encoding || rdna3_vglobal_encoding || gfx12_vglobal_encoding;
   if (!gfx12_flat_encoding && !cdna_flat_encoding && !rdna3_flat_encoding && !vglobal_encoding)
@@ -390,8 +384,7 @@ inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 512u 
 /// the original tier. G6B3 owns aggregate reservation against the process
 /// ceiling; the pure planner enforces the engine-specific per-buffer ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
-inline constexpr uint64_t kConSanMoiRecordReplayAutoReportBufferCeilingBytes =
-    512u * 1024u * 1024u;
+inline constexpr uint64_t kConSanMoiRecordReplayAutoReportBufferCeilingBytes = 512u * 1024u * 1024u;
 inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 1024u * 1024u * 1024u;
 [[nodiscard]] constexpr uint64_t
 consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine engine) {

@@ -188,6 +188,14 @@ public:
   /// parse the display string returned by name().
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
+  /// @brief Whether this operand denotes architectural register state.
+  ///
+  /// @details This is intentionally broader than `to_register_ref()`: special
+  /// registers such as NULL and target state registers can be register
+  /// operands even when the liveness model does not track them. Generated ISA
+  /// operands override this from typed selector metadata.
+  [[nodiscard]] virtual bool is_register() const { return to_register_ref().has_value(); }
+
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
 

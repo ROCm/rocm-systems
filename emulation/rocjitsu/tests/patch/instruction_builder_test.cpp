@@ -214,7 +214,7 @@ TEST(InstructionBuilder, BuildSGetpcB64) {
 TEST(InstructionBuilder, BuildSSetpcB64) {
   EXPECT_EQ(build_s_setpc_b64(/*ssrc0_target_base=*/30, ROCJITSU_CODE_ARCH_CDNA4), 0xBE801D1Eu);
   EXPECT_EQ(build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4), 0xBE80481Eu);
-  EXPECT_EQ(build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_GFX1250), 0xBE80481Eu);
+  EXPECT_EQ(build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA5), 0xBE80481Eu);
 }
 
 TEST(InstructionBuilder, BuildSAddU32) {

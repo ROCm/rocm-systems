@@ -4085,7 +4085,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
         (!cdna || std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets,
                                              original_kernel.descriptor_file_offset)) &&
         (cdna || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_GFX1250);
+         arch == ROCJITSU_CODE_ARCH_CDNA5);
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                       AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,

@@ -30,7 +30,7 @@ build_s_set_vgpr_msb_transition(uint8_t previous_mode, uint8_t new_mode, rj_code
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_call_i64(uint16_t sdst, int16_t simm16, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
     return std::nullopt;
   return build_gfx1250_s_call_i64(sdst, simm16, arch);
 }
@@ -381,8 +381,8 @@ build_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_
     return build_cdna4_v_writelane_b32(vdst, ssrc, lane, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     return build_rdna4_v_writelane_b32(vdst, ssrc, lane, arch);
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch)
-                                            : std::nullopt;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 ? build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch)
+                                          : std::nullopt;
 }
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
@@ -395,8 +395,8 @@ build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t
     return build_cdna4_v_readlane_b32(sdst, vsrc, lane, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     return build_rdna4_v_readlane_b32(sdst, vsrc, lane, arch);
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch)
-                                            : std::nullopt;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 ? build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch)
+                                          : std::nullopt;
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -773,7 +773,7 @@ build_flat_store_b32(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t arch, uint32_
     return copy_words(
         build_cdna4_flat_store_b32(vaddr, vsrc, static_cast<uint16_t>(byte_offset), arch));
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(build_gfx1250_flat_store_b32(vaddr, vsrc, byte_offset, arch));
   return copy_words(rocjitsu::build_flat_store_b32_vaddr_vsrc(vaddr, vsrc, arch, byte_offset));
 }
@@ -798,7 +798,7 @@ build_flat_load_b32(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arch, uint32_t
     return copy_words(
         build_cdna4_flat_load_b32(vaddr, vdst, static_cast<uint16_t>(byte_offset), arch));
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(build_gfx1250_flat_load_b32(vaddr, vdst, byte_offset, arch));
   return copy_words(rocjitsu::build_flat_load_b32_vaddr_vdst(vaddr, vdst, arch, byte_offset));
 }
@@ -922,7 +922,7 @@ build_flat_atomic_add_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool ret
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_add_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_add_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
@@ -941,7 +941,7 @@ build_flat_atomic_or_u32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool retu
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_or_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_or_u32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
@@ -960,7 +960,7 @@ build_flat_atomic_cmpswap_b32(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_cmpswap_b32(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_cmpswap_b32(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
@@ -979,7 +979,7 @@ build_flat_atomic_cmpswap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_cmpswap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_cmpswap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
@@ -998,7 +998,7 @@ build_flat_atomic_swap_b64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool re
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_swap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_swap_b64(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
@@ -1017,7 +1017,7 @@ build_flat_atomic_add_u64(uint16_t vaddr, uint16_t vsrc, uint16_t vdst, bool ret
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return copy_words(
         build_rdna3_flat_atomic_add_u64(vaddr, vsrc, vdst, return_old_value, scope, arch));
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return copy_words(
         build_gfx1250_flat_atomic_add_u64(vaddr, vsrc, vdst, return_old_value, scope, arch));
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)

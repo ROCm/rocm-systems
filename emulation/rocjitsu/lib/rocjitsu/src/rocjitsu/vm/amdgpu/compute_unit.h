@@ -761,6 +761,7 @@ protected:
 
   /// @brief Decode and execute one previously fetched instruction.
   void issue_instruction(Wavefront *wf, const FetchedInstruction &words);
+  [[nodiscard]] bool handle_unfetchable_pc(Wavefront &wave);
 
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();

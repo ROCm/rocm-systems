@@ -42,7 +42,7 @@ std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
     return std::make_unique<IsaDecoder<rdna3_5::Isa>>();
   case ROCJITSU_CODE_ARCH_RDNA4:
     return std::make_unique<IsaDecoder<rdna4::Isa>>();
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return std::make_unique<IsaDecoder<cdna5::Isa>>();
   default:
     return nullptr;

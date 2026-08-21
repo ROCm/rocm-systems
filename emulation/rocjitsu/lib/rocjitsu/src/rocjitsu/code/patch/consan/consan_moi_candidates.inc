@@ -48,7 +48,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
 [[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return 0;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return kGfx1250VectorFlatNoSaddr;
   return kRdna4VectorFlatNoSaddr;
 }
@@ -305,7 +305,7 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
   const bool supported_atomic =
       site.kind == ConSanLdsAccessKind::Atomic &&
       consan_arch_supports_capability_form(arch, ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
-      ((arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      ((arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
                                    "ds_cmpstore_rtn_b32"})) ||
        ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
@@ -511,7 +511,7 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_GFX1250))
+  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_CDNA5))
     return ConSanSiteDispositionReason::NonzeroFlatOffset;
   if (*candidate.addr_vgpr >= 255)
     return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
@@ -798,7 +798,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return false;
-  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_GFX1250))
+  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_CDNA5))
     return false;
   if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 255)
     return false;

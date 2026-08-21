@@ -639,7 +639,7 @@ TEST(SpillManager, BuildsGfx1201VgprSaveRestoreSequence) {
 TEST(SpillManager, BuildsGfx1250VgprSaveRestoreSequence) {
   SpillManager manager(/*original_private_bytes=*/0, kMaxAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10, /*vgpr_count=*/3,
-                                                  ROCJITSU_CODE_ARCH_GFX1250);
+                                                  ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(sequence);
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 12u);
@@ -647,8 +647,7 @@ TEST(SpillManager, BuildsGfx1250VgprSaveRestoreSequence) {
   ASSERT_EQ(sequence->save_words.size(), 12u);
   ASSERT_EQ(sequence->restore_words.size(), 10u);
   EXPECT_EQ(sequence->save_words[0], 0xbfc00000u);
-  EXPECT_EQ(sequence->save_words[1],
-            *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(sequence->save_words[2], 0xed06807cu);
   EXPECT_EQ(sequence->save_words[3], 10u << 23u);
   EXPECT_EQ(sequence->save_words[4], 0u);
@@ -757,7 +756,7 @@ TEST(SpillManager, BuildsRdna4FamilySccPreservingDynamicStackVgprFrame) {
   };
   constexpr std::array targets = {
       Target{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
-      Target{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      Target{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"},
   };
 
   for (const Target &target : targets) {
@@ -797,7 +796,7 @@ TEST(SpillManager, BuildsRdna4FamilySccPreservingDynamicStackVgprFrame) {
 
 TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
   for (const rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(arch);
     const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
     const auto wait_load = rdna3 ? build_rdna3_s_wait_vmcnt0(arch) : build_s_wait_loadcnt0(arch);
@@ -886,18 +885,16 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
 
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
       /*vgpr_base=*/3u, /*vgpr_count=*/3u, /*borrowed_sgpr_base=*/2u,
-      /*scalar_reservoir_vgpr_base=*/3u, /*original_private_bytes=*/0u,
-      ROCJITSU_CODE_ARCH_GFX1250));
+      /*scalar_reservoir_vgpr_base=*/3u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
       /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/32u,
-      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u,
-      ROCJITSU_CODE_ARCH_GFX1250));
+      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
       /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
       /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
       /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
-      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_GFX1250,
+      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA5,
       /*additional_frame_bytes=*/2u));
 }
 
@@ -936,9 +933,9 @@ TEST(SpillManager, ComposesDynamicStackVgprAndSgprFramesAcrossArchitectures) {
     std::string_view label;
   };
   constexpr std::array targets = {
-      Target{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},     Target{ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
-      Target{ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},     Target{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
-      Target{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      Target{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},   Target{ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+      Target{ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},   Target{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+      Target{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"},
   };
   constexpr uint16_t kTransferVgpr = 10u;
   constexpr uint16_t kSgprBase = 40u;

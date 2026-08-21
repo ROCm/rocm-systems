@@ -21,9 +21,9 @@ LLVM_READELF_ENV = "CONSAN_VALIDATION_LLVM_READELF"
 DEFAULT_TARGET = "gfx1250"
 TARGET_CONFIG_NAMES = {
     "gfx942": "gfx942_cdna3.json",
-    "gfx950": "gfx950_cdna4.json",
+    "gfx950": "gfx950_mi355x.json",
     "gfx1201": "gfx1201_r9700.json",
-    "gfx1250": "gfx1250.json",
+    "gfx1250": "gfx1250_mi455x.json",
 }
 
 

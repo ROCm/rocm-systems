@@ -218,7 +218,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
         // gfx1250 code objects place zero-filled alignment holes between function
         // bodies. Zero is not an instruction, so skip it before decoding.
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
           byte_offset += sizeof(uint32_t);
           continue;
         }

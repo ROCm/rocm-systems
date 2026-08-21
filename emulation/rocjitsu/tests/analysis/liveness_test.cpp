@@ -1170,9 +1170,9 @@ std::vector<uint32_t> build_gfx1250_lane_saved_target_program(uint16_t low_lane 
     words.insert(words.end(), encoded.begin(), encoded.end());
   };
   words.push_back(pack_gfx1250_sop1(0x48, 0, kReturnSreg));
-  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   words.push_back(pack_gfx1250_sop1(0x48, 0, kReturnSreg));
-  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
 
   words.push_back(pack_gfx1250_sop1(0x47, kTargetSreg, 0));
   words.push_back(pack_gfx1250_sop2(0, kTargetSreg, kTargetSreg, kLiteralOperand));
@@ -1193,12 +1193,12 @@ std::vector<uint32_t> build_gfx1250_lane_saved_target_program(uint16_t low_lane 
       movrel_before_restore
           ? cdna5::build_vop1(cdna5::kVMovrelsB32Vop1,
                               {.src0 = static_cast<uint16_t>(256u + kCarrierVgpr), .vdst = 0u})[0]
-          : build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+          : build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
 
   append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, low_lane));
   append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, high_lane));
   words.push_back(pack_gfx1250_sop1(0x49, kReturnSreg, kTargetSreg));
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   return words;
 }
 
@@ -1321,10 +1321,10 @@ TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossPreservingCalls) {
 
 TEST(CfgAnalysis, RecoversGfx1250LaneSavedTargetOperandLayout) {
   TestCodeObject co(build_gfx1250_lane_saved_target_program());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, extra_leaders);
 
   const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
     return block && block->terminator() && block->terminator()->src_loc() == 0x64u;
@@ -1402,7 +1402,7 @@ TEST(CfgAnalysis, RejectsFixedLaneOutsideKnownWavefront) {
       build_gfx1250_lane_saved_target_program(/*low_lane=*/128u + 40u,
                                               /*high_lane=*/128u + 41u);
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders, /*wavefront_size=*/32u);
+      words, ROCJITSU_CODE_ARCH_CDNA5, extra_leaders, /*wavefront_size=*/32u);
   EXPECT_TRUE(std::ranges::none_of(
       fixups, [](const IndirectCallFixup &fixup) { return fixup.source_call_offset == 0x64u; }));
 }
@@ -1418,7 +1418,7 @@ TEST(CfgAnalysis, RejectsLiteralSelectedLaneDuringDecode) {
   // A decoded literal value of 135 is numerically identical to inline lane 7.
   // The raw selector still says "literal" and must not become static provenance.
   words.insert(words.begin() + static_cast<ptrdiff_t>(kFirstWritelaneSecondWord + 1u), 135u);
-  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders,
+  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, extra_leaders,
                                             /*wavefront_size=*/64u)
                   .empty());
 }
@@ -1426,10 +1426,10 @@ TEST(CfgAnalysis, RejectsLiteralSelectedLaneDuringDecode) {
 TEST(CfgAnalysis, RejectsRelativeVgprAccessAcrossLaneSavedTarget) {
   TestCodeObject co(build_gfx1250_lane_saved_target_program(
       /*low_lane=*/128u + 7u, /*high_lane=*/128u + 8u, /*movrel_before_restore=*/true));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 3> extra_leaders{0, 8, 16};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, extra_leaders);
 
   const auto consumer_it = std::ranges::find_if(blocks, [](const auto &block) {
     return block && block->terminator() && block->terminator()->src_loc() == 0x64u;
@@ -2238,22 +2238,22 @@ TEST(CfgAnalysis, LocalPcBuilderMarksRecoveredTargetExhaustive) {
 TEST(CfgAnalysis, RecoversGfx1250SpecialPairPcBuildersAcrossDependencyWait) {
   constexpr std::array<uint16_t, 2> kSpecialPairSelectors{106u, 108u}; // VCC, TTMP0.
   constexpr uint64_t kTargetOffset = 20u;
-  const auto wait = instrumentation::build_s_wait_indirect_pc0(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto wait = instrumentation::build_s_wait_indirect_pc0(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(wait);
 
   for (uint16_t pair_lo : kSpecialPairSelectors) {
     std::vector<uint32_t> words = {
-        build_s_getpc_b64(pair_lo, ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_getpc_b64(pair_lo, ROCJITSU_CODE_ARCH_CDNA5),
     };
-    ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_GFX1250, pair_lo,
+    ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_CDNA5, pair_lo,
                                         static_cast<int64_t>(kTargetOffset) - 4));
     words.push_back(*wait);
-    words.push_back(build_s_setpc_b64(pair_lo, ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_setpc_b64(pair_lo, ROCJITSU_CODE_ARCH_CDNA5));
     ASSERT_EQ(words.size() * sizeof(uint32_t), kTargetOffset);
-    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
     const std::vector<IndirectCallFixup> fixups =
-        discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+        discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                       /*wavefront_size=*/32u);
     ASSERT_EQ(fixups.size(), 1u) << "pair selector " << pair_lo;
     EXPECT_EQ(fixups.front().source_call_offset, 16u);
@@ -2270,16 +2270,16 @@ TEST(CfgAnalysis, RecoversGfx1250SpecialPairLiteral64PcBuilders) {
 
   for (uint16_t pair_lo : kSpecialPairSelectors) {
     const std::vector<uint32_t> words = {
-        build_s_getpc_b64(pair_lo, ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_getpc_b64(pair_lo, ROCJITSU_CODE_ARCH_CDNA5),
         kAddNcU64Literal64Base | (static_cast<uint32_t>(pair_lo) << 16) | pair_lo,
         static_cast<uint32_t>(kTargetOffset - sizeof(uint32_t)),
         0u,
-        build_s_setpc_b64(pair_lo, ROCJITSU_CODE_ARCH_GFX1250),
-        build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_setpc_b64(pair_lo, ROCJITSU_CODE_ARCH_CDNA5),
+        build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
     };
 
     const std::vector<IndirectCallFixup> fixups =
-        discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+        discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                       /*wavefront_size=*/32u);
     ASSERT_EQ(fixups.size(), 1u) << "pair selector " << pair_lo;
     EXPECT_EQ(fixups.front().source_call_offset, 16u);
@@ -2294,23 +2294,22 @@ TEST(CfgAnalysis, RejectsSpecialPairPcBuilderAfterUnmodeledWrite) {
   constexpr uint16_t kExecLo = 126u;
   constexpr uint64_t kTargetOffset = 24u;
   std::vector<uint32_t> words = {
-      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_GFX1250, kVccLo,
+  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_CDNA5, kVccLo,
                                       static_cast<int64_t>(kTargetOffset) - 4));
-  const auto clobber =
-      instrumentation::build_s_mov_b64(kVccLo, kExecLo, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto clobber = instrumentation::build_s_mov_b64(kVccLo, kExecLo, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(clobber);
   words.push_back(*clobber);
-  const auto wait = instrumentation::build_s_wait_indirect_pc0(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto wait = instrumentation::build_s_wait_indirect_pc0(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(wait);
   words.push_back(*wait);
-  words.push_back(build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5));
   ASSERT_EQ(words.size() * sizeof(uint32_t), kTargetOffset);
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   const std::vector<IndirectCallFixup> fixups =
-      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+      discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                     /*wavefront_size=*/32u);
   EXPECT_TRUE(fixups.empty());
 }
@@ -2366,13 +2365,13 @@ TEST(CfgAnalysis, RejectsSpecialPcBuilderWithMismatchedConsumer) {
   constexpr uint16_t kVccLo = 106u;
   constexpr uint16_t kTtmp0 = 108u;
   std::vector<uint32_t> words = {
-      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_GFX1250, kVccLo, /*delta=*/16));
-  words.push_back(build_s_setpc_b64(kTtmp0, ROCJITSU_CODE_ARCH_GFX1250));
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_CDNA5, kVccLo, /*delta=*/16));
+  words.push_back(build_s_setpc_b64(kTtmp0, ROCJITSU_CODE_ARCH_CDNA5));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                                     /*wavefront_size=*/32u);
   EXPECT_TRUE(fixups.empty());
 }
@@ -2380,14 +2379,14 @@ TEST(CfgAnalysis, RejectsSpecialPcBuilderWithMismatchedConsumer) {
 TEST(CfgAnalysis, RejectsSpecialPcBuilderSplitAcrossBlocks) {
   constexpr uint16_t kVccLo = 106u;
   std::vector<uint32_t> words = {
-      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5),
   };
-  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_GFX1250, kVccLo, /*delta=*/20));
-  words.push_back(build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250));
-  words.push_back(build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_CDNA5, kVccLo, /*delta=*/20));
+  words.push_back(build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5));
+  words.push_back(build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                                     /*wavefront_size=*/32u);
   EXPECT_TRUE(fixups.empty());
 }
@@ -2398,16 +2397,16 @@ TEST(CfgAnalysis, RejectsSpecialPcTempDeltaAliasingCarrier) {
   constexpr uint32_t kInlineInt0 = 128u;
   constexpr uint32_t kInlineInt4 = 132u;
   const std::vector<uint32_t> words = {
-      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5),
       pack_sop2(2, kVccLo, kLiteralOperand, kInlineInt4),
       16u,
       pack_sop2(0, kVccLo, kVccLo, kVccLo),
       pack_sop2(4, kVccLo + 1, kVccLo + 1, kInlineInt0),
-      build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
 
-  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, {},
+  const auto fixups = discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA5, {},
                                                     /*wavefront_size=*/32u);
   EXPECT_TRUE(fixups.empty());
 }
@@ -4620,8 +4619,8 @@ TEST(CfgAnalysis, Gfx1250PredecessorlessFunctionLocalPcBuilderRemainsComplete) {
   // external entry: symbol-derived function boundaries split blocks but do not
   // claim that hardware can enter them with arbitrary SGPR state.
   std::vector<uint32_t> words = {
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x00: sole external entry.
-      0xBE804700u,                                // 0x04: s_get_pc_i64 s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x00: sole external entry.
+      0xBE804700u,                              // 0x04: s_get_pc_i64 s[0:1].
       0xA980FE00u,
       36u,
       0u,          // 0x08: s_add_nc_u64 ..., lit64(36) -> helper at 0x2c.
@@ -4629,17 +4628,17 @@ TEST(CfgAnalysis, Gfx1250PredecessorlessFunctionLocalPcBuilderRemainsComplete) {
       0x7E060280u, // 0x18: v_mov_b32 v3, 0.
       0x7E080283u, // 0x1c: v_mov_b32 v4, 3.
       0xBE9E4900u, // 0x20: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x24: continuation.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x28: padding.
-      0xBE80481Eu,                                // 0x2c: s_set_pc_i64 s[30:31].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x24: continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x28: padding.
+      0xBE80481Eu,                              // 0x2c: s_set_pc_i64 s[30:31].
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> external_entries{0};
   constexpr std::array<uint64_t, 1> function_boundaries{4};
-  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, external_entries,
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, external_entries,
                                    ExternalEntryPolicy::ExplicitOnly, function_boundaries);
 
   auto *consumer = block_starting_at(blocks, 0x20);
@@ -4699,17 +4698,17 @@ build_gfx1250_scratch_lane_target_program(bool mismatched_load_offset) {
   append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg, 128u + kLowLane));
   append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg + 1, 128u + kHighLane));
   append_full_exec_scratch(build_scratch_store_b32_saddr(kCarrierVgpr, kFrameSreg, kScratchOffset,
-                                                         ROCJITSU_CODE_ARCH_GFX1250));
+                                                         ROCJITSU_CODE_ARCH_CDNA5));
   program.words.push_back(
       cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = /*inline 0=*/128, .vdst = kCarrierVgpr})[0]);
   append_full_exec_scratch(build_scratch_load_b32_saddr(
       kCarrierVgpr, kFrameSreg, kScratchOffset + (mismatched_load_offset ? 4u : 0u),
-      ROCJITSU_CODE_ARCH_GFX1250));
+      ROCJITSU_CODE_ARCH_CDNA5));
   append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, 128u + kLowLane));
   append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, 128u + kHighLane));
   program.consumer_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kReturnSreg, kTargetSreg));
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   program.target_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
 
@@ -4721,7 +4720,7 @@ build_gfx1250_scratch_lane_target_program(bool mismatched_load_offset) {
 TEST(CfgAnalysis, Gfx1250FullExecScratchSpillPreservesLaneSavedTarget) {
   const auto program = build_gfx1250_scratch_lane_target_program(false);
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, std::array<uint64_t, 1>{0},
       /*wavefront_size=*/32u);
   const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.consumer_offset;
@@ -4735,7 +4734,7 @@ TEST(CfgAnalysis, Gfx1250FullExecScratchSpillPreservesLaneSavedTarget) {
 TEST(CfgAnalysis, Gfx1250ScratchSpillRejectsMismatchedReloadAddress) {
   const auto program = build_gfx1250_scratch_lane_target_program(true);
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, std::array<uint64_t, 1>{0},
       /*wavefront_size=*/32u);
   EXPECT_EQ(std::ranges::find_if(fixups,
                                  [&](const IndirectCallFixup &fixup) {
@@ -4824,7 +4823,7 @@ build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMu
   append(build_gfx1250_readlane(kTargetSreg + 1, kTargetCarrierVgpr, kTargetHighLane));
   program.final_consumer_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kOuterReturnSreg, kTargetSreg));
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   program.target_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kOuterReturnSreg));
@@ -4838,10 +4837,10 @@ build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMu
   append(build_gfx1250_writelane(kReturnCarrierVgpr, kOuterReturnSreg + 1, kReturnHighLane));
   begin_full_exec_scratch_group();
   append(build_scratch_store_b32_saddr(kReturnCarrierVgpr, frame_sreg, kReturnScratchOffset,
-                                       ROCJITSU_CODE_ARCH_GFX1250)
+                                       ROCJITSU_CODE_ARCH_CDNA5)
              .value());
   append(build_scratch_store_b32_saddr(kTargetCarrierVgpr, frame_sreg, kTargetScratchOffset,
-                                       ROCJITSU_CODE_ARCH_GFX1250)
+                                       ROCJITSU_CODE_ARCH_CDNA5)
              .value());
   end_full_exec_scratch_group();
   program.words.push_back(cdna5::build_vop1(
@@ -4862,10 +4861,10 @@ build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMu
   program.words.push_back(0);
   begin_full_exec_scratch_group();
   append(build_scratch_load_b32_saddr(kReturnCarrierVgpr, frame_sreg, kReturnScratchOffset,
-                                      ROCJITSU_CODE_ARCH_GFX1250)
+                                      ROCJITSU_CODE_ARCH_CDNA5)
              .value());
   append(build_scratch_load_b32_saddr(kTargetCarrierVgpr, frame_sreg, kTargetScratchOffset,
-                                      ROCJITSU_CODE_ARCH_GFX1250)
+                                      ROCJITSU_CODE_ARCH_CDNA5)
              .value());
   end_full_exec_scratch_group();
   append(build_gfx1250_readlane(kOuterReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
@@ -4886,7 +4885,7 @@ build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMu
     const int64_t call_next = static_cast<int64_t>(word_index + 1u) * sizeof(uint32_t);
     const int64_t delta = static_cast<int64_t>(target) - call_next;
     program.words[word_index] = rocjitsu::build_s_call_b64(
-        return_sreg, static_cast<int16_t>(delta / sizeof(uint32_t)), ROCJITSU_CODE_ARCH_GFX1250);
+        return_sreg, static_cast<int16_t>(delta / sizeof(uint32_t)), ROCJITSU_CODE_ARCH_CDNA5);
   };
   patch_direct_call(preserving_call_word, program.preserving_callee_offset, kOuterReturnSreg);
   patch_direct_call(nested_call_word, program.nested_callee_offset, kNestedReturnSreg);
@@ -4899,7 +4898,7 @@ TEST(CfgAnalysis, Gfx1250GroupedScratchCalleePreservesLaneSavedTargetAcrossNeste
   const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
                            program.nested_callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   const auto origin = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.origin_consumer_offset;
   });
@@ -4920,7 +4919,7 @@ TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeProvesGenericFrameAcrossNestedCall)
   const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
                            program.nested_callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.final_consumer_offset;
   });
@@ -4936,7 +4935,7 @@ TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeRejectsOverlappingSavedTargetStore)
   const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
                            program.nested_callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.origin_consumer_offset &&
            fixup.source_target_offset == program.target_offset;
@@ -4952,7 +4951,7 @@ TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeRejectsNestedFrameClobber) {
   const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
                            program.nested_callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.origin_consumer_offset &&
            fixup.source_target_offset == program.target_offset;
@@ -5011,7 +5010,7 @@ build_gfx1250_recovered_branch_callee_program(bool clobber_carrier_in_relay) {
   append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, kHighLane));
   program.final_consumer_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kReturnSreg, kTargetSreg));
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   program.target_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
@@ -5029,13 +5028,13 @@ build_gfx1250_recovered_branch_callee_program(bool clobber_carrier_in_relay) {
   program.words.push_back(0);
   program.internal_branch_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kBranchSreg));
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   program.relay_offset = offset();
   if (clobber_carrier_in_relay) {
     program.words.push_back(cdna5::build_vop1(cdna5::kVMovB32Vop1,
                                               {.src0 = /*inline 0=*/128, .vdst = kCarrierVgpr})[0]);
   } else {
-    program.words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+    program.words.push_back(build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   }
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
 
@@ -5051,7 +5050,7 @@ build_gfx1250_recovered_branch_callee_program(bool clobber_carrier_in_relay) {
       static_cast<int64_t>(program.callee_offset) - preserving_call_next;
   program.words[preserving_call_word] = rocjitsu::build_s_call_b64(
       kReturnSreg, static_cast<int16_t>(preserving_call_delta / sizeof(uint32_t)),
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   return program;
 }
 
@@ -5059,7 +5058,7 @@ TEST(CfgAnalysis, Gfx1250CalleeFollowsRecoveredInternalBranchToPreserveLaneTarge
   const auto program = build_gfx1250_recovered_branch_callee_program(false);
   const std::array leaders{uint64_t{0}, program.target_offset, program.callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.internal_branch_offset &&
            fixup.source_target_offset == program.relay_offset && !fixup.source_is_call &&
@@ -5080,7 +5079,7 @@ TEST(CfgAnalysis, Gfx1250CalleeRecoveredInternalBranchStillRejectsLaneClobber) {
   const auto program = build_gfx1250_recovered_branch_callee_program(true);
   const std::array leaders{uint64_t{0}, program.target_offset, program.callee_offset};
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, leaders, /*wavefront_size=*/32u);
   EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.internal_branch_offset &&
            fixup.source_target_offset == program.relay_offset;
@@ -5121,9 +5120,9 @@ build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode
   append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, /*inline lane 1=*/129));
   program.consumer_offset = offset();
   program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kOuterReturnSreg, kTargetSreg));
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   program.target_offset = offset();
-  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   // The outer helper contains a nested call, so the deliberately bounded exact
   // callee summary declines it. The narrower control-mode summary must handle
@@ -5159,16 +5158,16 @@ build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode
   const uint64_t outer_call_next = static_cast<uint64_t>(outer_call_word + 1u) * sizeof(uint32_t);
   program.words[outer_call_word] = rocjitsu::build_s_call_b64(
       kOuterReturnSreg, static_cast<int16_t>((outer_offset - outer_call_next) / 4u),
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const uint64_t inner_call_next = static_cast<uint64_t>(inner_call_word + 1u) * sizeof(uint32_t);
   program.words[inner_call_word] = rocjitsu::build_s_call_b64(
       kInnerReturnSreg, static_cast<int16_t>((inner_offset - inner_call_next) / 4u),
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const uint64_t recursive_call_next =
       static_cast<uint64_t>(recursive_call_word + 1u) * sizeof(uint32_t);
   program.words[recursive_call_word] = rocjitsu::build_s_call_b64(
       kInnerReturnSreg, static_cast<int16_t>((inner_offset - recursive_call_next) / 4u),
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const uint64_t tail_delta = tail_offset - tail_getpc_next;
   program.words[tail_delta_word] = static_cast<uint32_t>(tail_delta);
   program.words[tail_delta_word + 1] = static_cast<uint32_t>(tail_delta >> 32);
@@ -5181,7 +5180,7 @@ build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode
 TEST(CfgAnalysis, Gfx1250ProbeRelayModeInvariantSurvivesUnsummarizedCall) {
   const auto program = build_gfx1250_unsummarized_call_mode_program(std::nullopt);
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, std::array<uint64_t, 1>{0},
       /*wavefront_size=*/32u);
   const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.consumer_offset;
@@ -5194,7 +5193,7 @@ TEST(CfgAnalysis, Gfx1250ProbeRelayModeInvariantSurvivesUnsummarizedCall) {
 TEST(CfgAnalysis, Gfx1250ProbeRelayExplicitModeResetPreservesSelection) {
   const auto program = build_gfx1250_unsummarized_call_mode_program(uint16_t{0});
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, std::array<uint64_t, 1>{0},
       /*wavefront_size=*/32u);
   const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
     return fixup.source_call_offset == program.consumer_offset;
@@ -5207,7 +5206,7 @@ TEST(CfgAnalysis, Gfx1250ProbeRelayExplicitModeResetPreservesSelection) {
 TEST(CfgAnalysis, Gfx1250ProbeRelayPersistentModeChangeFailsClosed) {
   const auto program = build_gfx1250_unsummarized_call_mode_program(uint16_t{0x41});
   const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
-      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      program.words, ROCJITSU_CODE_ARCH_CDNA5, std::array<uint64_t, 1>{0},
       /*wavefront_size=*/32u);
   EXPECT_EQ(std::ranges::find_if(fixups,
                                  [&](const IndirectCallFixup &fixup) {

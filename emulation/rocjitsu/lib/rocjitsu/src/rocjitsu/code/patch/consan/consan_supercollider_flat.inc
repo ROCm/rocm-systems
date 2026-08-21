@@ -494,7 +494,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                              : comparison_setup_words + (2u + *action_words) * *required_vgprs;
     const uint64_t access_words = site.size / sizeof(uint32_t);
     const bool needs_runtime_group_gate =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
     uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
                                (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
@@ -1364,7 +1364,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                             "ConSan flat check/trap proof"))
       return;
     const bool needs_runtime_group_gate =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
     std::optional<size_t> runtime_group_gate_branch_index;
     if (needs_runtime_group_gate) {

@@ -2026,7 +2026,7 @@
     return true;
   if (consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))
     return true;
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250) ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
       !options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
     errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
@@ -3208,7 +3208,7 @@
     }
   }
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   const auto guest_words = build_moi_relocated_guest_access_words(
       bytes, candidate, arch, *lds_byte_offset_vgpr,
@@ -3247,7 +3247,7 @@
   const int64_t delta =
       static_cast<int64_t>(caller_return_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
     return false;
   const auto compare = instrumentation::build_s_cmp_eq_u32(call_return_sgpr, pc_sgpr, arch);
   if (!compare)

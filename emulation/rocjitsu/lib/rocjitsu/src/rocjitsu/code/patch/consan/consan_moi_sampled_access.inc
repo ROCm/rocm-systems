@@ -60,12 +60,12 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
       }
       const bool supported_scope = sequence.raw_scope
                                        ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
-                                       : result.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                       : result.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                              site != nullptr && site->mnemonic.starts_with("ds_");
       if (site != nullptr && supported_scope &&
           (site->mnemonic.starts_with("flat_atomic") ||
            site->mnemonic.starts_with("global_atomic") ||
-           (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site->mnemonic.starts_with("ds_"))) &&
+           (result.arch == ROCJITSU_CODE_ARCH_CDNA5 && site->mnemonic.starts_with("ds_"))) &&
           (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
            site->returns_old_value.value_or(false))) {
         eligible = true;
@@ -256,10 +256,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // smaller layout so nearby bodies are not needlessly displaced.
   constexpr size_t kLargeExplicitKeyRelayCandidateCount = 1024u;
   const bool needs_large_explicit_key_relay =
-      arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      candidates.size() >= kLargeExplicitKeyRelayCandidateCount;
+      arch != ROCJITSU_CODE_ARCH_CDNA5 && candidates.size() >= kLargeExplicitKeyRelayCandidateCount;
   const uint64_t ordinary_access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 20u : (needs_large_explicit_key_relay ? 20u : 10u);
+      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 20u : (needs_large_explicit_key_relay ? 20u : 10u);
   const uint64_t access_relay_words =
       std::max(ordinary_access_relay_words, access_island_word_count);
   const bool has_function_candidate = std::ranges::any_of(
@@ -307,7 +306,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   const bool supports_explicit_key_dense_router = arch == ROCJITSU_CODE_ARCH_CDNA3 ||
                                                   arch == ROCJITSU_CODE_ARCH_CDNA4 ||
                                                   arch == ROCJITSU_CODE_ARCH_RDNA4;
-  if ((supports_explicit_key_dense_router || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+  if ((supports_explicit_key_dense_router || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
       use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
@@ -327,7 +326,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       std::ranges::sort(owner_candidates, {}, &ConSanMoiCandidate::text_offset);
       for (const ConSanMoiCandidate *candidate : owner_candidates) {
         if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
+            (arch != ROCJITSU_CODE_ARCH_CDNA5 && groups.back().second.candidates.size() == 64u) ||
             candidate->text_offset - groups.back().second.candidates.front()->text_offset >
                 kMaxCommonRelayAnchorSpan) {
           groups.push_back(
@@ -360,7 +359,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
           });
       const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+          arch == ROCJITSU_CODE_ARCH_CDNA5 ||
           std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
             return candidate->size >= 2u * sizeof(uint32_t);
           });
@@ -372,7 +371,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       // no scalar call instruction, so use an explicit key plus branch only
       // when the ordinary per-site relay is stranded.
       if (!explicit_anchors_fit || singleton_has_direct_island ||
-          (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
+          (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -709,7 +708,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                            sizeof(uint32_t)
                      : 0u;
     const bool wrap_embedded_guest_vgpr_bank = use_indirect_appended &&
-                                               arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                               arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                                candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     const uint64_t vgpr_msb_bytes = use_indirect_appended
                                         ? moi_appended_body_vgpr_msb_transition_word_count(
@@ -924,7 +923,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       // same host without overwriting adjacent guest instructions.
       const uint32_t dense_entry_island_words = moi_record_replay_entry_island_words(
           group_options.automatic_moi_record_replay_sgpr_spill);
-      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
+      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_CDNA5;
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(group_options);
 
@@ -982,7 +981,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_CDNA5) {
         const auto subtract_pc = instrumentation::build_s_sub_u32(
             key_sgpr, collapsed_spill_router ? key_sgpr : call_return_sgpr, pc_sgpr, arch);
         if (!subtract_pc) {
@@ -995,7 +994,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
       if (entry_host != dense_entry_hosts.end()) {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             entry_host->second.host_offset + sizeof(uint32_t),
                                             pc_sgpr, call_match_sgpr, arch)) {
@@ -1050,7 +1049,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       for (size_t group_index = 0; group_index < group.size(); ++group_index) {
         const PlannedSampledPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             candidate.text_offset + sizeof(uint32_t), pc_sgpr,
                                             call_match_sgpr, arch)) {

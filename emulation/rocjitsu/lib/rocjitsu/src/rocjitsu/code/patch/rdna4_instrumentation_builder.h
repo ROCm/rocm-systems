@@ -18,8 +18,7 @@ inline constexpr uint32_t kRdna4FlatNoSaddrEncoding = static_cast<uint32_t>(rdna
 inline constexpr uint32_t kFlatNoSaddrGfx1250Encoding = static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
 
 [[nodiscard]] inline constexpr uint32_t flat_no_saddr_encoding(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 ? kFlatNoSaddrGfx1250Encoding
-                                            : kRdna4FlatNoSaddrEncoding;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 ? kFlatNoSaddrGfx1250Encoding : kRdna4FlatNoSaddrEncoding;
 }
 
 /// @brief Encode an s_sleep instruction for the given target ISA.
@@ -53,7 +52,7 @@ build_hwreg_imm(uint16_t reg_id, uint16_t offset, uint16_t size_bits) {
 /// @brief Encode RDNA4-class `s_getreg_b32 sdst, hwreg`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250) || sdst > 127)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) || sdst > 127)
     return std::nullopt;
   return pack_sopk(/*op=*/17, sdst, hwreg);
 }
@@ -289,7 +288,7 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
     return std::array<uint32_t, 2>{w0, w1};
   };
   const auto low =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? cdna5::build_vop3_sdst_enc(cdna5::kVAddCoU32Vop3SdstEnc,
                                        {.vdst = static_cast<uint8_t>(address_vgpr),
                                         .sdst = kVccLo,
@@ -300,7 +299,7 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
                       vector_source_vgpr(offset_vgpr), vector_source_vgpr(address_vgpr),
                       scalar_positive_inline_u32(0), kVccLo);
   const auto high =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? cdna5::build_vop3_sdst_enc(
                 cdna5::kVAddCoCiU32Vop3SdstEnc,
                 {.vdst = static_cast<uint8_t>(address_vgpr + 1u),
@@ -335,7 +334,7 @@ build_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t 
                                ? scalar_positive_inline_u32(static_cast<uint16_t>(low_literal))
                                : kVopLiteralSource;
   const auto low =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? cdna5::build_vop3_sdst_enc(cdna5::kVAddCoU32Vop3SdstEnc,
                                        {.vdst = static_cast<uint8_t>(address_vgpr),
                                         .sdst = kVccLo,
@@ -347,7 +346,7 @@ build_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t 
 
   const uint32_t high_literal = static_cast<uint32_t>(literal >> 32u);
   const uint16_t high_op =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? cdna5::kVAddCoCiU32Vop2 : rdna4::kVAddCoCiU32Vop2;
+      arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kVAddCoCiU32Vop2 : rdna4::kVAddCoCiU32Vop2;
 
   std::vector<uint32_t> words = {low[0], low[1]};
   if (low_src == kVopLiteralSource)
@@ -393,14 +392,14 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
       displacement < 0 ? kScalarInlineNegativeOne : scalar_positive_inline_u32(0);
   uint16_t low_displacement = kVopLiteralSource;
   uint32_t low_extension = static_cast<uint32_t>(displacement);
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && displacement >= 0 && displacement <= 64) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && displacement >= 0 && displacement <= 64) {
     low_displacement = scalar_positive_inline_u32(static_cast<uint16_t>(displacement));
     low_extension = build_s_nop(0, arch);
-  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 && displacement >= -16 && displacement < 0) {
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 && displacement >= -16 && displacement < 0) {
     low_displacement = static_cast<uint16_t>(192 - displacement);
     low_extension = build_s_nop(0, arch);
   }
-  const auto low = arch == ROCJITSU_CODE_ARCH_GFX1250
+  const auto low = arch == ROCJITSU_CODE_ARCH_CDNA5
                        ? cdna5::build_vop3_sdst_enc(cdna5::kVAddCoU32Vop3SdstEnc,
                                                     {.vdst = static_cast<uint8_t>(address_vgpr),
                                                      .sdst = kVccLo,
@@ -411,7 +410,7 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
                                    kVopLiteralSource, vector_source_vgpr(address_vgpr),
                                    scalar_positive_inline_u32(0), kVccLo);
   const auto high =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? cdna5::build_vop3_sdst_enc(
                 cdna5::kVAddCoCiU32Vop3SdstEnc,
                 {.vdst = static_cast<uint8_t>(address_vgpr + 1u),
@@ -431,7 +430,7 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
 build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || sdst > 127 || vsrc > 255)
     return std::nullopt;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return cdna5::build_vop1(
         cdna5::kVReadfirstlaneB32Vop1,
         {.src0 = vector_source_vgpr(vsrc), .vdst = static_cast<uint8_t>(sdst)})[0];
@@ -495,7 +494,7 @@ build_v_cmp_eq_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
 build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || src0 > 511 || vsrc1 > 255)
     return std::nullopt;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return cdna5::build_vopc(cdna5::kVCmpNeU32Vopc,
                              {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
   return rdna4::build_vopc(rdna4::kVCmpNeU32Vopc,
@@ -507,7 +506,7 @@ build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
 build_v_cmp_ne_u16_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch) || src0 > 511 || vsrc1 > 255)
     return std::nullopt;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return cdna5::build_vopc(cdna5::kVCmpNeU16Vopc,
                              {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1)})[0];
   return rdna4::build_vopc(rdna4::kVCmpNeU16Vopc,

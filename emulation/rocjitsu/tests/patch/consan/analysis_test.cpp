@@ -22,7 +22,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
                                                                          .vaddr = 5,
                                                                          .ioffset = 0xFFFFFC});
   const std::array<uint32_t, 4> text_words = {store[0], store[1], store[2],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
@@ -44,8 +44,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
 
 TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   constexpr auto call = cdna5::build_sopk(cdna5::kSCallI64Sopk, {.simm16 = 1, .sdst = 30});
-  const std::array<uint32_t, 2> kernel_words = {call[0],
-                                                build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+  const std::array<uint32_t, 2> kernel_words = {call[0], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   constexpr auto store =
       cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
@@ -74,7 +73,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   // The local function starts at byte 24. s_get_pc_i64 produces byte 4, so the
   // literal delta is 20 bytes.
   const std::array<uint32_t, 6> kernel_words = {
-      get_pc[0], add_pc[0], 20, 0, call[0], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+      get_pc[0], add_pc[0], 20, 0, call[0], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   constexpr auto store =
       cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
@@ -106,7 +105,7 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
       0xEE0AC07Cu,
       0x00080000u,
       0x00000000u, // global_inv scope:device
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -128,7 +127,7 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
   constexpr auto bpermute =
       cdna5::build_vds(cdna5::kDsBpermuteB32Vds, {.addr = 3, .data0 = 4, .vdst = 5});
   const std::array<uint32_t, 5> text_words = {load[0], load[1], bpermute[0], bpermute[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
@@ -457,7 +456,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughExactScratchSlot) {
       0xEC05007Cu,
       0x00000005u,
       0x00000003u, // flat_load_b32 v5, v[3:4]
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -524,7 +523,7 @@ TEST(ConSan, PropagatesGfx1250SharedHighHalfThroughVectorAddU64) {
       0xEC05007Cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -677,7 +676,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
       0xEC05007Cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -836,12 +835,12 @@ TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
       0xec05007cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
     const std::vector<uint8_t> bytes =
         arch == ROCJITSU_CODE_ARCH_RDNA4
@@ -880,12 +879,12 @@ TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
       0xec05007cu,
       0x00000004u,
       0x00000000u, // flat_load_b32 v4, v[0:1]
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
     const std::vector<uint8_t> bytes =
         arch == ROCJITSU_CODE_ARCH_RDNA4
@@ -1265,8 +1264,8 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
       },
       TargetCase{
           .target = ROCJITSU_CODE_TARGET_GFX1250,
-          .arch = ROCJITSU_CODE_ARCH_GFX1250,
-          .bytes = make_gfx1250_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)}),
+          .arch = ROCJITSU_CODE_ARCH_CDNA5,
+          .bytes = make_gfx1250_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)}),
       },
   };
   ConSanOptions options;
@@ -1464,7 +1463,7 @@ struct FlatSubwordTarget {
 
 constexpr std::array<FlatSubwordTarget, 5> kFlatSubwordTargets = {{
     {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", 0},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", 1},
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", 1},
     {ROCJITSU_CODE_ARCH_CDNA3, "gfx942", 2},
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950", 3},
     {ROCJITSU_CODE_ARCH_RDNA3, "gfx1100", 4},
@@ -1567,7 +1566,7 @@ std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &t
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
-  case ROCJITSU_CODE_ARCH_GFX1250: {
+  case ROCJITSU_CODE_ARCH_CDNA5: {
     const auto load = cdna5::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
@@ -1597,7 +1596,7 @@ std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &t
                                       /*workgroup_id_dimension_mask=*/7u);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(text_words, "gfx1201_flat_d16_load");
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_gfx1250_code_object(text_words, "gfx1250_flat_d16_load");
   case ROCJITSU_CODE_ARCH_CDNA3:
     return make_cdna3_lds_code_object(text_words, "gfx942_flat_d16_load",
@@ -1635,7 +1634,7 @@ std::vector<uint8_t> make_group_flat_d16_store_code_object(const FlatSubwordTarg
     text_words.insert(text_words.end(), store.begin(), store.end());
     break;
   }
-  case ROCJITSU_CODE_ARCH_GFX1250: {
+  case ROCJITSU_CODE_ARCH_CDNA5: {
     const auto store = cdna5::build_vflat(opcode, {.saddr = 124, .vsrc = 2, .vaddr = 0});
     text_words.insert(text_words.end(), store.begin(), store.end());
     break;
@@ -1665,7 +1664,7 @@ std::vector<uint8_t> make_group_flat_d16_store_code_object(const FlatSubwordTarg
                                       /*workgroup_id_dimension_mask=*/7u);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(text_words, "gfx1201_flat_d16_store");
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_gfx1250_code_object(text_words, "gfx1250_flat_d16_store");
   case ROCJITSU_CODE_ARCH_CDNA3:
     return make_cdna3_lds_code_object(text_words, "gfx942_flat_d16_store",
@@ -1697,7 +1696,7 @@ std::vector<uint32_t> expected_group_flat_store_readback(const FlatSubwordTarget
         opcode, {.saddr = 124, .vdst = static_cast<uint8_t>(scratch_vgpr), .vaddr = 0});
     return {load.begin(), load.end()};
   }
-  case ROCJITSU_CODE_ARCH_GFX1250: {
+  case ROCJITSU_CODE_ARCH_CDNA5: {
     const uint16_t opcode =
         memory_width_bits == 8u ? cdna5::kFlatLoadU8Vflat : cdna5::kFlatLoadU16Vflat;
     const auto load = cdna5::build_vflat(
@@ -2514,8 +2513,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   };
   std::vector<uint32_t> text_words = {
       0xbe8001ebu, // s_mov_b64 s[0:1], SRC_SHARED_BASE
-      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
-      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA5),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA5),
       kStoreB16[0],
       kStoreB16[1],
       kStoreB16[2],
@@ -2523,8 +2522,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
       kLoadU16[1],
       kLoadU16[2],
   };
-  text_words.resize(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_flat_short_emission");
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -2568,14 +2567,14 @@ TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
   for (const auto &access : kAccesses) {
     std::vector<uint32_t> text_words = {
         0xbe8001ebu, // s_mov_b64 s[0:1], SRC_SHARED_BASE
-        build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
-        build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+        build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA5),
+        build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA5),
         access[0],
         access[1],
         access[2],
     };
-    text_words.resize(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-    text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+    text_words.resize(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+    text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
     const std::vector<uint8_t> bytes =
         make_gfx1250_code_object(text_words, "gfx1250_flat_short_supercollider");
     ConSanOptions options;
@@ -3256,7 +3255,7 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
 TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
@@ -3564,7 +3563,7 @@ TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
 }
 
 TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
-  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(bypass_signal);
   const std::array<uint32_t, 6> text_words = {
       *bypass_signal, // Guard either bypasses or falls through the signal arm.
@@ -3572,7 +3571,7 @@ TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
       0x3600009Fu,    // v_and_b32_e32 v0, 31, v0
       0xBF048475u,    // s_cmp_lt_i32 ttmp9, 4
       0xBF94FFFDu,    // s_barrier_wait -3
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const ConSanResult result =
       try_patch_consan(make_gfx1250_code_object(text_words, "cluster_triangle"), moi_options());
@@ -3590,7 +3589,7 @@ TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
 }
 
 TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
-  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/2, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(bypass_signal);
   const std::array<uint32_t, 7> text_words = {
       *bypass_signal,
@@ -3599,7 +3598,7 @@ TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
       0x3600009Fu, // v_and_b32_e32 v0, 31, v0
       0xBF048475u, // s_cmp_lt_i32 ttmp9, 4
       0xBF94FFFDu, // s_barrier_wait -3
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -3821,7 +3820,7 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
 
   const std::array<uint32_t, 7> cross_block_words = {
       0xBE805181u, // s_barrier_init 1
-      build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5),
       0xBE805281u, // s_barrier_join 1
       0xBE804E81u, // s_barrier_signal 1
       0xBF940001u, // s_barrier_wait 1
@@ -4007,7 +4006,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   }));
 
   ConSanResult unaccounted = valid;
-  uint32_t changed_endpgm = build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250);
+  uint32_t changed_endpgm = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
   std::memcpy(unaccounted.elf_bytes.data() + text_file_offset + 6u * sizeof(uint32_t),
               &changed_endpgm, sizeof(changed_endpgm));
   const std::vector<std::string> accounting_errors =

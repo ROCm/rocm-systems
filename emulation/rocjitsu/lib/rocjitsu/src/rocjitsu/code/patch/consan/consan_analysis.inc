@@ -20,7 +20,7 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
 [[nodiscard]] bool is_rdna_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
@@ -29,7 +29,7 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
     return 4;
   if (is_cdna_arch(arch))
     return 8;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return wavefront_size == 32 ? 16 : 8;
   if (is_rdna_arch(arch))
     return wavefront_size == 32 ? 8 : 4;
@@ -892,7 +892,7 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
     vsrc = raw.vsrc;
     saddr = raw.saddr;
     ioffset = raw.ioffset;
-  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
              instruction_bytes.size() == sizeof(cdna5::VscratchMachineInst)) {
     cdna5::VscratchMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1050,7 +1050,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
       cdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
-    } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                instruction_bytes.size() >= sizeof(cdna5::Vop3MachineInst)) {
       cdna5::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1069,7 +1069,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
         const uint32_t key = (static_cast<uint32_t>(*vgpr) << 6u) | *lane;
         // CDNA and RDNA4 expose the tied destination as source operand 0.
         // gfx1250's decoder exposes only the scalar value and lane selector.
-        const int value_operand = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 0 : 1;
+        const int value_operand = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : 1;
         const auto component = source_component_hint(inst.src_operand(value_operand), tracker);
         ScalarRegisterOrigin scalar_origin;
         if (const auto source = register_ref(inst.src_operand(value_operand), RegClass::SGPR))
@@ -1732,7 +1732,7 @@ void record_barrier_site(const Instruction &inst, ConSanKernelInfo &kernel,
   // LLVM lowers a uniform named-barrier init count into M0[21:16] and the
   // barrier ID into M0[5:0]. Only accept the immediately preceding literal
   // s_mov_b32 m0 materialization: arbitrary M0 dataflow is not proof.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.operation == ConSanBarrierSite::Operation::Init &&
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.operation == ConSanBarrierSite::Operation::Init &&
       site.operand_source == ConSanBarrierSite::OperandSource::DynamicM0 &&
       previous_instruction_bytes.size() == 2u * sizeof(uint32_t)) {
     uint32_t setup_word = 0;
@@ -1839,7 +1839,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
       site.address_space_hint = ConSanFlatAddressSpaceHint::Private;
     else if (raw.seg == 2u)
       site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
-  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
              instruction_bytes.size() >= sizeof(cdna5::VflatMachineInst)) {
     cdna5::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1934,7 +1934,7 @@ void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kern
   // Operand objects remain useful on unsupported architectures, while the
   // raw RDNA4 fields below are the authoritative bounded decode.
   if (mnemonic.starts_with("buffer_")) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
     } else if (instruction_bytes.size() != sizeof(cdna5::VbufferMachineInst)) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
@@ -2091,7 +2091,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_buffer_atomic_raw(site, raw);
     }
-  } else if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(cdna5::VdsMachineInst)) {
       cdna5::VdsMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -2249,7 +2249,7 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     }
 
     ++kernel.stats.instruction_count;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       for (int operand_index = 0; operand_index < inst->num_src_operands(); ++operand_index) {
         const Operand *operand = inst->src_operand(operand_index);
         // TTMPs are deliberately outside liveness's allocatable register

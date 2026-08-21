@@ -224,7 +224,7 @@ bypass RocJitsu for any workload.
 
 Artifact
 `/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-pytorch-histc-rr-launcher-fix-bN76SO`
-records baseline and Record/Replay through the RocJitsu `gfx1250.json`
+records baseline and Record/Replay through the RocJitsu `gfx1250_mi455x.json`
 launcher with hook SHA-256
 `587f327b6c269414c61a79c8915867fdb68fc2a434cc8586ffe41e19e11cfbbc`.
 The exact baseline passes in 1.53 seconds. Record/Replay passes in 3.41 seconds
@@ -613,7 +613,7 @@ execution remains the shared first acceptance gap.
 
 A committed-tip Sampled follow-up at revision `813f0613a8` extends the exact
 same standard-profile run to 120 seconds through the explicit RocJITsu
-`gfx1250.json` launcher.  It again patches all 1000/1000 accesses and 90/90
+`gfx1250_mi455x.json` launcher.  It again patches all 1000/1000 accesses and 90/90
 barriers, installs the 3,945,440-byte replacement, and reaches simulated
 execution without an early rejection or diagnostic, but still produces no
 oracle or teardown verdict before timeout.  The retained artifact is
@@ -625,7 +625,7 @@ not enough to turn this large emulated model into an actionable iteration
 loop.
 
 A current-hook follow-up at revision `158b25fd5c` extends that same standard
-Sampled profile to 600 seconds through RocJITsu's checked-in `gfx1250.json`
+Sampled profile to 600 seconds through RocJITsu's checked-in `gfx1250_mi455x.json`
 configuration. Artifact
 `/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-qwen-sampled-600s-independent-abi-v2`
 uses hook SHA-256
@@ -726,7 +726,7 @@ tests pass.
 
 Artifact
 `/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-mxf4-tdm-record-replay-dense-fence-fix-v2`
-runs the full clean client through the explicit RocJitsu `gfx1250.json`
+runs the full clean client through the explicit RocJitsu `gfx1250_mi455x.json`
 launcher. It timed out after 300.126 seconds before producing either a coverage
 record or a numeric verdict. This proves no E2E promotion, so the matrix cell
 remains orange pending a completed run.
@@ -891,7 +891,7 @@ that workaround consistently.
 Artifact
 `/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-rr-bcnt-fix-timeout180`
 runs the target-specific PyTorch environment through the explicit RocJitsu
-`gfx1250.json` launcher.  The exact FP64 and BF16 value/index oracles now pass
+`gfx1250_mi455x.json` launcher.  The exact FP64 and BF16 value/index oracles now pass
 both uninstrumented in 1.83 seconds and under Record/Replay in 75.02 seconds.
 This supersedes
 `/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-rr-current`,
@@ -919,7 +919,7 @@ barriers.  The loaded hook SHA-256 is
 Artifact
 `/home/ossci/xx/consan-validation/rebase-20260821-gfx1250-pytorch-topk-inline-architectural-sgprs`
 runs the exact FP64 and BF16 value/index oracles through the explicit RocJitsu
-`gfx1250.json` launcher.  Both pass under InlineShadow in 89.29 seconds with
+`gfx1250_mi455x.json` launcher.  Both pass under InlineShadow in 89.29 seconds with
 dynamic completeness, zero diagnostics, and loaded hook SHA-256
 `669981f6e21299650871f0e8e1e18433f2c2a46733f07ac82c04e82b41f40e2f`.
 

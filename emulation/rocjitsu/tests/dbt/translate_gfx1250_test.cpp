@@ -2780,7 +2780,7 @@ translate_adopted_nonleaf_lane_restore(bool callee_clobbers_saved_lane) {
   // caller-saved, so the return is valid only when the decoded callee closure
   // proves that exact lane survives.
   const std::vector<uint32_t> words = {
-      rocjitsu::build_s_getpc_b64(10, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_getpc_b64(10, ROCJITSU_CODE_ARCH_CDNA5),
       // word 0: kernel 0 leaves an unresolved PC producer, preventing the
       // whole-object relocated-by-construction fallback from masking whether
       // the adopted return itself was proven.
@@ -2816,7 +2816,7 @@ translate_adopted_nonleaf_lane_restore(bool callee_clobbers_saved_lane) {
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   EXPECT_TRUE(source.is_valid());
   rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   return translator.translate(source);
@@ -15064,7 +15064,7 @@ TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesBranchIslandsWithoutClobbe
   std::vector<uint8_t> island_used(1, 0);
 
   const auto result = rocjitsu::patch_recovered_indirect_fixups(
-      text, layout, ROCJITSU_CODE_ARCH_GFX1250, island_used);
+      text, layout, ROCJITSU_CODE_ARCH_CDNA5, island_used);
   ASSERT_TRUE(result.ok) << result.message;
   EXPECT_EQ(island_used, (std::vector<uint8_t>{1}));
 
@@ -15072,10 +15072,10 @@ TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesBranchIslandsWithoutClobbe
   uint32_t island_word = 0;
   std::memcpy(&window_word, text.data() + kWindowOffset, sizeof(window_word));
   std::memcpy(&island_word, text.data() + kIslandOffset, sizeof(island_word));
-  EXPECT_EQ(window_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_EQ(island_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_NE(window_word, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_NE(window_word, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(window_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(island_word, rocjitsu::build_s_branch(17'499, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_NE(window_word, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_NE(window_word, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesReservedOrdinaryScratchPair) {
@@ -15100,23 +15100,21 @@ TEST(KernelTextLayout, LongRecoveredSpecialCarrierUsesReservedOrdinaryScratchPai
   std::vector<uint8_t> island_used;
 
   const auto result = rocjitsu::patch_recovered_indirect_fixups(
-      text, layout, ROCJITSU_CODE_ARCH_GFX1250, island_used);
+      text, layout, ROCJITSU_CODE_ARCH_CDNA5, island_used);
   ASSERT_TRUE(result.ok) << result.message;
 
   std::array<uint32_t, rocjitsu::kMaxRecoveredIndirectTransferWords> words{};
   std::memcpy(words.data(), text.data(), sizeof(words));
   EXPECT_EQ(words.front(), rocjitsu::build_s_nop(rocjitsu::kLongDirectBranchMarkerNopImmediate,
-                                                 ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_NE(std::ranges::find(
-                words, rocjitsu::build_s_getpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_GFX1250)),
-            words.end());
-  EXPECT_NE(std::ranges::find(
-                words, rocjitsu::build_s_setpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_GFX1250)),
-            words.end());
-  EXPECT_EQ(
-      std::ranges::find(words, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250)),
+                                                 ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_NE(
+      std::ranges::find(words, rocjitsu::build_s_getpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_CDNA5)),
       words.end());
-  EXPECT_EQ(
-      std::ranges::find(words, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_GFX1250)),
+  EXPECT_NE(
+      std::ranges::find(words, rocjitsu::build_s_setpc_b64(kScratchPair, ROCJITSU_CODE_ARCH_CDNA5)),
       words.end());
+  EXPECT_EQ(std::ranges::find(words, rocjitsu::build_s_getpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5)),
+            words.end());
+  EXPECT_EQ(std::ranges::find(words, rocjitsu::build_s_setpc_b64(kVccLo, ROCJITSU_CODE_ARCH_CDNA5)),
+            words.end());
 }

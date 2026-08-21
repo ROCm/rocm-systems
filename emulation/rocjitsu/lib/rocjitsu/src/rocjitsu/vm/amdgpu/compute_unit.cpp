@@ -65,7 +65,7 @@ namespace {
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 128u;
   default:
     return std::nullopt;
@@ -702,24 +702,28 @@ void ComputeUnitCore::update_wf_states() {
   }
 }
 
-void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruction &words) {
-  uint32_t vmid = active->process_id();
-
+bool ComputeUnitCore::handle_unfetchable_pc(Wavefront &wave) {
+  const uint32_t vmid = wave.process_id();
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
   // An unfetchable PC reads back as zeros, and zeros decode to a valid
   // instruction, so an undebugged wave that branches into unmapped memory would
   // otherwise execute zeros forever. Stopping it matters more than the one
   // extra page-table lookup, which is a fraction of the per-issue decode cost.
-  if (vmid != 0 && !memory_->is_fetchable(active->pc, vmid)) {
-    if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
-      return;
-    // Wavefront::halt() is silent, so say why this wave stopped. Without this
-    // the wave simply disappears from the run with nothing in the log.
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(UnfetchablePc) pc=0x",
-                     std::hex, active->pc, std::dec, " vmid=", vmid);
-    active->halt();
+  if (vmid == 0 || memory_->is_fetchable(wave.pc, vmid))
+    return false;
+  if (memory_violation_handler_ && memory_violation_handler_(wave, wave.pc, false))
+    return true;
+  // Wavefront::halt() is silent, so say why this wave stopped. Without this
+  // the wave simply disappears from the run with nothing in the log.
+  util::Logger::vm("CU ", this->name(), ": wf", wave.wf_id(), " HALT(UnfetchablePc) pc=0x",
+                   std::hex, wave.pc, std::dec, " vmid=", vmid);
+  wave.halt();
+  return true;
+}
+
+void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruction &words) {
+  if (handle_unfetchable_pc(*active))
     return;
-  }
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
@@ -1064,6 +1068,10 @@ bool ComputeUnitCore::step() {
     const bool single_step = wf->debug_single_step();
     const uint32_t vmid = wf->process_id();
     const uint64_t pc = wf->pc;
+    // Validate the mapping before fetch32() dereferences the process page-table
+    // entry. issue_instruction() repeats this gate for direct issue callers.
+    if (handle_unfetchable_pc(*wf))
+      continue;
     const size_t fetch_index =
         ((pc >> 2u) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b9u)) & (kStepFetchEntries - 1u);
     auto &entry = step_fetches[fetch_index];

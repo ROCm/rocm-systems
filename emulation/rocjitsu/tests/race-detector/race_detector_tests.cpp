@@ -610,6 +610,20 @@ TEST(RaceDetector, Exec_DisjointLanesDisjoint) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, Exec_InactiveLdsLaneRegistersNoMemoryOrVgprEvent) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+
+  // The operation is presented for lane 0 while EXEC enables only lane 1.
+  // Neither its LDS access nor its destination-register write exists.
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/32, /*bytes=*/4, /*exec=*/2);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4, /*vgprDst=*/2,
+            /*byteMask=*/0xF, /*exec=*/2);
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/32, /*bytes=*/4);
+  b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasRace());
+}
+
 // ---- Multi-workgroup ----
 
 TEST(RaceDetector, MultiWorkgroup_ReportsIndex) {

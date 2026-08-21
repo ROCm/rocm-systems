@@ -127,13 +127,13 @@ struct MoiAppendedBodyOptions {
 [[nodiscard]] constexpr bool
 moi_appended_body_uses_gfx1250_vgpr_msb(rj_code_arch_t arch,
                                         std::optional<uint16_t> gfx1250_vgpr_msb_mode) {
-  return arch == ROCJITSU_CODE_ARCH_GFX1250 && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
 }
 
 [[nodiscard]] constexpr bool
 moi_appended_body_vgpr_msb_mode_is_valid(rj_code_arch_t arch,
                                          std::optional<uint16_t> gfx1250_vgpr_msb_mode) {
-  return gfx1250_vgpr_msb_mode.value_or(0u) == 0u || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return gfx1250_vgpr_msb_mode.value_or(0u) == 0u || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] constexpr size_t
@@ -153,17 +153,17 @@ moi_embedded_guest_vgpr_bank_plan_is_valid(bool wraps_embedded_guest, bool selec
          (selects_low_vgpr_bank && has_guest_instruction && trailing_guest_word_count == 0u);
 }
 
-static_assert(moi_appended_body_vgpr_msb_mode_is_valid(ROCJITSU_CODE_ARCH_GFX1250, uint16_t{4u}));
+static_assert(moi_appended_body_vgpr_msb_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA5, uint16_t{4u}));
 static_assert(!moi_appended_body_vgpr_msb_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA4, uint16_t{4u}));
-static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
                                                                std::nullopt, false, false) == 0u);
-static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
                                                                uint16_t{4u}, false, false) == 2u);
-static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
                                                                uint16_t{4u}, false, true) == 4u);
-static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
                                                                uint16_t{4u}, true, false) == 4u);
-static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_GFX1250,
+static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
                                                                uint16_t{4u}, true, true) == 6u);
 static_assert(moi_appended_body_vgpr_msb_transition_word_count(ROCJITSU_CODE_ARCH_CDNA4,
                                                                uint16_t{4u}, true, true) == 0u);

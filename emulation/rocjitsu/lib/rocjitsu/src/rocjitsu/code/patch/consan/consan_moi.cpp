@@ -530,7 +530,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   if (!canonicalize_moi_candidates_by_physical_site(result))
     return result;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (ConSanMoiCandidate &candidate : result.moi_candidates) {
       if (candidate.text_offset < candidate.container_entry_text_offset ||
           candidate.file_offset < candidate.text_offset)
@@ -1184,8 +1184,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
       const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
-          result.arch == ROCJITSU_CODE_ARCH_GFX1250
-              ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)
+          result.arch == ROCJITSU_CODE_ARCH_CDNA5
+              ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5)
               : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
                                       consan_moi_exact_shadow::granule_bytes));
       inventory.inline_lds_bytes =

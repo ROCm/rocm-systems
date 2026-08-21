@@ -592,7 +592,7 @@ struct ConSanOptions {
   uint64_t moi_report_buffer_size = 0;
   /// Effective per-workgroup LDS aperture supplied by the execution runtime.
   /// Offline callers leave this unset and use the architecture's configured
-  /// default (gfx1250.json for gfx1250).
+  /// default (gfx1250_mi455x.json for gfx1250).
   std::optional<uint32_t> moi_max_workgroup_lds_bytes;
   std::optional<ConSanMoiReportLayoutOverride> moi_report_layout;
   /// Generation stored in direct sampled entries. Auto report buffers set

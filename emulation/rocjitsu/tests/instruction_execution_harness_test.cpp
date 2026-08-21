@@ -604,14 +604,14 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesInstrumentedNoSaddrFlatOperations) {
   amdgpu::L2Cache l2("gfx1250_instrumentation_memory_harness_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
 
   Gfx1250MemoryTestCu cu("gfx1250_instrumentation", cfg, &gpu_mem, &l2);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -637,14 +637,14 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesInstrumentedNoSaddrFlatOperations) {
   };
 
   const auto store = instrumentation::build_flat_store_b32(
-      /*vaddr=*/0, /*vsrc=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vaddr=*/0, /*vsrc=*/2, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(store);
   execute(*store, "flat_store_b32");
   cu.flush_all();
   EXPECT_EQ(gpu_mem.read32(kAddress), kStoredValue);
 
   const auto load = instrumentation::build_flat_load_b32(
-      /*vaddr=*/0, /*vdst=*/3, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vaddr=*/0, /*vdst=*/3, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(load);
   execute(*load, "flat_load_b32");
   EXPECT_EQ(cu.read_vgpr(vb + 3, 0), kStoredValue);
@@ -652,7 +652,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesInstrumentedNoSaddrFlatOperations) {
   cu.write_vgpr(vb + 4, 0, kAddend);
   const auto atomic = instrumentation::build_flat_atomic_add_u32(
       /*vaddr=*/0, /*vsrc=*/4, /*vdst=*/5, /*return_old_value=*/true,
-      /*scope=*/2, ROCJITSU_CODE_ARCH_GFX1250);
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(atomic);
   execute(*atomic, "flat_atomic_add_u32");
   cu.flush_all();
@@ -1303,13 +1303,14 @@ TEST(Cdna4ControlFlowTest, SetpcVccNullGuardReadsArchitecturalVcc) {
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
-  constexpr uint64_t kTarget = 0x1234567800010000ULL;
+  constexpr uint64_t kEncodedTarget = 0x1234567800010000ULL;
+  constexpr uint64_t kCanonicalTarget = 0x0000567800010000ULL;
   wf->pc = 0x8000;
-  wf->set_vcc(kTarget);
+  wf->set_vcc(kEncodedTarget);
   cu.issue(build_s_setpc_b64(/*ssrc0=*/106, ROCJITSU_CODE_ARCH_CDNA4), *wf);
 
   EXPECT_FALSE(wf->is_halted());
-  EXPECT_EQ(wf->pc, kTarget);
+  EXPECT_EQ(wf->pc, kCanonicalTarget);
   if (!wf->is_halted())
     wf->halt();
 }
@@ -1319,7 +1320,7 @@ TEST(Gfx1250ControlFlowTest, SetpcVccNullGuardRecognizesCdna5Mnemonic) {
   amdgpu::L2Cache l2("gfx1250_setpc_vcc_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1331,7 +1332,7 @@ TEST(Gfx1250ControlFlowTest, SetpcVccNullGuardRecognizesCdna5Mnemonic) {
 
   wf->pc = 0x8000;
   wf->set_vcc(0);
-  cu.issue(build_s_setpc_b64(/*ssrc0=*/106, ROCJITSU_CODE_ARCH_GFX1250), *wf);
+  cu.issue(build_s_setpc_b64(/*ssrc0=*/106, ROCJITSU_CODE_ARCH_CDNA5), *wf);
 
   EXPECT_TRUE(wf->is_halted());
 }
@@ -3137,7 +3138,7 @@ TEST(Gfx1250TopKPrefixTest, Vop3BcntAddsOverlappingSrc1Accumulator) {
   amdgpu::L2Cache l2("gfx1250_bcnt_accumulator_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3145,7 +3146,7 @@ TEST(Gfx1250TopKPrefixTest, Vop3BcntAddsOverlappingSrc1Accumulator) {
 
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);

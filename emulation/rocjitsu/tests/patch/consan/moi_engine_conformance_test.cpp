@@ -215,9 +215,9 @@ TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationR
 TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppendedEntries) {
   constexpr uint32_t kAccessCount = 9;
   constexpr size_t kTextWords = 40000u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kTextWords, filler);
-  text_words[18000u] = build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[18000u] = build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_CDNA5);
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   constexpr std::array<size_t, kAccessCount> kStoreOffsets = {
       32u, 4000u, 8000u, 12000u, 16000u, 20000u, 24000u, 28000u, 32000u,
@@ -226,7 +226,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
     text_words[offset] = store[0];
     text_words[offset + 1u] = store[1];
   }
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   const MoiEngineConformanceCase &test_case = GetParam();
   ConSanOptions options = conformance_options(test_case, kAccessCount);

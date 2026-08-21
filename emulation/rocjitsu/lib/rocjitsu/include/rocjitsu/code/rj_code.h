@@ -217,7 +217,7 @@ rj_code_arch_for_target(rj_code_target_id_t target) {
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
+    return ROCJITSU_CODE_ARCH_CDNA5;
   case ROCJITSU_CODE_TARGET_GFX1100:
     return ROCJITSU_CODE_ARCH_RDNA3;
   case ROCJITSU_CODE_TARGET_GFX1150:
@@ -257,8 +257,8 @@ static inline RJ_CODE_NO_SANITIZE_ENUM const char *rj_code_arch_name(rj_code_arc
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:
     return "rv64i";
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return "gfx1250";
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return "cdna5";
   case ROCJITSU_CODE_ARCH_INVALID:
     break;
   }

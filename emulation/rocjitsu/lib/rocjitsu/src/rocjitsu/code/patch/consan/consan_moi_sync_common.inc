@@ -85,7 +85,7 @@ sampled_atomic_semantics_for_site(const ConSanResult &result,
   const std::optional<uint32_t> semantic_scope =
       sequence->raw_scope
           ? sequence->raw_scope
-          : (result.arch == ROCJITSU_CODE_ARCH_GFX1250 && site.mnemonic.starts_with("ds_")
+          : (result.arch == ROCJITSU_CODE_ARCH_CDNA5 && site.mnemonic.starts_with("ds_")
                  ? std::optional<uint32_t>(1u)
                  : std::nullopt);
   if (!semantic_scope) {

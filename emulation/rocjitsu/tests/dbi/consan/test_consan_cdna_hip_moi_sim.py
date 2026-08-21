@@ -38,7 +38,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
                     "hip-moi-build-gfx942-tests",
                     "gfx942_cdna3_kmd.json",
                 ),
-                "gfx950": ("hip-moi-build-gfx950-tests", "gfx950_cdna4.json"),
+                "gfx950": ("hip-moi-build-gfx950-tests", "gfx950_mi355x.json"),
             },
         )
         expected_suffixes = {

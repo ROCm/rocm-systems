@@ -297,11 +297,11 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
 }
 
 TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
-  std::vector<uint32_t> text_words(600, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> text_words(600, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -331,7 +331,7 @@ TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
 TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKernel) {
   constexpr uint32_t kAccessesPerWindow = 9u;
   constexpr uint32_t kSecondWindowWord = 65'580u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(8u, filler);
   for (uint32_t index = 0; index < kAccessesPerWindow; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
@@ -342,7 +342,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_partitioned_dense_sampled");
 
@@ -384,7 +384,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
       const std::vector<uint32_t> dispatcher =
           text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
       ASSERT_GE(dispatcher.size(), 2u);
-      EXPECT_EQ(dispatcher[0], build_s_getpc_b64(/*sdst=*/80u, ROCJITSU_CODE_ARCH_GFX1250));
+      EXPECT_EQ(dispatcher[0], build_s_getpc_b64(/*sdst=*/80u, ROCJITSU_CODE_ARCH_CDNA5));
       ++checked_dispatchers;
     }
   }
@@ -399,14 +399,14 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint16_t kClusterWorkgroupTtmp = 6u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   text_words[0] = build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(kClusterWorkgroupTtmp),
-                                  ROCJITSU_CODE_ARCH_GFX1250);
+                                  ROCJITSU_CODE_ARCH_CDNA5);
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
@@ -445,8 +445,8 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
            *access->persistent_record_replay_workgroup_private_offsets.z,
            *access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id,
        }) {
-    const auto load = instrumentation::build_private_load_b32(coordinate_vgpr, offset,
-                                                              ROCJITSU_CODE_ARCH_GFX1250);
+    const auto load =
+        instrumentation::build_private_load_b32(coordinate_vgpr, offset, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(load);
     EXPECT_TRUE(contains_subsequence(cave, *load));
   }
@@ -457,14 +457,14 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint16_t kClusterWorkgroupTtmp = 6u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   text_words[0] = build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(kClusterWorkgroupTtmp),
-                                  ROCJITSU_CODE_ARCH_GFX1250);
+                                  ROCJITSU_CODE_ARCH_CDNA5);
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
@@ -500,14 +500,14 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   EXPECT_NE(std::ranges::find(prologue_words,
                               build_v_mov_b32_e32(persistent_cluster,
                                                   ttmp_scalar_operand(kClusterWorkgroupTtmp),
-                                                  ROCJITSU_CODE_ARCH_GFX1250)),
+                                                  ROCJITSU_CODE_ARCH_CDNA5)),
             prologue_words.end());
   const auto read_cluster = instrumentation::build_v_readfirstlane_b32(
-      /*sdst=*/85u, persistent_cluster, ROCJITSU_CODE_ARCH_GFX1250);
+      /*sdst=*/85u, persistent_cluster, ROCJITSU_CODE_ARCH_CDNA5);
   const auto dependency_wait =
-      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_GFX1250);
+      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA5);
   const auto cluster_mix = instrumentation::build_s_sub_u32(
-      /*sdst=*/86u, /*ssrc0=*/86u, /*ssrc1=*/85u, ROCJITSU_CODE_ARCH_GFX1250);
+      /*sdst=*/86u, /*ssrc0=*/86u, /*ssrc1=*/85u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(read_cluster);
   ASSERT_TRUE(dependency_wait);
   ASSERT_TRUE(cluster_mix);
@@ -520,12 +520,12 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
 TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
@@ -560,14 +560,14 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
   constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
   constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   text_words.push_back(
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250));
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
@@ -591,9 +591,9 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t select_low =
-      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_CDNA5);
   uint32_t checked = 0u;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
@@ -869,7 +869,7 @@ TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "large_two_address_sampled");
@@ -1137,7 +1137,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   const uint16_t atomic_bank = static_cast<uint16_t>(*atomic->scratch_vgpr + 8u);
   const auto owner_bank_mix = instrumentation::build_v_xor_b32(
       atomic_bank, vector_source_vgpr(*result.resolved_moi_owner_vgpr), atomic_bank,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(owner_bank_mix);
   EXPECT_NE(std::ranges::find(atomic_body, *owner_bank_mix), atomic_body.end());
   EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
@@ -1152,7 +1152,7 @@ TEST(ConSanMoi, Gfx1250SampledPublishesIsolatedLdsReleaseOrdering) {
       cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 6> words = {
       store[0],  store[1],  0xBFC90000u, // s_wait_storecnt_dscnt 0
-      atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+      atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -1657,7 +1657,7 @@ TEST(ConSanMoi, CdnaVglobalMaterializationSelectsSafeSignScratch) {
 TEST(ConSanMoi, AddressMaterializationRejectsMalformedScratchWindows) {
   constexpr std::array<SampledTarget, 4> kMaterializationTargets = {{
       {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
-      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"},
       {ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3"},
       {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
   }};
@@ -2427,9 +2427,9 @@ TEST(ConSanMoi, Gfx1250SampledAutomaticExecSaveUsesOwnerLocalWindow) {
         0x00000000u, // ds_store_b32 v0, v0
     };
     for (uint16_t sgpr = first_live; sgpr <= last_live; ++sgpr) {
-      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
     }
-    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
     return words;
   };
   const std::vector<uint32_t> first_words =
@@ -2655,9 +2655,9 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   }
   for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
     if (std::ranges::find(dead, sgpr) == dead.end())
-      words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
   }
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   for (const bool uses_dynamic_stack : {false, true}) {
     SCOPED_TRACE(uses_dynamic_stack ? "dynamic-stack" : "fixed-stack");
     const std::vector<uint8_t> bytes =
@@ -2693,11 +2693,11 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     ASSERT_TRUE(assignment.indirect_pc_sgpr);
     ASSERT_TRUE(assignment.indirect_scc_sgpr);
     const auto restore_return_scc = instrumentation::build_s_cmp_lg_u32(
-        *assignment.indirect_scc_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250);
+        *assignment.indirect_scc_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(restore_return_scc);
     const std::array return_tail = {
         *restore_return_scc,
-        build_s_setpc_b64(*assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_setpc_b64(*assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5),
     };
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
@@ -2723,7 +2723,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
 }
 
 TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kBarrierCount = 2u;
   constexpr uint16_t kExecSaveSgpr = 80u;
   constexpr uint16_t kDispatchKeySgpr = kExecSaveSgpr + 5u;
@@ -2811,12 +2811,12 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
 
 void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj_code_arch_t arch) {
   SCOPED_TRACE(arch);
-  ASSERT_TRUE(arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4);
   constexpr uint32_t kBarrierCount = 10u;
   constexpr uint32_t kCallReturnPairWidth = 2u;
   constexpr uint32_t kExecSaveWindowWidth = 8u;
   const uint32_t dense_entry_island_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 2u * (kBarrierCount + 1u) + 7u : 12u;
+      arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2u * (kBarrierCount + 1u) + 7u : 12u;
   constexpr uint32_t kKernelWordsForDenseHost = 1200u;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
   std::vector<uint32_t> words;
@@ -2837,7 +2837,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   words.resize(kKernelWordsForDenseHost, build_s_nop(0, arch));
   words.push_back(build_s_endpgm(arch));
   const std::vector<uint8_t> bytes =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? make_gfx1250_code_object(words, "sampled_scalar_spill_barriers_gfx1250",
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true)
           : make_rdna4_lds_code_object(words, "sampled_scalar_spill_barriers_rdna4");
@@ -2873,7 +2873,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
       << "call_return_sgpr=" << *assignment.call_return_sgpr
       << " exec_save_sgpr=" << assignment.exec_save_sgpr;
   const std::optional<uint32_t> call_opcode =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? instrumentation::build_s_call_i64(*assignment.call_return_sgpr, 0, arch)
           : std::optional<uint32_t>(build_s_call_b64(*assignment.call_return_sgpr, 0, arch));
   ASSERT_TRUE(call_opcode);
@@ -2889,7 +2889,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   const std::vector<uint32_t> entry_island =
       text_words_at_offset(patched, island_offset, dense_entry_island_words * sizeof(uint32_t));
   ASSERT_EQ(entry_island.size(), dense_entry_island_words);
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     const uint64_t common_entry_offset =
         island_offset + 2u * (kBarrierCount + 1u) * sizeof(uint32_t);
     for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
@@ -2914,7 +2914,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   ASSERT_TRUE(save_scc);
   ASSERT_TRUE(subtract_pc);
   ASSERT_TRUE(restore_scc);
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
     EXPECT_EQ(entry_island[0], *save_scc);
     EXPECT_EQ(entry_island[1],
               build_s_mov_b32(*assignment.dispatch_key_sgpr, *assignment.call_return_sgpr, arch));
@@ -2940,7 +2940,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
     ASSERT_EQ(anchor.size(), 1u);
     EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
     expected_dispatch_keys.push_back(
-        arch == ROCJITSU_CODE_ARCH_GFX1250
+        arch == ROCJITSU_CODE_ARCH_CDNA5
             ? patched_barriers + 1u
             : static_cast<uint32_t>(patch.anchor_offset + sizeof(uint32_t) - island_offset));
     if (!first_barrier_anchor)
@@ -2959,7 +2959,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   const auto compare_key =
       instrumentation::build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, arch);
   ASSERT_TRUE(compare_key);
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
       const auto explicit_compare = instrumentation::build_s_cmp_eq_u32(
           *assignment.dispatch_key_sgpr, scalar_positive_inline_u32(route_id), arch);
@@ -2982,7 +2982,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
 
 TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeysUnderScalarSpill) {
   expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 TEST(ConSanMoi, Rdna4SampledDenseBarrierRoutesThroughDeadPairUnderScalarSpill) {
@@ -3045,7 +3045,7 @@ TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
 
 TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) {
   constexpr uint32_t kAccessCount = 9u;
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
   const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch);
   std::vector<uint32_t> words(8u, filler);
@@ -4256,12 +4256,12 @@ TEST(ConSanMoi, DirectSampledProbeSpillsIdentityAwareWindowInAppendedCave) {
 }
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
-  std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 4u, .data0 = 3u});
   words[8] = store[0];
   words[9] = store[1];
-  words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_GFX1250);
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_CDNA5);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint8_t> bytes =
       make_gfx1250_code_object(words, "sampled_dynamic_store_operand_spill",
                                /*vgpr_granulated=*/0u, /*wave32=*/true,
@@ -4351,12 +4351,12 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledSpillPlansScalarStateBeforeVgprGrowth) {
 }
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadUsesDisjointSpillWindow) {
-  std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 4u, .vdst = 3u});
   words[8] = load[0];
   words[9] = load[1];
-  words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_GFX1250);
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_CDNA5);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "sampled_dynamic_load_operand_spill",
                                                         /*vgpr_granulated=*/0u, /*wave32=*/true,
                                                         /*uses_dynamic_stack=*/true);
@@ -4671,12 +4671,12 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
 }
 
 TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
-  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
-  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_GFX1250);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_CDNA5);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -4733,9 +4733,9 @@ TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure)
         patch_words, make_expected_literal_offset_store_words(offset, literal, address_vgpr,
                                                               record_temporary_vgpr)));
     const auto materialize = instrumentation::build_v_mov_b32_literal(
-        literal_temporary_vgpr, literal, ROCJITSU_CODE_ARCH_GFX1250);
+        literal_temporary_vgpr, literal, ROCJITSU_CODE_ARCH_CDNA5);
     const auto compare = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(literal_temporary_vgpr), value_vgpr, ROCJITSU_CODE_ARCH_GFX1250);
+        vector_source_vgpr(literal_temporary_vgpr), value_vgpr, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(materialize && compare);
     std::vector<uint32_t> expected_compare = *materialize;
     expected_compare.push_back(*compare);
@@ -4880,7 +4880,7 @@ TEST(ConSanMoi, Gfx1250SampledFastGatesKeepThousandPackedSitesReachable) {
     text_words.push_back(store[0]);
     text_words.push_back(store[1]);
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 20;
@@ -6888,7 +6888,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
 TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFallsBack) {
   constexpr uint32_t kAccessCount = 9u;
   const uint32_t router_reference =
-      build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_GFX1250);
+      build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> words(128u, router_reference);
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   for (uint32_t index = 0u; index < kAccessCount; ++index) {
@@ -6898,7 +6898,7 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
   // Dense gfx1250 anchors normally share a compact call relay. Make every
   // otherwise viable host reference its transient router state; the ordinary
   // per-site appended relays remain directly reachable.
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8;
@@ -7235,13 +7235,13 @@ TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
 }
 
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
-  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[300] = 0xBE804EC1u; // s_barrier_signal -1
   words[380] = 0xBF94FFFFu; // s_barrier_wait -1, 320 bytes later
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -7365,14 +7365,14 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledRejectsMissingEntryPrologueScratch) {
 }
 
 TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
-  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
   words[402] = 0xBF860001u; // next block selects a nonzero VGPR bank
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.force_vgpr_spill = true;
@@ -7402,13 +7402,13 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
 }
 
 TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
-  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
   words[401] = 0xBF94FFFFu; // s_barrier_wait -1
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
@@ -7437,15 +7437,15 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
     return candidate.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            candidate.anchor_offset == patch->anchor_offset;
   }));
-  expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_GFX1250);
+  expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_CDNA5);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   const auto obsolete_workgroup_gate_shift = build_s_lshr_b32(
-      /*sdst=*/85u, /*ssrc0=*/86u, scalar_positive_inline_u32(6u), ROCJITSU_CODE_ARCH_GFX1250);
+      /*sdst=*/85u, /*ssrc0=*/86u, scalar_positive_inline_u32(6u), ROCJITSU_CODE_ARCH_CDNA5);
   const auto owner_election = build_v_cmp_eq_u32_e32_vcc(
-      scalar_positive_inline_u32(0), *options.moi_owner_vgpr, ROCJITSU_CODE_ARCH_GFX1250);
+      scalar_positive_inline_u32(0), *options.moi_owner_vgpr, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(owner_election);
   const auto barrier = std::ranges::find(trampoline, words[401]);
   const auto owner = std::ranges::find(trampoline, *owner_election);
@@ -7465,7 +7465,7 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
   constexpr size_t kSecondStore = 65'580u;
   constexpr size_t kSecondSignal = 65'980u;
   constexpr size_t kSecondWait = 65'981u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> words(kSecondWait + 140u, filler);
   for (size_t index = 0; index < kAccessesPerWindow; ++index) {
     words[kFirstStore + 2u * index] = 0xD8340000u | static_cast<uint32_t>(index * sizeof(uint32_t));
@@ -7480,7 +7480,7 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
   }
   words[kSecondSignal] = 0xBE804EC1u; // s_barrier_signal -1
   words[kSecondWait] = 0xBF94FFFFu;   // s_barrier_wait -1
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
@@ -7506,18 +7506,18 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
 }
 
 TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
-  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
-  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(bypass_signal);
   words[400] = *bypass_signal;
   words[401] = 0xBE804EC3u; // s_barrier_signal -3
   words[402] = 0x3600009Fu; // v_and_b32_e32 v0, 31, v0
   words[403] = 0xBF048475u; // s_cmp_lt_i32 ttmp9, 4
   words[404] = 0xBF94FFFDu; // s_barrier_wait -3
-  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
@@ -7552,17 +7552,17 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   });
   ASSERT_EQ(descriptor.classification, ConSanMoiSampledSyncClassification::Valid);
   const auto descriptor_literal = build_v_mov_b32_e64_literal(
-      /*vdst=*/10, descriptor.packed.descriptor, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vdst=*/10, descriptor.packed.descriptor, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(descriptor_literal);
   EXPECT_TRUE(contains_subsequence(trampoline, *descriptor_literal));
 }
 
 TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
-  std::vector<uint32_t> words(43, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> words(43, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 1, .data0 = 2});
   words[21] = store[0];
   words[22] = store[1];
-  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(bypass_signal);
   words[23] = *bypass_signal;
   words[24] = 0xBE804EC3u; // s_barrier_signal -3
@@ -7573,7 +7573,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 1, .vdst = 2});
   words[34] = load[0];
   words[35] = load[1];
-  words[42] = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  words[42] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(words, "gfx1250_sampled_cluster_drop_composition");
 

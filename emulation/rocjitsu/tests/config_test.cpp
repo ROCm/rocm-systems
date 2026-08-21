@@ -77,6 +77,21 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->command_processor()->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
 }
 
+TEST(ConfigLoaderTest, LoadCdna5Config) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  const auto *soc = loaded.soc();
+
+  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
+  EXPECT_EQ(loaded.device.wave_front_size, 32u);
+  EXPECT_EQ(loaded.device.lds_size_kb, 320u);
+  EXPECT_EQ(soc->num_xcds(), 8u);
+  EXPECT_EQ(soc->num_iods(), 2u);
+  EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 2u);
+  EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+}
+
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   auto rdna4 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
@@ -1055,6 +1070,10 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_id(), 1u);
   lower_wf->halt();
+  const uint32_t sgpr0 = wf->sgpr_alloc().base;
+  const uint32_t sgpr_last = sgpr0 + wf->num_sgprs() - 1u;
+  cu->write_sgpr(sgpr0, 0x12345678u);
+  cu->write_sgpr(sgpr_last, 0x89ABCDEFu);
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
   const uint32_t acc_quarter = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4;
@@ -1079,6 +1098,10 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   ASSERT_NE(saved_wavefronts, nullptr);
   ASSERT_EQ(saved_wavefronts->size(), 1u);
   const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->sgprs(), nullptr);
+  ASSERT_EQ(saved_wavefront->sgprs()->size(), wf->num_sgprs());
+  EXPECT_EQ(saved_wavefront->sgprs()->Get(0), 0x12345678u);
+  EXPECT_EQ(saved_wavefront->sgprs()->Get(wf->num_sgprs() - 1u), 0x89ABCDEFu);
   ASSERT_NE(saved_wavefront->vgprs(), nullptr);
   EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
   EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
@@ -1097,6 +1120,9 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(restored_wf->wf_id(), 1u);
   EXPECT_EQ(restored_wf->wg_id(), 1u);
   EXPECT_EQ(restored_wf->pc, 0x2000u);
+  EXPECT_EQ(restored_cu->read_sgpr(restored_wf->sgpr_alloc().base), 0x12345678u);
+  EXPECT_EQ(restored_cu->read_sgpr(restored_wf->sgpr_alloc().base + restored_wf->num_sgprs() - 1u),
+            0x89ABCDEFu);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +

@@ -164,7 +164,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto restore_label = sequence.make_label();
   const auto fast_return_label = sequence.make_label();
   const auto matched_window_label = sequence.make_label();
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_GFX1250;
+  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   // A patched s_call_i64 can be immediately followed by the guest's next
@@ -1100,7 +1100,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   // helper: B0-to-A0 translation clones the helper per kernel owner, whereas
   // an absolute call-return dispatcher only names one physical clone.
   const bool gfx1250_single_direct_barrier =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && selected.size() == 1u &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 && selected.size() == 1u &&
       compute_sopp_branch_simm16(selected.front().candidate.barrier.site.text_offset,
                                  new_text.size())
           .has_value();
@@ -1114,7 +1114,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                !compute_sopp_branch_simm16(anchor, reserved_island);
       });
   const bool use_dense_barrier_relay =
-      (arch == ROCJITSU_CODE_ARCH_GFX1250 && !gfx1250_single_direct_barrier) ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA5 && !gfx1250_single_direct_barrier) ||
       (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u) || cdna_has_stranded_barrier;
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
@@ -1144,7 +1144,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       for (size_t index : owner_indices) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         if (groups.empty() || groups.back().first != key ||
-            (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+            (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
              groups.back().second.size() >= kMaxGfx1250CloneLocalRoutes) ||
             anchor - selected[groups.back().second.front()].candidate.barrier.site.text_offset >
                 kMaxCommonRelayAnchorSpan) {
@@ -1250,11 +1250,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       // GFX1250 uses an explicit key in a clone-local entry stub. Other
       // architectures retain the call-return-derived entry key when their
       // scalar assignment is spill backed.
-      const bool use_gfx1250_clone_local_routes = arch == ROCJITSU_CODE_ARCH_GFX1250;
+      const bool use_gfx1250_clone_local_routes = arch == ROCJITSU_CODE_ARCH_CDNA5;
       const bool derive_key_at_entry = spill_backed_router && !use_gfx1250_clone_local_routes;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
         if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
             arch == ROCJITSU_CODE_ARCH_CDNA4)
@@ -1414,7 +1414,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(
             build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_CDNA5) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -3199,7 +3199,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     words = std::move(*gate);
   }
   const std::optional<uint16_t> vgpr_msb_mode =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? gfx1250_vgpr_msb_mode_at(bytes, candidate.text_file_offset,
                                      candidate.container_entry_text_offset,
                                      candidate.fence.file_offset)

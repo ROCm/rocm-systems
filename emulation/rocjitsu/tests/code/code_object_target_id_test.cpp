@@ -202,7 +202,7 @@ TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryTargetEnumerator) {
       TargetCase{ROCJITSU_CODE_TARGET_GFX950, "gfx950", ROCJITSU_CODE_ARCH_CDNA4},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1200, "gfx1200", ROCJITSU_CODE_ARCH_RDNA4},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1201, "gfx1201", ROCJITSU_CODE_ARCH_RDNA4},
-      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, "gfx1250", ROCJITSU_CODE_ARCH_GFX1250},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, "gfx1250", ROCJITSU_CODE_ARCH_CDNA5},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1100, "gfx1100", ROCJITSU_CODE_ARCH_RDNA3},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1150, "gfx1150", ROCJITSU_CODE_ARCH_RDNA3_5},
       TargetCase{ROCJITSU_CODE_TARGET_GFX1151, "gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5},
@@ -231,7 +231,7 @@ TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryArchitectureEnumerator) {
       ArchCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1"}, ArchCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2"},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"}, ArchCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3.5"},
       ArchCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"}, ArchCase{ROCJITSU_CODE_ARCH_RV32I, "rv32i"},
-      ArchCase{ROCJITSU_CODE_ARCH_RV64I, "rv64i"}, ArchCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      ArchCase{ROCJITSU_CODE_ARCH_RV64I, "rv64i"}, ArchCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"},
   };
 
   for (const ArchCase &arch_case : cases) {
@@ -244,8 +244,8 @@ TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryArchitectureEnumerator) {
 }
 
 TEST(AmdGpuElfMachineFlags, MapsGfx1250ArchitectureInBothDirections) {
-  EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
-  EXPECT_EQ(elf_mach_for_arch(ROCJITSU_CODE_ARCH_GFX1250), EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA5), EF_AMDGPU_MACH_AMDGCN_GFX1250);
   EXPECT_STREQ(elf_mach_name(EF_AMDGPU_MACH_AMDGCN_GFX1250), "gfx1250");
 }
 

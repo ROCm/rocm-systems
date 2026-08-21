@@ -181,8 +181,8 @@ int main(int argc, char **argv) {
   "113,115,117,119,121,123,125,127,129,131,133,135,137,139,141,143,145,147,149,151,153,155,"       \
   "157,159,161,163,165,167,169,171,173,175,177,179,181,183,185,187,189,191,193,195,197,199,"       \
   "201,203,205,207,209,211,213,215,217,219,221,223,225,227,229,231,233,235,237,239,241,243,"       \
-  "245,247,249,251,253,255\n\t"                                                                     \
-  "v_mov_b32 v\\r, v\\r\n\t"                                                                        \
+  "245,247,249,251,253,255\n\t"                                                                    \
+  "v_mov_b32 v\\r, v\\r\n\t"                                                                       \
   ".endr\n\t"
 
 namespace {
@@ -371,27 +371,25 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
   uint32_t vector_after_five = 0;
   const uint32_t value = 0x51A7C0DEu;
   asm volatile("" : : "v"(&lds[0]) : "memory");
-  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
-               "v_mov_b32 v0, s14\n\t"
-               "v_mov_b32 v1, s15\n\t"
-               "v_mov_b32 v3, 0x13579bdf\n\t"
-               "v_mov_b32 v5, 0x2468ace0\n\t"
-               "v_mov_b32 %[scalar_before_lo], s2\n\t"
-               "v_mov_b32 %[scalar_before_hi], s3\n\t" RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED
-                   RJ_CONSAN_TEST_NOP_CAVE RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE
-                       RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
-               "v_mov_b32 %[scalar_after_lo], s2\n\t"
-               "v_mov_b32 %[scalar_after_hi], s3\n\t"
-               "v_mov_b32 %[vector_after_three], v3\n\t"
-               "v_mov_b32 %[vector_after_five], v5\n\t"
-               : [scalar_before_lo] "=&v"(scalar_before_lo),
-                 [scalar_before_hi] "=&v"(scalar_before_hi),
-                 [scalar_after_lo] "=&v"(scalar_after_lo),
-                 [scalar_after_hi] "=&v"(scalar_after_hi),
-                 [vector_after_three] "=&v"(vector_after_three),
-                 [vector_after_five] "=&v"(vector_after_five)
-               : [value] "v"(value)
-               : "s14", "s15", "v0", "v1", "v3", "v5", "memory");
+  asm volatile(
+      "s_mov_b64 s[14:15], src_shared_base\n\t"
+      "v_mov_b32 v0, s14\n\t"
+      "v_mov_b32 v1, s15\n\t"
+      "v_mov_b32 v3, 0x13579bdf\n\t"
+      "v_mov_b32 v5, 0x2468ace0\n\t"
+      "v_mov_b32 %[scalar_before_lo], s2\n\t"
+      "v_mov_b32 %[scalar_before_hi], s3\n\t" RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED
+          RJ_CONSAN_TEST_NOP_CAVE
+              RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
+      "v_mov_b32 %[scalar_after_lo], s2\n\t"
+      "v_mov_b32 %[scalar_after_hi], s3\n\t"
+      "v_mov_b32 %[vector_after_three], v3\n\t"
+      "v_mov_b32 %[vector_after_five], v5\n\t"
+      : [scalar_before_lo] "=&v"(scalar_before_lo), [scalar_before_hi] "=&v"(scalar_before_hi),
+        [scalar_after_lo] "=&v"(scalar_after_lo), [scalar_after_hi] "=&v"(scalar_after_hi),
+        [vector_after_three] "=&v"(vector_after_three), [vector_after_five] "=&v"(vector_after_five)
+      : [value] "v"(value)
+      : "s14", "s15", "v0", "v1", "v3", "v5", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;
@@ -400,8 +398,8 @@ padded_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(uint
   out[5] = vector_after_five;
 }
 
-__global__ __launch_bounds__(64) void
-padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(
+__global__
+__launch_bounds__(64) void padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation(
     uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -422,35 +420,34 @@ padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instru
   uint32_t scc_survived = 0;
   const uint32_t value = 0x51A7C0DEu;
   asm volatile("" : : "v"(&lds[0]) : "memory");
-  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
-               "v_mov_b32 v0, s14\n\t"
-               "v_mov_b32 v1, s15\n\t"
-               "v_mov_b32 v3, 0x13579bdf\n\t"
-               "v_mov_b32 v5, 0x2468ace0\n\t"
-               "v_mov_b32 %[scalar_before_lo], s2\n\t"
-               "v_mov_b32 %[scalar_before_hi], s3\n\t"
-               "s_cmp_eq_u32 s2, s2\n\t" RJ_CONSAN_TEST_SET_VCC_TRUE
-                   RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED RJ_CONSAN_TEST_NOP_CAVE
-                       RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
-               "v_mov_b32 %[scalar_after_lo], s2\n\t"
-               "v_mov_b32 %[scalar_after_hi], s3\n\t"
-               "v_mov_b32 %[vector_after_three], v3\n\t"
-               "v_mov_b32 %[vector_after_five], v5\n\t"
-               "s_cbranch_vccz 1f\n\t"
-               "v_mov_b32 %[vcc_survived], 1\n\t"
-               "1:\n\t"
-               "s_cbranch_scc0 2f\n\t"
-               "v_mov_b32 %[scc_survived], 1\n\t"
-               "2:\n\t"
-               : [scalar_before_lo] "=&v"(scalar_before_lo),
-                 [scalar_before_hi] "=&v"(scalar_before_hi),
-                 [scalar_after_lo] "=&v"(scalar_after_lo),
-                 [scalar_after_hi] "=&v"(scalar_after_hi),
-                 [vector_after_three] "=&v"(vector_after_three),
-                 [vector_after_five] "=&v"(vector_after_five),
-                 [vcc_survived] "+v"(vcc_survived), [scc_survived] "+v"(scc_survived)
-               : [value] "v"(value)
-               : "s14", "s15", "v0", "v1", "v3", "v5", "vcc", "memory");
+  asm volatile(
+      "s_mov_b64 s[14:15], src_shared_base\n\t"
+      "v_mov_b32 v0, s14\n\t"
+      "v_mov_b32 v1, s15\n\t"
+      "v_mov_b32 v3, 0x13579bdf\n\t"
+      "v_mov_b32 v5, 0x2468ace0\n\t"
+      "v_mov_b32 %[scalar_before_lo], s2\n\t"
+      "v_mov_b32 %[scalar_before_hi], s3\n\t"
+      "s_cmp_eq_u32 s2, s2\n\t" RJ_CONSAN_TEST_SET_VCC_TRUE RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED
+          RJ_CONSAN_TEST_NOP_CAVE
+              RJ_CONSAN_TEST_KEEP_ORDINARY_SGPRS_LIVE RJ_CONSAN_TEST_KEEP_ODD_VGPRS_LIVE
+      "v_mov_b32 %[scalar_after_lo], s2\n\t"
+      "v_mov_b32 %[scalar_after_hi], s3\n\t"
+      "v_mov_b32 %[vector_after_three], v3\n\t"
+      "v_mov_b32 %[vector_after_five], v5\n\t"
+      "s_cbranch_vccz 1f\n\t"
+      "v_mov_b32 %[vcc_survived], 1\n\t"
+      "1:\n\t"
+      "s_cbranch_scc0 2f\n\t"
+      "v_mov_b32 %[scc_survived], 1\n\t"
+      "2:\n\t"
+      : [scalar_before_lo] "=&v"(scalar_before_lo), [scalar_before_hi] "=&v"(scalar_before_hi),
+        [scalar_after_lo] "=&v"(scalar_after_lo), [scalar_after_hi] "=&v"(scalar_after_hi),
+        [vector_after_three] "=&v"(vector_after_three),
+        [vector_after_five] "=&v"(vector_after_five), [vcc_survived] "+v"(vcc_survived),
+        [scc_survived] "+v"(scc_survived)
+      : [value] "v"(value)
+      : "s14", "s15", "v0", "v1", "v3", "v5", "vcc", "memory");
   out[0] = scalar_before_lo;
   out[1] = scalar_before_hi;
   out[2] = scalar_after_lo;
@@ -584,8 +581,8 @@ __device__ __forceinline__ void padded_flat_low_b8_store(uint32_t value) {
 __device__ __forceinline__ void padded_flat_low_b8_store_at(uint32_t byte_offset, uint32_t value) {
   asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
                "v_mov_b32 v0, s14\n\t"
-               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32
-                   RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 RJ_CONSAN_TEST_NOP_CAVE
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32 RJ_CONSAN_TEST_FLAT_STORE_LOW_B8
+                   RJ_CONSAN_TEST_NOP_CAVE
                :
                : [offset] "v"(byte_offset), [value] "v"(value)
                : "s14", "s15", "v0", "v1", "vcc", "memory");
@@ -594,8 +591,8 @@ __device__ __forceinline__ void padded_flat_low_b8_store_at(uint32_t byte_offset
 __device__ __forceinline__ void padded_flat_low_b16_store_at(uint32_t byte_offset, uint32_t value) {
   asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
                "v_mov_b32 v0, s14\n\t"
-               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32
-                   RJ_CONSAN_TEST_FLAT_STORE_LOW_B16 RJ_CONSAN_TEST_NOP_CAVE
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32 RJ_CONSAN_TEST_FLAT_STORE_LOW_B16
+                   RJ_CONSAN_TEST_NOP_CAVE
                :
                : [offset] "v"(byte_offset), [value] "v"(value)
                : "s14", "s15", "v0", "v1", "vcc", "memory");
@@ -641,7 +638,8 @@ __global__ __launch_bounds__(128) void padded_inline_exact_external_adjacent_byt
     out[0] = 0x1e11u;
 }
 
-__global__ __launch_bounds__(128) void padded_inline_exact_external_overlapping_byte(uint32_t *out) {
+__global__
+__launch_bounds__(128) void padded_inline_exact_external_overlapping_byte(uint32_t *out) {
   extern __shared__ uint32_t lds[];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   padded_exact_byte_pair(/*adjacent=*/false);
@@ -661,8 +659,8 @@ __global__ __launch_bounds__(128) void padded_inline_exact_local_tail_b16(uint32
     out[0] = 0x1a33u;
 }
 
-__global__ __launch_bounds__(128) void
-padded_inline_exact_external_unequal_high_byte_overlap(uint32_t *out) {
+__global__
+__launch_bounds__(128) void padded_inline_exact_external_unequal_high_byte_overlap(uint32_t *out) {
   extern __shared__ uint32_t lds[];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   asm volatile("v_mov_b32 v20, 0" ::: "v20");
@@ -853,7 +851,8 @@ TEST(ConSanLdsTest, DynamicStackFullPressureFlatSpillPreservesLiveRegistersAndPr
   HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(*d_out)));
   HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(*d_out)));
 
-  padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation<<<1, 1>>>(
+  padded_dynamic_stack_full_pressure_flat_lds_store_preserves_registers_for_instrumentation<<<1,
+                                                                                              1>>>(
       d_out);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
@@ -903,7 +902,8 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatLoadsProduceExpectedResults) {
   hipDeviceProp_t properties{};
   HIP_ASSERT(hipGetDeviceProperties(&properties, 0));
   const std::string_view arch(properties.gcnArchName);
-  const bool cdna_sram_ecc = arch.starts_with("gfx942") || arch.starts_with("gfx950");
+  const bool cdna_sram_ecc =
+      arch.starts_with("gfx942") || arch.starts_with("gfx950") || arch.starts_with("gfx1250");
   const uint32_t expected_b16 = cdna_sram_ecc ? 0xBEEF0000u : 0xBEEF5AA5u;
   const uint32_t expected_i8 = cdna_sram_ecc ? 0xFFEF0000u : 0xFFEF5AA5u;
   // SRAM-ECC CDNA execution writes the selected half and clears the other;
@@ -936,8 +936,7 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatStoresProduceExpectedResults) {
   EXPECT_EQ(out[3], 0xAAAA55EFu);
 }
 
-template <typename Launch>
-void run_inline_exact_kernel(Launch &&launch, uint32_t expected) {
+template <typename Launch> void run_inline_exact_kernel(Launch &&launch, uint32_t expected) {
   uint32_t *d_out = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
   HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));

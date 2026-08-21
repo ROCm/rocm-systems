@@ -345,7 +345,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, long_return_pc_sgpr, delta, /*minimum_words=*/0u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
     return false;
@@ -382,7 +382,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -416,7 +416,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
     return false;
   }
   const auto restore_scc =
@@ -583,7 +583,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                static_cast<int64_t>(cave_text_offset) -
                                    static_cast<int64_t>(pc_after_getpc),
                                /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }
@@ -615,7 +615,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     const std::optional<std::array<uint32_t, 3>> &required_workgroup_size, rj_code_arch_t arch) {
   constexpr uint16_t kWave32Lanes = 32u;
   constexpr uint16_t kMaximumInlineLanes = 64u;
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !required_workgroup_size ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !required_workgroup_size ||
       (*required_workgroup_size)[0] <= kWave32Lanes) {
     return kWave32Lanes;
   }
@@ -658,7 +658,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const uint32_t initialization_size =
       layout.lazy_initialization ? layout.validity_size : layout.size;
   const bool use_quad_store =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && has_quad_zero_tuple && initialization_size % 16u == 0u;
+      arch == ROCJITSU_CODE_ARCH_CDNA5 && has_quad_zero_tuple && initialization_size % 16u == 0u;
   const uint16_t zero_tuple_size = use_quad_store ? 4u : 2u;
   if (!state_sgpr || *state_sgpr > 118u || initialization_size == 0u ||
       initialization_size % 8u != 0u || layout.workitem_id_dimensions == 0u ||
@@ -1409,7 +1409,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (result.elf_bytes.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
        arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+       arch != ROCJITSU_CODE_ARCH_CDNA5)) {
     return true;
   }
 
@@ -2050,7 +2050,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   uint32_t required = std::max<uint32_t>(*options.moi_owner_vgpr, *options.moi_epoch_vgpr) + 1u;
   if (workgroup_shadow) {
     const uint32_t shadow_zero_tuple_count =
-        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250 ? 4u : 2u;
+        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5 ? 4u : 2u;
     required = std::max<uint32_t>(required, *options.moi_epoch_vgpr + shadow_zero_tuple_count);
   }
   if (options.moi_workgroup_key_vgpr)
@@ -2100,12 +2100,12 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
   };
   if (overlaps(options.moi_owner_vgpr))
     return true;
-  const uint16_t epoch_width =
-      workgroup_shadow
-          ? static_cast<uint16_t>(
-                options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250 ? 4u
-                                                                                             : 2u)
-          : 1u;
+  const uint16_t epoch_width = workgroup_shadow
+                                   ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs &&
+                                                                   arch == ROCJITSU_CODE_ARCH_CDNA5
+                                                               ? 4u
+                                                               : 2u)
+                                   : 1u;
   if (overlaps(options.moi_epoch_vgpr, epoch_width) || overlaps(options.moi_workgroup_key_vgpr) ||
       overlaps(options.moi_dispatch_id_vgpr, 2u)) {
     return true;
@@ -2643,7 +2643,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       entry_island_offset = entry_islands.claim_reachable_for_owner(kernel.entry_text_offset,
                                                                     kernel.entry_text_offset);
       if (!entry_island_offset) {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !requires_in_place_entry &&
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !requires_in_place_entry &&
             !chains_existing_entry_trampoline) {
           // B0-to-A0 translation can move an appended prologue independently
           // of a hardware-entry indirect jump. Leave the entry intact and let
@@ -2721,7 +2721,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     }
     const uint64_t final_prologue_return_target = prologue_return_target;
     std::optional<uint64_t> prologue_return_relay;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !item.has_kernarg_preload &&
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !item.has_kernarg_preload &&
         !compute_sopp_branch_simm16(prologue_text_offset, prologue_return_target)) {
       const std::array relay_anchors = {prologue_text_offset, prologue_return_target};
       prologue_return_relay = entry_islands.claim_word_reachable_from_all_for_owner(
@@ -2744,7 +2744,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
         moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
         item.entry_scalar_backup, prologue_workgroup_shadow,
-        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
+        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
         item.workgroup_sources, displaced_entry_words, arch, result.errors);
     if (!words)
       return;
@@ -2830,7 +2830,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
           moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
           item.entry_scalar_backup, prologue_workgroup_shadow,
-          options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
+          options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
           item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
       if (!secondary_words)
         return;
@@ -2860,7 +2860,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
             moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
             item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
+            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
             item.workgroup_sources, displaced_entry_words, arch, result.errors);
         if (!words)
           return;
@@ -2878,7 +2878,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
             moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
             item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
+            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
             item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, primary_body_offset);

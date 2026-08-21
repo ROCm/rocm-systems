@@ -232,7 +232,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(DecoderSmokeTest, CodeEndIsCfgTerminator) {
   constexpr std::array arches{
       ROCJITSU_CODE_ARCH_RDNA1,   ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-      ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250,
+      ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5,
   };
   for (const rj_code_arch_t arch : arches) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -1908,7 +1908,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesFourDwords) {
       0x02024912u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);

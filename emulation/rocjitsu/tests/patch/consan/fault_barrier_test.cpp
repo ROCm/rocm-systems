@@ -276,7 +276,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
 
 TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) {
   constexpr uint32_t kSetupWord =
-      build_s_mov_b32(/*sdst=*/125, /*ssrc0=*/255, ROCJITSU_CODE_ARCH_GFX1250);
+      build_s_mov_b32(/*sdst=*/125, /*ssrc0=*/255, ROCJITSU_CODE_ARCH_CDNA5);
   static_assert(kSetupWord == 0xBEFD00FFu);
   const std::array<uint32_t, 8> text_words = {
       kSetupWord,  0x000C0001u, // s_mov_b32 m0, count=12 | named barrier ID=1
@@ -371,7 +371,7 @@ TEST(ConSan, FaultBarrierParticipantsReturnTypedUnsupportedWithoutProvenEncoding
   }));
 
   constexpr uint32_t kSetupWord =
-      build_s_mov_b32(/*sdst=*/125, /*ssrc0=*/255, ROCJITSU_CODE_ARCH_GFX1250);
+      build_s_mov_b32(/*sdst=*/125, /*ssrc0=*/255, ROCJITSU_CODE_ARCH_CDNA5);
   const std::array<uint32_t, 8> counted_words = {
       kSetupWord,  0x000C0001u, 0xBE80517Du, 0xBE805281u,
       0xBE804E81u, 0xBF940001u, 0xBF950000u, 0xBFB00000u,

@@ -74,7 +74,7 @@ inline constexpr std::array<ConSanCapabilityTarget, 5> kConSanCapabilityTargets 
     {ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4},
     {ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_ARCH_RDNA3},
     {ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4},
-    {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250},
+    {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_CDNA5},
 }};
 
 inline constexpr std::array<ConSanCapabilityEngine, 4> kConSanCapabilityEngines = {
@@ -149,7 +149,7 @@ template <typename Enum, std::size_t N>
 /// instruction-encoding property.
 [[nodiscard]] constexpr bool consan_arch_uses_literal_dispatch_identity(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_GFX1250;
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] constexpr ConSanCapabilityDomain consan_capability_domain(ConSanCapabilityForm form) {
@@ -191,10 +191,10 @@ template <typename Enum, std::size_t N>
     return true;
   case ConSanCapabilityForm::ClusterBarrier:
   case ConSanCapabilityForm::OrderedLdsAtomic:
-    return arch == ROCJITSU_CODE_ARCH_GFX1250;
+    return arch == ROCJITSU_CODE_ARCH_CDNA5;
   case ConSanCapabilityForm::RelaxedLdsAtomicAccess:
     return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-           arch == ROCJITSU_CODE_ARCH_GFX1250;
+           arch == ROCJITSU_CODE_ARCH_CDNA5;
   case ConSanCapabilityForm::Count:
     return false;
   }

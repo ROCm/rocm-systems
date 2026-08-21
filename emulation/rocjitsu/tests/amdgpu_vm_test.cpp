@@ -1785,7 +1785,7 @@ TEST(ResidentWaveHardwareIdTest, SGetregDistinguishesEveryResidentWaveOnSupporte
       Target{"rdna3", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
       Target{"rdna3_5", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
       Target{"rdna4", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
-      Target{"gfx1250", 0xB8824817u, 128u, 32u, {0u, 256u, 512u, 768u, 1u, 257u, 513u, 769u}},
+      Target{"cdna5", 0xB8824817u, 128u, 32u, {0u, 256u, 512u, 768u, 1u, 257u, 513u, 769u}},
   };
   for (const Target &target : targets) {
     SCOPED_TRACE(target.arch);
@@ -1821,7 +1821,7 @@ TEST(ResidentWaveHardwareIdTest, Gfx11AndGfx12RegisterPairCarriesMultiCuAndDispa
   constexpr uint32_t kReadFullHwId2 = 0xB883F818u;
   const std::array code = {kReadFullHwId1, kReadFullHwId2, SOPP_S_ENDPGM};
 
-  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4", "gfx1250"}) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4", "cdna5"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch, /*num_cus=*/2, /*num_wf_slots=*/10,
                 /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
@@ -1838,7 +1838,7 @@ TEST(ResidentWaveHardwareIdTest, Gfx11AndGfx12RegisterPairCarriesMultiCuAndDispa
     ASSERT_EQ(cu1.size(), 1u);
     EXPECT_NE(cu0.front()->sgpr(2), cu1.front()->sgpr(2));
     EXPECT_EQ(cu0.front()->sgpr(2), 0u);
-    EXPECT_EQ(cu1.front()->sgpr(2), arch == "gfx1250" ? 0x400u : 0x100u);
+    EXPECT_EQ(cu1.front()->sgpr(2), arch == "cdna5" ? 0x400u : 0x100u);
     EXPECT_EQ(cu0.front()->sgpr(3), 0x00000001u);
     EXPECT_EQ(cu1.front()->sgpr(3), 0x00010001u);
   }
@@ -1876,7 +1876,7 @@ TEST(ResidentWaveHardwareIdTest, ConfigurationRejectsUnencodableResidentWaveCoun
   EXPECT_THROW((void)VmFixture("rdna3_5", /*num_cus=*/1, /*num_wf_slots=*/65),
                std::invalid_argument);
   EXPECT_THROW((void)VmFixture("rdna4", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
-  EXPECT_THROW((void)VmFixture("gfx1250", /*num_cus=*/1, /*num_wf_slots=*/129),
+  EXPECT_THROW((void)VmFixture("cdna5", /*num_cus=*/1, /*num_wf_slots=*/129),
                std::invalid_argument);
 }
 
@@ -2233,7 +2233,7 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
 
 TEST(Gfx1250AllocationTest, SupportsArchitecturalMaximumAndReusesHighestSlot) {
   constexpr uint32_t kSlots = 64;
-  VmFixture f("gfx1250", 1, kSlots);
+  VmFixture f("cdna5", 1, kSlots);
   auto *cu = f.cu();
   std::vector<amdgpu::Wavefront *> waves;
   waves.reserve(kSlots);

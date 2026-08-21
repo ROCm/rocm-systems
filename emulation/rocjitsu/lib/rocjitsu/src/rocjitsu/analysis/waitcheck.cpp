@@ -52,12 +52,12 @@ static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size cha
 [[nodiscard]] bool is_supported_waitcheck_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] uint32_t default_wavefront_size(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250
+                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
              ? 32
              : 64;
 }
@@ -103,7 +103,7 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 }
 
 [[nodiscard]] bool supports_expert_scheduling(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] bool tracks_committed_vgpr_generations(rj_code_arch_t arch) {
@@ -3219,13 +3219,13 @@ private:
 
   static void apply_xcnt_drain(PendingState &state, const Instruction &inst, rj_code_arch_t arch,
                                bool immediately_after_mode_setreg) {
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && is_xcnt_drain(inst, immediately_after_mode_setreg))
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && is_xcnt_drain(inst, immediately_after_mode_setreg))
       apply_xcnt_wait(state, 0);
   }
 
   static bool apply_vgpr_msb_mode(PendingState &state, const Instruction &inst, rj_code_arch_t arch,
                                   bool immediately_after_mode_setreg) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
 
     const std::string_view mnemonic = inst.mnemonic();
@@ -3268,7 +3268,7 @@ private:
 
   static void apply_expert_scheduling_mode(PendingState &state, const Instruction &inst,
                                            rj_code_arch_t arch) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
       return;
     if (inst.mnemonic() != "s_setreg_imm32_b32" && inst.mnemonic() != "s_setreg_b32")
       return;
@@ -3306,7 +3306,7 @@ private:
 
   static void expand_vgpr_msb_ref(RegisterSet &regs, RegisterRef ref, const Operand &op,
                                   const VgprMsbState &state, rj_code_arch_t arch) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250 || ref.cls != RegClass::VGPR ||
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || ref.cls != RegClass::VGPR ||
         op.vgpr_msb_role() == amdgpu::VgprMsbRole::None) {
       regs.expand(ref);
       return;
@@ -3695,7 +3695,7 @@ private:
     const bool expert = supports_expert_scheduling(arch);
     const auto mnemonic = inst.mnemonic();
     auto add_xcnt_event = [&](WaitEventKind kind) {
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
         events.emplace_back(WaitCounterKind::X, kind, TrackedRegisterSource::Uses,
                             /*check_uses=*/false, /*check_defs=*/true,
                             /*check_exec_defs=*/is_xcnt_vmem_kind(kind));
@@ -3810,7 +3810,7 @@ private:
       return events;
     }
 
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && is_vmem_atomic(mnemonic)) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && is_vmem_atomic(mnemonic)) {
       const bool returns_value = inst.num_dst_operands() != 0;
       const WaitCounterKind counter =
           returns_value ? WaitCounterKind::Load : vmem_store_wait_counter(arch);
@@ -3866,7 +3866,7 @@ private:
       return events;
     }
 
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && is_gfx1250_smem(mnemonic)) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && is_gfx1250_smem(mnemonic)) {
       const bool produces_result = inst.num_dst_operands() != 0;
       events.emplace_back(smem_wait_counter(arch), WaitEventKind::Smem,
                           produces_result ? TrackedRegisterSource::Defs
@@ -5365,8 +5365,8 @@ private:
 
     InstDefUse du = inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_);
     auto events = classify_events(inst, arch);
-    const bool is_async_barrier = arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                  inst.mnemonic() == "ds_atomic_async_barrier_arrive_b64";
+    const bool is_async_barrier =
+        arch == ROCJITSU_CODE_ARCH_CDNA5 && inst.mnemonic() == "ds_atomic_async_barrier_arrive_b64";
     if (is_async_barrier && !previous_vm_vsrc_zero_wait && emit_report_diagnostics) {
       const SgprHazardProducer barrier{section_name, section_offset, file_offset,
                                        inst.disassemble()};
@@ -5523,7 +5523,7 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
+    return ROCJITSU_CODE_ARCH_CDNA5;
   case ROCJITSU_CODE_TARGET_GFX950:
     return ROCJITSU_CODE_ARCH_CDNA4;
   default:

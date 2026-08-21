@@ -312,7 +312,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   const uint16_t opcode =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? cdna5::kSWaitDscntSopp : rdna4::kSWaitDscntSopp;
+      arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kSWaitDscntSopp : rdna4::kSWaitDscntSopp;
   return build_sopp_encoding(arch, opcode, count);
 }
 
@@ -595,7 +595,7 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
 /// these four architecture families, so this captures the complete target
 /// distinction used by its scratch planners.
 [[nodiscard]] constexpr bool consan_arch_requires_even_vgpr_tuples(rj_code_arch_t arch) {
-  return instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site, rj_code_arch_t arch,
@@ -606,7 +606,7 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
 
   // gfx1250's transposed 96-bit six-lane load is the sole admitted exception
   // to the target's even-tuple rule.
-  return (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.mnemonic == "ds_load_tr6_b96") ||
+  return (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.mnemonic == "ds_load_tr6_b96") ||
          candidate % 2u == 0u;
 }
 

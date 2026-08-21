@@ -39,7 +39,7 @@ consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
 // layout; explicit legacy buffers retain the original maximum fanout.
 inline constexpr uint32_t kConSanMoiInlineMaximumDispatchBankCount = 256u;
 static_assert(consan_moi_inline_exact_dispatch_bank_count_for_lds(
-                  consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250)) != 0u,
+                  consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5)) != 0u,
               "the configured LDS aperture cannot fit one InlineShadow dispatch bank");
 
 struct alignas(8) ConSanMoiInlineAtomicReleaseSlot {

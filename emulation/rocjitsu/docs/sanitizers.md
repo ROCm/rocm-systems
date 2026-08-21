@@ -219,7 +219,7 @@ env \
   HSA_TOOLS_LIB="$BUILD/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
   RJ_CONSAN_LOG=1 \
   "$BUILD/tools/rocjitsu/rocjitsu" \
-    --config emulation/rocjitsu/configs/gfx1250.json -- \
+    --config emulation/rocjitsu/configs/gfx1250_mi455x.json -- \
     /tmp/gfx1250-sanitizer-repro 2>&1 | \
   grep -E 'rocjitsu-waitcheck:.*(missing|consumer)|ConSan MOI auto replay diagnostic|ConSan analysis verdict'
 ```

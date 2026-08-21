@@ -102,7 +102,7 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
     return make_cdna4_lds_code_object(text_words, "atomic_release_sequence");
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_rdna4_lds_code_object(text_words, "atomic_release_sequence");
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_gfx1250_code_object(text_words, "atomic_release_sequence");
   default:
     return {};
@@ -168,7 +168,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3", 12u, 26u},
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4", 12u, 26u},
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4", 13u, 27u},
-      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", 13u, 27u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", 13u, 27u},
   };
 
   for (const InlineReleaseSequenceTarget &target : targets) {
@@ -611,7 +611,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4",
                                   /*release_transaction_vsrc=*/13,
                                   /*token_transaction_vsrc=*/27},
-      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250",
                                   /*release_transaction_vsrc=*/13,
                                   /*token_transaction_vsrc=*/27},
   };
@@ -2252,7 +2252,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                           2u * sizeof(uint32_t), kRdna3GlobalNoSaddrEncoding},
       VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4,
                           3u * sizeof(uint32_t), 4u},
-      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
+      VglobalContractCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_CDNA5,
                           3u * sizeof(uint32_t), 4u},
   };
   for (const VglobalContractCase &contract_case : contract_cases) {
@@ -2400,7 +2400,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
 
   const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
       site, /*scratch_vgpr=*/0, /*scratch_vgpr_count=*/5,
-      ConSanRegisterAllocationSource::LivenessDead, ROCJITSU_CODE_ARCH_GFX1250);
+      ConSanRegisterAllocationSource::LivenessDead, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(plan.supported()) << consan_moi_atomic_address_support_name(plan.support);
   EXPECT_EQ(plan.kind, ConSanMoiAtomicAddressKind::BufferResourceMaterialized);
   EXPECT_EQ(plan.input_address_vgpr, 4u);
@@ -2412,7 +2412,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
   EXPECT_EQ(plan.signed_byte_offset, 16);
 
   const auto words = build_consan_moi_atomic_address_materialization(
-      plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_GFX1250);
+      plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(words);
   EXPECT_GT(words->size(), 10u);
 
@@ -2422,7 +2422,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
             ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
   site.raw_idxen = true;
   EXPECT_EQ(plan_consan_moi_atomic_address(site, 0, 5, ConSanRegisterAllocationSource::LivenessDead,
-                                           ROCJITSU_CODE_ARCH_GFX1250)
+                                           ROCJITSU_CODE_ARCH_CDNA5)
                 .support,
             ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
 }
@@ -2442,7 +2442,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250LdsTokenWithByteOffset) {
 
   const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
       site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/5,
-      ConSanRegisterAllocationSource::LivenessDead, ROCJITSU_CODE_ARCH_GFX1250);
+      ConSanRegisterAllocationSource::LivenessDead, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(plan.supported()) << consan_moi_atomic_address_support_name(plan.support);
   EXPECT_EQ(plan.kind, ConSanMoiAtomicAddressKind::LdsByteOffsetToken);
   EXPECT_EQ(plan.input_address_vgpr, 4u);
@@ -2452,12 +2452,12 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250LdsTokenWithByteOffset) {
   EXPECT_EQ(plan.result_address_vgpr_count, 2u);
 
   const auto words = build_consan_moi_atomic_address_materialization(
-      plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_GFX1250);
+      plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(words);
   EXPECT_EQ(words->front(),
-            build_v_mov_b32_e32(/*vdst=*/11, vector_source_vgpr(4), ROCJITSU_CODE_ARCH_GFX1250));
+            build_v_mov_b32_e32(/*vdst=*/11, vector_source_vgpr(4), ROCJITSU_CODE_ARCH_CDNA5));
   const auto tag = build_v_mov_b32_e64_literal(
-      /*vdst=*/12, kConSanMoiLdsAddressTokenTag, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vdst=*/12, kConSanMoiLdsAddressTokenTag, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(tag);
   EXPECT_GT(words->size(), tag->size() + 1u);
   EXPECT_TRUE(contains_subsequence(*words, *tag));
@@ -2486,7 +2486,7 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
   };
   constexpr std::array<RdnaFamilyTarget, 2> kTargets = {{
       {ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4"},
-      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"},
   }};
   for (const RdnaFamilyTarget &target : kTargets) {
     SCOPED_TRACE(target.label);
@@ -4080,10 +4080,10 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
 TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto acquire = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/4, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(release && acquire);
   const std::array<uint32_t, 13> text_words = {
       0xEE0B0000u,   0x00000000u,   0x00000000u, // global_wb

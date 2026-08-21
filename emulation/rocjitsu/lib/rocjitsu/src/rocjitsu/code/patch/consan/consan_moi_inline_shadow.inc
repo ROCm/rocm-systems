@@ -172,7 +172,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // match, guest-return adjustment, conditional branch, and long jump), plus
   // the final terminator. Keep RDNA4's compact spacing: its explicit-key
   // groups do not carry the gfx1250 call-return and adjustment sequences.
-  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 28u : 20u;
+  const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 28u : 20u;
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
   std::unordered_set<uint64_t> dynamic_lds_descriptors;
@@ -307,7 +307,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         const size_t max_group_size =
             arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 31u : 64u;
         if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+            (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
              groups.back().second.candidates.size() == max_group_size) ||
             candidate->text_offset - groups.back().second.candidates.front()->text_offset >
                 kMaxCommonRelayAnchorSpan) {
@@ -342,7 +342,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
           });
       const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+          arch == ROCJITSU_CODE_ARCH_CDNA5 ||
           std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
             return candidate->size >= 2u * sizeof(uint32_t);
           });
@@ -354,7 +354,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       // CDNA3/4 and RDNA4 use an explicit key plus branch only when the
       // ordinary per-site relay is stranded.
       if (!explicit_anchors_fit || singleton_has_direct_island ||
-          (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
+          (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -871,7 +871,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // the displaced guest instruction (which is itself inert under EXEC=0).
     const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
     const uint64_t vgpr_msb_bytes =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
+        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
             ? (spill ? 4u : 2u) * sizeof(uint32_t)
             : 0u;
     const uint32_t required_private_bytes =
@@ -1088,7 +1088,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         // reservation keeps later body addresses stable while their
         // instruction words are regenerated during emission.
         const uint64_t return_bytes =
-            (use_dense_call && arch == ROCJITSU_CODE_ARCH_GFX1250 ? 1u : 7u) * sizeof(uint32_t);
+            (use_dense_call && arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1u : 7u) * sizeof(uint32_t);
         std::string placement_error;
         const auto reservation =
             placement_planner.plan_indirect_appended(candidate.text_offset, displaced_original_size,
@@ -1391,7 +1391,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         words.push_back(*normalize);
         return true;
       };
-      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_CDNA5) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, *call_return_sgpr, jump_sgprs.pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1405,7 +1405,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
 
       if (entry_host != dense_entry_hosts.end()) {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!call_return_sgpr ||
               !append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             entry_host->second.host_offset + sizeof(uint32_t),
@@ -1468,7 +1468,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       for (size_t group_index = 0; group_index < group.size(); ++group_index) {
         const PlannedInlineShadowPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!call_return_sgpr ||
               !append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             candidate.text_offset + sizeof(uint32_t),
@@ -1896,7 +1896,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           }
           cave_words->push_back(build_s_branch(*ret, arch));
         } else if (planned_patch.dense_call_anchor) {
-          if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
             empty_exec_continuation_word_offset = cave_words->size();
             insert_deferred_guest(cave_words->size());
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
@@ -2537,7 +2537,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
                                  ? sampled_spill_backed_scratch_count(options, candidate, arch)
                                  : direct_sampled_scratch_count(options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI sampled probe exceeds the VGPR file");
@@ -2675,7 +2675,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*derived_owner_word);
   if (relocate_instruction) {
     const bool select_guest_vgpr_bank =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
@@ -3240,7 +3240,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
 
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+      arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   const bool spill_backed_operand_recovery = options.moi_sampled_spill_backed_operand_recovery;
   if (spill_backed_operand_recovery &&
       (spill == nullptr ||
@@ -3265,7 +3265,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
                                      : direct_sampled_scratch_count(options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   if (spill_backed_operand_recovery) {
     if (!options.scratch_vgpr) {
@@ -3603,7 +3603,7 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // returns with its ordinary indirect-PC pair and retains the established
   // residue slot.
   const uint16_t residue =
-      options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_GFX1250
+      options.moi_engine == ConSanMoiEngine::RecordReplay && arch == ROCJITSU_CODE_ARCH_CDNA5
           ? *options.moi_exec_save_sgpr
           : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t shift =

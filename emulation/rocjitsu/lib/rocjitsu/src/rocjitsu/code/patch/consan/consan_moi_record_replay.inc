@@ -150,7 +150,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       candidates.size() >= kLargeRdna4RelayCandidateCount ||
       (has_spill_backed_scalar_assignment && candidates.size() <= 2u);
   const uint64_t ordinary_access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? 24u
           : (needs_large_rdna4_relay ? 20u : 10u) + (has_spill_backed_scalar_assignment ? 1u : 0u);
   const uint64_t access_relay_words =
@@ -259,7 +259,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     for (const auto &[key, owner_candidates] : owner_groups) {
       for (const ConSanMoiCandidate *candidate : owner_candidates) {
         if (groups.empty() || groups.back().first != key ||
-            (arch != ROCJITSU_CODE_ARCH_GFX1250 && groups.back().second.candidates.size() == 64u) ||
+            (arch != ROCJITSU_CODE_ARCH_CDNA5 && groups.back().second.candidates.size() == 64u) ||
             candidate->text_offset - groups.back().second.candidates.front()->text_offset >
                 kMaxCommonRelayAnchorSpan) {
           groups.push_back(
@@ -302,7 +302,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return !compute_sopp_branch_simm16(candidate->text_offset, default_entry);
           });
       const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+          arch == ROCJITSU_CODE_ARCH_CDNA5 ||
           std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
             return candidate->size >= 2u * sizeof(uint32_t);
           });
@@ -315,7 +315,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       // reachable and use dense routing only to recover otherwise-stranded
       // sites.
       if (!explicit_anchors_fit || singleton_has_direct_island ||
-          (!(arch == ROCJITSU_CODE_ARCH_GFX1250 && has_dense_neighbors) && !has_stranded_entry))
+          (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -598,7 +598,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                      : 0u;
     const bool wrap_embedded_guest_vgpr_bank =
         use_indirect_appended && options.moi_dynamic_access_records &&
-        arch == ROCJITSU_CODE_ARCH_GFX1250 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
     const uint64_t vgpr_msb_bytes = moi_appended_body_vgpr_msb_transition_word_count(
                                         arch, candidate.gfx1250_vgpr_msb_mode, spill.has_value(),
                                         wrap_embedded_guest_vgpr_bank) *
@@ -706,7 +706,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             .return_target = candidate.text_offset + displaced_original_size,
         };
         const uint64_t return_words =
-            use_dense_call ? (arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+            use_dense_call ? (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
                                       candidate_options.automatic_moi_record_replay_sgpr_spill
                                   ? 7u
                                   : 1u)
@@ -868,7 +868,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr = group_options.automatic_moi_record_replay_sgpr_spill
                                             ? *group_options.moi_record_replay_call_return_sgpr
                                             : static_cast<uint16_t>(base + 6u);
-      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
+      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_CDNA5;
       const bool collapsed_spill_router = !explicit_dense_key &&
                                           group_options.automatic_moi_record_replay_sgpr_spill &&
                                           call_return_sgpr == pc_sgpr;
@@ -933,7 +933,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_CDNA5) {
         const auto subtract_pc = instrumentation::build_s_sub_u32(
             key_sgpr, collapsed_spill_router ? key_sgpr : call_return_sgpr, pc_sgpr, arch);
         if (!subtract_pc) {
@@ -947,7 +947,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
 
       if (entry_host != dense_entry_hosts.end()) {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             entry_host->second.host_offset + sizeof(uint32_t),
                                             pc_sgpr, call_match_sgpr, arch)) {
@@ -1003,7 +1003,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       for (size_t group_index = 0; group_index < group.size(); ++group_index) {
         const PlannedAccessRecordPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             candidate.text_offset + sizeof(uint32_t), pc_sgpr,
                                             call_match_sgpr, arch)) {
@@ -1283,7 +1283,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         if (!cave_words)
           return;
         if (planned_patch.dense_call_anchor) {
-          if (arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+          if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
               candidate_options.automatic_moi_record_replay_sgpr_spill) {
             const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
             const size_t return_begin = cave_words->size();

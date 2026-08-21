@@ -3424,7 +3424,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       for (size_t index = callee_block.first_index; index <= callee_block.last_index; ++index) {
         const Instruction &candidate = *ctx.insts[index];
         update_vgpr_mode(item.state.vgpr_msb_imm, candidate, ctx.text);
-        update_gpr_idx_enabled(item.state.gpr_idx_enabled, candidate, ctx.text);
+        update_gpr_idx_enabled(item.state.gpr_idx_enabled, candidate, ctx.text, ctx.arch);
       }
 
       const Instruction &term = *ctx.insts[callee_block.last_index];
@@ -4430,9 +4430,9 @@ void transfer_callee_value_state(AnalysisContext &ctx, const AnalysisBlock &bloc
   const Instruction &inst = *ctx.insts[inst_index];
   const auto lane_transfer = fixed_lane_transfer(*ctx.insts[inst_index], ctx.wavefront_size);
   const auto scratch =
-      ctx.arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250_scratch_dword(inst) : std::nullopt;
+      ctx.arch == ROCJITSU_CODE_ARCH_CDNA5 ? gfx1250_scratch_dword(inst) : std::nullopt;
   const auto scratch_store =
-      ctx.arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250_scratch_store_range(inst) : std::nullopt;
+      ctx.arch == ROCJITSU_CODE_ARCH_CDNA5 ? gfx1250_scratch_store_range(inst) : std::nullopt;
   const bool full_exec_scratch =
       scratch && gfx1250_full_exec_scratch_transfer(ctx, block, inst_index);
 

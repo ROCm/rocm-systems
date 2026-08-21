@@ -747,7 +747,7 @@ def test_named_inline_immediates_are_not_register_patterns():
         ('rdna3', Rdna3Profile),
         ('rdna3_5', Rdna3_5Profile),
         ('rdna4', Rdna4Profile),
-        ('gfx1250', Gfx1250Profile),
+        ('cdna5', Cdna5Profile),
     ],
 )
 def test_mrisa_implicit_operand_types_have_explicit_register_classification(

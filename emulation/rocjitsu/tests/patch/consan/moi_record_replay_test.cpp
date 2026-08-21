@@ -106,7 +106,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplayZerosUnusedPersistentClusterCoordinate) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint16_t kClusterCoordinateSgpr = 53u;
   std::vector<uint32_t> words(64u, build_s_nop(0u, kArch));
   words[8] = 0xD8340000u;
@@ -578,7 +578,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   expect_invalid(std::move(wrong_target), bytes, "code-object target");
 
   ConSanResult wrong_arch = pristine;
-  wrong_arch.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  wrong_arch.arch = ROCJITSU_CODE_ARCH_CDNA5;
   expect_invalid(std::move(wrong_arch), bytes, "code-object architecture");
 
   ConSanResult modified = pristine;
@@ -1096,7 +1096,7 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
 }
 
 TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(arch);
     constexpr std::array<uint16_t, 4> kRouterState = {0u, 1u, 4u, 6u};
     std::vector<uint32_t> words = {
@@ -1110,7 +1110,7 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
     words.push_back(build_s_endpgm(arch));
 
     const std::vector<uint8_t> bytes =
-        arch == ROCJITSU_CODE_ARCH_GFX1250
+        arch == ROCJITSU_CODE_ARCH_CDNA5
             ? make_gfx1250_code_object(words, "auto_record_replay_scalar_spill",
                                        kRdna4Wave64AllVgprsGranulated, /*wave32=*/true)
             : make_rdna4_lds_code_object(words, "auto_record_replay_scalar_spill",
@@ -1652,8 +1652,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> text_words = {
-      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
-      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "zero_sized_final_symbol");
   mutate_elf_symbol(bytes, 1u, [](Elf64_Sym &symbol) { symbol.st_size = 0; });
@@ -1681,11 +1681,11 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> first_kernel_words = {
-      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
-      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::array<uint32_t, 1> second_kernel_words = {
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
       first_kernel_words, second_kernel_words, {}, kRdna4Wave64AllVgprsGranulated,
@@ -1711,8 +1711,8 @@ TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
   constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> text_words = {
-      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
-      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "explicit_sized_unreachable_tail");
@@ -2368,7 +2368,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillsDynamicStackAccessInBothWaveModes) {
   for (bool wave32 : {false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
     std::vector<uint32_t> text_words(guest.begin(), guest.end());
-    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
     const std::vector<uint8_t> bytes = make_gfx1250_code_object(
         text_words, "dynamic_spill", kRdna4Wave64AllVgprsGranulated, wave32,
         /*uses_dynamic_stack=*/true);
@@ -3024,7 +3024,7 @@ TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
 }
 
 TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
@@ -3092,7 +3092,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
 }
 
 TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
@@ -3162,7 +3162,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
 }
 
 TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kAccessCount = 9u;
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
@@ -3235,7 +3235,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
 }
 
 TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
@@ -3280,7 +3280,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
 }
 
 TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   constexpr auto unsupported_guest =
       cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 8u, .data0 = 9u});
@@ -3338,7 +3338,7 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
 }
 
 TEST(ConSanMoi, OwningDynamicStackKernelRejectsForcedPrivateRecordReplayState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   std::vector<uint32_t> text_words(320u, build_s_nop(0, kArch));
   std::ranges::copy(guest, text_words.begin());
@@ -5001,9 +5001,9 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
         0x00000000u, // ds_store_b32 v0, v0
     };
     for (uint16_t sgpr = first_live; sgpr <= last_live; ++sgpr) {
-      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
     }
-    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
     return words;
   };
   // The first owner leaves only s0:s7 dead at its access. The second leaves
@@ -5062,13 +5062,13 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
-  std::vector<uint32_t> low_pressure_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> low_pressure_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   low_pressure_words[0] = 0xD8340000u;
   low_pressure_words[1] = 0x00000000u; // ds_store_b32 v0, v0
-  low_pressure_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  low_pressure_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   std::vector<uint32_t> full_pressure_words = low_pressure_words;
-  full_pressure_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_GFX1250);
+  full_pressure_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object_with_local_function(
       low_pressure_words, full_pressure_words, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
@@ -5161,12 +5161,12 @@ TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelpe
 
 TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
   for (const rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (const bool uses_dynamic_stack : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(uses_dynamic_stack ? "dynamic-stack" : "fixed-stack");
       const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
-      const uint32_t access_count = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 9u : 1u;
+      const uint32_t access_count = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 9u : 1u;
       std::vector<uint32_t> words;
       for (uint32_t index = 0; index < access_count; ++index) {
         words.push_back(0xD8340000u);
@@ -5186,7 +5186,7 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
       }
       words.push_back(build_s_endpgm(arch));
       const std::vector<uint8_t> bytes =
-          arch == ROCJITSU_CODE_ARCH_GFX1250
+          arch == ROCJITSU_CODE_ARCH_CDNA5
               ? make_gfx1250_code_object(words, "record_replay_scalar_spill",
                                          kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
                                          uses_dynamic_stack)
@@ -5347,7 +5347,7 @@ TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {
 }
 
 TEST(ConSanMoi, Gfx1250OwnerPrologueUsesOwnerLocalEntryAndReturnRelays) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr size_t kFirstAccessWord = 27'750u;
   constexpr size_t kOwnerCodeWords = kFirstAccessWord + 3u;
   constexpr size_t kTotalTextWords = 60'000u;
@@ -5664,9 +5664,9 @@ TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
     }
     for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
       if (std::ranges::find(dead, sgpr) == dead.end())
-        words.push_back(build_s_mov_b32(/*M0=*/125u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+        words.push_back(build_s_mov_b32(/*M0=*/125u, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
     }
-    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8;
@@ -5804,7 +5804,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   constexpr uint32_t kAccessCount = 9u;
   const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
   std::vector<uint32_t> words(
-      9u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_GFX1250));
+      9u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     words.push_back(0xD8340000u | index * sizeof(uint32_t));
     words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
@@ -5813,9 +5813,9 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   }
   for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
     if (std::ranges::find(dead, sgpr) == dead.end())
-      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
   }
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(words);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -5864,9 +5864,9 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
   const auto captured_key_compare = build_s_cmp_eq_u32(
-      *assignment.dispatch_key_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+      *assignment.dispatch_key_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5);
   const auto tautological_pc_compare = build_s_cmp_eq_u32(
-      *assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+      *assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(captured_key_compare);
   ASSERT_TRUE(tautological_pc_compare);
   EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
@@ -5879,7 +5879,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kSiteCount = 17u;
   const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
   std::vector<uint32_t> words(9u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch));
@@ -5945,7 +5945,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
 }
 
 TEST(ConSanMoi, Gfx1250DenseBarrierHostAvoidsImplicitHighVgprBank) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kSiteCount = 17u;
   constexpr uint32_t kFillerWords = 20u;
   constexpr std::array<uint16_t, 6> kDead = {0u, 1u, 4u, 6u, 8u, 9u};
@@ -6028,20 +6028,19 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostAvoidsTransientSgprLiveRange) {
   // live across the following NOP run, which is an attractive relocatable
   // host unless the post-planning liveness state includes arbitrary hosts.
   for (uint16_t sgpr : kTransientWindow) {
-    words.push_back(
-        build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_mov_b32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5));
   }
-  words.resize(words.size() + 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.resize(words.size() + 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint16_t sgpr : kTransientWindow)
-    words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+    words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
   const uint64_t first_safe_host_offset = words.size() * sizeof(uint32_t);
 
   for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
     if (std::ranges::find(kTransientWindow, sgpr) == kTransientWindow.end())
-      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
   }
-  words.resize(words.size() + 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  words.resize(words.size() + 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
@@ -6154,7 +6153,7 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "disjoint_store_tuple_scratch");
@@ -6204,7 +6203,7 @@ TEST(ConSanMoi, RecordReplaySplitsLargeGfx1250TwoAddressOffsetsWithPlannedScratc
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "large_two_address_record_replay");
@@ -6943,7 +6942,7 @@ TEST(ConSanMoi, Rdna4ScalarRelativeVariantsUseFixedWaveSgprBound) {
   };
   constexpr std::array kTargets = {
       Target{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201"},
-      Target{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+      Target{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"},
   };
   constexpr std::array kIndirectInstructions = {
       0xBE804002u, // s_movrels_b32 s0, s2
@@ -6964,7 +6963,7 @@ TEST(ConSanMoi, Rdna4ScalarRelativeVariantsUseFixedWaveSgprBound) {
       text_words.push_back(indirect_instruction);
       text_words.push_back(build_s_endpgm(target.arch));
       const std::vector<uint8_t> bytes =
-          target.arch == ROCJITSU_CODE_ARCH_GFX1250
+          target.arch == ROCJITSU_CODE_ARCH_CDNA5
               ? make_gfx1250_code_object(text_words, "rdna_indirect_sgpr",
                                          /*vgpr_granulated=*/3u)
               : make_rdna4_lds_code_object(text_words, "rdna_indirect_sgpr",
@@ -7003,8 +7002,8 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
   };
   text_words.insert(text_words.end(), 33u, kBarrierWait);
   text_words.push_back(
-      build_v_mov_b32_e32(/*vdst=*/255, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+      build_v_mov_b32_e32(/*vdst=*/255, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = true;
@@ -7051,7 +7050,7 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
   EXPECT_NE(std::ranges::find(access_words,
                               build_v_mov_b32_e32(record_value_vgpr,
                                                   *result.resolved_moi_persistent_epoch_sgpr,
-                                                  ROCJITSU_CODE_ARCH_GFX1250)),
+                                                  ROCJITSU_CODE_ARCH_CDNA5)),
             access_words.end());
 }
 
@@ -7061,11 +7060,11 @@ TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsArchitecturalAliasesForPersistentEpo
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
       kBarrierWait,
-      build_s_mov_b32(/*sdst=*/0u, /*ssrc=*/101u, ROCJITSU_CODE_ARCH_GFX1250),
-      build_v_mov_b32_e32(/*vdst=*/255, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc=*/101u, ROCJITSU_CODE_ARCH_CDNA5),
+      build_v_mov_b32_e32(/*vdst=*/255, vector_source_vgpr(255), ROCJITSU_CODE_ARCH_CDNA5),
   };
-  text_words.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_dynamic_access_records = true;
@@ -7108,8 +7107,8 @@ TEST(ConSanMoi, Gfx1250RejectsExplicitPersistentStateInFlatScratch) {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
   };
-  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   const auto patch_with = [&](ConSanOptions options) {
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -7157,8 +7156,8 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateInXnackMask) {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
   };
-  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   // LLVM reserves s104:s105 as the gfx1250 XNACK_MASK pair even though the
@@ -7184,8 +7183,8 @@ TEST(ConSanMoi, Gfx1250RejectsConfiguredPersistentStateAtOrdinarySgprLimit) {
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
   };
-  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   // s106:s107 are VCC and begin immediately after the ordinary s0:s105 file.
@@ -8226,14 +8225,14 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
   constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250),
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_CDNA5),
       0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
       kBarrierSignal,
       kBarrierWait,
   };
-  text_words.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_dynamic_access_records = true;
@@ -8256,9 +8255,9 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t select_low =
-      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_CDNA5);
   const auto barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier, result.patches.end());
@@ -8409,7 +8408,7 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
 TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(atomic);
   const std::array<uint32_t, 7> text_words = {
       0xEE0B0000u,  0x00000000u,  0x00000000u, // global_wb
@@ -8447,13 +8446,13 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
       {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL), .vdst = 8, .vaddr = 4, .ioffset = 16});
   const std::array<uint32_t, 8> text_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
-      build_v_mov_b32_e32(/*vdst=*/4, /*src=*/0, ROCJITSU_CODE_ARCH_GFX1250),
-      build_v_mov_b32_e32(/*vdst=*/5, /*src=*/1, ROCJITSU_CODE_ARCH_GFX1250),
+      build_v_mov_b32_e32(/*vdst=*/4, /*src=*/0, ROCJITSU_CODE_ARCH_CDNA5),
+      build_v_mov_b32_e32(/*vdst=*/5, /*src=*/1, ROCJITSU_CODE_ARCH_CDNA5),
       load[0],
       load[1],
       load[2],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),
   };
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
@@ -8487,7 +8486,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
               patched.text_sections().front()->size());
   const auto add = build_v_add_u64_signed_i24(/*address_vgpr=*/22, /*displacement=*/16,
-                                              ROCJITSU_CODE_ARCH_GFX1250);
+                                              ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(add);
   EXPECT_TRUE(contains_subsequence(patched_words, *add));
 }
@@ -8495,7 +8494,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
 TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/2, /*return_old_value=*/true, /*scope=*/0,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(atomic);
   const std::array<uint32_t, 7> text_words = {
       0xEE0B0000u,  0x00000000u,  0x00000000u, // global_wb
@@ -8526,7 +8525,7 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
       cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 6> text_words = {
       store[0],  store[1],  0xBFC90000u, // s_wait_storecnt_dscnt 0
-      atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+      atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
@@ -8562,7 +8561,7 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
 }
 
 TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(arch);
     constexpr uint32_t kAccessCount = 9u;
     std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, arch));
@@ -8577,7 +8576,7 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
     }
     text_words.push_back(build_s_endpgm(arch));
     std::vector<uint8_t> bytes =
-        arch == ROCJITSU_CODE_ARCH_GFX1250
+        arch == ROCJITSU_CODE_ARCH_CDNA5
             ? make_gfx1250_code_object(text_words, "gfx1250_dense_record_replay")
             : make_rdna4_lds_code_object(text_words, "rdna4_dense_record_replay");
 
@@ -8607,7 +8606,7 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
 }
 
 TEST(ConSanMoi, Gfx1250FarFenceUsesDenseRelayWithAutomaticExecSave) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kOwnerWordCount = 33'000u;
   const auto make_owner = [](uint16_t first_live, uint16_t last_live, uint16_t dead_destination) {
@@ -8733,12 +8732,12 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   constexpr uint16_t kDispatchIdSgpr = 70u;
   constexpr uint16_t kCallReturnSgpr = kExecSaveSgpr + 6u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
@@ -8770,13 +8769,13 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
       text_words_at_offset(patched, access_patch->trampoline_offset, access_patch->trampoline_size);
   const auto save_scc = instrumentation::build_s_cselect_b32(
       /*sdst=*/kExecSaveSgpr + 4u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto initialize_residue = instrumentation::build_s_sub_u32(
       /*sdst=*/kExecSaveSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto clobber_call_return = instrumentation::build_s_sub_u32(
       /*sdst=*/kCallReturnSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(save_scc);
   ASSERT_TRUE(initialize_residue);
   ASSERT_TRUE(clobber_call_return);
@@ -8784,9 +8783,8 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   EXPECT_EQ(words[0], *save_scc);
   EXPECT_EQ(words[1], *initialize_residue);
   EXPECT_EQ(std::ranges::find(words, *clobber_call_return), words.end());
-  EXPECT_NE(
-      std::ranges::find(words, build_s_setpc_b64(kCallReturnSgpr, ROCJITSU_CODE_ARCH_GFX1250)),
-      words.end());
+  EXPECT_NE(std::ranges::find(words, build_s_setpc_b64(kCallReturnSgpr, ROCJITSU_CODE_ARCH_CDNA5)),
+            words.end());
 }
 
 TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
@@ -9186,7 +9184,7 @@ TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {
 TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
   constexpr uint32_t kAccessesPerWindow = 9u;
   constexpr uint32_t kSecondWindowWord = 65'580u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(8u, filler);
   for (uint32_t index = 0; index < kAccessesPerWindow; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
@@ -9197,7 +9195,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_partitioned_dense_record_replay");
 
@@ -9232,12 +9230,12 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
 TEST(ConSanMoi, RecordReplayAllSupportedPolicyIgnoresNominalPatchLimit) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_all_supported_record_replay");
 
@@ -9270,15 +9268,15 @@ TEST(ConSanMoi, RecordReplayAllSupportedPolicyIgnoresNominalPatchLimit) {
 TEST(ConSanMoi, Gfx1250DenseAccessesUseRelocatableHostPastKernelEntry) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words = {
-      build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_CDNA5),
   };
   text_words.insert(text_words.end(), 8u,
-                    build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+                    build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_record_replay_late_host");
 
@@ -9311,19 +9309,19 @@ TEST(ConSanMoi, Gfx1250DenseAccessesRejectUnreachableHostWhenOwnerUsesRouterStat
   constexpr size_t kUnreachableBeginWord = 1u;
   constexpr size_t kUnreachableEndWord = 9u;
   std::vector<uint32_t> text_words = {
-      build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_CDNA5),
   };
   text_words.insert(text_words.end(), kUnreachableEndWord - kUnreachableBeginWord,
-                    build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+                    build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   // The reachable owner explicitly references the record/replay router base.
   // Its unreachable tail therefore cannot be treated as scalar-state-free
   // relocation storage merely because it has no live-before CFG snapshot.
-  text_words.push_back(build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
@@ -9360,14 +9358,14 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   constexpr uint16_t kGuestVgprMsbTransition = 0x4004u;
   constexpr uint8_t kGuestVgprMsbMode = 0x04u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   text_words.push_back(
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_GFX1250));
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbTransition, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_record_replay_vgpr_msb");
 
@@ -9395,9 +9393,9 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t select_low =
-      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const uint32_t restore_guest =
-      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_GFX1250);
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, ROCJITSU_CODE_ARCH_CDNA5);
   uint32_t checked = 0;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
@@ -9425,12 +9423,12 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
 TEST(ConSanMoi, Gfx1250DenseAccessesIgnorePreviousGuestVgprMsbMode) {
   constexpr uint16_t kPreviousOnlyTransition = 0x4400u;
   std::vector<uint32_t> text_words(
-      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   text_words.push_back(
-      *build_gfx1250_s_set_vgpr_msb(kPreviousOnlyTransition, ROCJITSU_CODE_ARCH_GFX1250));
+      *build_gfx1250_s_set_vgpr_msb(kPreviousOnlyTransition, ROCJITSU_CODE_ARCH_CDNA5));
   text_words.push_back(0xD8340000u);
   text_words.push_back(0x00000000u); // ds_store_b32 v0, v0
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   const ConSanResult result =
       try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_previous_vgpr_msb_mode"),

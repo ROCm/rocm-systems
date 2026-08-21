@@ -61,6 +61,34 @@ scratch before promotion.
 | **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 47.08x paired slowdown, and a reviewed exact-one producer-release atomic-order fault with pass/no-diagnosis outcome, containment, health, and clean provenance | 🟨 Current physical paired row passes the exact MFMA-partials oracle with complete 48/48 access, 4/4 applicable-barrier, and 3/3 atomic coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 90 and 67 ms versus 1,162 ms for Sampled (14.80x); reviewed-fault and clean-provenance acceptance remain | 🟨 Current physical paired row passes the exact MFMA-partials oracle with complete 48/48 access, 6/6 barrier, and 3/3 atomic coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 60 and 98 ms versus 1,165 ms for Inline Shadow (14.75x); reviewed-fault and clean-provenance acceptance remain |
 | **P4 hip-moi Jakub attention** | 🟨 Current physical clean row passes all four exact oracles in 0.34 seconds with complete 338/338 access coverage; paired overhead and reviewed-fault acceptance remain | 🟨 Current physical clean row passes all four exact oracles in 189.08 seconds with complete 338/338 accesses plus 35/35 barriers, zero diagnostics, and a complete dynamic verdict under a workload-bounded stride; paired overhead and reviewed-fault acceptance remain | 🟨 Current physical paired row passes all four exact oracles with complete 338/338 access and 35/35 applicable-barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 104 and 118 ms versus 274 ms for Sampled (2.47x); reviewed-fault and clean-provenance acceptance remain | 🟨 Current physical paired row passes all four exact oracles with complete 338/338 access and 35/35 barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 68 and 120 ms versus 299 ms for Inline Shadow (3.18x); reviewed-fault and clean-provenance acceptance remain |
 
+### 2026-08-21 post-merge Hip-MOI tree atomic-OR simulator limitation
+
+After merging `origin/develop`, the broad non-device gate passes 5,830 tests
+and has exactly one failure:
+`ConSanGfx950HipMoiSim.TreeAtomicOr`. The original Hip-MOI correct workload
+still passes directly on the physical gfx950 in 0.12 seconds, and its paired
+incorrect workload also retains the expected physical diagnostic. The failure
+therefore does not change any physical ConSan matrix cell above.
+
+The RocJitsu simulation reproducer fails only the external Hip-MOI correct
+workload, with 256 false conflicts; its numerical oracle passes, and the
+relaxed negative workload passes. Instrumenting Hip-MOI's metadata protocol
+showed that all four producer release records are eventually published, but
+the final subgroup imports only producer 0's record: Hip-MOI's generic atomic
+acquire lookup stops as soon as *any* matching release record exists, before
+producers 1 and 2 have published their post-atomic metadata under this legal
+RocJitsu interleaving. Disabling Hip-MOI's lookup cache does not alter the
+outcome, so this is not stale cache state.
+
+RocJitsu must not constrain legal scheduling merely to hide this external
+metadata-publication race. The corresponding checked-in ConSan tree atomic-OR
+correct/incorrect behavioral-contract pair passes in gfx950 simulation for the
+baseline and all four engines (10/10 tests), directly guarding ConSan's
+architecture behavior. The remaining external smoke failure is recorded as an
+upstream Hip-MOI protocol prerequisite rather than an emulator or ConSan
+regression; resolving it requires making Hip-MOI wait for all applicable
+post-atomic publishers instead of returning after the first record.
+
 ### 2026-08-21 Sampled independent scalar-proof repair
 
 Paired physical artifact
@@ -1314,7 +1342,7 @@ descendant revision `0db836e7bd8c`:
 - three generated code objects whose ELF flags all name gfx950.
 
 The checked-in runner executes `tensilelite-client` through
-`gfx950_cdna4.json`, parses every numeric CSV result row, requires every
+`gfx950_mi355x.json`, parses every numeric CSV result row, requires every
 validation field to be `PASSED`, and rejects missing or non-gfx950 code
 objects.  At corpus revision `0db836e7bd8c`, fresh default-tool runs complete
 in about 5.0 seconds.  The runner and negative-oracle suite pass 21/21.  The

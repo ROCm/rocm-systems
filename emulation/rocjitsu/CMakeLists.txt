@@ -30,7 +30,7 @@ include(rj_configure_target)
 # configuration. Runtime callers can override this default through
 # ConSanOptions, while constexpr planners and offline tests retain the JSON as
 # their source of truth. Reconfigure when the JSON changes.
-set(_RJ_GFX1250_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250.json")
+set(_RJ_GFX1250_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/configs/gfx1250_mi455x.json")
 set_property(
     DIRECTORY
     APPEND
@@ -51,7 +51,7 @@ if(
 )
     message(
         FATAL_ERROR
-        "gfx1250.json must declare a positive uint32_t LDS size in KiB"
+        "gfx1250_mi455x.json must declare a positive uint32_t LDS size in KiB"
     )
 endif()
 add_compile_definitions(ROCJITSU_GFX1250_LDS_SIZE_KB=${_RJ_GFX1250_LDS_SIZE_KB})

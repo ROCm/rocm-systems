@@ -2580,7 +2580,7 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   if (!usable_resource_source(resource_source))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan);
   if (site.mnemonic.starts_with("ds_")) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
     if (site.width_bits != 32u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
@@ -2619,7 +2619,7 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
@@ -2835,7 +2835,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       result_end > scratch_end)
     return std::nullopt;
   if (plan.kind == ConSanMoiAtomicAddressKind::LdsByteOffsetToken) {
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250 || plan.input_address_vgpr_count != 1u ||
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || plan.input_address_vgpr_count != 1u ||
         plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
         plan.signed_byte_offset < 0 || plan.signed_byte_offset > 0xff)
       return std::nullopt;

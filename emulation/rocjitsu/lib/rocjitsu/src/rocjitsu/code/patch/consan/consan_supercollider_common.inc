@@ -364,7 +364,7 @@ struct Gfx1250TwoAddressExpansionPlan {
 [[nodiscard]] std::optional<Gfx1250TwoAddressExpansionPlan>
 gfx1250_two_address_expansion_plan(std::span<const uint8_t> original_bytes,
                                    const ConSanLdsSite &site, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
       (!is_two_address_lds_load(site) && !is_two_address_lds_store(site)))
     return std::nullopt;
   const auto width_bits = two_address_lds_element_width_bits(site);
@@ -481,7 +481,7 @@ constexpr uint16_t kRdna4ExecHi = 127u;
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -510,7 +510,7 @@ append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t wor
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(captured_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -753,7 +753,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
     if (byte_offset > UINT16_MAX) {
       const auto adjust = instrumentation::build_v_add_u32_literal(
           adjusted_address_vgpr, adjusted_address_vgpr, byte_offset, address_vgpr,
-          ROCJITSU_CODE_ARCH_GFX1250);
+          ROCJITSU_CODE_ARCH_CDNA5);
       if (!adjust)
         return false;
       words.insert(words.end(), adjust->begin(), adjust->end());
@@ -911,7 +911,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   }
 
   uint32_t compare_mode_switch_words = 0;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.kind == ConSanLdsAccessKind::Read) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.kind == ConSanLdsAccessKind::Read) {
     for (uint16_t i = 0; i < *required_vgprs; ++i) {
       const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
       if (compare_vgpr && *compare_vgpr >= 256u)
@@ -998,7 +998,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       words.insert(words.end(), acc_read->begin(), acc_read->end());
       compare_vgpr = compare_scratch_vgpr;
     }
-    const uint16_t compare_mode = arch == ROCJITSU_CODE_ARCH_GFX1250 && compare_vgpr
+    const uint16_t compare_mode = arch == ROCJITSU_CODE_ARCH_CDNA5 && compare_vgpr
                                       ? static_cast<uint16_t>(*compare_vgpr / 256u)
                                       : 0u;
     if (compare_mode != 0u) {

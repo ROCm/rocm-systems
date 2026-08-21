@@ -135,7 +135,7 @@ TARGETS = {
             "gfx950",
             "hip-moi-build-gfx950-tests",
             "cdna4",
-            "gfx950_cdna4.json",
+            "gfx950_mi355x.json",
         ),
     )
 }

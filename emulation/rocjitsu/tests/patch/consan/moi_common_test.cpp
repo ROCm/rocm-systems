@@ -112,7 +112,7 @@ TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
       ROCJITSU_CODE_ARCH_CDNA3,
       ROCJITSU_CODE_ARCH_CDNA4,
       ROCJITSU_CODE_ARCH_RDNA4,
-      ROCJITSU_CODE_ARCH_GFX1250,
+      ROCJITSU_CODE_ARCH_CDNA5,
   };
 
   size_t case_index = 0;
@@ -208,8 +208,8 @@ TEST(ConSanMoi, SpilledVgprReloadSelectsFixedAndDynamicTargetEncodings) {
   constexpr uint16_t kFrameBaseSgpr = 33u;
   constexpr uint32_t kSlotOffset = 20u;
   constexpr std::array kArchitectures = {
-      ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3,   ROCJITSU_CODE_ARCH_CDNA4,
-      ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250,
+      ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+      ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5,
   };
 
   for (rj_code_arch_t arch : kArchitectures) {
@@ -660,7 +660,7 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
 TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "lds_probe", /*vgpr_granulated=*/4);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -690,7 +690,7 @@ TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {
 TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
   const std::array<uint32_t, 3> text_words = {load[0], load[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "two_address_load");
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -828,7 +828,7 @@ TEST(ConSanMoi, Gfx1250MoiEnginesAdmitNativeB96Accesses) {
   };
 
   expect_moi_engines_admit_native_b96_accesses(
-      ROCJITSU_CODE_ARCH_GFX1250, accesses, [](const auto &text_words) {
+      ROCJITSU_CODE_ARCH_CDNA5, accesses, [](const auto &text_words) {
         return make_gfx1250_code_object(text_words, "native_b96_access");
       });
 }
@@ -837,7 +837,7 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   constexpr auto atomic = cdna5::build_vds(
       cdna5::kDsCmpstoreRtnB32Vds, {.offset0 = 12, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 3});
   const std::array<uint32_t, 3> text_words = {atomic[0], atomic[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "relaxed_lds_atomic");
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
@@ -2246,7 +2246,7 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
   for (std::string_view mnemonic : {"ds_load_b96", "ds_store_b96"}) {
     SCOPED_TRACE(mnemonic);
     EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
-    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_GFX1250));
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA5));
     // RDNA3 and RDNA3.5 hardware encode B96, but ConSan's RDNA3 subset does
     // not admit that width.
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
@@ -2261,7 +2261,7 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_GFX1250));
+    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA5));
   }
 }
 
@@ -2390,7 +2390,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   constexpr uint32_t kRuntimeLdsBytes = 96u * 1024u;
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "opaque_lds", /*vgpr_granulated=*/4);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -2413,7 +2413,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
 TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   constexpr std::string_view kernel_name = "dynamic_lds_auto_report";
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, kernel_name);
   mutate_first_kernel_descriptor(bytes,
@@ -2431,13 +2431,13 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
   const ConSanMoiAutoReportInventory inventory =
       inventory_consan_moi_auto_report(result, options, bytes);
   EXPECT_EQ(inventory.inline_lds_bytes,
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
+            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
             consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) *
+            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5) *
                 plan.layout.inline_exact_dispatch_bank_count);
 }
 

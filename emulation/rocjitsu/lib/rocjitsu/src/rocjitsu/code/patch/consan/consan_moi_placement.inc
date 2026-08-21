@@ -497,7 +497,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     invalid.system_sgpr_count = system_count;
     return invalid;
   }
-  const uint16_t user_sgpr_initialization_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 32u : 16u;
+  const uint16_t user_sgpr_initialization_limit = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 16u;
   ConSanMoiDispatchIdPreloadPlan plan;
   if (!dispatch_enabled && original_user_count <= user_sgpr_initialization_limit &&
       minimum_declared_user_count + 2u <= original_user_count &&
@@ -589,7 +589,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // These are the translated RDNA command-processor ABI TTMPs, not the
     // descriptor-selected entry SGPRs copied from them by the kernel prologue.
     // MOI finalization enables the complete command-processor grid payload on
@@ -604,7 +604,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
         .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(kTtmpRdna4GridYz),
                                               /*shift_right_16=*/true),
         .cluster_workgroup_id =
-            arch == ROCJITSU_CODE_ARCH_GFX1250 && uses_gfx1250_cluster_workgroup_id
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && uses_gfx1250_cluster_workgroup_id
                 ? ConSanMoiWorkgroupSource::scalar(
                       ttmp_scalar_operand(kTtmpGfx1250ClusterWorkgroupId))
                 : ConSanMoiWorkgroupSource{},
@@ -735,7 +735,7 @@ moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
 [[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return 8;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return moi_descriptor_wavefront_size(desc) == 32 ? 16 : 8;
   return moi_descriptor_wavefront_size(desc) == 32 ? 8 : 4;
 }
@@ -1026,7 +1026,7 @@ append_materialize_gfx1250_flat_access_address(std::vector<uint32_t> &words,
                                                const ConSanMoiCandidate &candidate,
                                                uint16_t result_vgpr, rj_code_arch_t arch) {
   if (!candidate_requires_gfx1250_flat_offset_materialization(candidate) ||
-      arch != ROCJITSU_CODE_ARCH_GFX1250 || !candidate.addr_vgpr || *candidate.addr_vgpr >= 255u ||
+      arch != ROCJITSU_CODE_ARCH_CDNA5 || !candidate.addr_vgpr || *candidate.addr_vgpr >= 255u ||
       result_vgpr >= 255u)
     return false;
   words.push_back(build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*candidate.addr_vgpr), arch));
@@ -1126,7 +1126,7 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
           : 0u;
   const uint16_t two_address_replay_count =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
               two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
           ? 1u
           : 0u;
@@ -1157,7 +1157,7 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
                                                     rj_code_arch_t arch) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
   const uint16_t two_address_replay_count =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
               two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
           ? 1u
           : 0u;
@@ -1678,7 +1678,7 @@ struct MoiOwnerRegisterReferenceSummary {
         (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
          : moi_load_clobbers_address(candidate)                            ? 1u
                                                                            : 0u) +
-        (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                  two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
              ? 1u
              : 0u));
@@ -1843,6 +1843,15 @@ struct MoiResourcePlanningState {
       stored.block_set.insert(stored.scope.blocks.begin(), stored.scope.blocks.end());
       std::vector<const Instruction *> context_liveness_queries;
       LivenessAnalysisOptions liveness_options;
+      liveness_options.arch = arch;
+      liveness_options.entry_block = stored.scope.entry;
+      liveness_options.text = text;
+      std::vector<BasicBlock *> additional_entry_blocks;
+      for (uint64_t offset : additional_entry_offsets) {
+        if (BasicBlock *block = block_for_offset(block_index, offset))
+          additional_entry_blocks.push_back(block);
+      }
+      liveness_options.additional_entry_blocks = additional_entry_blocks;
       if (restrict_liveness_queries) {
         for (BasicBlock *block : stored.scope.blocks) {
           const auto queries = liveness_queries_by_block.find(block);
@@ -2231,7 +2240,7 @@ struct MoiInlineDenseRouterScalarAbi {
 moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t arch) {
   if (options.moi_engine != ConSanMoiEngine::InlineShadow ||
       (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-       arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+       arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5)) {
     return std::nullopt;
   }
   if (options.moi_inline_branch_only_scalar_spill)
@@ -2243,13 +2252,13 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
   if (options.automatic_moi_inline_sgpr_spill) {
     if (!options.moi_inline_dispatch_key_sgpr)
       return std::nullopt;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_inline_call_return_sgpr)
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !options.moi_inline_call_return_sgpr)
       return std::nullopt;
     return MoiInlineDenseRouterScalarAbi{
         .indirect_jump = *indirect_jump,
         .dispatch_key_sgpr = *options.moi_inline_dispatch_key_sgpr,
         .call_return_sgpr =
-            arch == ROCJITSU_CODE_ARCH_GFX1250 ? options.moi_inline_call_return_sgpr : std::nullopt,
+            arch == ROCJITSU_CODE_ARCH_CDNA5 ? options.moi_inline_call_return_sgpr : std::nullopt,
     };
   }
 
@@ -2261,9 +2270,9 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
       // GFX1250 derives its key from the scalar-call return PC. CDNA3/4 and
       // RDNA4 use an explicit key in the otherwise-unused return pair's low
       // half.
-      .dispatch_key_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250 ? indirect_jump->pc_sgpr
-                                                              : static_cast<uint16_t>(base + 28u),
-      .call_return_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250
+      .dispatch_key_sgpr = arch == ROCJITSU_CODE_ARCH_CDNA5 ? indirect_jump->pc_sgpr
+                                                            : static_cast<uint16_t>(base + 28u),
+      .call_return_sgpr = arch == ROCJITSU_CODE_ARCH_CDNA5
                               ? std::optional<uint16_t>(static_cast<uint16_t>(base + 28u))
                               : std::nullopt,
   };
@@ -2494,7 +2503,7 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     // incoming bank mode.  Relocating a high-bank WMMA sequence therefore
     // silently changes its operands.  Keep host relocation in the low bank
     // until the host-body ABI explicitly carries and restores this state.
-    if (resource_state.arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (resource_state.arch == ROCJITSU_CODE_ARCH_CDNA5) {
       const std::optional<uint16_t> mode =
           consan_gfx1250_vgpr_msb_mode_at(text, /*text_file_offset=*/0u, owner_begin, host_offset);
       if (!mode || *mode != 0u)
@@ -2524,7 +2533,7 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     }
     if (displaced_words.size() != host_word_count)
       return std::nullopt;
-    if (resource_state.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+    if (resource_state.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         std::ranges::any_of(displaced_words,
                             [](uint32_t word) { return (word & 0xffff0000u) == 0xbf860000u; })) {
       // Moving the transition would also remove it from the original CFG.
@@ -2813,7 +2822,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     });
   }
   const bool guest_replay_needs_disjoint_address_scratch =
-      access_candidate != nullptr && state.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      access_candidate != nullptr && state.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(access_candidate->mnemonic).value_or(0u) > 8u;
   const bool supports_access_operand_overlap_spill =
       (options.moi_engine == ConSanMoiEngine::InlineShadow &&
@@ -3344,7 +3353,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
       return 8u;
     if (options.moi_dynamic_stack_spill)
       return moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u);
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
       return 8u;
     return options.moi_track_atomics ? 8u : 7u;
   }
@@ -3438,7 +3447,7 @@ moi_architectural_sgpr_layout(rj_code_arch_t arch) {
         .ordinary_limit = 102u,
     };
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // gfx1250 scalar encodings below the ordinary operand limit still alias
     // architectural state: s102:s103 are FLAT_SCRATCH and s104:s105 are
     // XNACK_MASK. LLVM reserves both pairs even when kernel metadata reports a
@@ -3474,14 +3483,14 @@ persistent_sgpr_range_overlaps_reserved_ordinary_range(uint16_t base, uint16_t w
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
                                                                       ROCJITSU_CODE_ARCH_CDNA4));
 static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
-                                                                     ROCJITSU_CODE_ARCH_GFX1250));
+                                                                     ROCJITSU_CODE_ARCH_CDNA5));
 static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
-                                                                     ROCJITSU_CODE_ARCH_GFX1250));
+                                                                     ROCJITSU_CODE_ARCH_CDNA5));
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u,
-                                                                      ROCJITSU_CODE_ARCH_GFX1250));
+                                                                      ROCJITSU_CODE_ARCH_CDNA5));
 static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA3).ordinary_limit == 102u);
 static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA4).ordinary_limit == 102u);
-static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_GFX1250).ordinary_limit == 106u);
+static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA5).ordinary_limit == 106u);
 
 [[nodiscard]] uint16_t moi_dispatch_state_sgpr_count(const ConSanOptions &options) {
   (void)options;
@@ -4890,7 +4899,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
   const rj_code_arch_t arch = state.arch;
   const bool has_inline_dispatch_consumer =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      !(arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_track_atomics) &&
+      !(arch == ROCJITSU_CODE_ARCH_CDNA5 && !options.moi_track_atomics) &&
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||
@@ -4899,7 +4908,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
   const bool needs_dispatch_id =
       has_inline_dispatch_consumer || options.moi_engine == ConSanMoiEngine::RecordReplay ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
-       arch != ROCJITSU_CODE_ARCH_GFX1250);
+       arch != ROCJITSU_CODE_ARCH_CDNA5);
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
       options.moi_dispatch_id_vgpr) {
     return false;
@@ -4986,7 +4995,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
   // owner and let resource-plan rebuilding reject only incompatible groups.
   // The pair remains code-object-wide, so this does not change the report ABI
   // or any emitted probe sequence.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
       arch == ROCJITSU_CODE_ARCH_CDNA4) {
     const int32_t last_base =
         static_cast<int32_t>((ordinary_sgpr_limit - dispatch_state_count) & ~1u);
@@ -5484,7 +5493,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       record_replay_requires_entry_workgroup_capture(options) && has_supported_record_replay_site &&
       !record_replay_has_entry_workgroup_capture(options);
   const bool needs_gfx1250_cluster_workgroup_id =
-      needs_record_replay_workgroup_tuple && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      needs_record_replay_workgroup_tuple && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
         return kernel.uses_gfx1250_cluster_workgroup_id;
       });
@@ -5607,7 +5616,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                                           static_cast<uint32_t>(needs_workgroup_key) +
                                           record_replay_workgroup_count + dispatch_id_count;
   const uint32_t persistent_count =
-      options.moi_engine == ConSanMoiEngine::InlineShadow && arch == ROCJITSU_CODE_ARCH_GFX1250
+      options.moi_engine == ConSanMoiEngine::InlineShadow && arch == ROCJITSU_CODE_ARCH_CDNA5
           ? std::max<uint32_t>(named_persistent_count, 5u)
           : named_persistent_count;
   const uint32_t persistent_end = persistent_base + persistent_count;

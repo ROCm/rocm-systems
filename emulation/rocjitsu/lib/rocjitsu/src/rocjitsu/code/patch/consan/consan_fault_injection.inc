@@ -1872,7 +1872,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
   const uint32_t address_bank =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? static_cast<uint32_t>(selected->gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u)
           : 0u;
   const uint32_t physical_target_address_vgpr = address_bank * 256u + target_address_vgpr;
@@ -2136,7 +2136,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
       return (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
              static_cast<uint32_t>(*site.dst_accvgpr) + *dword_count <= 256u;
     }
-    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 1024u : 256u;
+    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1024u : 256u;
     return site.dst_vgpr.has_value() &&
            static_cast<uint32_t>(*site.dst_vgpr) + *dword_count <= register_limit;
   }
@@ -2328,7 +2328,7 @@ retarget_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst, rj_code_ar
   }
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     words[1] = (words[1] & ~0xffu) | vdst;
     return words;
   }
@@ -2403,7 +2403,7 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
         (words[1] & ~kRdna3FlatDataMask & 0x00ffffffu) | (static_cast<uint32_t>(vdst) << 24u);
     return words;
   }
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     uint16_t load_op = 0;
     switch (width_bits) {
     case 8:
@@ -2472,11 +2472,11 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
                                                               rj_code_arch_t arch,
                                                               uint16_t gfx1250_vgpr_msb_mode) {
   if (site.kind == ConSanLdsAccessKind::Read) {
-    const uint32_t dst_bank = arch == ROCJITSU_CODE_ARCH_GFX1250
+    const uint32_t dst_bank = arch == ROCJITSU_CODE_ARCH_CDNA5
                                   ? static_cast<uint32_t>((gfx1250_vgpr_msb_mode >> 6u) & 0x3u)
                                   : 0u;
     const uint32_t physical_vgpr = dst_bank * 256u + site.dst_vgpr.value_or(0u) + chunk_index;
-    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 1024u : 256u;
+    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1024u : 256u;
     return site.dst_vgpr && physical_vgpr < register_limit
                ? std::optional<uint16_t>(static_cast<uint16_t>(physical_vgpr))
                : std::nullopt;

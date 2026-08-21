@@ -961,7 +961,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         continue;
       ++supported_candidate_count;
       const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
-          arch == ROCJITSU_CODE_ARCH_GFX1250 && site.file_offset >= site.text_offset
+          arch == ROCJITSU_CODE_ARCH_CDNA5 && site.file_offset >= site.text_offset
               ? consan_gfx1250_vgpr_msb_mode_at(original_bytes, site.file_offset - site.text_offset,
                                                 site_context.container_entry_text_offset,
                                                 site.file_offset)
@@ -973,7 +973,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       const auto gfx1250_two_address =
           gfx1250_two_address_expansion_plan(original_bytes, site, arch);
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
           (is_two_address_lds_load(site) || is_two_address_lds_store(site)) &&
           !gfx1250_two_address) {
         ++missing_width_plan_site_count;
@@ -1036,7 +1036,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         requested_words += 4u;
       if (spill_vcc_save_to_vgpr && gfx1250_vgpr_msb_mode.value_or(0u) != 0u)
         requested_words += 2u;
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && site.kind == ConSanLdsAccessKind::Read &&
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.kind == ConSanLdsAccessKind::Read &&
           site.dst_vgpr) {
         const uint32_t dst_bank =
             static_cast<uint32_t>((gfx1250_vgpr_msb_mode.value_or(0u) >> 6u) & 0x3u);
@@ -1640,7 +1640,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             std::max<uint16_t>(highest_instrumentation_sgpr, candidate.vcc_save_sgpr);
       const uint16_t fresh_call_return_sgpr =
           static_cast<uint16_t>((highest_instrumentation_sgpr + 2u) & ~uint16_t{1u});
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
           fresh_call_return_sgpr + 1u < REGISTER_SET_ALLOCATABLE_SGPRS) {
         normalized_seed_groups.push_back(std::move(seed_group));
         continue;
@@ -1708,7 +1708,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             std::max<uint16_t>(highest_instrumentation_sgpr, candidate.vcc_save_sgpr);
       const uint16_t call_return_sgpr =
           static_cast<uint16_t>((highest_instrumentation_sgpr + 2u) & ~uint16_t{1u});
-      const bool use_explicit_key = arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+      const bool use_explicit_key = arch != ROCJITSU_CODE_ARCH_CDNA5 ||
                                     call_return_sgpr + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS;
       const std::optional<uint16_t> explicit_key_sgpr =
           use_explicit_key && !seed_group.candidates.empty()

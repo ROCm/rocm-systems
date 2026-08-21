@@ -44,7 +44,7 @@ void write_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void 
 }
 
 TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
-  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx950_cdna4.json",
+  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx950_mi355x.json",
                                     rocjitsu::kEmbeddedSchema);
   auto *memory = loaded.memory();
   auto *cp = loaded.soc()->xcd(0)->command_processor();

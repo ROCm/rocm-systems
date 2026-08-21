@@ -12,14 +12,14 @@ enum class AtomicFaultEncoding : uint8_t {
       ((mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst)) ||
        (mnemonic.starts_with("global_atomic") && size == sizeof(cdna4::FlatGlblMachineInst))))
     return AtomicFaultEncoding::CdnaFlat;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst))
     return AtomicFaultEncoding::FlatLike;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
       mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
     return AtomicFaultEncoding::Buffer;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
       mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
       size == sizeof(rdna4::VdsMachineInst))
     return AtomicFaultEncoding::Ds;
@@ -42,7 +42,7 @@ enum class AtomicFaultEncoding : uint8_t {
 
 [[nodiscard]] bool lds_address_fault_arch_supported(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] bool lds_address_fault_site_supported(const ConSanLdsSite &site,
@@ -54,7 +54,7 @@ enum class AtomicFaultEncoding : uint8_t {
   }
   // gfx1250 two-address accesses are split during instrumentation, so there is
   // no single relocated instruction against which to prove this exact rewrite.
-  return arch != ROCJITSU_CODE_ARCH_GFX1250 ||
+  return arch != ROCJITSU_CODE_ARCH_CDNA5 ||
          (!is_two_address_lds_load(site) && !is_two_address_lds_store(site));
 }
 
@@ -135,7 +135,7 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     site.size = lds.size;
     site.width_bits = lds.width_bits;
     site.address_vgpr = lds.addr_vgpr;
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && lds.file_offset >= lds.text_offset) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && lds.file_offset >= lds.text_offset) {
       site.gfx1250_vgpr_msb_mode = consan_gfx1250_vgpr_msb_mode_at(
           bytes, container.text_file_offset, container.entry_text_offset, lds.file_offset);
     }

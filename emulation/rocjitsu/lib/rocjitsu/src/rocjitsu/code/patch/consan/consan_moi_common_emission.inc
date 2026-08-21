@@ -26,7 +26,7 @@ moi_resident_wave_hwreg(rj_code_arch_t arch) {
     return MoiResidentWaveHwreg{.id = kLegacyHwRegHwId, .bits = kLegacyHwIdResidentWaveBits};
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return MoiResidentWaveHwreg{.id = kGfx11HwRegHwId1, .bits = kGfx11HwIdResidentWaveBits};
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return MoiResidentWaveHwreg{.id = kGfx12HwRegHwId1, .bits = kGfx12HwIdResidentWaveBits};
   return std::nullopt;
 }
@@ -229,7 +229,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // mirror establishes the same validity invariant without that tag. RDNA4
     // can instead use its packed first-use bitmap. If either full layout does
     // not fit, the caller uses the semantically equivalent external table.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;
@@ -299,7 +299,7 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
   std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
   if (include_record_replay_workgroup) {
     const bool include_cluster_workgroup_id =
-        arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         std::ranges::any_of(
             resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
               const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
@@ -797,7 +797,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   };
 
   const auto two_address_scale = two_address_native_lds_offset_scale(candidate.mnemonic);
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !two_address_scale)
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !two_address_scale)
     return copy_original();
 
   const auto ranges = candidate_access_ranges(bytes, candidate, arch);
@@ -886,7 +886,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
   const bool save_clobbered_address = moi_load_clobbers_address(candidate);
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   const uint16_t address_scratch_count =
       static_cast<uint16_t>((materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u)) +

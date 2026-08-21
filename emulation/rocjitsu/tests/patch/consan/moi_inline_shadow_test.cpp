@@ -2196,7 +2196,7 @@ TEST(ConSanMoi, WorkgroupShadowLayoutUsesOneEightByteSlotPerFourByteLdsCell) {
 
 TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
   constexpr uint32_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250);
+      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
   constexpr uint32_t kOriginalLdsBytes = kConfiguredLdsBytes / 4u;
   const auto layout =
       plan_consan_moi_compact_workgroup_shadow(kOriginalLdsBytes, kConfiguredLdsBytes);
@@ -2210,11 +2210,11 @@ TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
 }
 
 TEST(ConSanMoi, Gfx1250WorkgroupLdsMatchesSimulatorConfig) {
-  const auto loaded =
-      config::load_config(std::string(CONFIG_DIR) + "/gfx1250.json", rocjitsu::kEmbeddedSchema);
+  const auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
+                                          rocjitsu::kEmbeddedSchema);
 
   ASSERT_TRUE(loaded.device.present);
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250),
+  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5),
             loaded.device.lds_size_kb * 1024u);
 }
 
@@ -2222,10 +2222,10 @@ TEST(ConSanMoi, RuntimeLdsApertureOverridesConfiguredDefault) {
   ConSanOptions options;
   options.moi_max_workgroup_lds_bytes = 96u * 1024u;
 
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_GFX1250), 96u * 1024u);
+  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_CDNA5), 96u * 1024u);
   options.moi_max_workgroup_lds_bytes.reset();
-  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_GFX1250),
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(consan_moi_max_workgroup_lds_bytes(options, ROCJITSU_CODE_ARCH_CDNA5),
+            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
@@ -2242,7 +2242,7 @@ TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
 
 TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
   constexpr uint64_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250);
+      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
   constexpr uint64_t kExactBytesPerBank =
       kConfiguredLdsBytes * sizeof(ConSanMoiInlineExactShadowSlot);
   constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
@@ -2278,7 +2278,7 @@ TEST(ConSanMoi, LazyWorkgroupShadowAddsTwoBitValidityState) {
 
 TEST(ConSanMoi, GenerationTaggedWorkgroupShadowNeedsNoInitializationState) {
   const auto layout = plan_consan_moi_generation_tagged_workgroup_shadow(
-      21120u, consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250));
+      21120u, consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
   ASSERT_TRUE(layout);
   EXPECT_EQ(layout->base, 21120u);
   EXPECT_EQ(layout->size, 42240u);
@@ -2757,7 +2757,7 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   constexpr std::string_view kernel_name = "dynamic_lds_external_shadow";
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, kernel_name);
@@ -2981,7 +2981,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   constexpr auto store0 = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   constexpr auto store1 = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 5> text_words = {
-      store0[0], store0[1], store1[0], store1[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      store0[0], store0[1], store1[0], store1[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "workgroup_visible_evidence_latch");
@@ -3018,31 +3018,30 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
             (std::array<uint32_t, 3>{64u, 1u, 1u}));
   const uint16_t initializer_offset = static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u);
   const auto extract_x = ib::build_v_and_b32_literal(
-      initializer_offset, 0x3ffu, /*packed_workitem_id=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+      initializer_offset, 0x3ffu, /*packed_workitem_id=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto select_initialization_x_lanes = ib::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(64u), initializer_offset, ROCJITSU_CODE_ARCH_GFX1250);
+      scalar_positive_inline_u32(64u), initializer_offset, ROCJITSU_CODE_ARCH_CDNA5);
   const auto legacy_first_wave = ib::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(32u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+      scalar_positive_inline_u32(32u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto scale_x = ib::build_v_lshlrev_b32(initializer_offset, scalar_positive_inline_u32(4u),
-                                               initializer_offset, ROCJITSU_CODE_ARCH_GFX1250);
+                                               initializer_offset, ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_EQ(prologue->workgroup_shadow_validity_base, 13080u);
   EXPECT_EQ(prologue->workgroup_shadow_validity_size, 288u);
-  const auto add_shadow_base =
-      ib::build_v_add_u32_literal(initializer_address, /*validity base=*/13080u, initializer_offset,
-                                  ROCJITSU_CODE_ARCH_GFX1250);
+  const auto add_shadow_base = ib::build_v_add_u32_literal(
+      initializer_address, /*validity base=*/13080u, initializer_offset, ROCJITSU_CODE_ARCH_CDNA5);
   const auto advance_row = ib::build_v_add_u32(
       initializer_address, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
-      initializer_address, ROCJITSU_CODE_ARCH_GFX1250);
+      initializer_address, ROCJITSU_CODE_ARCH_CDNA5);
   const auto select_x_zero = ib::build_v_cmp_eq_u32_vcc(
-      scalar_positive_inline_u32(0u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+      scalar_positive_inline_u32(0u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto end_address = ib::build_v_cmp_gt_u32_literal_vcc(
       /*13080-byte base + 288-byte validity state=*/13368u, initializer_address,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto store_wide = ib::build_ds_store_b128(
-      initializer_address, *result.resolved_moi_epoch_vgpr, 0u, ROCJITSU_CODE_ARCH_GFX1250);
+      initializer_address, *result.resolved_moi_epoch_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto count_lanes =
       ib::build_s_bcnt1_i32_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
-                                /*exec=*/126u, ROCJITSU_CODE_ARCH_GFX1250);
+                                /*exec=*/126u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(extract_x);
   ASSERT_TRUE(select_initialization_x_lanes);
   ASSERT_TRUE(legacy_first_wave);
@@ -3069,20 +3068,20 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
     EXPECT_NE(std::ranges::find(
                   prologue_words,
                   build_v_mov_b32_e32(static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + i),
-                                      scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_GFX1250)),
+                                      scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_CDNA5)),
               prologue_words.end());
   }
   EXPECT_NE(std::ranges::find(prologue_words, *count_lanes), prologue_words.end())
       << "the runtime x-row width must determine the exact shadow stride";
   EXPECT_NE(std::find(prologue_words.begin(), prologue_words.end(),
                       build_s_mov_b32(evidence_latch, scalar_positive_inline_u32(0),
-                                      ROCJITSU_CODE_ARCH_GFX1250)),
+                                      ROCJITSU_CODE_ARCH_CDNA5)),
             prologue_words.end())
       << testing::PrintToString(result.warnings);
 
   const auto latch_nonzero = build_rdna4_s_cmp_lg_u32(evidence_latch, scalar_positive_inline_u32(0),
-                                                      ROCJITSU_CODE_ARCH_GFX1250);
-  const auto skip_published = build_s_cbranch_scc1(0, ROCJITSU_CODE_ARCH_GFX1250);
+                                                      ROCJITSU_CODE_ARCH_CDNA5);
+  const auto skip_published = build_s_cbranch_scc1(0, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(latch_nonzero);
   ASSERT_TRUE(skip_published);
   size_t access_count = 0;
@@ -3098,7 +3097,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
     EXPECT_EQ((*(compare + 1)) & 0xffff0000u, (*skip_published) & 0xffff0000u);
     EXPECT_NE(std::find(compare + 2, body.end(),
                         build_s_mov_b32(evidence_latch, scalar_positive_inline_u32(1),
-                                        ROCJITSU_CODE_ARCH_GFX1250)),
+                                        ROCJITSU_CODE_ARCH_CDNA5)),
               body.end());
   }
   EXPECT_EQ(access_count, 2u);
@@ -3109,7 +3108,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
   constexpr auto atomic =
       cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 3> text_words = {atomic[0], atomic[1],
-                                              build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
+                                              build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "local_atomic_shadow");
   append_kernel_metadata_note(bytes, "local_atomic_shadow",
                               /*uses_dynamic_stack=*/false, /*sgpr_count=*/0u, std::nullopt,
@@ -3140,12 +3139,12 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressure) {
-  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
-  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_GFX1250);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_CDNA5);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -3356,7 +3355,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
 void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_arch_t arch) {
   std::vector<uint32_t> text_words(800u, build_s_nop(0, arch));
   size_t cursor = 0u;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
     text_words[cursor++] = store[0];
     text_words[cursor++] = store[1];
@@ -3369,7 +3368,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
     text_words[cursor++] = build_s_mov_b32(105u, sgpr, arch);
   text_words.back() = build_s_endpgm(arch);
   const std::vector<uint8_t> bytes =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? make_gfx1250_code_object(text_words, "inline_branch_only_fixed_stack_gfx1250",
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
                                      /*uses_dynamic_stack=*/false)
@@ -3443,7 +3442,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {
-  check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(ROCJITSU_CODE_ARCH_GFX1250);
+  check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
@@ -3460,7 +3459,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
     text_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(1u), arch);
   }
   for (uint32_t site = 0u; site < 8u; ++site) {
-    if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
       text_words[cursor++] = store[0];
       text_words[cursor++] = store[1];
@@ -3476,7 +3475,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   }
   text_words.back() = build_s_endpgm(arch);
   const std::vector<uint8_t> bytes =
-      arch == ROCJITSU_CODE_ARCH_GFX1250
+      arch == ROCJITSU_CODE_ARCH_CDNA5
           ? make_gfx1250_code_object(text_words, "inline_branch_only_preferred_gfx1250",
                                      kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
                                      /*uses_dynamic_stack=*/false)
@@ -3521,7 +3520,7 @@ TEST(ConSanMoi, Rdna4InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter)
 
 TEST(ConSanMoi, Gfx1250InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter) {
   check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
@@ -3783,7 +3782,7 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "odd_shadow_slot_count");
   mutate_first_kernel_descriptor(bytes,
@@ -3814,13 +3813,13 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto store_pair =
       ib::build_ds_store_b64(*result.resolved_moi_owner_vgpr, *result.resolved_moi_epoch_vgpr, 0u,
-                             ROCJITSU_CODE_ARCH_GFX1250);
+                             ROCJITSU_CODE_ARCH_CDNA5);
   const auto store_quad =
       ib::build_ds_store_b128(*result.resolved_moi_owner_vgpr, *result.resolved_moi_epoch_vgpr, 0u,
-                              ROCJITSU_CODE_ARCH_GFX1250);
+                              ROCJITSU_CODE_ARCH_CDNA5);
   const auto scale_x = ib::build_v_lshlrev_b32(
       static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u), scalar_positive_inline_u32(3u),
-      /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+      /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(store_pair);
   ASSERT_TRUE(store_quad);
   ASSERT_TRUE(scale_x);
@@ -3834,7 +3833,7 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "large_local_mirror");
   mutate_first_kernel_descriptor(
@@ -3870,15 +3869,15 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   const uint16_t scratch = *access->scratch_vgpr;
   const auto exchange = ib::build_ds_storexchg_rtn_b64(static_cast<uint16_t>(scratch + 5u), scratch,
                                                        static_cast<uint16_t>(scratch + 2u), 0u,
-                                                       ROCJITSU_CODE_ARCH_GFX1250);
+                                                       ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(exchange);
   EXPECT_TRUE(contains_subsequence(body, *exchange));
   const auto claim = ib::build_ds_or_rtn_b32(
       static_cast<uint16_t>(scratch + 5u), static_cast<uint16_t>(scratch + 12u),
-      static_cast<uint16_t>(scratch + 8u), 0u, ROCJITSU_CODE_ARCH_GFX1250);
+      static_cast<uint16_t>(scratch + 8u), 0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto observe =
       ib::build_ds_load_b32(static_cast<uint16_t>(scratch + 5u),
-                            static_cast<uint16_t>(scratch + 12u), 0u, ROCJITSU_CODE_ARCH_GFX1250);
+                            static_cast<uint16_t>(scratch + 12u), 0u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(claim);
   ASSERT_TRUE(observe);
   EXPECT_TRUE(contains_subsequence(body, *claim));
@@ -3900,7 +3899,7 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "compact_validity_state");
   mutate_first_kernel_descriptor(
@@ -3930,10 +3929,10 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
   const uint16_t scratch = *access->scratch_vgpr;
   const auto state_index =
       ib::build_v_and_b32_literal(static_cast<uint16_t>(scratch + 8u), 15u,
-                                  static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_GFX1250);
+                                  static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_CDNA5);
   const auto scale_state_index =
       ib::build_v_lshlrev_b32(static_cast<uint16_t>(scratch + 8u), scalar_positive_inline_u32(1u),
-                              static_cast<uint16_t>(scratch + 8u), ROCJITSU_CODE_ARCH_GFX1250);
+                              static_cast<uint16_t>(scratch + 8u), ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(state_index);
   ASSERT_TRUE(scale_state_index);
   std::vector<uint32_t> two_bit_state(state_index->begin(), state_index->end());
@@ -3946,17 +3945,17 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto acquire = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/4, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(release && acquire);
   const std::array<uint32_t, 15> text_words = {
       store[0],      store[1],      0xEE0B0000u,
       0x00000000u,   0x00000000u,   (*release)[0],
       (*release)[1], (*release)[2], (*acquire)[0],
       (*acquire)[1], (*acquire)[2], 0xEE0AC000u,
-      0x00000000u,   0x00000000u,   build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      0x00000000u,   0x00000000u,   build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "compact_atomic_workgroup_key");
   mutate_first_kernel_descriptor(
@@ -3989,7 +3988,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
        destination < static_cast<uint16_t>(*access->scratch_vgpr + 25u); ++destination) {
     const uint32_t copy = build_v_mov_b32_e32(
         destination, vector_source_vgpr(*result.resolved_moi_workgroup_key_vgpr),
-        ROCJITSU_CODE_ARCH_GFX1250);
+        ROCJITSU_CODE_ARCH_CDNA5);
     copies_workgroup_key |= std::ranges::find(body, copy) != body.end();
   }
   EXPECT_TRUE(copies_workgroup_key);
@@ -3998,13 +3997,13 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   const uint16_t original_exec =
       static_cast<uint16_t>(exec_base + kConSanMoiInlineOriginalExecSaveOffset);
   const auto save_original =
-      ib::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_GFX1250);
+      ib::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_CDNA5);
   const auto restore_original =
-      ib::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_GFX1250);
+      ib::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_CDNA5);
   const auto authorize_stable_access_token = ib::build_v_cmp_gt_u32_vcc(
       scalar_positive_inline_u32(
           static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
-      static_cast<uint16_t>(*access->scratch_vgpr + 16u), ROCJITSU_CODE_ARCH_GFX1250);
+      static_cast<uint16_t>(*access->scratch_vgpr + 16u), ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(save_original && restore_original && authorize_stable_access_token);
   EXPECT_NE(std::ranges::find(body, *save_original), body.end());
   EXPECT_NE(std::ranges::find(body, *restore_original), body.end());
@@ -4015,17 +4014,17 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto acquire = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/4, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(release && acquire);
   const std::array<uint32_t, 15> text_words = {
       store[0],      store[1],      0xEE0B0000u,
       0x00000000u,   0x00000000u,   (*release)[0],
       (*release)[1], (*release)[2], (*acquire)[0],
       (*acquire)[1], (*acquire)[2], 0xEE0AC000u,
-      0x00000000u,   0x00000000u,   build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      0x00000000u,   0x00000000u,   build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "full_local_atomic_workgroup_key");
@@ -4058,7 +4057,7 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
        destination < static_cast<uint16_t>(*access->scratch_vgpr + 25u); ++destination) {
     const uint32_t copy = build_v_mov_b32_e32(
         destination, vector_source_vgpr(*result.resolved_moi_workgroup_key_vgpr),
-        ROCJITSU_CODE_ARCH_GFX1250);
+        ROCJITSU_CODE_ARCH_CDNA5);
     copies_workgroup_key |= std::ranges::find(body, copy) != body.end();
   }
   EXPECT_TRUE(copies_workgroup_key);
@@ -4071,7 +4070,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "paired_compact_cells");
   mutate_first_kernel_descriptor(
@@ -4104,7 +4103,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   const uint16_t scratch = *access->scratch_vgpr;
   const auto paired_exchange = ib::build_ds_storexchg_rtn_b64(
       static_cast<uint16_t>(scratch + 5u), scratch, static_cast<uint16_t>(scratch + 2u), 0u,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(paired_exchange);
   EXPECT_EQ(count_subsequence(body, *paired_exchange), 2u)
       << "each disjoint b64 range should have an exact cell-exchange loop";
@@ -4124,7 +4123,7 @@ TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "large_two_address_inline_shadow");
@@ -6157,7 +6156,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowDefersLoadBeforeAnchorIslandContinuation) {
   constexpr size_t kLargeTextWords = 33000u;
   constexpr size_t kOwnerWords = 65u;
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
-  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   for (size_t site = 0; site < 8u; ++site) {
     const size_t offset = site * 8u;
@@ -6165,10 +6164,10 @@ TEST(ConSanMoi, Gfx1250InlineShadowDefersLoadBeforeAnchorIslandContinuation) {
     text_words[offset + 1u] = load[1];
   }
   const uint32_t address_consumer =
-      build_v_mov_b32_e32(/*vdst=*/4, vector_source_vgpr(11), ROCJITSU_CODE_ARCH_GFX1250);
+      build_v_mov_b32_e32(/*vdst=*/4, vector_source_vgpr(11), ROCJITSU_CODE_ARCH_CDNA5);
   text_words[2] = address_consumer;
-  text_words[kOwnerWords - 1u] = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[kOwnerWords - 1u] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "far_vds_load");
   mutate_elf_symbol(bytes, 1,
@@ -6207,8 +6206,8 @@ TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
   constexpr uint32_t kRestoreGuest = 0xBF860040u;
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
   std::vector<uint32_t> text_words = {0xBF860000u | kGuestMode, load[0], load[1]};
-  text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "banked_vds_load");
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
@@ -6243,12 +6242,12 @@ TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
 TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
-      9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
     text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_inline_shadow");
 
@@ -6280,14 +6279,14 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
 TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(
-      9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+      9u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     const auto store = cdna5::build_vds(
         cdna5::kDsStoreB32Vds,
         {.offset0 = static_cast<uint8_t>(index * sizeof(uint32_t)), .addr = 0u, .data0 = 0u});
     text_words.insert(text_words.end(), store.begin(), store.end());
   }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82u;
@@ -6322,7 +6321,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
 }
 
 TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kFirstWindowAccessCount = 2u;
   constexpr uint32_t kSecondWindowAccessCount = 6u;
   constexpr uint32_t kAccessCount = kFirstWindowAccessCount + kSecondWindowAccessCount;
@@ -7089,16 +7088,16 @@ TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33000u;
-  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 32u;
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
     text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
-    text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-    text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+    text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+    text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
   }
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_dense_inline_shadow_barriers");
 
@@ -7141,8 +7140,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const uint32_t external_return = build_s_setpc_b64(/*sdst=*/26, ROCJITSU_CODE_ARCH_GFX1250);
-  const uint32_t spill_window_return = build_s_setpc_b64(/*sdst=*/88, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t external_return = build_s_setpc_b64(/*sdst=*/26, ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t spill_window_return = build_s_setpc_b64(/*sdst=*/88, ROCJITSU_CODE_ARCH_CDNA5);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore)
       continue;
@@ -7154,7 +7153,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
 }
 
 TEST(ConSanMoi, Gfx1250BranchOnlyInlineShadowFarBarrierDoesNotAbortObject) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr size_t kLargeTextWords = 33'000u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, kArch);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
@@ -7211,16 +7210,16 @@ TEST(ConSanMoi, Gfx1250BranchOnlyInlineShadowFarBarrierDoesNotAbortObject) {
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33'000u;
-  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 32u;
   for (uint32_t index = 0; index < kAccessCount; ++index) {
     text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
     text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
   }
-  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
@@ -7260,7 +7259,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
       barrier->anchor_offset, *access_dispatcher->moi_dense_entry_island_offset);
   ASSERT_TRUE(call_delta);
   const auto reused_call =
-      instrumentation::build_s_call_i64(/*sdst=*/26u, *call_delta, ROCJITSU_CODE_ARCH_GFX1250);
+      instrumentation::build_s_call_i64(/*sdst=*/26u, *call_delta, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(reused_call);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7323,7 +7322,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   constexpr uint32_t kAccessCount = 9u;
   constexpr uint32_t kBarrierCount = 64u;
   constexpr size_t kLargeTextWords = 33'000u;
-  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 32u;
   for (uint32_t index = 0; index < kAccessCount; ++index) {
@@ -7331,10 +7330,10 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
     text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
   }
   for (uint32_t index = 0; index < kBarrierCount; ++index) {
-    text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-    text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+    text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+    text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
   }
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
@@ -7410,7 +7409,7 @@ TEST(ConSanMoi, Rdna4SharedHelperBarrierUsesCommonPrivateEpochState) {
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLargeKernel) {
   constexpr uint32_t kBarriersPerWindow = 9u;
   constexpr size_t kSecondWindowWord = 65'580u;
-  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_CDNA5);
   std::vector<uint32_t> text_words(kSecondWindowWord + 64u, filler);
   const auto append_window = [&](size_t cursor, bool include_accesses) {
     for (uint32_t index = 0; index < kBarriersPerWindow; ++index) {
@@ -7418,13 +7417,13 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
         text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
         text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0 offset:index*4
       }
-      text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
-      text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+      text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5);
+      text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5);
     }
   };
   append_window(32u, /*include_accesses=*/true);
   append_window(kSecondWindowWord, /*include_accesses=*/false);
-  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_partitioned_dense_inline_shadow_barriers");
 
@@ -7472,7 +7471,7 @@ TEST(ConSanMoi, Gfx1250InlineBarrierEstablishesLowBankBeforeAdjacentGuestTransit
       0xBE804EC1u, // s_barrier_signal -1
       kBarrierWait,
       0xBF860001u, // The next guest block selects a nonzero VGPR bank.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -7498,7 +7497,7 @@ TEST(ConSanMoi, Gfx1250InlineBarrierEstablishesLowBankBeforeAdjacentGuestTransit
       text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
   ASSERT_GE(cave.size(), 2u);
   EXPECT_EQ(cave[0], kBarrierWait);
-  EXPECT_EQ(cave[1], *build_gfx1250_s_set_vgpr_msb_transition(0u, 0u, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(cave[1], *build_gfx1250_s_set_vgpr_msb_transition(0u, 0u, ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners) {
@@ -7509,12 +7508,12 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
         0x00000000u, // ds_store_b32 v0, v0
     };
     for (uint16_t sgpr : live_sgprs)
-      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
-    words.push_back(*build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250));
-    words.push_back(*build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
+    words.push_back(*build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_CDNA5));
+    words.push_back(*build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_CDNA5));
     for (uint16_t sgpr : live_sgprs)
-      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
-    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+      words.push_back(build_s_mov_b32(dead_destination, sgpr, ROCJITSU_CODE_ARCH_CDNA5));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
     return words;
   };
 

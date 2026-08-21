@@ -121,7 +121,7 @@ inline constexpr uint32_t kMaxRdna3AddressFreeScratchPrivateBytes = 0x1000u;
 address_free_scratch_private_limit(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return kMaxAddressFreeScratchPrivateBytes;
   case ROCJITSU_CODE_ARCH_CDNA4:
     return kMaxCdnaAddressFreeScratchPrivateBytes;
@@ -159,7 +159,7 @@ normalize_address_free_scratch_private_size(rj_code_arch_t arch, uint32_t reques
 /// instrumentation recipes. Generated opcode tables and decoder fixtures are
 /// the authority for each builder enabled through this predicate.
 [[nodiscard]] inline constexpr bool is_rdna4_family_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
@@ -641,7 +641,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 3;
   default:
     return 14;
@@ -849,7 +849,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 25;
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
@@ -863,7 +863,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_lshlrev_b32(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 24;
   default:
     return std::nullopt;
@@ -874,7 +874,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_add_nc_u32(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 37;
   default:
     return std::nullopt;
@@ -886,7 +886,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kVMinU32Vop2;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kVMinU32Vop2;
   default:
     return std::nullopt;
@@ -897,7 +897,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_and_b32(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 27;
   default:
     return std::nullopt;
@@ -908,7 +908,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_xor_b32(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return 29;
   default:
     return std::nullopt;
@@ -977,8 +977,7 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 ///        for it only when the window can hold it.
 [[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, int64_t delta,
-                                           size_t minimum_words = 0,
-                                           bool prefer_literal64 = false);
+                                           size_t minimum_words = 0, bool prefer_literal64 = false);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///

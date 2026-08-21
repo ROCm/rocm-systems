@@ -140,7 +140,7 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 
 [[nodiscard]] WaitcheckReport analyze_gfx1250_normal(const std::vector<uint32_t> &program) {
   TestCodeObject code_object(program);
-  return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 constexpr std::array<uint32_t, 4> kGfx1250ScaledWmma{
@@ -154,11 +154,11 @@ TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
   std::vector<uint32_t> program(kGfx1250ScaledWmma.begin(), kGfx1250ScaledWmma.end());
   program.push_back(0xbfb00000u); // s_endpgm.
   TestCodeObject code_object(program);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint64_t, 1> entries{0};
   const std::array<uint64_t, 1> entry_sizes{program.size() * sizeof(uint32_t)};
-  auto blocks = BasicBlock::build_reachable(code_object, *decoder, ROCJITSU_CODE_ARCH_GFX1250,
+  auto blocks = BasicBlock::build_reachable(code_object, *decoder, ROCJITSU_CODE_ARCH_CDNA5,
                                             entries, entry_sizes, 32);
 
   ASSERT_FALSE(blocks.empty());
@@ -1142,7 +1142,7 @@ TEST(WaitcheckTest, Gfx1250StreamDecodePreservesFourWordInstructionAtEnd) {
   append_inst(program, global_load_b32(16));
   program.insert(program.end(), kGfx1250ScaledWmma.begin(), kGfx1250ScaledWmma.end());
 
-  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   const auto diagnostic =
@@ -2223,7 +2223,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesSplitLoadcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2244,7 +2244,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityNormalizesCombinedLoadAndDsWait) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2265,7 +2265,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesPartialDsWaitBeforeResultOverwrit
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2284,7 +2284,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2305,7 +2305,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcntBeforeImplicitCmpxExecDef) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2329,7 +2329,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeXcntClauseDrain) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2355,7 +2355,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeScratchStoreXcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2380,7 +2380,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeScratchLoadReplaceme
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2489,7 +2489,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesAsynccnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2507,7 +2507,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesTensorcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2590,7 +2590,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityAttributesImpliedXcntToLoadcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -2608,7 +2608,7 @@ TEST(WaitcheckTest, Gfx1250CounterParityAttributesImpliedXcntToKmcnt) {
   WaitcheckOptions options;
   options.check_counter_parity = true;
   TestCodeObject code_object(program);
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250, options);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -3127,7 +3127,7 @@ TEST(WaitcheckTest, Gfx1250GlobalLoadWithSaddrUsesSingleVaddrRegister) {
   append_global_load_b64_v8_v7_s0_offset16(program);
   append_global_load_b128_v2_v7_s0(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -3746,7 +3746,7 @@ TEST(WaitcheckTest, Gfx1250CodeObjectTracksVmVsrcInExpertMode) {
   append_inst(program, v_mov_b32(8, 10));
 
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
@@ -3766,7 +3766,7 @@ TEST(WaitcheckTest, Gfx1250WaitIdlePreservesExpertSchedulingMode) {
   append_inst(program, v_mov_b32(8, 10));
 
   TestCodeObject code_object(program);
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
@@ -3782,7 +3782,7 @@ TEST(WaitcheckTest, ScratchOffDoesNotReadVaddrZero) {
   append_inst(program, global_load_b32(0));
   append_inst(program, scratch_load_b128_off(4));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4071,7 +4071,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeSeparatesLowLoadFromHighStoreData) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 1, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4084,7 +4084,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeSeparatesLowLoadFromV512StoreData) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 2, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4097,7 +4097,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeReportsSameHighStoreDataUse) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 1, 0, 0)));
   append_inst(program, flat_store_b32(255));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
@@ -4119,7 +4119,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeAcceptsCombinedWaitBeforeSameHighStoreDat
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 2, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4132,7 +4132,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeReportsSameV768StoreDataUse) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 3, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
@@ -4153,7 +4153,7 @@ TEST(WaitcheckTest, Gfx1250HighVgprModeSeparatesDifferentHighBanks) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 2, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4167,7 +4167,7 @@ TEST(WaitcheckTest, Gfx1250WaitIdlePreservesHighVgprMode) {
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 2, 0, 0)));
   append_inst(program, flat_store_b32(0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
@@ -4521,7 +4521,7 @@ TEST(WaitcheckTest, Gfx1250VopdCndmaskDoesNotRequireWaitAluVaVcc) {
   append_inst(program, v_cmp_gt_u32_e32(5, 12));      // VALU writes VCC.
   append_v_dual_cndmask_b32_v2_v1_v2_dual_mov_b32_v1_0(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4630,7 +4630,7 @@ TEST(WaitcheckTest, DscntPartialWaitCountsYoungerDsSwizzles) {
   append_inst(program, sopp(70, 2)); // s_wait_dscnt 2 retires the oldest result.
   append_inst(program, v_mov_b32(29, 4));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4894,7 +4894,7 @@ TEST(WaitcheckTest, VopdMovDoesNotReadUnusedVsrc1Encoding) {
   append_inst(program, ds_load_b32(0, 10));
   append_v_dual_lshlrev_b32_v17_2_v9_dual_mov_b32_v9_s11(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -4905,7 +4905,7 @@ TEST(WaitcheckTest, BufferOffenUsesSingleVaddrRegister) {
   append_inst(program, ds_load_b32(8, 10));
   append_buffer_load_b128_v32_v7_s4_offen(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5098,7 +5098,7 @@ TEST(WaitcheckTest, Gfx1250Wave32VopCompareDoesNotDefineAdjacentMaskSgpr) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5112,7 +5112,7 @@ TEST(WaitcheckTest, Gfx1250Wave64VopCompareDefinesBothMaskSgprs) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
@@ -5129,7 +5129,7 @@ TEST(WaitcheckTest, Gfx1250Wave32VopdCndmaskDoesNotUseAdjacentMaskSgpr) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5143,7 +5143,7 @@ TEST(WaitcheckTest, Gfx1250Wave64VopdCndmaskUsesBothMaskSgprs) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
@@ -5160,7 +5160,7 @@ TEST(WaitcheckTest, Gfx1250Wave32Vop3CndmaskDoesNotUseAdjacentMaskSgpr) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5174,7 +5174,7 @@ TEST(WaitcheckTest, Gfx1250Wave64Vop3CndmaskUsesBothMaskSgprs) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
@@ -5191,7 +5191,7 @@ TEST(WaitcheckTest, Gfx1250Wave32Vop3CndmaskB16DoesNotUseAdjacentMaskSgpr) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5205,7 +5205,7 @@ TEST(WaitcheckTest, Gfx1250Wave64Vop3CndmaskB16UsesBothMaskSgprs) {
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
@@ -5219,7 +5219,7 @@ TEST(WaitcheckTest, Gfx1250Vop3True16DestinationUsesFullEightBitVgprIndex) {
   append_global_load_b128_v6_v137_s2(program);
   append_v_and_b16_v134_ff_v134(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5388,7 +5388,7 @@ TEST(WaitcheckTest, Gfx1250SBufferLoadSbaseUsesPhysicalDescriptorRegister) {
   append_s_buffer_load_b128_s8_s12_imm48(program);
   append_s_buffer_load_b64_s20_s12_imm64(program);
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -5927,7 +5927,7 @@ TEST(WaitcheckTest, Gfx1250LoadcntAgeSaturatesAcrossCounterOnlyEvents) {
     append_inst(program, global_inv());
   append_inst(program, v_mov_b32(1, 0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
@@ -5943,7 +5943,7 @@ TEST(WaitcheckTest, Gfx1250MaximumLoadcntRetiresSaturatedEvent) {
   append_inst(program, sopp(64, 62));
   append_inst(program, v_mov_b32(1, 0));
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -6650,7 +6650,7 @@ TEST(WaitcheckTest, DescriptorEntryAnalysisStopsAtUnterminatedFunctionEnd) {
   ASSERT_EQ(kernels.size(), 1u);
   EXPECT_EQ(kernels[0].code_size, 2 * sizeof(uint32_t));
 
-  auto report = analyze_waitcnts_for_kernel(code_object, ROCJITSU_CODE_ARCH_GFX1250, kernels[0]);
+  auto report = analyze_waitcnts_for_kernel(code_object, ROCJITSU_CODE_ARCH_CDNA5, kernels[0]);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -7208,11 +7208,11 @@ TEST(WaitcheckTest, Gfx1250DoesNotApplyRdna4SgprControlTransferRules) {
   std::vector<uint32_t> program;
   append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
   append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
-  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_GFX1250));
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_CDNA5));
   const auto image = rocjitsu::waitcheck_test::make_gfx1250_code_object(program);
   AmdGpuCodeObject code_object(image.data(), image.size());
 
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -7301,20 +7301,20 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
   constexpr uint16_t kReturnSreg = 30;
 
   std::vector<uint32_t> program;
-  append_inst(program, global_load_b32(0));                                      // 0x00.
-  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x0c.
+  append_inst(program, global_load_b32(0));                                    // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA5)); // 0x0c.
   program.push_back(0xA988FE08u); // 0x10: s_add_nc_u64 s[8:9], s[8:9], literal64.
   program.push_back(24);          // getpc next 0x10 + 24 -> helper 0x28.
   program.push_back(0);
   program.push_back(
-      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x1c.
-  append_inst(program, v_mov_b32(1, 0));                                         // 0x20.
-  append_inst(program, s_endpgm());                                              // 0x24.
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA5)); // 0x1c.
+  append_inst(program, v_mov_b32(1, 0));                                       // 0x20.
+  append_inst(program, s_endpgm());                                            // 0x24.
   append_inst(program, sopp(64, 0)); // 0x28 helper: s_wait_loadcnt 0.
-  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, 0x48, 0,
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, 0x48, 0,
                                         kReturnSreg)); // 0x2c return.
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   std::unique_ptr<Instruction> add_inst(decode_valid(*decoder, &program[4], 0x10));
   ASSERT_NE(add_inst, nullptr);
   EXPECT_EQ(add_inst->mnemonic(), "s_add_nc_u64");
@@ -7338,8 +7338,7 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
   }
   const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(program.data()),
                                              program.size() * sizeof(uint32_t));
-  const auto fixups =
-      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto fixups = discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(fixups.size(), 1u);
   EXPECT_EQ(fixups[0].source_target_offset, 0x28u);
   EXPECT_TRUE(fixups[0].source_is_call);
@@ -7347,7 +7346,7 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -7359,22 +7358,22 @@ TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
   constexpr uint16_t kReturnSreg = 30;
 
   std::vector<uint32_t> program;
-  append_inst(program, global_load_b32(0));                                      // 0x00.
-  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x0c.
+  append_inst(program, global_load_b32(0));                                    // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA5)); // 0x0c.
   program.push_back(0xA984FE04u); // 0x10: s_add_nc_u64 s[4:5], s[4:5], literal64.
   program.push_back(32);          // getpc next 0x10 + 32 -> helper 0x30.
   program.push_back(0);
   program.push_back(0xD4410003u); // 0x1c: v_cmp_lt_i32_e64 s3, v20, v101.
   program.push_back(0x0202CB14u);
   program.push_back(
-      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250)); // 0x24.
-  append_inst(program, v_mov_b32(1, 0));                                         // 0x28.
-  append_inst(program, s_endpgm());                                              // 0x2c.
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA5)); // 0x24.
+  append_inst(program, v_mov_b32(1, 0));                                       // 0x28.
+  append_inst(program, s_endpgm());                                            // 0x2c.
   append_inst(program, sopp(72, 0)); // 0x30 helper: s_wait_loadcnt_dscnt 0.
-  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, 0x48, 0,
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, 0x48, 0,
                                         kReturnSreg)); // 0x34 return.
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   std::unique_ptr<Instruction> cmp_inst(decode_valid(*decoder, &program[7], 0x1c));
   ASSERT_NE(cmp_inst, nullptr);
   EXPECT_EQ(cmp_inst->mnemonic(), "v_cmp_lt_i32");
@@ -7394,17 +7393,17 @@ TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
   const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(program.data()),
                                              program.size() * sizeof(uint32_t));
   const auto fixups =
-      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250, {}, 32);
+      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_CDNA5, {}, 32);
   ASSERT_EQ(fixups.size(), 1u);
   EXPECT_EQ(fixups[0].source_target_offset, 0x30u);
   EXPECT_TRUE(fixups[0].source_is_call);
-  EXPECT_TRUE(discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_GFX1250, {}, 64)
-                  .empty());
+  EXPECT_TRUE(
+      discover_indirect_branch_edges(decoded_ptrs, text, ROCJITSU_CODE_ARCH_CDNA5, {}, 64).empty());
 
   const auto image =
       rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
   AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);

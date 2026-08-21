@@ -39,15 +39,15 @@ TEST(InstructionBuilder, BuildAddressFreeScratchB32) {
 
 TEST(InstructionBuilder, BuildGfx1250AddressFreeScratchB32) {
   const auto store = build_address_free_scratch_store_b32(
-      /*vsrc=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vsrc=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_CDNA5);
   const auto load = build_address_free_scratch_load_b32(
-      /*vdst=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_GFX1250);
+      /*vdst=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(store);
   ASSERT_TRUE(load);
   EXPECT_EQ(*store, (std::array<uint32_t, 3>{0xed06807cu, 0x02800000u, 0x00001000u}));
   EXPECT_EQ(*load, (std::array<uint32_t, 3>{0xed05007cu, 0x00000005u, 0x00001000u}));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, store->data()));
   std::unique_ptr<Instruction> load_inst(decode_valid(*decoder, load->data()));
@@ -82,7 +82,7 @@ TEST(InstructionBuilder, LiteralAddressHighWordRespectsConstantBus) {
   constexpr uint64_t kAddress = 0x00007eff82d2c0c4ull;
   const std::vector<uint32_t> kExpected = {0xd7006a0au, 0x020214ffu, 0x82d2c0c4u, 0xbf88ff9du,
                                            0x40161680u, 0x4a1616ffu, 0x00007effu};
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     const auto words = build_v_add_u64_literal(10, kAddress, arch);
     ASSERT_TRUE(words);
     EXPECT_EQ(*words, kExpected);
@@ -107,8 +107,8 @@ TEST(InstructionBuilder, BuildSplitScratchWaits) {
 TEST(InstructionBuilder, BuildScalarDestinationDependencyWaits) {
   const auto salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
-  const auto gfx1250_salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_GFX1250);
-  const auto gfx1250_valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto gfx1250_salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto gfx1250_valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(salu);
   ASSERT_TRUE(valu);
   ASSERT_TRUE(gfx1250_salu);
@@ -199,10 +199,10 @@ TEST(InstructionBuilder, BuildRdna4FixedLaneScalarTransfers) {
       build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/256, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(
       build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/64, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/18, /*lane=*/0,
-                                           ROCJITSU_CODE_ARCH_GFX1250));
   EXPECT_FALSE(
-      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/1, ROCJITSU_CODE_ARCH_GFX1250));
+      build_rdna4_v_writelane_b32(/*vdst=*/40, /*ssrc=*/18, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(
+      build_rdna4_v_readlane_b32(/*sdst=*/3, /*vsrc=*/40, /*lane=*/1, ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 TEST(InstructionBuilder, BuildSGetregB32) {
@@ -537,7 +537,7 @@ TEST(InstructionBuilder, BuildRdna4WaveUniformControlFlow) {
 }
 
 TEST(InstructionBuilder, BuildGfx1250MoiBarrierRecordRecipeEncodings) {
-  constexpr auto kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr auto kArch = ROCJITSU_CODE_ARCH_CDNA5;
 
   const auto mbcnt_low = build_v_mbcnt_lo_u32_b32(
       /*vdst=*/13, /*src0=*/0xC1, scalar_positive_inline_u32(0), kArch);
@@ -629,7 +629,7 @@ TEST(InstructionBuilder, BuildFlatStoreB32) {
 }
 
 TEST(InstructionBuilder, BuildWideLdsStoreAndLiteralBoundsCompare) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     const auto store = build_ds_store_b64(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/16, arch);
     const auto store_quad = build_ds_store_b128(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/16, arch);
     const auto compare = build_v_cmp_gt_u32_e32_vcc_literal(/*literal=*/13080u, /*vsrc1=*/3, arch);
@@ -656,10 +656,10 @@ TEST(InstructionBuilder, BuildWideLdsStoreAndLiteralBoundsCompare) {
     EXPECT_EQ(compare_inst->size(), 8u);
   }
 
-  EXPECT_FALSE(build_ds_store_b64(/*vaddr=*/3, /*vdata=*/255, /*byte_offset=*/0,
-                                  ROCJITSU_CODE_ARCH_GFX1250));
-  EXPECT_FALSE(build_ds_store_b128(/*vaddr=*/3, /*vdata=*/253, /*byte_offset=*/0,
-                                   ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_FALSE(
+      build_ds_store_b64(/*vaddr=*/3, /*vdata=*/255, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(
+      build_ds_store_b128(/*vaddr=*/3, /*vdata=*/253, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_FALSE(
       build_ds_store_b64(/*vaddr=*/3, /*vdata=*/4, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(
@@ -691,11 +691,11 @@ TEST(InstructionBuilder, BuildFlatLoadB32) {
 
 TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
   const auto words =
-      build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_GFX1250);
+      build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(words);
 
   EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC05007Cu, 0x0000000Au, 0x00000008u}));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
@@ -727,19 +727,18 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
                                       .vaddr = 8});
 
   EXPECT_EQ(
-      build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA5),
       expected_cmpswap);
   EXPECT_EQ(
-      build_flat_atomic_swap_b64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
+      build_flat_atomic_swap_b64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA5),
       expected_swap);
-  EXPECT_EQ(
-      build_flat_atomic_add_u64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
-      expected_add);
+  EXPECT_EQ(build_flat_atomic_add_u64_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_CDNA5),
+            expected_add);
 
-  const auto address_add = build_v_add_u64_vgpr_offset(/*address_vgpr=*/8, /*offset_vgpr=*/10,
-                                                       ROCJITSU_CODE_ARCH_GFX1250);
+  const auto address_add =
+      build_v_add_u64_vgpr_offset(/*address_vgpr=*/8, /*offset_vgpr=*/10, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(address_add);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> low(decode_valid(*decoder, address_add->data()));
   std::unique_ptr<Instruction> wait(decode_valid(*decoder, address_add->data() + 2));
@@ -754,14 +753,14 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   EXPECT_EQ((*address_add)[1], 0x0202110au);
 
   const auto readfirstlane =
-      build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_GFX1250);
+      build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(readfirstlane);
   constexpr auto expected_readfirstlane = cdna5::build_vop1(
       cdna5::kVReadfirstlaneB32Vop1, {.src0 = vector_source_vgpr(90), .vdst = 78});
   EXPECT_EQ(*readfirstlane, expected_readfirstlane[0]);
 
-  const auto cell_offset = build_v_add_u64_signed_i24(/*address_vgpr=*/8, /*displacement=*/16,
-                                                      ROCJITSU_CODE_ARCH_GFX1250);
+  const auto cell_offset =
+      build_v_add_u64_signed_i24(/*address_vgpr=*/8, /*displacement=*/16, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(cell_offset);
   std::unique_ptr<Instruction> offset_low(decode_valid(*decoder, cell_offset->data()));
   std::unique_ptr<Instruction> offset_wait(decode_valid(*decoder, cell_offset->data() + 3));
@@ -778,7 +777,7 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
                                      .src2 = scalar_positive_inline_u32(0)});
   EXPECT_EQ((*cell_offset)[0], expected_offset_low[0]);
   EXPECT_EQ((*cell_offset)[1], expected_offset_low[1]);
-  EXPECT_EQ((*cell_offset)[2], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ((*cell_offset)[2], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(std::string_view(offset_wait->mnemonic()), "s_wait_alu");
   EXPECT_EQ(std::string_view(offset_high->mnemonic()), "v_add_co_ci_u32");
 }
@@ -830,13 +829,13 @@ TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsInlineAndLiteralBoundaries)
        scalar_positive_inline_u32(0),
        {0xd7006a08u, 0x020210ffu, 0x007fffffu, 0xbf88ff9du, 0xd5206a09u, 0x01aa1280u}},
   }};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   for (const DisplacementCase &test_case : kCases) {
     SCOPED_TRACE(test_case.label);
     const auto words = build_v_add_u64_signed_i24(
-        /*address_vgpr=*/8, test_case.displacement, ROCJITSU_CODE_ARCH_GFX1250);
+        /*address_vgpr=*/8, test_case.displacement, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(words);
     EXPECT_EQ(*words, test_case.expected);
     EXPECT_EQ((*words)[1] & 0x1ffu, test_case.low_source);

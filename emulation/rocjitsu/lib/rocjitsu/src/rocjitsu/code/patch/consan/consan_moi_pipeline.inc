@@ -402,7 +402,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (!cave_words)
       return;
     std::optional<DenseFenceRelay> dense_relay;
-    if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+    if (!direct_entry && !has_indirect_entry_island && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         planned.candidate.kernel_descriptor_file_offset && dense_call_return_sgpr &&
         dense_dispatch_key_sgpr && dense_indirect_state && dense_special_state) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
@@ -489,7 +489,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                                 static_cast<int64_t>(getpc_offset + sizeof(uint32_t));
           const bool delta_encoded = append_pc_delta_builder(
               island_words, arch, jump_sgprs->pc_sgpr, delta, /*minimum_words=*/0u,
-              /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250);
+              /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5);
           if (const auto delay = instrumentation::build_salu_dependency_delay(arch);
               delta_encoded && delay) {
             island_words.push_back(*delay);
@@ -1117,14 +1117,14 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
                                 ConSanResult &result) {
   append_moi_resource_plans(state, options, result);
   append_moi_operational_resource_plans(state, options, result);
-  if ((state.arch == ROCJITSU_CODE_ARCH_GFX1250 || state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+  if ((state.arch == ROCJITSU_CODE_ARCH_CDNA5 || state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
        state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       options.automatic_moi_dispatch_id_sgprs && options.moi_dispatch_id_sgpr) {
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {
       ConSanOptions owner_options = options;
       if (!options.moi_transient_sgpr_assignments.empty() &&
           !apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets)) {
-        if (state.arch == ROCJITSU_CODE_ARCH_GFX1250)
+        if (state.arch == ROCJITSU_CODE_ARCH_CDNA5)
           continue;
         owner_options.moi_dispatch_id_sgpr.reset();
       }
