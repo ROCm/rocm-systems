@@ -95,7 +95,8 @@ form exists. E2E-derived focused regressions add further adjacent pairs where
 one engine-specific resource/control path is the behavior under test. The
 current registered `consan-device` matrix is 1,541 tests, including four
 physical module-load lifecycle rows and the physical post-instrumentation
-health row.
+health row. The current candidate-tree run passes all 1,541 rows in 553.71
+seconds at `-j64`.
 
 | Scenario | Workload-derived contract | Status |
 | --- | --- | --- |
@@ -145,6 +146,7 @@ idiom; the new CDNA B96 pair protects that capability on gfx942 and gfx950.
 | E2E source | Failure distilled into a checked-in contract | Quick coverage |
 | --- | --- | --- |
 | Physical-gfx950 PyTorch `torch.sort`, Inline Shadow | A full-pressure radix-sort LDS site borrowed a 30-SGPR transient window, then reached the displaced guest operation with `EXEC=0`. The correct member forces the same scalar pressure, empties `EXEC`, and requires exact scalar preservation with no diagnostic. The adjacent incorrect member retains the same pressure with nonempty waves and requires the exact LDS conflict diagnostic while preserving its scalar checksum. Both members contain eight access sites so that they exercise the scalable appended-body route rather than only its one-site compact case. | The shared target-native source runs on RocJitsu `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`, plus physical `gfx950`. Baseline and Inline Shadow registrations give 24 rows total; all 24 pass together in 1.13 seconds on the reference host. Strengthening the pair from one site to eight immediately exposed gfx1201/gfx1250 crashes: fixed-stack owners selected a compact indirect scalar router whose per-lane saved call/PC state is unavailable under empty `EXEC`. The planner now prefers the branch-only route for fixed-stack RDNA4-family owners. Focused host tests protect that choice on both targets, while a separate long-range CDNA4 host test proves that an empty wave enters its long-return setup before the inert displaced LDS operation. |
+| Physical-gfx950 PyTorch `torch.sort`, Inline Shadow owner-local planning | After the empty-wave behavior was covered, the full generated object still corrupted 744 output indices because disconnected kernels with different SGPR tails were forced through an unsafe object-wide scalar ABI. This is not a new race contract: it is the resource-planning envelope around the existing eight-site correct/incorrect pair. | A focused host regression synthesizes disconnected 64- and 96-SGPR owners, requires both device access sites to survive lowering, and verifies that only the incompatible owner receives scalar-spill and persistent-dispatch overrides. All 722 `ConSanMoi.*` tests pass, while the final physical E2E run passes exact values and indices with complete 56,884-access/6,032-barrier coverage. Do not add a prototype-layout assertion to the device tier; expand the paired workload only if a future replacement exposes a distinct observable behavior not already covered by the empty/nonempty-wave contract. |
 | Physical-gfx950 PyTorch norm/softmax, Sampled | The exact device oracle completed before the 30-second limit, but host teardown scanned all 46,080 allocated watchpoint slots even though the report contained zero claimed windows. The reader now stops after the committed `Ready` count and reconstructs deferred releases with one scan per relevant owner bank instead of one capacity scan per visible access. This is report-reader complexity, not a new device semantic: the existing adjacent two-stage-softmax pair owns the reduction/global-intermediate behavior and the existing Stream-K pairs own Sampled acquire-release publication. | Two focused host regressions pin zero examined slots for an empty allocated report and one capacity scan, rather than two, for two visible entries sharing a pending owner bank. All 186 hook tests pass. The 18 selected Sampled Stream-K correct/incorrect rows pass across all five RocJitsu targets plus physical gfx950 in 0.94 seconds. The final E2E run passes exact norm/softmax, complete 4,820-access/2,030-barrier coverage, and the ordinary 30-second contract in 28.98 seconds. |
 
 This extraction is intentionally phrased as an empty-wave spill behavioral
@@ -607,7 +609,7 @@ and repeated-dispatch idioms distilled from `VALIDATION.md` and Aorta. Every
 applicable pair runs through the baseline and all four engines in RocJitsu;
 CDNA4 repeats the same coverage on the physical `gfx950`. All 1,541 rows pass
 without expected-failure exemptions. On the current reference host, the full
-`ctest -j64 -L consan-device` matrix completes in 529.04 seconds, inside the
+`ctest -j64 -L consan-device` matrix completes in 553.71 seconds, inside the
 5--20-minute review budget.
 
 This materially shrinks, but cannot eliminate, regression risk. The remaining

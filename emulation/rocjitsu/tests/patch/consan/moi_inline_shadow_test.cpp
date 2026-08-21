@@ -7367,6 +7367,97 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4InlinePrefersOwnerWideFreshWindowToObjectWideSiteDeadWindow) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+
+  const auto make_owner = [&](uint16_t scalar_tail) {
+    std::vector<uint32_t> words(64u, build_s_nop(0u, kArch));
+    // Model generated radix kernels whose scalar mask temporaries belong to
+    // the compiler allocation but are dead at each LDS instruction.  The
+    // object-wide site union therefore exposes a tempting low scratch window.
+    words[0] = build_s_mov_b32(static_cast<uint16_t>(scalar_tail - 1u),
+                               scalar_positive_inline_u32(0u), kArch);
+    std::ranges::copy(*guest, words.begin() + 2u);
+    words.back() = build_s_endpgm(kArch);
+    return words;
+  };
+
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      make_owner(/*scalar_tail=*/58u), make_owner(/*scalar_tail=*/90u), {},
+      kRdna4Wave64AllVgprsGranulated, /*function_is_kernel=*/true);
+  const auto configure_descriptor = [](uint32_t granulated_sgpr_count) {
+    return [=](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, granulated_sgpr_count);
+    };
+  };
+  // The first owner has 64 allocated SGPRs and admits a window above its
+  // complete decoded reference tail. The second has 96 and must use a
+  // component-local spill ABI. Neither owner may make the shared low
+  // site-dead window the scalar ABI of every kernel in the object.
+  mutate_kernel_descriptor(bytes, "lds_probe", configure_descriptor(/*64 SGPRs=*/7u));
+  mutate_kernel_descriptor(bytes, "lds_helper", configure_descriptor(/*96 SGPRs=*/11u));
+
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto low = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
+  const auto high = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(low, original.kernels().end());
+  ASSERT_NE(high, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  // The preceding automatic persistent-state pass can reserve a dispatch-ID
+  // pair inside the stronger owner-wide transient window. Planning must move
+  // that automatic pair instead of falling back to a low site-liveness hole.
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 68u) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 64u) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("liveness-dead EXEC-save SGPRs") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  const auto assignment = std::ranges::find(
+      result.resolved_moi_transient_sgpr_assignments, high->descriptor_file_offset,
+      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(assignment, result.resolved_moi_transient_sgpr_assignments.end())
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(assignment->spill_backed);
+  EXPECT_EQ(std::ranges::find(result.resolved_moi_transient_sgpr_assignments,
+                              low->descriptor_file_offset,
+                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset),
+            result.resolved_moi_transient_sgpr_assignments.end());
+  const auto high_persistent = std::ranges::find(
+      result.resolved_moi_persistent_vgpr_assignments, high->descriptor_file_offset,
+      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(high_persistent, result.resolved_moi_persistent_vgpr_assignments.end())
+      << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(high_persistent->dispatch_id_vgpr);
+  const auto low_persistent = std::ranges::find(
+      result.resolved_moi_persistent_vgpr_assignments, low->descriptor_file_offset,
+      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(low_persistent, result.resolved_moi_persistent_vgpr_assignments.end())
+      << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(low_persistent->dispatch_id_vgpr);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            2u)
+      << testing::PrintToString(result.warnings) << "\n"
+      << testing::PrintToString(result.resolved_moi_persistent_vgpr_assignments);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysicalVcc) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/0, /*vdata=*/0, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
