@@ -1192,7 +1192,6 @@ protected:
         *nqps = state.nqps;
         return result;
     }
-#endif /* ENABLE_FAULT_INJECTION */
 
     // Warm the scheduler up (it initializes on the first send) and arm equal
     // weights. nqps comes from the environment so both ranks agree without a
@@ -1551,6 +1550,7 @@ protected:
         }
         return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
     }
+#endif /* ENABLE_FAULT_INJECTION */
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
