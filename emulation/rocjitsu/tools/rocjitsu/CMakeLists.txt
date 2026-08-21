@@ -3,7 +3,12 @@
 
 include(rj_configure_target)
 
-add_library(rocjitsu_cli_launch_preload STATIC launch_preload.cpp)
+add_library(
+    rocjitsu_cli_launch_preload
+    STATIC
+    launch_preload.cpp
+    rocm_visibility.cpp
+)
 target_include_directories(
     rocjitsu_cli_launch_preload
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

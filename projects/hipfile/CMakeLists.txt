@@ -138,8 +138,12 @@ elseif(DEFINED ROCM_VERSION)
         set(ROCM_INITIAL_PATH "/opt/rocm-${ROCM_VERSION}")
     endif()
 else()
-    # Default install location symlink
-    set(ROCM_INITIAL_PATH "/opt/rocm")
+    # No ROCM_PATH env or ROCM_VERSION given. Find correct Initial Path
+    if(EXISTS "/opt/rocm/core/.info/version")
+        set(ROCM_INITIAL_PATH "/opt/rocm/core")
+    else()
+        set(ROCM_INITIAL_PATH "/opt/rocm")
+    endif()
 endif()
 set(ROCM_PATH "${ROCM_INITIAL_PATH}" CACHE PATH "The path to the ROCm installation")
 
@@ -158,10 +162,6 @@ message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
 list(APPEND CMAKE_PREFIX_PATH
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
-    ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip
 )
 
 # Set hipFile Install Path to the ROCm directory

@@ -243,28 +243,51 @@ else()
 
   find_package(PkgConfig)
   if (UNIX)
-    # Check for libraries required for building
+    # hsakmt is a static library, so every item in its link interface is
+    # re-emitted verbatim into the installed hsakmtTargets.cmake as
+    # $<LINK_ONLY:...> and is then resolved on the *consumer's* machine.
+    # Anything build-machine specific therefore must not reach the interface:
+    # an absolute /usr/lib64/libc.so found on a RHEL builder does not exist on
+    # a Debian/Ubuntu multiarch host, and a pkg-config -L pointing into the CI
+    # runner's workspace exists nowhere at all.  Both break the link for every
+    # consumer of the exported target (ROCM-29513).  Propagate plain link item
+    # names instead and let each consumer's toolchain resolve them per-distro.
+
+    # Check for libraries required for building.  Only the presence of libc is
+    # asserted here; the resolved path is deliberately not propagated.
     find_library(LIBC NAMES c REQUIRED)
     find_package(NUMA)
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
-      # In BUILD_SHARED_LIBS mode hsakmt-config.cmake loads hsakmtTargets.cmake.
-      # Because hsakmt is static, its private imported dependencies are exported
-      # through LINK_ONLY and must be recreated by the package config. The
-      # staticdrm package path links the raw library name instead.
-      if(BUILD_SHARED_LIBS)
-        foreach(_numa_library IN LISTS NUMA_LIBRARIES)
-          if(TARGET "${_numa_library}")
-            set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
-            break()
-          endif()
-        endforeach()
-      endif()
+      # When NUMA was found as a target, ensure consumers can find it too
+      # by having hsakmt-config.cmake call find_dependency(NUMA).
+      # This is needed regardless of BUILD_SHARED_LIBS because hsakmt's
+      # exported targets reference numa::numa.
+      foreach(_numa_library IN LISTS NUMA_LIBRARIES)
+        if(TARGET "${_numa_library}")
+          set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
+          break()
+        endif()
+      endforeach()
     else()
       find_library(NUMA NAMES numa REQUIRED)
     endif()
-    message(STATUS "LIBC: " ${LIBC})
+    message(STATUS "LIBC (presence check only, links as plain 'c'): " ${LIBC})
     message(STATUS "NUMA: " ${NUMA})
+
+    # An imported target is safe to propagate as-is: hsakmt-config.cmake
+    # recreates it through find_dependency(NUMA) before loading the export.
+    # Anything else has resolved to an absolute path on this machine, so
+    # export the plain link item instead.
+    set(NUMA_LINK_ITEMS "")
+    foreach(_numa_library IN LISTS NUMA)
+      if(TARGET "${_numa_library}")
+        list(APPEND NUMA_LINK_ITEMS "${_numa_library}")
+      else()
+        list(APPEND NUMA_LINK_ITEMS "numa")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES NUMA_LINK_ITEMS)
 
     ## If environment variable DRM_DIR is set, the script
     ## will pick up the corresponding libraries from that path.
@@ -279,9 +302,33 @@ else()
     include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
     include_directories(${DRM_INCLUDE_DIRS})
 
+    # Separate pkg-config's link flags into the -l items consumers need and the
+    # -L search paths, which are valid only on this build machine.  The search
+    # paths still have to reach in-tree consumers (hsa-runtime64 links
+    # hsakmt::hsakmt from the build tree), so keep them behind BUILD_INTERFACE:
+    # they apply while building and vanish from the installed export.
+    set(DRM_LINK_ITEMS "")
+    set(DRM_SEARCH_PATHS "")
+    foreach(_drm_ldflag IN LISTS DRM_LDFLAGS DRM_AMDGPU_LDFLAGS)
+      if(_drm_ldflag MATCHES "^-L")
+        list(APPEND DRM_SEARCH_PATHS "${_drm_ldflag}")
+      else()
+        list(APPEND DRM_LINK_ITEMS "${_drm_ldflag}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES DRM_SEARCH_PATHS)
+
     target_link_libraries ( ${HSAKMT_TARGET}
-      PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
+      PRIVATE ${DRM_LINK_ITEMS} pthread rt c ${NUMA_LINK_ITEMS} ${CMAKE_DL_LIBS}
     )
+
+    # One entry per path: a genex wrapping a ;-separated list would rely on
+    # CMake's list splitting looking inside $<...>, which is needless subtlety.
+    foreach(_drm_search_path IN LISTS DRM_SEARCH_PATHS)
+      target_link_libraries ( ${HSAKMT_TARGET}
+        INTERFACE "$<BUILD_INTERFACE:${_drm_search_path}>"
+      )
+    endforeach()
 
     target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
@@ -329,23 +376,33 @@ else()
       ## Fall back to pre-built wkmi.lib
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
-      if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
-      else()
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
-      endif()
-      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
+      set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
+      set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/lib/wkmi.lib)
+      target_include_directories(${HSAKMT_TARGET} PUBLIC
+        $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
-      target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
+      target_link_libraries(${HSAKMT_TARGET} PUBLIC
+        $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       
-      # Export wkmi.lib path for downstream static linking
-      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
     endif()
   endif()
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-  if (NOT WIN32)
+  if (WIN32)
+    install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev )
+    if(NOT WKMI_SRC_BUILD)
+      install ( FILES ${WKMI_LIB_PATH}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT dev )
+      install ( FILES ${WKMI_INCLUDE_DIR}/wkmi.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi
+        COMPONENT dev )
+    endif()
+  else()
     install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
@@ -358,8 +415,12 @@ else()
   install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
-  # Record our usage data for clients find_package calls.
-  if (NOT WIN32)
+  # Record our usage data for clients find_package calls. On Windows, this is
+  # only relocatable for the prebuilt WKMI path because that path installs
+  # wkmi.h/wkmi.lib and records install-interface paths. A source-built WKMI
+  # target is not exported here, so exporting hsakmt would leave consumers with
+  # an undefined wkmi target in hsakmtTargets.cmake.
+  if(NOT WIN32 OR NOT WKMI_SRC_BUILD)
     install ( EXPORT ${HSAKMT_TARGET}Targets
       FILE ${HSAKMT_TARGET}Targets.cmake
       NAMESPACE ${HSAKMT_TARGET}::
@@ -386,7 +447,7 @@ else()
                    VERSION ${BUILD_VERSION_STRING}
                    COMPATIBILITY
                    AnyNewerVersion)
-  if (NOT WIN32)
+  if(NOT WIN32 OR NOT WKMI_SRC_BUILD)
     install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
@@ -451,8 +512,12 @@ else()
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
       else()
-        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
-        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC
+          $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
+          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
+        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+          $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+          $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       endif()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
@@ -464,17 +529,15 @@ else()
         "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
     endif()
 
-    if (NOT WIN32)
-      install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-              ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-              LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
+    install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
 
-      install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-        FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
-        NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-        COMPONENT dev)
-    endif()
+    install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+      FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
+      NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+      COMPONENT dev)
 
     add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
   endif()

@@ -54,12 +54,14 @@ typedef enum rj_vm_mode_t {
 
 /// @brief Device command descriptor for rj_vm_execute.
 typedef struct rj_vm_cmd_t {
-  uint32_t cmd;              ///< Platform-specific command number.
-  void *buf;                 ///< Command arguments buffer (with inlined arrays).
-  size_t buf_size;           ///< Total size of the arguments buffer.
-  int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle; ///< [out] Borrowed backing handle, or -1; owned by the VM.
-  rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  uint32_t cmd;               ///< Platform-specific command number.
+  void *buf;                  ///< Command arguments buffer (with inlined arrays).
+  size_t buf_size;            ///< Total size of the arguments buffer.
+  int32_t result;             ///< [out] Return code (0 on success, negative errno on failure).
+  rj_handle_t shared_handle;  ///< [out] Borrowed backing handle, or -1; owned by the VM.
+  rj_handle_t in_handle;      ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  rj_handle_t in_mem_handle;  ///< [in,out] Debugger-authorized target /proc/pid/mem fd, or -1.
+  rj_handle_t in_proc_handle; ///< [in] Pinned target /proc/pid directory fd, or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.
@@ -161,13 +163,16 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 
 /// @brief Load and attach the execution plugins declared in a config to a VM.
 ///
-/// @details Parses the `plugins`, `sinks`, and `profiled` sections of the
+/// @details Parses the `plugins` and `sinks` sections of the
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
 /// enable plugins without linking the simulator's C++ ABI. Call once after
 /// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
-/// no `plugins` attaches an empty group (near-zero overhead).
+/// no `plugins` attaches an empty group (near-zero overhead). This function must
+/// complete before the first rj_vm_step or rj_vm_run call and must not overlap
+/// either call; that ordering keeps plugin initialization and replacement
+/// outside the simulation-callback interval.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON (same text used to create
 ///            the VM). Never NULL.
@@ -200,24 +205,33 @@ RJ_API_EXPORT void rj_vm_release(rj_vm_t *vm);
 ///
 /// @details If the reference count is already 0, frees immediately. Otherwise,
 /// the VM is freed when the last rj_vm_release drops the reference count to 0.
+/// No rj_vm_step or rj_vm_run call may be active. An asynchronous host must call
+/// rj_vm_request_exit and wait for rj_vm_run to return before destroying the VM;
+/// this ensures plugin shutdown cannot overlap simulation callbacks.
 /// @param[in] vm VM to destroy (may be NULL).
 RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 
 /// @brief Step the entire VM by one tick.
 ///
 /// @details Processes all simulation events at the next timestamp, advancing the
-/// simulation by one tick.
+/// simulation by one tick. Stepping is supported only for single-partition VMs;
+/// use rj_vm_run() when the configuration has multiple engine partitions. This
+/// call must not overlap rj_vm_load_plugins or rj_vm_destroy.
 /// @param[in] vm VM handle.
-/// @param[out] active Non-zero if any wavefront is still executing.
+/// @param[out] active Non-zero if any wavefront is still executing. Written only
+/// on success.
 /// @retval ROCJITSU_STATUS_SUCCESS Step completed successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm is NULL.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
 /// @brief Run the VM to completion or until max_ticks is reached.
 ///
 /// @details Runs the simulation to completion. Terminates when all primary
 /// components signal completion, the tick limit from the configuration is
-/// reached, or quiescence is detected.
+/// reached, or quiescence is detected. This call must not overlap
+/// rj_vm_load_plugins or rj_vm_destroy.
 /// @param[in] vm VM handle.
 /// @param[out] ticks_executed Number of ticks actually executed (may be NULL).
 /// @retval ROCJITSU_STATUS_SUCCESS Simulation completed successfully.

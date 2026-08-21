@@ -38,9 +38,11 @@ What the grep can't point at are the "create a new thing" steps:
   for the new device.
 - For a brand-new ISA family: sync `shared/machine-readable-isa` with
   `download.py`, regenerate the ISA/DBT sources per [codegen.md](codegen.md),
-  and author the hand-written per-arch files (`isa.h`, `insts.h`, `mma_exec.h`,
+  and author the hand-written per-arch files (`isa.h`, `mma_exec.h`,
   `addr_calc.h/.cpp`, ...) under
-  `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/`.
+  `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/`. The generated files,
+  including `insts.h`, are emitted under
+  `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<isa>/`.
 - Define its [ISA target provider](isa-target-providers.md) and select it in
   each executable or shared object that should contain it.
 - Add HIP kernel coverage under `tests/kernels/`.

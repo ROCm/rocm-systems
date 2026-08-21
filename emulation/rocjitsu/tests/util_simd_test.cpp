@@ -6,19 +6,24 @@
 /// no rocjitsu Operand/Wavefront fixture.
 
 #include "util/simd.h"
+#include "util/simd_test_hooks.h"
 
 #include "util/data_types.h"
 
 #include <gtest/gtest.h>
 
+#include <dlfcn.h>
+
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <thread>
 
 namespace {
@@ -237,23 +242,89 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
     EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
 }
 
-TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
-  // force_scalar() is seeded once from RJ_FORCE_SCALAR at startup. Absent the
-  // test-only setter (util/simd_test_hooks.h), it is stable across calls and
-  // identical on every thread; this test exercises that steady-state behaviour
-  // without flipping the gate.
+TEST(UtilSimd, ForceScalar_StableAcrossThreadsWithinImage) {
+  // force_scalar() is seeded once from RJ_FORCE_SCALAR at image load. Absent
+  // the test-only setter (util/simd_test_hooks.h), it is stable across calls
+  // and identical on every thread; this test exercises that steady-state
+  // behaviour without flipping the gate.
+  //
+  // Scope note: the gate has local binding per shared object (see
+  // util::detail::g_force_scalar), so this only covers the copy linked into
+  // this test executable. It deliberately does NOT assert process-wide
+  // behaviour -- a same-image thread check cannot observe the DSO boundary,
+  // where each image carries its own copy.
   const bool v = util::force_scalar();
-  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within a process";
+  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within an image";
 
   std::atomic<bool> other{!v};
   std::thread t([&]() { other.store(util::force_scalar()); });
   t.join();
-  EXPECT_EQ(other.load(), v) << "force_scalar() must be process-wide (identical on all threads)";
+  EXPECT_EQ(other.load(), v) << "force_scalar() must be identical on all threads in this image";
+}
 
-  // Value reflects the env parse: unset/empty/"0" => false, else true.
-  const char *e = std::getenv("RJ_FORCE_SCALAR");
-  const bool expected = e && e[0] && !(e[0] == '0' && e[1] == '\0');
-  EXPECT_EQ(v, expected);
+// The documented contract for RJ_FORCE_SCALAR, driven through the parser with
+// literal expectations. Restating the parser to compute the expected value
+// cannot fail, so these cases name the answers instead.
+TEST(UtilSimd, ForceScalar_EnvContract) {
+  struct EnvCase {
+    const char *value; // nullptr means unset.
+    bool expected;
+  };
+  static constexpr EnvCase kCases[] = {
+      {nullptr, false}, {"", false}, {"0", false}, {"1", true}, {"00", true}, {"false", true},
+  };
+
+  const char *saved = std::getenv("RJ_FORCE_SCALAR");
+  const bool was_set = saved != nullptr;
+  const std::string saved_value = was_set ? saved : std::string();
+
+  for (const EnvCase &test_case : kCases) {
+    SCOPED_TRACE(test_case.value ? test_case.value : "<unset>");
+    if (test_case.value == nullptr)
+      ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+    else
+      ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", test_case.value, 1), 0);
+    EXPECT_EQ(util::detail::init_force_scalar(), test_case.expected);
+  }
+
+  if (was_set)
+    ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", saved_value.c_str(), 1), 0);
+  else
+    ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+}
+
+// Positive control for the test seam. Without this, a setter that did nothing
+// would leave every scalar/SIMD comparison in this suite passing, because both
+// halves of each comparison would run the same path.
+TEST(UtilSimd, ForceScalar_SeamActuallyMovesTheGate) {
+  const bool original = util::force_scalar();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the seam must move the gate";
+
+  util::set_force_scalar_for_testing(original);
+  EXPECT_EQ(util::force_scalar(), original) << "the seam must restore the gate";
+}
+
+// The gate is an inline variable with hidden visibility, so a module the process
+// loads carries its own copy and the seam cannot reach it. This is the scope the
+// headers document; pinning it here keeps a later test from flipping the gate and
+// expecting a loaded module to follow, which would silently assert nothing.
+TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
+  void *module = ::dlopen(RJ_FORCE_SCALAR_PROBE_MODULE, RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(module, nullptr) << ::dlerror();
+  auto *probe = reinterpret_cast<bool (*)()>(::dlsym(module, "rj_probe_force_scalar"));
+  ASSERT_NE(probe, nullptr) << ::dlerror();
+
+  const bool original = util::force_scalar();
+  const bool module_before = probe();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the host gate must have moved";
+  EXPECT_EQ(probe(), module_before) << "a loaded module must keep its own gate";
+
+  util::set_force_scalar_for_testing(original);
+  ::dlclose(module);
 }
 
 // Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
@@ -342,12 +413,10 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   }
 }
 
-// Toolchain guard for the 64-bit-lane VOP2 FMA SIMD fast path (v_fmac_f64,
-// SIMD_VOP2_FMA_F64). Same contract as the f32 Fma guard above, over
-// native<double>: util::stdx::fma must be the single-rounded fused operation
-// matching the scalar std::fma in the generated body. Sweeps full-range random
-// 64-bit patterns for all three operands, EXCLUDING NaN-input lanes (accepted
-// payload divergence). If a finite/Inf lane diverges, drop SIMD_VOP2_FMA_F64.
+// Toolchain guard for the native<double> stdx::fma primitive. Architectural
+// F64 execution declines this SIMD operation because MODE cannot be represented
+// exactly; this test documents the utility's narrower host-default rounding
+// contract. It excludes NaN-input lanes because payload propagation may differ.
 TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<double>;
@@ -842,12 +911,37 @@ TEST(UtilSimd, CubeMa_F32_BitExact) {
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
+  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<uint16_t>(lower);
+}
+
+TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
+  SKIP_IF_NO_SIMD();
+  const int original_mode = std::fegetround();
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(mode), 0);
+    EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
+    EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
+    util::native<float> input(32767.5f);
+    auto result = util::round_to_nearest_even_simd(input);
+    for (std::size_t lane = 0; lane < result.size(); ++lane)
+      EXPECT_EQ(result[lane], 32768.0f);
+  }
+  EXPECT_EQ(std::fesetround(original_mode), 0);
 }
 
 TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {

@@ -18,6 +18,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -107,7 +108,7 @@ get_rocprofsys_is_preloaded()
 inline bool
 get_rocprofsys_preload()
 {
-    static bool _v = []() {
+    static const bool _v = []() {
         auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
@@ -216,19 +217,19 @@ struct ROCPROFSYS_INTERNAL_API indirect
      */
     ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
                                const std::string& _dllib, const std::string& _lib_paths)
-    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
-    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
+    : m_omnilib{ path::find_library(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_dllib{ path::find_library(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_userlib{ path::find_library(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
             ROCPROFSYS_COMMON_LIBRARY_LOG_START
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_omnilib.c_str()), m_omnilib.c_str());
+                    path::filename(_omnilib).c_str(), m_omnilib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_dllib.c_str()), m_dllib.c_str());
+                    path::filename(_dllib).c_str(), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_userlib.c_str()), m_userlib.c_str());
+                    path::filename(_userlib).c_str(), m_userlib.c_str());
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
@@ -279,8 +280,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
     {
         if(!m_omnihandle) m_omnihandle = open(m_omnilib);
 
-        int _warn_verbose = 0;
-        int _info_verbose = 2;
+        int       _warn_verbose = 0;
+        const int _info_verbose = 2;
         // Initialize all pointers
         ROCPROFSYS_DLSYM(rocprofsys_init_library_f, m_omnihandle,
                          "rocprofsys_init_library");
@@ -1248,7 +1249,7 @@ rocprofsys_preinit()
 void
 rocprofsys_postinit(std::string _exe)
 {
-    InstrumentMode instrumentMode = get_instrumented();
+    const InstrumentMode instrumentMode = get_instrumented();
 
     switch(instrumentMode)
     {
@@ -1263,7 +1264,7 @@ rocprofsys_postinit(std::string _exe)
             if(_exe.empty())
                 rocprofsys_push_trace("main");
             else
-                rocprofsys_push_trace(basename(_exe.c_str()));
+                rocprofsys_push_trace(path::filename(_exe).c_str());
             break;
         }
         case InstrumentMode::PythonProfile:
@@ -1571,9 +1572,9 @@ extern "C"
                         dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
                         argv[0]);
 
-        int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
+        const int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
 
-        rocprofsys_pop_trace(basename(argv[0]));
+        rocprofsys_pop_trace(rocprofsys::path::filename(argv[0]).c_str());
         rocprofsys_finalize();
 
         return ret;

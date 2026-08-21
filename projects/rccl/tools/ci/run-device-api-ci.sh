@@ -40,12 +40,12 @@ RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
 CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
 # Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
-# shellcheck source=/dev/null  # runtime fragment written by fetch-rocm.sh
+# shellcheck source=/dev/null  # runtime fragment written by the provision step
 [[ -f "${WORKDIR}/.ci-out/rocm.env" ]] && source "${WORKDIR}/.ci-out/rocm.env"
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
 [[ -f "${WORKDIR}/.ci-out/ompi.env" ]] && source "${WORKDIR}/.ci-out/ompi.env"
 
-: "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (run fetch-rocm.sh / via sbatch)}"
+: "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-device-api-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"
 
 if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then

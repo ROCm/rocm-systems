@@ -239,22 +239,6 @@ async_io_bind_params(void *userargs)
 }
 
 void
-async_io_cleanup(void *userargs)
-{
-    auto     op                         = static_cast<AsyncOpFallback *>(userargs);
-    ssize_t *bytes_transferred          = op->bytes_transferred;
-    ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
-    try {
-        Context<AsyncMonitor>::get()->completeOp(op);
-    }
-    catch (const std::invalid_argument &) {
-        *bytes_transferred = -hipFileInternalError;
-        return;
-    }
-    *bytes_transferred = bytes_transferred_internal;
-}
-
-void
 async_io_cpu_copy(void *userargs)
 {
     auto         op                = static_cast<AsyncOpFallback *>(userargs);

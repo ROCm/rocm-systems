@@ -70,7 +70,6 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
-#if !defined(ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS)
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
     {
         ROCP_FATAL_IF(trace_size != 1) << "Expected one ATT event record, got " << trace_size;
@@ -87,7 +86,6 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         std::memcpy(&rec, dispatch, std::min<size_t>(dispatch->size, sizeof(rec)));
         tool.config.dispatches.emplace_back(rec);
     }
-#endif
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY)
     {
         if(tool.config.realtime && trace_size != 0)

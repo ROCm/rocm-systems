@@ -31,6 +31,7 @@ hipDeviceGetLimit
 hipDeviceGetName
 hipDeviceGetTexture1DLinearMaxWidth
 hipDeviceGetUuid
+hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
 hipDeviceGetP2PAttribute
@@ -80,6 +81,7 @@ hipHostMalloc
 hipHostRegister
 hipHostUnregister
 hipInit
+hipInitDevice
 hipIpcCloseMemHandle
 hipIpcGetMemHandle
 hipIpcOpenMemHandle
