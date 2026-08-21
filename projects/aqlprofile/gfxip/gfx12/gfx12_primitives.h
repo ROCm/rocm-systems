@@ -529,9 +529,13 @@ class gfx12_cntx_prim {
 #if GFX12_VARIANT <= GFX12_VARIANT_1201
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, exclude_wait ? 1 : 0) |
 #endif
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE,
-                           ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
-                            (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT)));
+        // TOKEN_EXCLUDE=0: log every token class for a detailed capture.  In particular the
+        // VMEMEXEC and ALUEXEC (SQTT "Issue") tokens MUST be present - RGP's instruction-timing
+        // analyzer consumes them (kRgpSqttTokenTypeIssue -> ProcessIssueToken -> inst_sequencer)
+        // to build the per-wave instruction timeline.  Excluding them yields a trace that loads
+        // with ISA visible but "no wavefronts analyzed".  PAL's detailed capture includes them
+        // (gfx12PerfExperiment.cpp GetSqttTokenMask), so match that here.
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE, 0);
     return sq_thread_trace_token_mask;
   }
 
