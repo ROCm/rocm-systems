@@ -727,37 +727,51 @@ protected:
             int status;
             ncclNetHandle_t handle;
         } handshake = {};
+        // Tracks this rank's own outcome, kept separate from the peer's status
+        // in the handshake so the assertion message below can tell "my own
+        // accept/connect failed" apart from "the peer's listen failed", instead
+        // of both ranks reporting the same generic verdict.
         bool localOk = true;
+        const char* localReason = "ok";
 
         if (rank == 0) {
             localOk = (CreateListenComm(dev, &handshake.handle, listenComm) == ncclSuccess)
                       && *listenComm != nullptr;
             handshake.status = localOk ? 1 : 0;
+            if (!localOk) localReason = "listen failed";
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
             for (int i = 0; localOk && i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
-                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) localOk = false;
+                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
+                    localOk = false;
+                    localReason = "accept failed";
+                }
                 if (localOk && *recvComm == nullptr) usleep(kPollIntervalUs);
             }
-            if (*recvComm == nullptr) localOk = false;
+            if (localOk && *recvComm == nullptr) { localOk = false; localReason = "accept timed out"; }
         } else {
             MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
-            localOk = (handshake.status == 1);
-
-            for (int i = 0; localOk && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
-                if (ConnectToRemote(dev, &handshake.handle, sendComm) != ncclSuccess)
-                    localOk = false;
-                if (localOk && *sendComm == nullptr) usleep(kPollIntervalUs);
+            if (handshake.status != 1) {
+                localOk = false;
+                localReason = "peer's listen failed";
+            } else {
+                for (int i = 0; localOk && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                    if (ConnectToRemote(dev, &handshake.handle, sendComm) != ncclSuccess) {
+                        localOk = false;
+                        localReason = "connect failed";
+                    }
+                    if (localOk && *sendComm == nullptr) usleep(kPollIntervalUs);
+                }
+                if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
             }
-            if (*sendComm == nullptr) localOk = false;
         }
 
         int ok = localOk ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         ASSERT_EQ(ok, 1) << "IB-CAST connection setup failed on at least one rank (this rank: "
-                         << (localOk ? "ok" : "failed") << ")";
+                         << localReason << ")";
     }
 
     // Composite block: Warmup send + read real nqps from sendComm on rank 1.
