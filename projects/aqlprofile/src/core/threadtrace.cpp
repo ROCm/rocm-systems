@@ -190,6 +190,14 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
   trace_config.perfMASK = ~0u;
   trace_config.se_mask = 0x1;
   trace_config.enable_rt_timestamp = true;
+  // This aqlprofile copy is dedicated to feeding RGP. The rocprof trace-decoder instrumentation
+  // preamble on USERDATA_2 collides with RGP's marker parser (see sqtt_builder.h Begin), so
+  // suppress it by default. AQLPROFILE_EMIT_DECODER_INSTRUMENT=1 re-enables it for rocprof/ATT
+  // decoder consumers that need the '\0ROC' stream.
+  {
+    const char* emit_instr = getenv("AQLPROFILE_EMIT_DECODER_INSTRUMENT");
+    trace_config.emit_decoder_instrument = (emit_instr != nullptr && emit_instr[0] == '1');
+  }
   size_t buffer_num = 1;
 
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();

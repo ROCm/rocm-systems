@@ -269,6 +269,16 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
       trace_config.se_number = se_number_total / trace_config.xcc_number;
       trace_config.sa_number = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
 
+      // This aqlprofile copy is dedicated to feeding RGP. The rocprof trace-decoder
+      // instrumentation preamble on USERDATA_2 ('\0ROC' magic + version + AGENT_INFO) collides
+      // with RGP's no-resync marker parser (see pm4/sqtt_builder.h Begin), leaving compute kernels
+      // greyed out for Instruction Timing. Suppress it by default; AQLPROFILE_EMIT_DECODER_INSTRUMENT=1
+      // re-enables the '\0ROC' stream for rocprof/ATT decoder consumers.
+      {
+        const char* emit_instr = getenv("AQLPROFILE_EMIT_DECODER_INSTRUMENT");
+        trace_config.emit_decoder_instrument = (emit_instr != nullptr && emit_instr[0] == '1');
+      }
+
       if (profile->parameters) {
         for (const hsa_ven_amd_aqlprofile_parameter_t* p = profile->parameters;
              p < (profile->parameters + profile->parameter_count); ++p) {
