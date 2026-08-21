@@ -50,6 +50,7 @@ def moi_auto_report(
     *,
     diagnostics: int = 0,
     visible_records: int = 1,
+    visible_barriers: int = 0,
     diagnostic_capacity: int = 1,
     code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
@@ -59,7 +60,7 @@ def moi_auto_report(
         f"code_object={code_object_fingerprint} "
         f"diagnostics={diagnostics} visible_records={visible_records} "
         f"diagnostic_capacity={diagnostic_capacity} "
-        "visible_barriers=0 visible_atomics=0 visible_fences=0 "
+        f"visible_barriers={visible_barriers} visible_atomics=0 visible_fences=0 "
         "sampled_conflicts=0 sampled_immediate_conflicts=0"
     )
 
@@ -142,6 +143,7 @@ def moi_auto_replay(
     metadata_full: bool = False,
     capacity_exhausted: bool = False,
     diagnostic_capacity: int = 1,
+    replay_input_access: int | None = None,
     replay_scratch_diagnostic_capacity: int | None = None,
     provenance_repaired: int = 0,
     provenance_unresolved: int = 0,
@@ -155,9 +157,15 @@ def moi_auto_replay(
         else "replay_scratch_diagnostic_capacity="
         f"{replay_scratch_diagnostic_capacity} "
     )
+    replay_input = (
+        ""
+        if replay_input_access is None
+        else f"replay_input_access={replay_input_access} "
+    )
     return (
         f"ConSan MOI auto replay reader={reader} generation={generation} "
         f"code_object={code_object_fingerprint} diagnostics={diagnostics} "
+        f"{replay_input}"
         f"conflict={'true' if conflict else 'false'} "
         f"metadata_full={'true' if metadata_full else 'false'} "
         "diagnostic_capacity_exhausted="
@@ -918,6 +926,7 @@ class ConSanValidationTest(unittest.TestCase):
                         1,
                         0,
                         diagnostic_capacity=100,
+                        replay_input_access=2,
                         replay_scratch_diagnostic_capacity=2,
                     ),
                 )
@@ -928,6 +937,59 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(summary["accepted"], summary)
         self.assertEqual(
             summary["readers"]["reader=7,generation=1"]["diagnostic_capacity"], 100
+        )
+
+    def test_barrier_only_replay_preserves_report_diagnostic_capacity(self) -> None:
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(
+                        7,
+                        1,
+                        visible_records=0,
+                        visible_barriers=49,
+                        diagnostic_capacity=1474560,
+                    ),
+                    moi_auto_replay(
+                        7,
+                        1,
+                        0,
+                        diagnostic_capacity=1474560,
+                        replay_input_access=0,
+                        replay_scratch_diagnostic_capacity=0,
+                    ),
+                )
+            ),
+            contract,
+        )
+
+        self.assertTrue(summary["accepted"], summary)
+        self.assertEqual(
+            summary["readers"]["reader=7,generation=1"]["diagnostic_capacity"],
+            1474560,
+        )
+
+    def test_legacy_replay_summary_retains_clamped_capacity_contract(self) -> None:
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
+        summary = validation._coverage_output_diagnostic_summary(
+            "\n".join(
+                (
+                    moi_auto_report(
+                        7,
+                        1,
+                        visible_records=3,
+                        diagnostic_capacity=18794,
+                    ),
+                    moi_auto_replay(7, 1, 0, diagnostic_capacity=3),
+                )
+            ),
+            contract,
+        )
+
+        self.assertTrue(summary["accepted"], summary)
+        self.assertEqual(
+            summary["readers"]["reader=7,generation=1"]["diagnostic_capacity"], 3
         )
 
     def test_record_replay_parser_normalizes_producer_output(self) -> None:
@@ -1053,7 +1115,9 @@ class ConSanValidationTest(unittest.TestCase):
             malformed["reasons"],
         )
 
-    def test_record_replay_capacity_is_clamped_to_visible_records(self) -> None:
+    def test_record_replay_reports_full_and_clamped_diagnostic_capacities(
+        self,
+    ) -> None:
         report = moi_auto_report(
             7,
             1,
@@ -1061,11 +1125,18 @@ class ConSanValidationTest(unittest.TestCase):
             diagnostic_capacity=18794,
         )
         valid_log = complete_coverage_log(
-            moi_auto_replay(7, 1, 0, diagnostic_capacity=3)
+            moi_auto_replay(
+                7,
+                1,
+                0,
+                diagnostic_capacity=18794,
+                replay_input_access=3,
+                replay_scratch_diagnostic_capacity=3,
+            )
         ).replace(moi_auto_report(7, 1), report)
         invalid_log = valid_log.replace(
-            "diagnostic_capacity=3 ",
-            "diagnostic_capacity=18794 ",
+            "replay_scratch_diagnostic_capacity=3 ",
+            "replay_scratch_diagnostic_capacity=18794 ",
             1,
         )
 
@@ -1076,7 +1147,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(invalid["accepted"])
         self.assertTrue(
             any(
-                "replay diagnostic capacity mismatch" in reason
+                "replay scratch diagnostic capacity mismatch" in reason
                 and "expected=3" in reason
                 for reason in invalid["reasons"]
             ),

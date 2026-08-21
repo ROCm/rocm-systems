@@ -3292,8 +3292,10 @@ class _ReplaySummary:
     identity: ReplayIdentity
     code_object_fingerprint: str
     reported: int
+    replay_input_access: int | None
     diagnostic_capacity_exhausted: bool | None
     diagnostic_capacity: int | None
+    replay_scratch_diagnostic_capacity: int | None
     conflict: bool | None
     metadata_full: bool | None
     provenance_repaired: int
@@ -3610,10 +3612,14 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                     identity=identity,
                     code_object_fingerprint=fingerprint,
                     reported=diagnostics,
+                    replay_input_access=_unsigned(fields, "replay_input_access"),
                     diagnostic_capacity_exhausted=_boolean(
                         fields, "diagnostic_capacity_exhausted"
                     ),
                     diagnostic_capacity=_unsigned(fields, "diagnostic_capacity"),
+                    replay_scratch_diagnostic_capacity=_unsigned(
+                        fields, "replay_scratch_diagnostic_capacity"
+                    ),
                     conflict=_boolean(fields, "conflict"),
                     metadata_full=_boolean(fields, "metadata_full"),
                     provenance_repaired=provenance_repaired,
@@ -3718,17 +3724,40 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                 f"expected={expected_indices}, "
                 f"actual={actual_indices or 'none'}"
             )
-        expected_diagnostic_capacity = (
-            min(report.diagnostic_capacity, report.visible_records)
-            if report is not None
-            else None
+        is_legacy_capacity_summary = (
+            summary.replay_input_access is None
+            and summary.replay_scratch_diagnostic_capacity is None
         )
+        expected_diagnostic_capacity = None
+        if report is not None:
+            expected_diagnostic_capacity = (
+                min(report.diagnostic_capacity, report.visible_records)
+                if is_legacy_capacity_summary
+                else report.diagnostic_capacity
+            )
         if summary.diagnostic_capacity != expected_diagnostic_capacity:
             reasons.append(
                 "replay diagnostic capacity mismatch: "
                 f"{_identity_label(identity)}, "
                 f"value={summary.diagnostic_capacity}, "
                 f"expected={expected_diagnostic_capacity}"
+            )
+        expected_scratch_diagnostic_capacity = (
+            min(report.diagnostic_capacity, summary.replay_input_access)
+            if report is not None and summary.replay_input_access is not None
+            else None
+        )
+        if (
+            summary.replay_scratch_diagnostic_capacity is not None
+            and expected_scratch_diagnostic_capacity is not None
+            and summary.replay_scratch_diagnostic_capacity
+            != expected_scratch_diagnostic_capacity
+        ):
+            reasons.append(
+                "replay scratch diagnostic capacity mismatch: "
+                f"{_identity_label(identity)}, "
+                f"value={summary.replay_scratch_diagnostic_capacity}, "
+                f"expected={expected_scratch_diagnostic_capacity}"
             )
         expected_conflict = summary.reported != 0
         if summary.conflict is not expected_conflict:
@@ -3768,11 +3797,16 @@ def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOut
                 code_object_fingerprint=summary.code_object_fingerprint,
                 artifact_fields=(
                     ("reader", identity[0]),
+                    ("replay_input_access", summary.replay_input_access),
                     (
                         "diagnostic_capacity_exhausted",
                         summary.diagnostic_capacity_exhausted,
                     ),
                     ("diagnostic_capacity", summary.diagnostic_capacity),
+                    (
+                        "replay_scratch_diagnostic_capacity",
+                        summary.replay_scratch_diagnostic_capacity,
+                    ),
                     ("conflict", summary.conflict),
                     ("metadata_full", summary.metadata_full),
                     ("provenance_repaired", summary.provenance_repaired),
