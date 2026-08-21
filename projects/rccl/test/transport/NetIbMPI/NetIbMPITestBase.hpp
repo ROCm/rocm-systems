@@ -415,8 +415,17 @@ protected:
         // both ranks instead of leaving one of them in the barrier.
         int ok = (local == ncclSuccess) ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-        if (local != ncclSuccess) return local;
-        return ok ? ncclSuccess : ncclRemoteError;
+        if (local == ncclSuccess && ok) return ncclSuccess;
+
+        // Now that the failure is recoverable rather than fatal, whatever this
+        // rank did create has to be closed here: every caller asserts on this
+        // result before it constructs its NetConnectionGuard, so nothing else
+        // will. A leaked listener or QP would outlive the test and contaminate
+        // the rest of the process. Data comms first, then the listener.
+        if (pair.sendComm) { CloseSendComm(pair.sendComm); pair.sendComm = nullptr; }
+        if (pair.recvComm) { CloseRecvComm(pair.recvComm); pair.recvComm = nullptr; }
+        if (pair.listenComm) { CloseListenComm(pair.listenComm); pair.listenComm = nullptr; }
+        return (local != ncclSuccess) ? local : ncclRemoteError;
     }
 
     // Helper: Retry until the receiver's FIFO slot is ready.
@@ -770,6 +779,15 @@ protected:
 
         int ok = localOk ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        if (!ok) {
+            // The assertion below is fatal and unwinds through the caller's
+            // ASSERT_NO_FATAL_FAILURE before its teardown runs, so anything this
+            // rank created must be released here or it stays open for the rest
+            // of the process. Data comms first, then the listener.
+            if (*sendComm) { CloseSendComm(*sendComm); *sendComm = nullptr; }
+            if (*recvComm) { CloseRecvComm(*recvComm); *recvComm = nullptr; }
+            if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+        }
         ASSERT_EQ(ok, 1) << "IB-CAST connection setup failed on at least one rank (this rank: "
                          << localReason << ")";
     }

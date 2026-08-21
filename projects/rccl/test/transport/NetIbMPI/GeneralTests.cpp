@@ -879,7 +879,12 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
         }
         MPI_Allreduce(MPI_IN_PLACE, &connectFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (connectFailed) {
-            if (rank == 0 && pair.listenComm) CloseListenComm(pair.listenComm);
+            // Either side may have completed its own comm before the peer failed,
+            // and FAIL() ends the test before the loop's normal close path, so
+            // every local handle is released here. Data comms first, then listen.
+            if (pair.sendComm) CloseSendComm(pair.sendComm);
+            if (pair.recvComm) CloseRecvComm(pair.recvComm);
+            if (pair.listenComm) CloseListenComm(pair.listenComm);
             FAIL() << "IB QP listen/connect/accept failed iter " << iter
                    << " (cross-subnet node pair, or rank 0's listen failed)";
         }
