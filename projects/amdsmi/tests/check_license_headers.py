@@ -117,6 +117,21 @@ def has_header(text: str) -> bool:
     return COPYRIGHT_LINE in head and SPDX_LINE in head
 
 
+def has_orphaned_block_tail(text: str, leader: str) -> bool:
+    """A ``*/`` with no ``/*`` before it — debris from a half-replaced block header.
+
+    The two SPDX lines can be present while the tail of the old comment survives,
+    so presence alone does not mean the file still parses.
+    """
+    if leader != "//":
+        return False
+    head = text.splitlines()[:15]
+    close = next((i for i, line in enumerate(head) if "*/" in line), None)
+    if close is None:
+        return False
+    return not any("/*" in line for line in head[: close + 1])
+
+
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
@@ -140,7 +155,8 @@ def _to_rel(arg: str) -> str | None:
 
 def main(argv: list[str]) -> int:
     rels = [r for r in (_to_rel(a) for a in argv) if r] if argv else _tracked_files()
-    offenders = []
+    missing = []
+    orphaned = []
     for rel in rels:
         if not in_scope(rel):
             continue
@@ -148,19 +164,26 @@ def main(argv: list[str]) -> int:
         if not path.is_file():
             continue
         text = path.read_text(errors="replace")
-        if is_trivial(text, comment_leader(rel)):
+        leader = comment_leader(rel)
+        if is_trivial(text, leader):
             continue
         if not has_header(text):
-            offenders.append(rel)
-    if offenders:
+            missing.append(rel)
+        elif has_orphaned_block_tail(text, leader):
+            orphaned.append(rel)
+    if missing:
         print("Missing or malformed AMD SPDX license header:")
-        for rel in sorted(offenders):
+        for rel in sorted(missing):
             print(f"  {rel}")
         print("\nExpected near the top of the file (comment leader per language):")
         print(f"    {COPYRIGHT_LINE}")
         print(f"    {SPDX_LINE}")
-        return 1
-    return 0
+    if orphaned:
+        print("Leftover block-comment tail below the SPDX header ('*/' with no '/*'):")
+        for rel in sorted(orphaned):
+            print(f"  {rel}")
+        print("\nDelete the remnant lines of the old license block.")
+    return 1 if (missing or orphaned) else 0
 
 
 if __name__ == "__main__":
