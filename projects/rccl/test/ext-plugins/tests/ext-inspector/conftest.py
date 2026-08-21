@@ -91,7 +91,16 @@ def validate_inspector_log_file(filepath):
             line = line.strip()
             if not line:
                 continue
-            is_valid, _, error_msg = validate_inspector_log_line(line)
+            # A collective run also emits p2p records when its algorithm moves data with
+            # send/recv, so pick the validator by record type rather than assuming coll.
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as e:
+                errors.append(f"Line {lineno}: Invalid JSON: {e}")
+                continue
+            validate = (validate_inspector_p2p_line if "p2p_perf" in record
+                        else validate_inspector_log_line)
+            is_valid, _, error_msg = validate(line)
             if is_valid:
                 num_records += 1
             else:
