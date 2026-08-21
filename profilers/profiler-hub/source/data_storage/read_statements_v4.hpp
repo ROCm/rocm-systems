@@ -33,16 +33,15 @@ namespace profiler_hub::data_storage::schema_v4
 //     carry start_id/end_id FKs and rocpd_sample carries timestamp_id, so reading
 //     an actual time requires a JOIN onto rocpd_timestamp.value.
 //
-// Task 002C ports the legacy reader surface to v4.0. The timeline-event and count
-// accessors are implemented here against the v4.0 schema (spine JOINs + rocpd_track
-// + rocpd_info_category). The remaining legacy detail/call-stack/correlated/
-// time-range surface is still pending in later 002C groups; those accessors inherit
-// the default-empty stubs from read_statements_base and the reader still guards
-// those paths.
+// The timeline-event and count accessors are implemented here against the v4.0
+// schema (spine JOINs + rocpd_track + rocpd_info_category). The remaining legacy
+// detail/call-stack/correlated/time-range surface is not yet implemented; those
+// accessors inherit the default-empty stubs from read_statements_base and the
+// reader still guards those paths.
 //
 // Table naming: this backend reuses the v3 reader convention `rocpd_<name>_<uuid>`
-// (underscore separator supplied by the reader). See the open question in
-// tasks/002B-result.md about the v4.0 DDL template placeholder `{{uuid}}`.
+// (underscore separator supplied by the reader). The `{{uuid}}` placeholder in the
+// v4.0 DDL template is not substituted here.
 struct read_statements : public read_statements_base
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -289,7 +288,7 @@ struct read_statements : public read_statements_base
         return m_scalar_stats;
     }
 
-    // ----- legacy timeline-event accessors (task 002C) -----
+    // ----- legacy timeline-event accessors -----
     [[nodiscard]] const timeline_event_statement_set& region_statements() const override
     {
         return m_region_statements;
@@ -310,7 +309,7 @@ struct read_statements : public read_statements_base
         return m_memory_copy_statements;
     }
 
-    // ----- legacy count accessors (task 002C) -----
+    // ----- legacy count accessors -----
     [[nodiscard]] const count_func_t& region_count() const override
     {
         return m_region_count;
@@ -348,7 +347,7 @@ struct read_statements : public read_statements_base
         return m_memory_alloc_count_time_filtered;
     }
 
-    // ----- legacy event-metadata / property accessors (task 002C) -----
+    // ----- legacy event-metadata / property accessors -----
     [[nodiscard]] const event_id_func_t& region_event_id() const override
     {
         return m_region_event_id;
@@ -377,7 +376,7 @@ struct read_statements : public read_statements_base
         return m_correlated_event_statements;
     }
 
-    // ----- legacy per-event detail accessors (task 002C) -----
+    // ----- legacy per-event detail accessors -----
     [[nodiscard]] const region_detail_func_t& region_detail() const override
     {
         return m_region_detail;
@@ -396,7 +395,7 @@ struct read_statements : public read_statements_base
         return m_memory_alloc_detail;
     }
 
-    // ----- legacy per-event-type time-range accessors (task 002C) -----
+    // ----- legacy per-event-type time-range accessors -----
     [[nodiscard]] const time_range_func_t& region_time_range() const override
     {
         return m_region_time_range;

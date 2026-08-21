@@ -543,7 +543,7 @@ struct scalar_detail_result
 // ---------------------------------------------------------------------------
 // Abstract read-statements interface.
 //
-// This is the version-dispatch seam (task 002B): reader_impl holds a
+// This is the version-dispatch seam: reader_impl holds a
 // shared_ptr<read_statements_base>, selected once at construction based on the
 // detected schema version. Both schema_v3::read_statements and
 // schema_v4::read_statements derive from this and provide their own SQL.
