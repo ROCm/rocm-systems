@@ -66,63 +66,44 @@ if(NOT TORCH_FOUND)
     return()
 endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
-set(_torch_version "${Torch_VERSION}")
 
-function(_ttc_source_fingerprint out_var)
-    set(_collector_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
-    file(GLOB _cpp_files CONFIGURE_DEPENDS "${_collector_dir}/*.cpp")
-    file(GLOB _header_files CONFIGURE_DEPENDS "${_collector_dir}/*.h")
-    set(_inputs ${_cpp_files} ${_header_files})
-    list(
-        APPEND
-        _inputs
-        "${_collector_dir}/CMakeLists.txt"
-        "${_collector_dir}/../utils/synchronized/synchronized.hpp"
-        "${_collector_dir}/../utils/gsl_assert/gsl_assert.h"
+# The tag names one build of the extension and has to be byte-identical to what
+# the loader looks for at runtime, so it has exactly one implementation:
+# utils/inject_roctx/_backends/torch_trace_fingerprint.py. The loader passes the
+# tag it already computed; a build-time configure asks that module directly.
+if(TORCH_TRACE_ARTIFACT_TAG)
+    set(_tag "${TORCH_TRACE_ARTIFACT_TAG}")
+else()
+    execute_process(
+        COMMAND
+            "${_ttc_python}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/inject_roctx/_backends/torch_trace_fingerprint.py"
+        OUTPUT_VARIABLE _tag
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_VARIABLE _ttc_tag_error
+        RESULT_VARIABLE _ttc_tag_result
     )
-    set(_resolved_paths "")
-    foreach(_path IN LISTS _inputs)
-        if(EXISTS "${_path}")
-            file(REAL_PATH "${_path}" _resolved)
-            list(APPEND _resolved_paths "${_resolved}")
-        endif()
-    endforeach()
-    list(REMOVE_DUPLICATES _resolved_paths)
-    list(SORT _resolved_paths)
-    set(_digest_lines "")
-    foreach(_path IN LISTS _resolved_paths)
-        get_filename_component(_name "${_path}" NAME)
-        file(SHA256 "${_path}" _digest)
-        string(APPEND _digest_lines "${_name}:${_digest}\n")
-    endforeach()
-    if(_digest_lines STREQUAL "")
-        set("${out_var}" "missing" PARENT_SCOPE)
-        return()
-    endif()
-    string(SHA256 _catalog_hash "${_digest_lines}")
-    string(SUBSTRING "${_catalog_hash}" 0 12 _fingerprint)
-    set("${out_var}" "${_fingerprint}" PARENT_SCOPE)
-endfunction()
-
-if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
-    _ttc_source_fingerprint(TORCH_TRACE_SOURCE_FINGERPRINT)
-    if(
-        NOT TORCH_TRACE_SOURCE_FINGERPRINT
-        OR TORCH_TRACE_SOURCE_FINGERPRINT STREQUAL "missing"
-    )
+    if(NOT _ttc_tag_result EQUAL 0 OR NOT _tag)
         message(
             ${_ttc_unavailable_severity}
-            "torch_trace_collector: could not hash the collector sources; the "
-            "extension is not built."
+            "torch_trace_collector: could not resolve the artifact tag "
+            "(${_ttc_tag_error}); the extension is not built."
         )
         return()
     endif()
 endif()
-set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
+
+if(_tag MATCHES "_srcmissing$")
+    message(
+        ${_ttc_unavailable_severity}
+        "torch_trace_collector: the collector sources could not be read; the "
+        "extension is not built."
+    )
+    return()
+endif()
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
-set(_tag "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}")
 set(_so_name "torch_trace_collector-${_tag}")
 
 message(STATUS "torch_trace_collector: building against ${_ttc_python} (tag ${_tag})")
@@ -229,11 +210,15 @@ endif()
 set(_torch_python_lib ${${_torch_python_cachevar}})
 
 # Detect whether c10::DebugInfoKind accepts a custom string_view-backed key.
-# When unavailable, the source falls back to TEST_INFO_2.
+# When unavailable, the source falls back to TEST_INFO_2. The standard is set
+# through CMAKE_CXX_STANDARD rather than CMAKE_REQUIRED_FLAGS: try_compile
+# appends its own -std= flag last, which would override anything passed here.
 include(CheckCXXSourceCompiles)
-set(_ttc_saved_flags "${CMAKE_REQUIRED_FLAGS}")
+set(_ttc_saved_standard "${CMAKE_CXX_STANDARD}")
+set(_ttc_saved_standard_required "${CMAKE_CXX_STANDARD_REQUIRED}")
 set(_ttc_saved_includes "${CMAKE_REQUIRED_INCLUDES}")
-set(CMAKE_REQUIRED_FLAGS "-std=c++17")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_REQUIRED_INCLUDES ${_torch_includes})
 check_cxx_source_compiles(
     "#include <c10/util/ThreadLocalDebugInfo.h>
@@ -243,7 +228,8 @@ check_cxx_source_compiles(
      int main() { (void)kProbeKind; return 0; }"
     ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
 )
-set(CMAKE_REQUIRED_FLAGS "${_ttc_saved_flags}")
+set(CMAKE_CXX_STANDARD "${_ttc_saved_standard}")
+set(CMAKE_CXX_STANDARD_REQUIRED "${_ttc_saved_standard_required}")
 set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 
 # --- torch-trace-collector library -------------------------------------------------
@@ -274,8 +260,6 @@ target_link_libraries(
     PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB} synchronized gsl_assert
 )
 target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
-# Official ROCm libtorch 2.10+ is CXX11 ABI.
-target_compile_definitions(torch-trace-collector PUBLIC _GLIBCXX_USE_CXX11_ABI=1)
 target_compile_options(
     torch-trace-collector
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
@@ -308,11 +292,9 @@ target_compile_options(
 )
 set_target_properties(${_so_name} PROPERTIES PREFIX "")
 
-# The loader globs lib*/rocprofiler-compute/ for this artifact.
-install(
-    TARGETS ${_so_name}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-)
+# The root CMakeLists.txt installs this target alongside the other native
+# libraries; publish the tagged name it cannot derive on its own.
+set(TORCH_TRACE_COLLECTOR_TARGET "${_so_name}" CACHE INTERNAL "")
 
 if(ENABLE_TESTS AND TARGET gtest_main)
     add_subdirectory(tests)

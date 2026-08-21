@@ -1,22 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-from __future__ import annotations
-
 import shlex
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 from utils.logger import console_debug, console_log
 from utils.utils_common import capture_subprocess_output
+
+# Lines of cmake output kept when a command fails.
+_ERROR_OUTPUT_LINES = 20
 
 
 class NativeToolFinder:
     """Locate an artifact of the native tool project, building it from the source
     tree when no installed copy is present.
 
-    ``reuse_built_artifact`` accepts an artifact already present in the build
-    directory instead of running cmake again. It is sound only for artifacts
-    whose name identifies the sources they were built from, since an artifact
-    with a name-independent identity may be stale.
+    Set ``reuse_built_artifact`` only for artifacts whose name encodes the
+    sources they were built from; a fixed-name artifact would be reused stale.
     """
 
     sources_dir_name = "lib"
@@ -35,9 +35,9 @@ class NativeToolFinder:
         root_path: Path,
         *,
         artifact_name: str = lib_name,
-        build_target: str | None = None,
-        build_path: Path | None = None,
-        configure_options: tuple[str, ...] = (),
+        build_target: Optional[str] = None,
+        build_path: Optional[Path] = None,
+        configure_options: Tuple[str, ...] = (),
         cmake_executable: str = "cmake",
         search_installed: bool = True,
         reuse_built_artifact: bool = False,
@@ -61,40 +61,34 @@ class NativeToolFinder:
 
     def get_artifact_path(self) -> Path:
         artifact_path = (
-            self.__find_installed_artifact() if self.search_installed else None
+            self._find_installed_artifact() if self.search_installed else None
         )
         if not artifact_path and self.reuse_built_artifact:
-            artifact_path = self.__find_built_artifact()
+            artifact_path = self._find_built_artifact()
         if not artifact_path:
-            artifact_path = self.__build_artifact()
+            artifact_path = self._build_artifact()
         if not artifact_path:
             raise RuntimeError(f"Failed to find or build {self.artifact_name}")
         console_log(f"Using {self.artifact_name}: {artifact_path}")
         return artifact_path
 
-    def __find_installed_artifact(self) -> Path | None:
-        rocm_root_path = self.__get_installed_rocm_root_path()
+    def _find_installed_artifact(self) -> Optional[Path]:
+        rocm_root_path = self._get_installed_rocm_root_path()
         # lib* glob pattern is used to handle CMAKE_INSTALL_LIBDIR variations
         pattern = f"lib*/rocprofiler-compute/{self.artifact_name}"
         console_debug(f"Searching {rocm_root_path} for {pattern}")
-        return self.__find_file_by_glob_pattern(rocm_root_path, pattern)
-
-    def __get_installed_rocm_root_path(self) -> Path:
-        native_tool_base_path = (
-            self.root_path.parents[1] if len(self.root_path.parents) > 1 else Path()
-        )
-        return native_tool_base_path
-
-    def __find_file_by_glob_pattern(self, base_path: Path, pattern: str) -> Path | None:
-        match = next(base_path.glob(pattern), None)
+        match = next(rocm_root_path.glob(pattern), None)
         return Path(match) if match is not None else None
 
-    def __build_artifact(self) -> Path | None:
+    def _get_installed_rocm_root_path(self) -> Path:
+        return self.root_path.parents[1] if len(self.root_path.parents) > 1 else Path()
+
+    def _build_artifact(self) -> Optional[Path]:
         self._generate_cmake()
         self._build_cmake()
-        return self.__find_built_artifact()
+        return self._find_built_artifact()
 
-    def __find_built_artifact(self) -> Path | None:
+    def _find_built_artifact(self) -> Optional[Path]:
         artifact_path = (
             self.build_path / self.sources_bin_subdir_name / self.artifact_name
         )
@@ -113,24 +107,21 @@ class NativeToolFinder:
         console_log(
             f"Generating native tool project using command: {shlex.join(command)}"
         )
-        self.__execute_command(command)
+        self._execute_command(command)
 
     def _build_cmake(self) -> None:
         command = [self.cmake_executable, "--build", str(self.build_path), "--parallel"]
         if self.build_target is not None:
             command += ["--target", self.build_target]
         console_log(f"Building native tool using command: {shlex.join(command)}")
-        self.__execute_command(command)
+        self._execute_command(command)
 
-    def __execute_command(self, command: list[str]) -> None:
+    def _execute_command(self, command: List[str]) -> None:
         # Output is logged when enable_logging=False is not provided
         success, output = capture_subprocess_output(command)
-        if not success:
-            msg = f"Failed to execute command: {shlex.join(command)}"
-            tail = self.__output_tail(output)
-            raise RuntimeError(f"{msg}\n{tail}" if tail else msg)
-
-    @staticmethod
-    def __output_tail(output: str, max_lines: int = 20) -> str:
-        lines = output.strip().splitlines()
-        return "\n".join(lines[-max_lines:])
+        if success:
+            return
+        # The tail carries the cmake diagnostic the loader classifies.
+        tail = "\n".join(output.strip().splitlines()[-_ERROR_OUTPUT_LINES:])
+        message = f"Failed to execute command: {shlex.join(command)}"
+        raise RuntimeError(f"{message}\n{tail}" if tail else message)

@@ -19,7 +19,7 @@ import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from utils.inject_roctx._backends import torch_trace_fingerprint
 
@@ -28,8 +28,6 @@ _THIS_DIR = Path(__file__).resolve().parent
 # in installed layouts; both host the torch_trace_collector sources at lib/.
 _NATIVE_TOOL_ROOT = _THIS_DIR.parents[2]
 _NATIVE_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib"
-_SO_SOURCE_DIR = _NATIVE_SOURCE_DIR / "torch_trace_collector"
-_SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
@@ -38,11 +36,9 @@ TIER_RUNTIME_BUILD = "runtime-build"
 
 C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_RUNTIME_BUILD))
 
-_source_fingerprint = torch_trace_fingerprint.source_fingerprint
-
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_TORCH_TRACE"
 
-_Diagnostics = list[tuple[str, str]]
+_Diagnostics = List[Tuple[str, str]]
 
 
 @dataclass
@@ -90,18 +86,8 @@ def format_load_diagnostic_trail(
 
 
 def compute_tag() -> Optional[str]:
-    """Return ``py{major}.{minor}_torch{version}_src{fingerprint}``, or ``None``."""
-    try:
-        import torch
-    except Exception:
-        return None
-
-    torch_version = torch.__version__.split("+", 1)[0]
-    fingerprint = _source_fingerprint()
-    return (
-        f"py{sys.version_info.major}.{sys.version_info.minor}"
-        f"_torch{torch_version}_src{fingerprint}"
-    )
+    """Return the artifact tag for the running interpreter, or ``None``."""
+    return torch_trace_fingerprint.artifact_tag()
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
@@ -114,7 +100,7 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
     return module
 
 
-def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
+def _install_tree_prebuilt_candidates(tag: str) -> List[Path]:
     """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
     # parents[4] reaches the install prefix from this file's location in
     # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
@@ -166,7 +152,7 @@ _PREBUILT_HINT = (
 )
 
 
-def _explain_cmake_failure(err: Exception) -> tuple[str, str]:
+def _explain_cmake_failure(err: Exception) -> Tuple[str, str]:
     """Classify a cmake failure into ``(reason, hint)``."""
     text = str(err).lower()
     if "could not find torch" in text or "torch_dir" in text:
@@ -302,9 +288,11 @@ def _try_runtime_build(
 
     artifact_name = f"torch_trace_collector-{tag}.so"
     build_target = f"torch_trace_collector-{tag}"
+    # The tag is passed whole so cmake names its target exactly what the loader
+    # looks for, rather than re-deriving the same string from its own inputs.
     configure_options = (
         f"-DTORCH_TRACE_PYTHON={sys.executable}",
-        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={tag.rpartition('_src')[2]}",
+        f"-DTORCH_TRACE_ARTIFACT_TAG={tag}",
         "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
         "-DCMAKE_BUILD_TYPE=Release",
     )

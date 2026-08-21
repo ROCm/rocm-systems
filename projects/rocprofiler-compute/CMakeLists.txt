@@ -823,18 +823,25 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-if(TARGET test-roctx-recordfn)
+if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
-        set(_rcfn_test_cmd tests/test-roctx-recordfn)
+        set(_ttc_test_cmd tests/test-torch-trace-collector)
     else()
-        set(_rcfn_test_cmd $<TARGET_FILE:test-roctx-recordfn>)
+        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
     endif()
-    add_test(NAME test-roctx-recordfn COMMAND ${_rcfn_test_cmd})
-    get_target_property(_rcfn_ld_path test-roctx-recordfn ROCPROF_TEST_LD_LIBRARY_PATH)
-    set(_rcfn_test_env "LD_LIBRARY_PATH=${_rcfn_ld_path}:$ENV{LD_LIBRARY_PATH}")
+    add_test(NAME test-torch-trace-collector COMMAND ${_ttc_test_cmd})
+    get_target_property(
+        _ttc_ld_path
+        test-torch-trace-collector
+        ROCPROF_TEST_LD_LIBRARY_PATH
+    )
+    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
     sanitizer_runtime_env(_san_env OFF)
-    list(APPEND _rcfn_test_env ${_san_env})
-    set_tests_properties(test-roctx-recordfn PROPERTIES ENVIRONMENT "${_rcfn_test_env}")
+    list(APPEND _ttc_test_env ${_san_env})
+    set_tests_properties(
+        test-torch-trace-collector
+        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
+    )
 endif()
 
 # -----------------------------------
@@ -871,9 +878,16 @@ add_test(
 add_test(
     NAME test_torch_trace_kernel_names
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_kernel_names.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_kernel_names.xml ${COV_OPTION}
         tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_fingerprint
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_fingerprint.xml ${COV_OPTION}
+        tests/unit/utils/inject_roctx/_backends/test_torch_trace_fingerprint.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1066,6 +1080,7 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_torch_cpp_loader
         test_torch_trace_kernel_names
+        test_torch_trace_fingerprint
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
@@ -1269,11 +1284,19 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so
+# install librocprofiler-compute-tool.so and torch_trace_collector-<tag>.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
+# BUILD_TORCH_TRACE_COLLECTOR=AUTO skips the extension when Torch is absent.
+# The loader globs lib*/rocprofiler-compute/ for the tagged artifact.
+if(TARGET ${TORCH_TRACE_COLLECTOR_TARGET})
+    install(
+        TARGETS ${TORCH_TRACE_COLLECTOR_TARGET}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+    )
+endif()
 
 # top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
 configure_file(
