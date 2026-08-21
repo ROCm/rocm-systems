@@ -30,7 +30,7 @@ write_perfetto_counter_track(std::uint64_t _val)
         auto _emplace = [](const size_t _idx) {
             if(!counter_track::exists(_idx))
             {
-                std::string _label =
+                const std::string _label =
                     (_idx > 0) ? fmt::format(" {} [{}]", Tp::label, _idx) : Tp::label;
                 counter_track::emplace(_idx, _label, "bytes");
             }
@@ -44,7 +44,7 @@ write_perfetto_counter_track(std::uint64_t _val)
         static std::uint64_t value = 0;
         std::uint64_t        _now  = 0;
         {
-            std::unique_lock<std::mutex> _lk{ _mutex };
+            const std::unique_lock<std::mutex> _lk{ _mutex };
             _now = rocprofsys::tracing::now<std::uint64_t>();
             _val = (value += _val);
         }
@@ -86,8 +86,8 @@ void
 metadata_initialize_comm_data_pmc()
 {
     // find the proper values for a following definitions
-    [[maybe_unused]] size_t                EVENT_CODE       = 0;
-    [[maybe_unused]] size_t                INSTANCE_ID      = 0;
+    [[maybe_unused]] const size_t          EVENT_CODE       = 0;
+    [[maybe_unused]] const size_t          INSTANCE_ID      = 0;
     [[maybe_unused]] constexpr const char* LONG_DESCRIPTION = "";
     [[maybe_unused]] constexpr const char* COMPONENT        = "";
     [[maybe_unused]] constexpr const char* BLOCK            = "";
@@ -129,7 +129,7 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
     static std::uint64_t value = 0;
     std::uint64_t        _now  = 0;
     {
-        std::unique_lock<std::mutex> _lk{ _mutex };
+        const std::unique_lock<std::mutex> _lk{ _mutex };
         _now  = rocprofsys::tracing::now<std::uint64_t>();
         bytes = (value += bytes);
     }
@@ -562,7 +562,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
 {
     if(count == 0 && header_length == 0) return;
 
-    size_t total_size = header_length + count;
+    const size_t total_size = header_length + count;
     if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_size);
 
     {
@@ -670,7 +670,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
 {
     if(length == 0) return;
 
-    bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
+    const bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
 
     if(get_use_perfetto())
     {
@@ -700,7 +700,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
                  size_t header_length, void*, size_t length, unsigned, void*)
 {
-    size_t total_length = header_length + length;
+    const size_t total_length = header_length + length;
     if(total_length == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_length);
@@ -724,7 +724,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 {
     if(count == 0) return;
 
-    bool is_send = _data.tool_id.find("send") != std::string::npos;
+    const bool is_send = _data.tool_id.find("send") != std::string::npos;
 
     if(get_use_perfetto())
     {

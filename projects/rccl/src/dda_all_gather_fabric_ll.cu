@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace {
 
@@ -52,6 +53,14 @@ static inline int ddaLLAgBlocksPerPeer(size_t perRankBytes) {
   return (int)bpp;
 }
 
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
+// per-peer packet split; 256 threads/block.
+static inline std::pair<dim3, dim3> ddaAllGatherFabricLLGeom(ncclComm* comm, size_t perRankBytes) {
+  const unsigned threads = 256;
+  const int blocksPerPeer = ddaLLAgBlocksPerPeer(perRankBytes);
+  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   const void* sendbuff, void* recvbuff,
@@ -60,18 +69,16 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
 
-  // grid.x == nRanks (peer), grid.y == blocksPerPeer (packet split, 1 for small
-  // messages).
-  const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLAgBlocksPerPeer(perRankBytes);
-  dim3 block(threads);
-  dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
+  auto gridBlock = ddaAllGatherFabricLLGeom(comm, perRankBytes);
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
+  const uint32_t blocksPerPeer = grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
+  INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
@@ -132,6 +139,11 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   }
 
   return true;
+}
+
+uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  const auto grid = ddaAllGatherFabricLLGeom(comm, sendcount * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
