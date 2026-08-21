@@ -10,7 +10,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
-
+- The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
+  default. Pass `--profile` to get a call-stack-based profile instead.
 - `rocprof-sys-python` no longer accepts abbreviated long options (for example,
   `--conf` for `--config`). Spell out the full option name.
 
