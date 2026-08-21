@@ -674,9 +674,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
         goto dxcore_loader_failed;
     }
 
-#if defined(__linux__)
-    hsakmt_hsa_loader_init();
-#endif
     init_page_size();
 
 

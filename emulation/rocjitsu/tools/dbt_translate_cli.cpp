@@ -52,7 +52,7 @@ constexpr std::array<TargetInfo, 5> kTargetInfos = {{
      ROCJITSU_CODE_TARGET_GFX1201},
     // gfx1250 A0 and B0 share the same ELF machine and structural ISA. Separate
     // revision options select the translation direction.
-    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+    {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
      ROCJITSU_CODE_TARGET_GFX1250},
 }};
 
@@ -95,6 +95,7 @@ void print_help() {
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --verify-idempotence           Require a same-architecture second pass to be "
          "unchanged\n"
+      << "  --verify-rewrite-discharge     Require no registered rewrite trigger in final output\n"
       << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
@@ -199,6 +200,10 @@ void print_help() {
     }
     if (arg == "--verify-idempotence") {
       options.translate.verify_idempotence = true;
+      continue;
+    }
+    if (arg == "--verify-rewrite-discharge") {
+      options.translate.verify_rewrite_discharge = true;
       continue;
     }
 
@@ -344,6 +349,8 @@ struct ReportTotals {
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
     return "kernel-skipped";
+  case DiagnosticKind::ResidualRewrite:
+    return "residual-rewrite";
   }
   return "unknown";
 }
@@ -356,6 +363,8 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
      << diagnostic_kind_name(diagnostic.kind);
   if (diagnostic.guest_offset)
     os << " .text+" << hex_offset(*diagnostic.guest_offset);
+  if (diagnostic.output_offset)
+    os << " output:.text+" << hex_offset(*diagnostic.output_offset);
   if (!diagnostic.mnemonic.empty())
     os << " " << diagnostic.mnemonic;
   os << ": " << diagnostic.message << "\n";
@@ -386,10 +395,15 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
 [[nodiscard]] std::string translation_action_text(const InstructionTranslationReport &translation) {
   if (translation.copied_original)
     return "copy_original";
-  if (!translation.has_legalization)
+
+  // An unclassified semantic lowering deliberately reads the same as a
+  // classified expansion: whether a legalization entry also named the opcode is
+  // internal to the profile, and the action the reader sees is the same one.
+  const auto action = translation.effective_action();
+  if (!action)
     return "encode";
 
-  std::string text = legalization_action_name(translation.action);
+  std::string text = legalization_action_name(*action);
   if (translation.semantic_lowering)
     text += " semantic";
   return text;
@@ -404,23 +418,19 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
 
 [[nodiscard]] size_t count_action(const std::vector<InstructionTranslationReport> &translations,
                                   Action action) {
-  size_t count = 0;
-  for (const auto &translation : translations) {
-    if (!translation.copied_original && translation.has_legalization &&
-        translation.action == action)
-      ++count;
-  }
-  return count;
+  return static_cast<size_t>(std::ranges::count_if(
+      translations, [action](const InstructionTranslationReport &translation) {
+        return translation.effective_action() == action;
+      }));
 }
 
+/// @brief Instructions re-encoded with no rule: not copied, and no action.
 [[nodiscard]] size_t
 count_runtime_encode(const std::vector<InstructionTranslationReport> &translations) {
-  size_t count = 0;
-  for (const auto &translation : translations) {
-    if (!translation.copied_original && !translation.has_legalization)
-      ++count;
-  }
-  return count;
+  return static_cast<size_t>(
+      std::ranges::count_if(translations, [](const InstructionTranslationReport &translation) {
+        return !translation.copied_original && !translation.effective_action();
+      }));
 }
 
 [[nodiscard]] size_t
@@ -536,6 +546,12 @@ void print_text_report(std::ostream &os, const CliOptions &options,
                                                                   : "not-verified";
     os << "idempotence: " << status << "\n";
   }
+  if (options.translate.verify_rewrite_discharge) {
+    const std::string_view status = !output.rewrite_discharge_checked   ? "not-checked"
+                                    : output.rewrite_discharge_verified ? "verified"
+                                                                        : "not-verified";
+    os << "rewrite_discharge: " << status << "\n";
+  }
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
@@ -600,6 +616,10 @@ int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
 
   if (options.list_code_objects && options.translate.verify_idempotence) {
     std::cerr << "--verify-idempotence cannot be combined with --list-code-objects\n";
+    return kUsageError;
+  }
+  if (options.list_code_objects && options.translate.verify_rewrite_discharge) {
+    std::cerr << "--verify-rewrite-discharge cannot be combined with --list-code-objects\n";
     return kUsageError;
   }
 

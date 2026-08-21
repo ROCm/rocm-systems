@@ -365,8 +365,8 @@ validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
                      "Consider adding --rocm for GPU collective tracing.\n";
     }
 
-    int domain_count = (gpu_enabled ? 1 : 0) + (rocm_enabled ? 1 : 0) +
-                       (cpu_enabled ? 1 : 0) + (parallel_enabled ? 1 : 0);
+    const int domain_count = (gpu_enabled ? 1 : 0) + (rocm_enabled ? 1 : 0) +
+                             (cpu_enabled ? 1 : 0) + (parallel_enabled ? 1 : 0);
     if(domain_count >= 3 && preset_name.empty())
     {
         std::cerr << "[rocprof-sys][note] Multiple domain flags specified. Consider "
@@ -394,12 +394,12 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
 
     for(const auto& env_entry : current_env)
     {
-        std::string_view entry{ env_entry };
-        auto             eq_pos = entry.find('=');
+        const std::string_view entry{ env_entry };
+        auto                   eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos) continue;
 
-        std::string key(entry.substr(0, eq_pos));
-        std::string val(entry.substr(eq_pos + 1));
+        const std::string key(entry.substr(0, eq_pos));
+        const std::string val(entry.substr(eq_pos + 1));
 
         if(key.find("ROCPROFSYS_") != 0) continue;
 
@@ -471,7 +471,7 @@ strip_ansi(const std::string& text)
     std::string result;
     result.reserve(text.size());
     bool in_escape = false;
-    for(char ch : text)
+    for(const char ch : text)
     {
         if(in_escape)
         {
@@ -514,7 +514,7 @@ line_contains_flag(const std::string& line, const std::string& flag)
     auto end = pos + flag.size();
     if(end < stripped.size())
     {
-        char next = stripped[end];
+        const char next = stripped[end];
         if(next != ' ' && next != ',' && next != '=' && next != '\t' && next != '[')
             return false;
     }
@@ -772,7 +772,8 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     if(match == topic_map.end()) return false;
 
     // Build set of target header strings
-    std::set<std::string> target_headers(match->second.begin(), match->second.end());
+    const std::set<std::string> target_headers(match->second.begin(),
+                                               match->second.end());
 
     // Split captured text into lines
     std::istringstream       iss(captured);
@@ -885,7 +886,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
         }
 
         // Check if this line starts a new argument (has - prefix after indent)
-        bool is_arg_line = (stripped[first] == '-');
+        const bool is_arg_line = (stripped[first] == '-');
 
         if(is_arg_line)
         {

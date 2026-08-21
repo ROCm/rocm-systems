@@ -14,7 +14,7 @@ Covers scalar semantic classes:
   scalar_bitcmp, scalar_saveexec, scalar_mov, scalar_cmov
 
 Covers vector ALU + cmp semantic classes:
-  vector_mov, vector_unary, vector_binop, vector_ternary,
+  vector_mov, vector_unary, pseudo_scalar_unary, vector_binop, vector_ternary,
   vector_cmp, vector_cmpx, vector_cmp_class, vector_cmpx_class,
   vector_add_co, vector_cndmask, vector_readfirstlane, vector_readlane,
   vector_writelane, vector_swap, vector_fmaak, vector_fmamk
@@ -1117,6 +1117,25 @@ class _VectorUnary(_ScalarDeriver):
         result = _vec_unary_expr(op, src0, ty)
         body = _assign(_cast(_dst(0, ty), ty), result)
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
+@_register('pseudo_scalar_unary')
+class _PseudoScalarUnary(_ScalarDeriver):
+    """VALU unary expression that executes once on SGPRs and ignores EXEC."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        ty = _dtype_to_sema(sem.data_type)
+        src0 = _cast(_src(0, ty), ty)
+        call_name = f'pseudo_scalar_{sem.operation}_{sem.data_type}'
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.B32,
+            call_name=call_name,
+            children=(_id(call_name), src0),
+        )
+        body = _assign(_cast(_dst(0), SemaType.B32), result)
+        return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
 @_register('vector_binop')

@@ -17,10 +17,11 @@ enum primsMode {
 };
 
 template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
-          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
+          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc,
+          int UserRegMode>
 class Primitives<T, RedOp, Fan, Direct,
                  ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p,
-                 isNetOffload, Metadata, Pipeline, useAcc> {
+                 isNetOffload, Metadata, Pipeline, useAcc, UserRegMode> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1;
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,
@@ -58,8 +59,10 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void barrier() {
     if (nthreads == WARP_SIZE) __syncwarp();
     else
+      // gfx942/gfx950/gfx1250 all use intra-block fence; __threadfence() is
+      // device-wide and doesn't add system-scope ordering here.
       // To be revisited for correctness on gfx1250
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
       barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nworkers, barrier_next, barriers);
@@ -72,7 +75,7 @@ class Primitives<T, RedOp, Fan, Direct,
 
   inline __device__ void patBarrier() {
     // To be revisited for correctness on gfx1250
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
 #else
     barrier_generic(__threadfence(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
@@ -106,7 +109,7 @@ class Primitives<T, RedOp, Fan, Direct,
     // NET no-GDR can publish host-staged payloads from the CPU proxy.
     // Acquire the tail before GPU workers consume the payload.
     return ld_acquire_sys_global(ptr);
-#elif defined(__gfx1200__) || defined(__gfx1201__)
+#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
@@ -766,7 +769,7 @@ public:
     patBarrier();
   }
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
     // The cheap post-peer fence is only safe with global DWORDX4 builtins
     // (system-scope cache-bypassing stores); otherwise always use the full fence.

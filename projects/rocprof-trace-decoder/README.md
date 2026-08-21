@@ -89,50 +89,7 @@ The namespaced target carries the disasm backend's include dirs, link libs, and 
 
 ## Testing
 
-### Building and Running Tests
-
-```bash
-cmake -B build -DBUILD_TESTS=ON -DDISABLE_COMGR=ON
-cmake --build build -j$(nproc)
-cd build && ctest --test-dir test -j$(nproc)
-```
-
-Set `-DDISABLE_COMGR=ON` if `amd_comgr` is not installed. This skips the att-tool but all other tests still run.
-
-### Running Only Unit Tests
-
-```bash
-ctest --test-dir build/test -R "regular/" -j$(nproc)
-```
-
-### Running Only Integration Tests
-
-```bash
-ctest --test-dir build/test -E "regular/|sanitize|ubsan|asan" -j$(nproc)
-```
-
-### Sanitizer Builds
-
-```bash
-ctest --test-dir build/test -R "asan/" -j$(nproc)   # AddressSanitizer
-ctest --test-dir build/test -R "ubsan/" -j$(nproc)  # UBSan
-```
-
-## Code Coverage
-
-```bash
-# Requires gcov, lcov and genhtml
-
-cmake -B build_coverage -DBUILD_TESTS=ON -DDISABLE_COMGR=ON \
-    -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
-    -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
-    -DCMAKE_SHARED_LINKER_FLAGS="--coverage" \
-    -DCMAKE_BUILD_TYPE=Debug
-
-# Build and Generate coverage report
-cmake --build build_coverage -j$(nproc)
-cd build_coverage && make coverage
-```
+See [TESTING.md](TESTING.md) for test and code coverage information.
 
 ## Usage with rocprofv3
 

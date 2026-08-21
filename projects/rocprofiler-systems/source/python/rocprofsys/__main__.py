@@ -274,6 +274,13 @@ def main(main_args=sys.argv):
                     "python -m rocprofsys -- ./script.py".format(" ".join(argv))
                 )
 
+    if not argv:
+        raise RuntimeError(
+            "Could not determine input script. Use '--' before the script and its "
+            "arguments to ensure correct parsing. \nE.g. "
+            "python -m rocprofsys -- ./script.py"
+        )
+
     if len(argv) > 1:
         if argv[0] == "-m":
             argv = argv[1:]
@@ -338,7 +345,6 @@ def main(main_args=sys.argv):
     # Make sure the script's directory is on sys.path
     sys.path.insert(0, os.path.dirname(script_file))
 
-    _ROCPROFSYS_PYTHON_SCRIPT_FILE = script_file
     os.environ["ROCPROFSYS_PYTHON_SCRIPT_FILE"] = script_file
 
     prof = Profiler()
