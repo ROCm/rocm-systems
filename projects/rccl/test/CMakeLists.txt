@@ -737,6 +737,7 @@ if(BUILD_TESTS)
         common/MPITestCore.cpp
         common/MPIEnvironment.cpp
         common/TestChecks.cpp
+        common/MPIHostUtils.cc
         HostApiCustomGinPluginMPITests.cpp
       )
       list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
