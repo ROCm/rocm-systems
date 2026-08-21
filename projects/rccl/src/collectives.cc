@@ -216,8 +216,6 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
   return ncclEnqueueCheck(&info);
 }
 
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
-
 // rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper

@@ -224,7 +224,6 @@ RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns the process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when the env var
 // is unset or held no valid token. A UNDEF result means no env override was applied, so per-call and
