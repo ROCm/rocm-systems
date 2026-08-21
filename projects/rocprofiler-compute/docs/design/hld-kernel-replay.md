@@ -8,9 +8,15 @@
 packs those counters into groups that each fit one hardware pass. The number of
 groups therefore determines how many counter-collection passes are needed.
 
-The profiling layer can invoke `rocprofv3`,`rocprofiler-sdk`, or
-`rocprof-compute` native collector. All three configurations consume the same buckets. Application
-replay work across them; iteration multiplexing is limited to native collector.
+The profiling layer can invoke `rocprofv3` or `rocprofiler-sdk`. On the `rocprofiler-sdk` path,
+`rocprof-compute` additionally preloads its own **native collector**, which takes over counter
+collection and leaves the SDK tool library doing tracing. The native collector is therefore a
+sub-mode of the `rocprofiler-sdk` configuration rather than a third backend, and it is unavailable
+when the user opts out of it, when the backend is `rocprofv3`, or when the installed ROCm predates
+the version that supports it.
+
+All configurations consume the same buckets. Application replay works across all of them;
+iteration multiplexing already requires the native collector and hard-errors otherwise.
 
 
 | Strategy | Execution model | What it covers | What it does not cover |
@@ -24,8 +30,10 @@ without cross-dispatch imputation.
 ### Co-active profiling services
 
 Counter collection never runs alone. Every counter invocation must yield kernel-dispatch records;
-those records supply the kernel counts and durations. The SDK backend explicitly enables kernel dispatch tracing and adds
-marker or ROCTx tracing for a framework-selected run.
+those records supply the kernel counts and durations. Under native collection the work is split: the
+native collector owns counters, while the SDK tool library performs kernel dispatch tracing and adds
+marker or ROCTx tracing for a framework-selected run. That split matters here, because it means the
+trace records are produced by a context the native collector can control but does not itself emit.
 
 The native collector also subscribes to code-object tracing, but those events describe load-time
 objects rather than individual dispatches and are not multiplied by kernel replay. PC sampling runs
@@ -173,7 +181,10 @@ flowchart LR
 - For *N* counter buckets, kernel-replay mode shall use one workload invocation for counter
   collection and collect one bucket in each of *N* passes for every replay-eligible dispatch. No
   user-supplied pass count shall be required.
-- Kernel replay shall support `rocprofv3`, native collector, and `rocprofiler-sdk`.
+- Kernel replay shall require the native collector. When the selected configuration cannot provide
+  it — because the native collector was declined, because the backend is `rocprofv3`, or because the
+  installed ROCm does not support it — kernel replay shall produce a hard error naming the unmet
+  condition, before any workload runs.
 - Kernel replay shall preserve the counter bucket membership used by application replay. The pass count
   shall equal the bucket count, every bucket shall fit one hardware pass, and `_ACCUM` pairing, TCC
   grouping, and same-bucket priority shall remain unchanged.
@@ -197,11 +208,11 @@ flowchart LR
 - Kernel replay shall expose one kernel-dispatch trace record per logical dispatch, so Top Stats and
   `pmc_dispatch_info.csv` preserve non-replay semantics by reporting one dispatch and its pass-0
   logical duration rather than replay-multiplied values.
-- Kernel filtering shall compose with kernel replay on the native collector. A dispatch whose kernel
-  is excluded shall not be replayed and shall incur no snapshot or restore.
-- Dispatch filtering shall compose with kernel replay on the native collector. `--dispatch` indices
-  shall count logical dispatches, not replay passes, so an index selects the same work whether or not
-  kernel replay is selected. An excluded dispatch shall not be replayed.
+- Kernel filtering shall compose with kernel replay. A dispatch whose kernel is excluded shall not
+  be replayed and shall incur no snapshot or restore.
+- Dispatch filtering shall compose with kernel replay. `--dispatch` indices shall count logical
+  dispatches, not replay passes, so an index selects the same work whether or not kernel replay is
+  selected. An excluded dispatch shall not be replayed.
 
 ### Non-functional requirements
 
@@ -222,57 +233,46 @@ flowchart LR
 
 ## Design
 
-### Counter groups and backend boundaries
+### Counter groups and the collector boundary
 
 Kernel replay changes the invocation shape, not counter partitioning. `perfmon_coalesce` remains
 the only authority for bucket membership and one-pass fit. Its `_ACCUM` pairing, TCC grouping,
 and same-bucket priority policies produce *N* buckets for both application and kernel replay. The
-kernel-replay adapter translates those buckets into each backend's syntax without regrouping them.
+kernel-replay adapter translates those buckets for the native collector without regrouping them.
 
-| Backend configuration | Single-invocation encoding | Pass-count owner |
-| --- | --- | --- |
-| Native collector | Deliver all *N* groups through `ROCPROF_COUNTERS` to one replay-enabled invocation. | The native collector derives the count from the per-agent profiles it created. |
-| `rocprofiler-sdk` | Deliver all *N* `ROCPROF_COUNTERS` groups and enable `ROCPROF_KERNEL_REPLAY`. | The SDK tool library derives the count from its per-agent profiles. |
-| `rocprofv3` | Bypass `-i`, emit one repeated `--pmc` group per bucket, and enable the upstream replay option. | The SDK tool library derives the count from its per-agent profiles. |
-
-No separate pass-count option or environment value is introduced.
+All *N* counter groups are delivered to a single replay-enabled invocation, and the native collector
+derives the pass count from the per-agent profiles it created from them. No separate pass-count
+option or environment value is introduced, so the bucket count and the pass count cannot disagree.
 
 ### Pass-count ownership and profile validity
 
-On the native path, counter-group parsing creates one profile-vector entry per group and per agent.
-For an admitted dispatch, `pass_count_cb` returns the size of the vector for the dispatch's
-agent, and replay pass *i* selects entry *i* from that same vector.
+Counter-group parsing creates one profile-vector entry per group and per agent. For an admitted
+dispatch, `pass_count_cb` returns the size of the vector for the dispatch's agent, and replay pass
+*i* selects entry *i* from that same vector.
 
 The callback's ordinary value of one means “do not replay.” It is not a valid fallback when an agent
 lookup fails or its vector is empty: that would execute the dispatch once, collect only one bucket,
 and make incomplete data look successful. A missing or empty vector must instead diagnose the
 agent/profile mismatch and fail the complete profile.
 
-The non-native SDK and `rocprofv3` paths follow the same ownership rule inside the SDK tool
-library. `rocprof-compute` supplies groups and replay enablement.
-
-The component diagram shows both counter and kernel-trace data. The trace mechanisms differ because
-only the native collector have fine-grained control over sdk services.
+The component diagram shows both counter and kernel-trace data, and where each crosses the
+collector boundary.
 
 ```mermaid
 graph LR
     subgraph Compute["rocprof-compute"]
         Buckets["N buckets"]
-        Adapter["Kernel-replay backend adapter"]
+        Adapter["Kernel-replay adapter"]
         Normalize["Cross-pass counter identity<br/>and timestamp normalization"]
-        Dedup["Post-run kernel-trace deduplication<br/>non-native SDK and rocprofv3"]
         Output["Consolidated counter result<br/>and one logical trace record"]
         Analysis["Existing join and analysis path"]
         Buckets --> Adapter
         Normalize --> Output
-        Dedup --> Output
         Output --> Analysis
     end
 
-    subgraph Tools["Profiler and tool boundary"]
+    subgraph Tools["Tool boundary"]
         Native["Native collector<br/>per-agent profile vector"]
-        NonNative["SDK tool"]
-        V3["rocprofv3"]
         Reject["Diagnose and reject invalid profile<br/>never treat it as filter opt-out"]
     end
 
@@ -285,29 +285,22 @@ graph LR
     end
 
     Adapter -- "ROCPROF_COUNTERS groups<br/>native replay setup" --> Native
-    Adapter -- "ROCPROF_COUNTERS groups<br/>ROCPROF_KERNEL_REPLAY" --> NonNative
-    Adapter -- "repeated --pmc groups<br/>replay option; bypass -i" --> V3
 
-    Native -- "pass_count_cb<br/>selected: profile-vector size<br/>filtered: one" --> Replay
-    NonNative -- "SDK tool derives count" --> Replay
-    V3 -- "SDK tool derives count" --> Replay
+    Native -- "pass_count_cb<br/>admitted: profile-vector size<br/>filtered: one" --> Replay
     Native -- "missing or empty vector" --> Reject
 
     Native -. "locally stop trace context<br/>on passes 1 through N-1" .-> Trace
     Counters --> Normalize
-    Trace -- "native path: pass-0 record" --> Output
-    Trace -- "other paths: N raw records" --> Dedup
-    Normalize -. "shared logical-dispatch identity" .-> Dedup
+    Trace -- "pass-0 record only" --> Output
 ```
 
-### Native filtering at the pass-count decision
+### Filtering at the pass-count decision
 
-On the native-collector path, `pass_count_cb` is also the filter decision point because it runs
-once per logical dispatch before any replay pass. Before choosing a count, the collector confirms
-that the dispatch's agent has a non-empty profile vector. It then assigns the dispatch's per-kernel
-logical index exactly once, evaluates the kernel-ID target set built during code-object loading and
-the requested dispatch range, and returns the profile-vector size only when both filters admit the
-dispatch. A confirmed filter miss returns one, intentionally selecting the SDK's ordinary path
+`pass_count_cb` is also the filter decision point, because it runs once per logical dispatch before
+any replay pass. Before choosing a count, the collector confirms that the dispatch's agent has a
+non-empty profile vector. It then assigns the dispatch's per-kernel logical index exactly once,
+evaluates the kernel-ID target set built during code-object loading and the requested dispatch
+range, and returns the profile-vector size only when both filters admit the dispatch. A confirmed filter miss returns one, intentionally selecting the SDK's ordinary path
 without a snapshot or restore. A missing or empty profile vector remains a fatal profile error and
 must never use that return.
 
@@ -339,16 +332,19 @@ each group would contain only one bucket and no row would have the complete metr
 
 ### Co-active service composition
 
-Kernel dispatch tracing must yield one record per logical dispatch, independent of the pass count.
-The mechanism differs at the ownership boundary:
+Kernel dispatch tracing must yield one record per logical dispatch, independent of the pass count,
+so that Top Stats and `pmc_dispatch_info.csv` report the same dispatch count and duration they would
+without replay.
 
-- The native collector can control its own SDK contexts. It traces pass 0 and locally stops the
-  kernel-trace context for passes 1 through *N*−1.
-- The non-native SDK and `rocprofv3` paths execute the SDK-owned tool library, which
-  `rocprof-compute` cannot instrument. Those paths collapse the *N* raw trace records after the
-  run.
+The native collector controls its own SDK contexts, so the duplicate records are suppressed at the
+source rather than removed afterwards: it traces pass 0 and locally stops the kernel-trace context
+for passes 1 through *N*−1. Pass 0 is chosen because it alone runs against pristine pre-snapshot
+state; every later pass executes immediately after a full restore of the tracked footprint, so its
+timing reflects replay overhead rather than the dispatch.
 
-This split is forced by code ownership. Both must produce the same dispatch count for Top Stats and `pmc_dispatch_info.csv`.
+Suppressing at the source rather than collapsing records after the run is what makes this cheap and
+exact — there is no need to reconstruct which records belonged to the same logical dispatch, because
+the extra records are never emitted.
 
 Roofline uses the selected replay mode through the ordinary counter path and needs no special
 handling. Code-object tracing is load-time only and needs no replay treatment. Marker and ROCTx
@@ -358,12 +354,27 @@ regions are emitted once on the host but span all passes; their duration semanti
 
 `--replay-mode` accepts `application` and `kernel`. Application replay remains the
 default, and CLI help identifies kernel replay as experimental. The selected mode is carried to the
-backend adapter; it does not change `--iteration-multiplexing` into a mode selector.
+kernel-replay adapter; it does not change `--iteration-multiplexing` into a mode selector.
 
-Kernel mode is rejected before profiling when combined with iteration multiplexing, live attach, or
-PC sampling. PC sampling is agent-wide, does not consume the localized context override, and today
-runs in a separate counter-disabled invocation. There is therefore no supported replay pass into
-which it can be inserted.
+Kernel mode requires the native collector, and the conditions that supply it do not all become
+knowable at the same moment. Rejection therefore happens in two places:
+
+- **Flag conflict**, decidable from the arguments alone: selecting kernel replay while declining the
+  native collector. This is rejected immediately, before any discovery and before the workload
+  directory is created.
+- **Capability failure**, decidable only after discovery resolves the backend, the ROCm version, and
+  the native library: a `rocprofv3` backend, an unsupported ROCm version, or a library that cannot
+  be resolved. These are rejected later, but still before the workload runs.
+
+Both are hard errors. The split is not incidental — a reader needs to know that a capability
+failure occurs after the workload directory exists, whereas a flag conflict leaves nothing behind.
+
+Kernel mode is likewise rejected before profiling when combined with iteration multiplexing, live
+attach, or PC sampling. Iteration multiplexing is rejected because both strategies claim the same
+per-dispatch passes, not because of any backend restriction — it requires the native collector too.
+PC sampling is agent-wide, does not consume the localized context override, and today runs in a
+separate counter-disabled invocation. There is therefore no supported replay pass into which it can
+be inserted.
 
 `--roof-only`, `--set`, and `--block` continue through ordinary counter selection.
 Multi-rank profiling remains available and retains its warning. Kernel replay additionally requires
@@ -377,8 +388,9 @@ multi-bucket request into one pass.
 
 | Condition | Required behavior |
 | --- | --- |
-| Unsupported backend configuration | Hard error naming the configuration and a supported alternative. |
-| SDK below the supported version floor | Hard error stating the required version. The numeric floor remains pending upstream merge. |
+| Native collector declined while kernel replay is selected | Hard error from the argument combination alone, before discovery. |
+| Native collector unavailable: `rocprofv3` backend, unsupported ROCm version, or unresolvable library | Hard error after discovery, naming which of the three conditions failed. |
+| SDK below the supported version floor | Hard error stating the required version. Distinct from the ROCm version the native collector needs; the diagnostic must say which one is unmet. The numeric floor remains pending upstream merge. |
 | Iteration multiplexing, live attach, or PC sampling selected with kernel replay | Hard error before profiling starts. |
 | Missing or empty per-agent profile vector | Diagnose the agent/profile mismatch and reject the profile; never return one as a fallback. |
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
@@ -410,27 +422,23 @@ These are proposed vertical slices for future implementation work:
 
 - **Mode selection and validation.** Add the experimental
    `--replay-mode {application,kernel}` surface, carry the selected mode through the profiling
-   backends, and implement compatibility checks and hard-error diagnostics. Replay execution
-   remains disabled in this slice, so its observable behavior is mode selection and validation
-   without changing existing application-replay output.
-- **v3 and SDK backends.** Add single-invocation behavior to `rocprofv3`, using
-   repeated `--pmc` groups while bypassing `-i`, and to the non-native SDK
-   configuration, using the counter groups and kernel-replay enablement expected by the SDK tool
-   library.
+   path, and implement both rejection layers with their hard-error diagnostics. Replay execution
+   remains disabled in this slice, so its observable behavior is mode selection and correct
+   rejection, without changing existing application-replay output.
+- **Native-collector replay.** Deliver the coalesced counter groups to the SDK invocation,
+   implement `pass_count_cb` from the per-agent profile-vector size, apply the kernel and dispatch
+   filters at that same decision point, and diagnose a missing or empty vector instead of returning
+   one pass. Preserve application replay.
 - **Consolidated output and dispatch identity.** Produce one consolidated
    `results_*.csv`, normalize cross-pass timestamps and identity so all passes of one logical
-   dispatch resolve to one `Dispatch_ID`.
-- **Native-collector replay.** Deliver the coalesced counter groups to the SDK invocation,
-   implement the native collector's `pass_count_cb` from its per-agent profile-vector size,
-   and diagnose a missing or empty vector instead of returning one pass. Preserve application
-   replay.
+   dispatch resolve to one `Dispatch_ID`, and expose the single pass-0 trace record.
 
 ## Validation, security and debuggability
 
 ### Validation
 
-Validation spans the CLI, each backend adapter, replay-profile construction, output normalization,
-and the unchanged analysis boundary for all three supported configurations.
+Validation spans the CLI, the kernel-replay adapter, replay-profile construction, output
+normalization, and the unchanged analysis boundary.
 
 - **Counter accuracy.** For one logical dispatch and state covered by the equivalence guarantee, a
   counter present in more than one bucket must have the same value in every pass. A mismatch is a
@@ -440,7 +448,7 @@ and the unchanged analysis boundary for all three supported configurations.
   pass count must equal the application replay count, every bucket must appear
   exactly once, and all pass rows must collapse to one complete `Dispatch_ID`. Incomplete results
   must fail before analysis.
-- **Native filtering.** Logical indices must advance once per dispatch, not once per pass. A
+- **Filtering.** Logical indices must advance once per dispatch, not once per pass. A
   confirmed filter exclusion must take the ordinary no-snapshot path and must not be classified as
   a missing-profile failure or an incomplete replay result.
 - **Application-replay comparison.** The same deterministic workload and counter request must be
@@ -451,9 +459,11 @@ and the unchanged analysis boundary for all three supported configurations.
 - **Compatibility.** Accepted options and every rejected combination must be covered, including
   iteration multiplexing, live attach, PC sampling, roofline selection, multi-rank warning,
   and the default-off behavior.
-- **Failure paths.** Coverage must include an unsupported SDK or backend, a
-  missing profile vector, declined snapshot, and upstream abort. Each case
-  must prove that no one-pass fallback.
+- **Configuration rejection.** Each unmet native-collector condition must be covered separately —
+  declined native collector, `rocprofv3` backend, unsupported ROCm version, unresolvable library —
+  and each must fail before profiling starts, with a diagnostic identifying that specific condition.
+- **Failure paths.** Coverage must include an unsupported SDK, a missing profile vector, a declined
+  snapshot, and an upstream abort. Each case must prove that no one-pass fallback occurs.
 
 ### Security
 
@@ -468,9 +478,14 @@ availability failures and follow the same fail-closed rule as other incomplete r
 
 Run diagnostics must identify the selected replay mode and backend, SDK capability, agent, and the
 mapping from every counter bucket to its replay pass. They must distinguish option
-conflicts, unsupported configurations, missing profiles, snapshot decline,
+conflicts, unavailable native collection, missing profiles, snapshot decline,
 and upstream abort, and state that partial results are unusable. A
 snapshot-decline diagnostic also recommends application replay.
+
+A configuration diagnostic must name the specific unmet condition rather than reporting that the
+native collector is unavailable. A single message covering a `rocprofv3` backend, an unsupported
+ROCm version, and an unresolvable library leaves the user without an action, because the remedy
+differs in each case.
 
 ## Open questions
 
@@ -479,8 +494,10 @@ snapshot-decline diagnostic also recommends application replay.
 - **Marker and ROCTx semantics.** Host regions are emitted once but span all replay passes, so
    their durations include replay overhead and are not comparable with a non-replay run. Should the
    combination be rejected or duration be corrected?
-- **Filtering on non-native backends.** `rocprofv3` and `rocprofiler-sdk` without the
-   native collector resolve filters inside the SDK tool library. Will `rocprofv3` support
-   in future?
+- **Extending kernel replay beyond the native collector.** `rocprofv3` and `rocprofiler-sdk`
+   without the native collector run the SDK's own tool library, which `rocprof-compute` cannot
+   instrument. Neither the pass-0 trace stop nor the filter decision at `pass_count_cb` has an
+   equivalent there, and filter resolution happens inside that library. Whether support requires
+   upstream changes or post-run reconstruction is unresolved.
 - **Cache related counter value validity.** Can cache-related metrics be trusted
    since the cache state is not restored between replay passes?
