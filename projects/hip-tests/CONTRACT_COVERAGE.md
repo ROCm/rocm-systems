@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 591
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
+- Contract tests: 608
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 497
 - Declared HIP runtime APIs directly exercised by contract tests: 486
-- Approximate declared API-name coverage: 98.4%
+- Approximate declared API-name coverage: 97.8%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); and the OpenGL interop entry points declared in `hip/hip_gl_interop.h` (`hipGLGetDevices`, `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`), which are AMD-gated because the NVIDIA header pulls in `<GL/gl.h>` (a headless CUDA node need not have it). These are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -23,13 +23,13 @@ The percentages below are approximate API-name coverage against declarations par
 | `driver_memcpy_2d` | 5 |
 | `runtime` | 10 |
 | `device` | 7 |
-| `device_identity` | 7 |
+| `device_identity` | 9 |
 | `device_texture_query` | 6 |
 | `peer_query` | 5 |
 | `peer_access` | 6 |
 | `peer_copy` | 5 |
 | `device_config` | 6 |
-| `device_lifecycle` | 5 |
+| `device_lifecycle` | 7 |
 | `device_reset` | 1 |
 | `green_context` | 5 |
 | `stream_event` | 7 |
@@ -145,7 +145,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Occupancy | 13 | 13 | 100.0% |
 | Graph / capture | 100 | 100 | 100.0% |
 | Stream | 23 | 23 | 100.0% |
-| Runtime / device | 40 | 45 | 88.9% |
+| Runtime / device | 42 | 47 | 89.4% |
 | Kernel launch / function attrs | 19 | 19 | 100.0% |
 | Memory / copy / memset | 134 | 137 | 97.8% |
 | Other runtime APIs | 33 | 56 | 58.9% |
@@ -324,6 +324,7 @@ hipDeviceGetName
 hipDeviceComputeCapability
 hipDeviceTotalMem
 hipDeviceGetUuid
+hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetByPCIBusId
 hipChooseDevice
@@ -342,6 +343,7 @@ hipDeviceSetLimit
 hipGetDeviceFlags
 hipDeviceGetStreamPriorityRange
 hipSetDeviceFlags
+hipInitDevice
 hipSetValidDevices
 hipDeviceSetSharedMemConfig
 hipDevicePrimaryCtxSetFlags

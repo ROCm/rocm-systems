@@ -324,6 +324,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "tool_runner",
         "cli_help",
         "hpc",
         "hip",
@@ -1503,6 +1504,28 @@ def _generate_rocprofsys_config_header() -> list[str]:
             signal.signal(signal.SIGALRM, _previous_handler)
 
 
+def _trace_processor_shell_status(tests_dir: Path) -> str:
+    """Report which trace_processor_shell Perfetto validation will use.
+
+    Mirrors resolve_trace_processor_shell() in validate-perfetto-proto.py, minus its
+    ``-t`` argument, so a CI log shows whether the build staged a binary before any
+    Perfetto test runs and had to report it the hard way.
+    """
+
+    def usable(path: Path) -> bool:
+        return path.is_file() and os.access(path, os.X_OK)
+
+    override = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    if override and usable(Path(override)):
+        return f"{override} ($ROCPROFSYS_TRACE_PROC_SHELL)"
+
+    staged = tests_dir / "trace_processor_shell"
+    if usable(staged):
+        return f"{staged} (staged by the build)"
+
+    return "none staged, perfetto will download one on demand"
+
+
 def _build_rocprofsys_config_header() -> list[str]:
     """Collect system configuration and format it as printable header lines."""
     try:
@@ -1585,6 +1608,19 @@ def _build_rocprofsys_config_header() -> list[str]:
     def _subrow(label: str, value) -> str:
         return f"    {label:<{W}}{value}"
 
+    # Build mode only: the staged binary is a build-tree test aid and is not installed,
+    # so in install mode this would always report the download fallback
+    trace_processor_rows = (
+        []
+        if rocprof_config.is_installed
+        else [
+            _row(
+                "Trace processor:",
+                _trace_processor_shell_status(rocprof_config.rocprofsys_tests_dir),
+            )
+        ]
+    )
+
     header = [
         "",
         "=" * 70,
@@ -1599,6 +1635,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Output dir:", rocprof_config.test_output_dir),
         _row("Validate ROCPD:", check_use_rocpd()),
         _row("Validate Perfetto:", check_use_perfetto()),
+        *trace_processor_rows,
         "-" * 70,
         "Core Executables:",
         _row("Instrument:", rocprof_config.rocprofsys_instrument),

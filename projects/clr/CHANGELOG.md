@@ -2,6 +2,15 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.1.0 for ROCm 10.1.0
+
+### Added
+* New HIP APIs
+    - Device Management: support for querying a device identifier.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+    - Device Management: support for API parity with corresponding CUDA API.
+      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+
 ## HIP 10.0.0 for ROCm 10.0.0
 
 ### Added
@@ -157,6 +166,7 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 
 ### Removed
 * roc-obj* tools and Perl dependency.

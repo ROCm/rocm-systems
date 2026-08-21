@@ -5,21 +5,8 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mtbuf.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <memory>
 
 namespace rocjitsu {
@@ -37,7 +24,7 @@ template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMac
 
 TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadFormatXMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -53,22 +40,20 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadFormatXMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadFormatXyMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -84,22 +69,20 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadFormatXyMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadFormatXyzMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzMtbuf)),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -115,22 +98,20 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadFormatXyzMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadFormatXyzwMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzwMtbuf)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -146,22 +127,20 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadFormatXyzwMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreFormatXMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -177,31 +156,20 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreFormatXMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreFormatXyMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXyMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -217,33 +185,20 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreFormatXyMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreFormatXyzMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXyzMtbuf)),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -259,35 +214,20 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreFormatXyzMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreFormatXyzwMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXyzwMtbuf)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -303,37 +243,20 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
-  d->non_temporal = 0;
-  mtbuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreFormatXyzwMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadD16FormatXMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -348,6 +271,17 @@ TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeTbufferLoadD16FormatXMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_d16_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadD16FormatXMtbuf>(opcode);
+}
+} // namespace detail
 
 void TbufferLoadD16FormatXMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
@@ -355,14 +289,9 @@ void TbufferLoadD16FormatXMtbuf::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void TbufferLoadD16FormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadD16FormatXyMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -378,14 +307,21 @@ TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadD16FormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferLoadD16FormatXyMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_d16_format_xy",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadD16FormatXyMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadD16FormatXyzMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyzMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -400,6 +336,18 @@ TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *in
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeTbufferLoadD16FormatXyzMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_d16_format_xyz",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadD16FormatXyzMtbuf>(opcode);
+}
+} // namespace detail
 
 void TbufferLoadD16FormatXyzMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
@@ -407,14 +355,9 @@ void TbufferLoadD16FormatXyzMtbuf::implicit_uses(RegisterSet &uses) const {
     uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
 }
 
-void TbufferLoadD16FormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferLoadD16FormatXyzwMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyzwMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -430,14 +373,21 @@ TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadD16FormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferLoadD16FormatXyzwMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_d16_format_xyzw",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferLoadD16FormatXyzwMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreD16FormatXMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreD16FormatXMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -453,14 +403,21 @@ TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreD16FormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferStoreD16FormatXMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_d16_format_x",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreD16FormatXMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreD16FormatXyMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreD16FormatXyMtbuf)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -476,14 +433,21 @@ TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreD16FormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferStoreD16FormatXyMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_d16_format_xy",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreD16FormatXyMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreD16FormatXyzMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreD16FormatXyzMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -499,14 +463,21 @@ TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreD16FormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferStoreD16FormatXyzMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_d16_format_xyz",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreD16FormatXyzMtbuf>(opcode);
 }
+} // namespace detail
 
 TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<TbufferStoreD16FormatXyzwMtbuf>()),
+            selected_exec_fn(InstructionExecutionId::TbufferStoreD16FormatXyzwMtbuf)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -522,10 +493,17 @@ TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst
   flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreD16FormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeTbufferStoreD16FormatXyzwMtbuf(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_d16_format_xyzw",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<TbufferStoreD16FormatXyzwMtbuf>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu

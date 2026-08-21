@@ -50,7 +50,7 @@ class InstructionLineRecord(NamedTuple):
     code_object_offset: int
     kernel_name: Optional[str]
     instruction: Optional[str]
-    comment: str
+    source: str
     total_count: int
     issue_count: Optional[int]
     stall_count: Optional[int]
@@ -238,7 +238,7 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         code_object_offset=int(row.code_object_offset),
         kernel_name=row.kernel_name,
         instruction=row.instruction,
-        comment=row.source_line,
+        source=row.source_line,
         total_count=int(row.count),
         issue_count=None if pd.isna(row.count_issued) else int(row.count_issued),
         stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),

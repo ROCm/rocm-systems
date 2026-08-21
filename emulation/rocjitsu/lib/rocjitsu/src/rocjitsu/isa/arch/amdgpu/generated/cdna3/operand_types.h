@@ -373,6 +373,7 @@ enum OpSelSsrcLanesel {
   OPR_SSRC_LANESEL_VCC_HI = 107,
   OPR_SSRC_LANESEL_M0 = 124,
   OPR_SSRC_LANESEL_POS_INT_MIN = 128,
+  OPR_SSRC_LANESEL_POS_INT_MAX = 191,
 };
 
 enum OpSelSsrcNolit {
@@ -442,6 +443,8 @@ enum OpSelVgprOrLds {
   case OperandType::OPR_ACCVGPR:
   case OperandType::OPR_SRC:
   case OperandType::OPR_SRC_ACCVGPR:
+  case OperandType::OPR_SRC_NOLDS:
+  case OperandType::OPR_SRC_NOLIT:
   case OperandType::OPR_SRC_SIMPLE:
   case OperandType::OPR_SRC_VGPR:
   case OperandType::OPR_SRC_VGPR_OR_ACCVGPR:
