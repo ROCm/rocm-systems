@@ -59,10 +59,14 @@ job_scontrol_state() {
 
 # Wait until the job is RUNNING. PENDING is the expected busy-cluster path -- do
 # not scancel it. Heartbeats go to stderr so the caller can capture only the
-# terminal state on stdout.
+# terminal state on stdout. If a PINNED job stays PENDING past PIN_WAIT_SECS the
+# pinned nodes were most likely grabbed by someone else between probe and submit
+# (a race); echo PENDING_TIMEOUT so the caller releases this pair and re-probes
+# another one instead of blocking on the same busy nodes until the GHA timeout.
 wait_until_running() {
   local jobid="$1"
   local state="" reason="" js="" last_log=0 now
+  local pend_deadline=$(( $(date +%s) + ${PIN_WAIT_SECS:-600} ))
   while true; do
     state=$(job_state_of "${jobid}")
     reason=$(job_reason_of "${jobid}")
@@ -84,6 +88,10 @@ wait_until_running() {
         return 0
         ;;
       PENDING|CONFIGURING)
+        if [ "$(date +%s)" -ge "${pend_deadline}" ]; then
+          echo "PENDING_TIMEOUT"
+          return 1
+        fi
         sleep 15
         continue
         ;;
@@ -99,6 +107,10 @@ wait_until_running() {
             return 0
             ;;
           PENDING|CONFIGURING)
+            if [ "$(date +%s)" -ge "${pend_deadline}" ]; then
+              echo "PENDING_TIMEOUT"
+              return 1
+            fi
             sleep 15
             continue
             ;;
@@ -281,6 +293,15 @@ while [ "${launch_fails}" -lt "${MAX_LAUNCH_TRIES}" ]; do
     # state; otherwise retry on the same pool without discarding healthy
     # hardware.
     spur_cmd scancel "${JOBID}" >/dev/null 2>&1 || true
+    if [ "${state}" = "PENDING_TIMEOUT" ]; then
+      # The pinned pair never started within PIN_WAIT_SECS: the nodes were taken
+      # between probe and submit. Do not preempt and do not burn a launch try --
+      # release this pair and go probe another one (polite wait for free nodes).
+      echo "Pinned pair ${PIN} did not start within ${PIN_WAIT_SECS:-600}s (nodes taken/contention); releasing and re-probing another pair"
+      JOBID=""
+      sleep 5
+      continue
+    fi
     faulty=$(nodes_faulty "${PIN}")
     if [ -n "${faulty}" ]; then
       echo "Did not reach RUNNING (state=${state:-gone}); node fault on ${faulty} -- blacklisting and retrying"
