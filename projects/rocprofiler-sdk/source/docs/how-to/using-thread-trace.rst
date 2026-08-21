@@ -6,7 +6,9 @@
 
 ====================
 Using thread trace
-====================
+********************************
+Using thread trace
+********************************
 
 Thread trace is a shader execution tracing technique capable of profiling wavefronts at the instruction timing level.
 This is a low-level tracing and profiling feature that targets a single or a few kernel executions.
