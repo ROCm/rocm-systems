@@ -7,6 +7,7 @@ layout below is a stable contract:
   mca\t<flags>
   debug_env\t<-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
   test\t<name>\t<kind>\t<bin>\t<-x env flags>\t<args>
+    kind: rocshmem | rccl-tests | fixtures (fixtures: gtest binary, no mpirun)
 """
 
 import argparse
