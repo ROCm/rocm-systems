@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 ambiguous-pmc fixture data (profiler-hub task 014)
+-- Synthetic v3 ambiguous-pmc fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The main v3 fixture (rocpd.db) has 2358 PMCs and pmc_id 2356 as the lone

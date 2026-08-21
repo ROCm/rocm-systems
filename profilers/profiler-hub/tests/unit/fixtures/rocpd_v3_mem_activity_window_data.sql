@@ -1,8 +1,8 @@
 -- =============================================================================
--- Synthetic v3 memory_activity time-window fixture (profiler-hub task 045)
+-- Synthetic v3 memory_activity time-window fixture
 -- =============================================================================
 -- WHY THIS EXISTS:
---   The 043 coverage recon (gap 3) found that the time-window `continue` filters
+--   Coverage recon found that the time-window `continue` filters
 --   inside the memory_activity branch of get_scalar_track() (source/reader_impl.cpp
 --   ~2515-2520 ALLOC, ~2548-2553 FREE) never execute: every committed test queries
 --   a memory_activity scalar track WITHOUT a time_window, so all rows pass and the

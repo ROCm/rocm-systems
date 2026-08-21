@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 memory_activity fixture data (profiler-hub task 012B)
+-- Synthetic v4.0 memory_activity fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   Covers get_scalar_track(memory_activity track) on the v4.0 backend. In v4,

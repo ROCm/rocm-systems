@@ -1,8 +1,8 @@
 -- =============================================================================
--- Synthetic v3 missing-metadata naming-fallback fixture (profiler-hub task 048)
+-- Synthetic v3 missing-metadata naming-fallback fixture
 -- =============================================================================
 -- WHY THIS EXISTS:
---   The 043 coverage recon (gap 11) found the Tier-3 "missing metadata" naming
+--   Coverage recon found the Tier-3 "missing metadata" naming
 --   fallbacks in synthesize_derived_tracks() (source/reader_impl.cpp) are never
 --   lit by any committed v3 fixture, because every real capture / synthetic
 --   fixture names its streams and threads. Specifically dark:

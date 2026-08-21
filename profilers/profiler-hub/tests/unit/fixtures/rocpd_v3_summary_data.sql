@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 summary / GROUP-BY-name fixture data (profiler-hub task 050)
+-- Synthetic v3 summary / GROUP-BY-name fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   get_kernel_summary / get_region_summary aggregate events GROUP BY name into

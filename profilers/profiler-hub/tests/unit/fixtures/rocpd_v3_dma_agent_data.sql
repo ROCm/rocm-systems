@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 dma-by-destination-agent fixture (profiler-hub task 005B-3-fix-2)
+-- Synthetic v3 dma-by-destination-agent fixture
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   v3 dma track identity is keyed on (nid, pid, queue_id, dst_agent_id) -- by

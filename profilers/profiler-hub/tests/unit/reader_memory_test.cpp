@@ -162,7 +162,7 @@ TEST_F(reader_v3_mem_activity_test, v3_get_interval_track_returns_empty_for_mem_
 }
 
 // ============================================================================
-// memory_activity time-window straddle — v3 synthetic fixture (task 045, gap 3).
+// memory_activity time-window straddle — v3 synthetic fixture.
 // The window `continue` filters inside get_scalar_track's memory_activity branch
 // (source/reader_impl.cpp ~2515-2520 ALLOC, ~2548-2553 FREE) are point-in-window
 // on r.start, inclusive: a row is kept iff window.start <= r.start <= window.end.
@@ -373,7 +373,7 @@ TEST_F(reader_v4_mem_activity_test, v4_get_interval_track_returns_empty_for_mem_
     ASSERT_TRUE(m_reader->get_interval_track(tracks.front()->id).empty());
 }
 
-// Task 044: the v4 `memory`-typed tracks (the real rocpd_track rows carrying
+// The v4 `memory`-typed tracks (the real rocpd_track rows carrying
 // memory_allocate rows, distinct from the synthesized memory_activity tracks)
 // exercise the v4 memory arms of get_interval_track (memory_alloc_interval_track_v4)
 // and get_track_stats (memory_alloc_stats_track_v4), which no prior test lit. The

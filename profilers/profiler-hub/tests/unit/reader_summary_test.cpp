@@ -17,7 +17,7 @@ using namespace profiler_hub;
 using namespace profiler_hub::test;
 
 // ============================================================================
-// get_kernel_summary / get_region_summary — GROUP-BY-name aggregation (task 050)
+// get_kernel_summary / get_region_summary — GROUP-BY-name aggregation
 //
 // Two synthetic summary fixtures share ONE by-construction oracle so both reader
 // backends are asserted against identical expected aggregates: rocpd_v3_summary.db

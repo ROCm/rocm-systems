@@ -133,7 +133,7 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // Task 035: a kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its
+    // A kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its
     // handle must be typed kernel_dispatch and resolve through the KD detail path -- NOT
     // the point pmc_event path (WHERE rocpd_pmc_event.id = ?), which keys a different
     // table. Guard bites: revert interval_event_type_for(kernel_dispatch_pmc) to
@@ -316,7 +316,7 @@ TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // Task 035 (v4 backend): same contract as the v3 test. The v4 kd_pmc interval SQL
+    // v4 backend: same contract as the v3 test. The v4 kd_pmc interval SQL
     // also SELECTs K.id (rocpd_kernel_dispatch.id), so the single-site fix in
     // interval_event_type_for is backend-agnostic and routes this handle through the KD
     // detail path with the interval extent (te) present.
@@ -494,7 +494,7 @@ TEST_F(reader_v4_amb_pmc_test, v4_exactly_one_ambiguous_pmc)
     EXPECT_EQ(ambiguous_count, 1U);
 }
 
-// Task 018: v4 track-classification ambiguity detection tests
+// v4 track-classification ambiguity detection tests
 //
 // Fixture: rocpd_v4_amb_cls.db — a single rocpd_track row (id=1) referenced by
 //   both rocpd_sample/rocpd_pmc_event (counter set) and rocpd_memory_allocate
@@ -639,7 +639,7 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 {
     // sample row id 1 -> timestamp 3000. The scalar handle encodes the sample event
     // type; get_event_info resolves it as a point event (te == nullopt). The counter
-    // name + value payload is asserted separately below (§7, task 052).
+    // name + value payload is asserted separately below.
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
     ASSERT_TRUE(details.has_value());
@@ -649,7 +649,7 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and_value)
 {
-    // §7 (task 052, v4 backend): sample row id 1 -> track 1 "GRBM_COUNT", value 30.5.
+    // v4 backend: sample row id 1 -> track 1 "GRBM_COUNT", value 30.5.
     // Resolved through the unified get_event_info the counter sample carries the counter
     // name (from the track) + value (as a double property). Pre-052 this arm returned a
     // bare timestamp, dropping name+value (guard-bite).

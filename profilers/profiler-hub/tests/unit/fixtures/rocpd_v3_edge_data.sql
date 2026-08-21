@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 edge-matrix fixture data (profiler-hub task 003)
+-- Synthetic v3 edge-matrix fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The bundled real-capture v3 fixture (tests/unit/rocpd.db) is a trivial
@@ -246,7 +246,7 @@ VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 1, 7);
 -- row kernel_dispatch/memory_copy/memory_allocate carry via their event_id column.
 -- The bundled bit_extract capture (rocpd.db) only has args on region events, so
 -- this is the sole coverage that get_event_info folds args for the other three
--- detail types (task 037 Phase 1 Item 2). Keyed by:
+-- detail types. Keyed by:
 --   event 4 -> kernel_dispatch id 1 (2 args)
 --   event 5 -> memory_copy     id 1 (1 arg)
 --   event 7 -> memory_allocate id 1 (1 arg)

@@ -313,7 +313,7 @@ TEST_F(reader_v3_clique_test, get_flows_emits_directed_typed_clique)
 
     // Handle-collision guard: region 1 / kernel_dispatch 1 / memory_copy 1 /
     // memory_allocate 1 all share raw row id 1 but come from different per-type tables.
-    // They MUST mint to four distinct handles (the identity leak task 028 closes).
+    // They MUST mint to four distinct handles (closing a prior identity-leak defect).
     std::unordered_set<profiler_hub::reader_types::event_id_t> distinct{
         make_event_id(et::region, 1),
         make_event_id(et::kernel_dispatch, 1),
@@ -755,7 +755,7 @@ TEST_F(reader_v3_edge_flow_test, get_flows_excludes_zero_and_null_stack_id)
 
 // ===========================================================================
 // Edge-matrix NON-flow tests (ported from pre-rebase cac3369ac5). Chunk 2 of
-// the mixed-policy port wave (task 070). The pre-rebase reader_v3_edge_test
+// the mixed-policy port wave. The pre-rebase reader_v3_edge_test
 // loaded a single SQL fixture (rocpd_v3_edge.db) for all 17 non-flow tests; the
 // DL-015 3-way split re-homes them by seed mechanism:
 //   * (c) 9 writer-portable behaviors -> reader_v3_edge_test below, reproduced
@@ -1392,7 +1392,7 @@ TEST_F(reader_v3_edge_sql_test, track_matrix_counts_by_type)
     // rocpd_pmc_event -- is NOT a counter. Track 8 (pmc_id 99, empty PMC name) IS a
     // counter -- discovery joins rocpd_pmc_event (present), not rocpd_info_pmc.
     // Synthesis adds 1 cpu_thread, 2 gpu_queue, 1 dma, 2 stream, 1 memory => 11 tracks.
-    // Task 012B adds 1 memory_activity (1 alloc row, agent_id=1) => total 12.
+    // Synthesis adds 1 memory_activity (1 alloc row, agent_id=1) => total 12.
     auto tracks = m_reader->get_tracks();
     ASSERT_EQ(tracks.size(), 12U);
     ASSERT_EQ(

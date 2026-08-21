@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 kernel_dispatch_pmc fixture data (profiler-hub task 011)
+-- Synthetic v3 kernel_dispatch_pmc fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The two real-capture v3 fixtures (rocpd.db, rocpd_v3_edge.db) contain

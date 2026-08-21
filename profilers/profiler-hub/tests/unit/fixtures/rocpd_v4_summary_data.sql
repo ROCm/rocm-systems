@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 summary / GROUP-BY-name fixture data (profiler-hub task 050)
+-- Synthetic v4.0 summary / GROUP-BY-name fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   Cross-schema companion to rocpd_v3_summary_data.sql: exercises the v4 backend

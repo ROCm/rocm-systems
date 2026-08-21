@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 counter/scalar fixture data (profiler-hub task 003)
+-- Synthetic v4.0 counter/scalar fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   No real captured v4.0 database available to the project contains any

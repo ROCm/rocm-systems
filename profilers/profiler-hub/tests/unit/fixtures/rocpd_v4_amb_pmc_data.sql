@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 ambiguous-pmc fixture data (profiler-hub task 014)
+-- Synthetic v4.0 ambiguous-pmc fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The real v4.0 fixture has no ambiguous (pmc_id, event_id) pairs. This

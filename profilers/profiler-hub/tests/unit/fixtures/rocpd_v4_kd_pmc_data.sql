@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 kernel_dispatch_pmc fixture data (profiler-hub task 011)
+-- Synthetic v4.0 kernel_dispatch_pmc fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The real v4.0 fixture (rocpd_v4.db) has no rocpd_pmc_event rows joined to

@@ -20,7 +20,7 @@ using namespace profiler_hub;
 using namespace profiler_hub::test;
 
 // =============================================================================
-// Task 044: v3 track-type x schema switch-arm coverage.
+// v3 track-type x schema switch-arm coverage.
 //   Fixture rocpd_v3_track_shapes.db carries exactly one track of each v3 dma /
 //   memory / cpu_thread shape the other v3 fixtures leave dark in get_track_stats
 //   / get_interval_track: dma queue-only / agent-only / queue+agent, memory
@@ -352,7 +352,7 @@ TEST_F(reader_v3_bracket_name_test, delimiter_in_metric_name_resolves_via_pmc_id
     // neither pmc), so both co-sampled pmcs tie on the name key and the pmc_id
     // tiebreaker picks the lower id -- pmc 1, which by construction IS the track's own
     // metric. Correct resolution survives here ONLY because the correct pmc has the
-    // lower id; this is the non-fatal face of the LATENT degradation task 062 graded.
+    // lower id; this is the non-fatal face of that LATENT degradation.
     EXPECT_EQ(counter->pmc_info->pmc_id, 1U);
     EXPECT_EQ(counter->pmc_info->name, "TCC_HIT [sum]");
     // Q9 display name is that same resolved pmc's name.

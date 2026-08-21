@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v4.0 ambiguous-classification fixture (profiler-hub task 018)
+-- Synthetic v4.0 ambiguous-classification fixture
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   Forces the track-classification ambiguity: a single rocpd_track row (id=1)

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Synthetic v3 track-shapes fixture data (profiler-hub task 044)
+-- Synthetic v3 track-shapes fixture data
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   The 043 coverage recon found that the per-track_type x schema switch arms in

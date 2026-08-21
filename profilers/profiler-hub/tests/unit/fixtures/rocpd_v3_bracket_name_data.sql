@@ -1,6 +1,6 @@
 -- =============================================================================
--- Synthetic v3 bracket-in-name counter fixture data (profiler-hub task 063)
--- Coverage cell A3 x delimiter-in-name (task 062 audit).
+-- Synthetic v3 bracket-in-name counter fixture data
+-- Coverage cell A3 x delimiter-in-name.
 -- =============================================================================
 -- WHY THIS EXISTS:
 --   ranked_pmc_resolver strips the agent ordinal " [N]" from a v3 counter track's
@@ -13,7 +13,7 @@
 --   contains " [" (here "TCC_HIT [sum]"), the strip cuts at the WRONG bracket:
 --   "TCC_HIT [sum] [0]" -> "TCC_HIT", which matches NEITHER pmc name, so the
 --   name-match rank collapses and every co-sampled pmc ties at rank-key 1. This is
---   the LATENT degradation graded by task 062: the name key no longer selects the
+--   the LATENT degradation: the name key no longer selects the
 --   pmc; only the deterministic pmc_id tiebreaker (ORDER BY ... , pe.pmc_id) does.
 --
 --   This fixture is crafted so the CORRECT pmc (TCC_HIT [sum]) has the LOWER pmc_id
