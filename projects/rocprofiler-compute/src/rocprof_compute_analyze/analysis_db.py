@@ -629,8 +629,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
-        *,
-        sys_info: Optional[dict[str, Any]] = None,
+        sys_info: Optional[dict[str, Any]],
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload.
 
@@ -642,8 +641,6 @@ class db_analysis(OmniAnalyze_Base):
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
-        if sys_info is None and workload_path in self._runs:
-            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
 
         for tool_data in tool_data_records:
             pid: int = tool_data["metadata"]["pid"]

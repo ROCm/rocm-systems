@@ -415,6 +415,9 @@ def _build_pc_sampling_partial_frame(
     aggregated_df = aggregate_pc_sample_records(
         records_df,
         group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        # The terminal frame does not surface the wave measurements, so the
+        # machine specs they are derived from are not threaded through here.
+        sys_info=None,
     )
     df = enrich_with_metadata(
         aggregated_df,

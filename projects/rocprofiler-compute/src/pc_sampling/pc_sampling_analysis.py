@@ -66,8 +66,8 @@ class InstructionLineRecord(NamedTuple):
     stall_count: Optional[int]
     stall_reasons: dict[str, int]
     inst_types: dict[str, int]
-    active_thread_percent: Optional[float] = None
-    wave_occupancy_percent: Optional[float] = None
+    active_thread_percent: Optional[float]
+    wave_occupancy_percent: Optional[float]
 
 
 class CodeObjectRecord(NamedTuple):
@@ -141,8 +141,7 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
 def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
-    *,
-    sys_info: Optional[Mapping[str, Any]] = None,
+    sys_info: Optional[Mapping[str, Any]],
 ) -> pd.DataFrame:
     """Group normalized records into per-group counts, stall reasons, inst types."""
     # inst_index and kernel_id are constant within a group; carry the first when
@@ -233,8 +232,7 @@ def enrich_with_metadata(
 
 def load_aggregated_pc_sampling(
     tool_data: dict[str, Any],
-    *,
-    sys_info: Optional[Mapping[str, Any]] = None,
+    sys_info: Optional[Mapping[str, Any]],
 ) -> list[CodeObjectRecord]:
     """Build the normalized code-object tree the analysis DB inserts.
 
@@ -318,7 +316,6 @@ def _coerce_machine_spec_int(
 
 def _aggregate_active_thread_percent(
     exec_masks: pd.Series,
-    *,
     wave_size: Optional[int],
 ) -> Optional[float]:
     """Return the mean active-lane percentage for present execution masks."""
@@ -332,7 +329,6 @@ def _aggregate_active_thread_percent(
 
 def _aggregate_wave_occupancy_percent(
     wave_counts: pd.Series,
-    *,
     max_waves_per_cu: Optional[int],
 ) -> Optional[float]:
     """Return mean resident-wave occupancy for present wave counts."""
