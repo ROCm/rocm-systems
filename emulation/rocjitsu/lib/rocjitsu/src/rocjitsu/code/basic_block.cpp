@@ -363,7 +363,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         const bool can_fall_through = !is_program_path_terminator(last) &&
                                       !is_unconditional_branch(last) &&
                                       (last.flags() & INDIRECT_BRANCH) == 0;
-        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                           next_offset < section_end &&
                                           inst_data[next_offset / sizeof(uint32_t)] == 0;
         // Running off the end of `.text` is the same boundary as running into padding: there is no
@@ -371,7 +371,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
         const bool reaches_section_end =
-            arch == ROCJITSU_CODE_ARCH_GFX1250 && i >= decoded.size() && next_offset >= section_end;
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
         if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;

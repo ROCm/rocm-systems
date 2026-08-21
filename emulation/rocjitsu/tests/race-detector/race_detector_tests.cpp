@@ -10,7 +10,7 @@
 //   Vgpr_*          — VGPR races from global loads (vmcnt)
 //   Sgpr_*          — SGPR races from scalar loads (lgkmcnt)
 //   LdsCrossWave_*  — cross-wave LDS races (missing barrier)
-//   LdsSameWave_*   — ordered same-wave LDS accesses
+//   LdsSameWave_*   — same-wave LDS instruction ordering
 //   SameWave_*      — same-wave VGPR races via LDS loads
 //   DeepStack_*     — multiple outstanding loads with partial waitcnt
 //   D16_*           — byte-level VGPR tracking (half-register loads)
@@ -155,7 +155,7 @@ TEST(RaceDetector, LdsCrossWave_WarNoOverlap) {
   EXPECT_FALSE(b.hasRace());
 }
 
-// ---- LDS same-wave races ----
+// ---- LDS same-wave ordering ----
 
 TEST(RaceDetector, LdsSameWave_WriteWriteOk) {
   // Two writes to same address, same wave → not a race.
@@ -178,7 +178,7 @@ TEST(RaceDetector, LdsSameWave_ReadReadOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, LdsSameWave_WriteReadOrdered) {
+TEST(RaceDetector, LdsSameWave_WriteReadSameLaneOk) {
   // LDS operations from one wave are ordered, so the later read observes the
   // earlier write without requiring a workgroup barrier.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
@@ -198,6 +198,31 @@ TEST(RaceDetector, LdsSameWave_PartialWaitDoesNotChangeOrdering) {
   EXPECT_FALSE(b.hasLdsRace(0));
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4); // also safe
   EXPECT_FALSE(b.hasLdsRace(64));
+}
+
+TEST(RaceDetector, LdsSameWave_WriteReadCrossLaneOk) {
+  // DS instructions are wave-wide, so a later lane 1 read cannot overtake
+  // lane 0's write from the earlier instruction.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, LdsSameWave_ReadWriteSameLaneOk) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, LdsSameWave_ReadWriteCrossLaneOk) {
+  // A later lane 1 write cannot overtake lane 0's read from the earlier
+  // wave-wide DS instruction.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
 }
 
 // ---- Same-wave VGPR via LDS load ----
@@ -514,37 +539,56 @@ TEST(RaceDetector, Dtl_CrossWaveSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, Dtl_SameWaveNeedsVmcnt) {
+TEST(RaceDetector, Dtl_SameWaveMissingVmcntRace) {
+  // Direct-to-LDS arrives through VMEM, so unlike an ordinary DS write the
+  // owning wave must wait for vmcnt before reading the LDS bytes.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/64);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/4);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   EXPECT_TRUE(b.hasLdsRace(0));
 }
 
-TEST(RaceDetector, Dtl_SameWaveVmcntMakesReadSafe) {
+TEST(RaceDetector, Dtl_SameWaveWithVmcntSafe) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/64);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0}, /*bytesPerLane=*/4);
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, Dtl_SameWavePartialVmcntRetiresOldest) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{16}, /*bytesPerLane=*/4, /*exec=*/1);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{64}, /*bytesPerLane=*/4, /*exec=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/1);
+
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
 // ---- Exec mask ----
+
+TEST(RaceDetector, Exec_DirectToLdsTracksOnlyActiveLaneIntervals) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{16}, /*bytesPerLane=*/4, /*exec=*/1);
+
+  // globalToLds pads inactive lane addresses with zero. The explicit one-lane
+  // exec mask must keep that padding out of the tracked LDS intervals.
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/16, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(16));
+}
 
 TEST(RaceDetector, Exec_PartialWriteSameWaveReadOrdered) {
   // Only lane 0 writes LDS, then the same wave reads. The partial EXEC mask
   // does not change same-wave LDS ordering.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_FALSE(b.hasRace());
-}
-
-TEST(RaceDetector, Exec_PartialWriteWaitcntOk) {
-  // Lane 0 writes, waitcnt, then read → safe (same wave, WAVE_COMPLETE).
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*exec=*/1);
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   EXPECT_FALSE(b.hasRace());
 }
@@ -929,10 +973,10 @@ TEST(RaceDetector, Dtl_MultiLane_CrossWaveSafeWithBarrier) {
 
 // ---- Dual-offset LDS ----
 
-TEST(RaceDetector, DualOffset_Race) {
+TEST(RaceDetector, DualOffset_CrossWaveRace) {
   // registerDualOffsetLdsEvent: each lane writes TWO 8-byte intervals.
   // Lane 0 base=100: [100, 108) (offset0=0) and [116, 124) (offset1=2).
-  // Read from either interval without waitcnt → RACE.
+  // Another wave reading either interval without a barrier → RACE.
   //
   // Uses RaceDetector/WaveRaceState directly since the builder doesn't
   // expose registerDualOffsetLdsEvent.

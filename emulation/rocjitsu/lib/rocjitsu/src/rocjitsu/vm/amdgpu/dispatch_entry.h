@@ -47,7 +47,12 @@ struct DispatchEntry {
   uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
+  /// AQL ring packet id (queue read index at which this dispatch's packet was
+  /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.
+  uint32_t aql_packet_id = 0;
+
   uint64_t kernel_entry_pc = 0;
+  uint64_t code_load_bias = 0;
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
@@ -56,6 +61,9 @@ struct DispatchEntry {
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   uint32_t num_named_barriers = 0;
+  /// Architectural wave size selected by the kernel descriptor and used by
+  /// the dispatched wavefront.
+  uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;

@@ -47,6 +47,18 @@ struct IndirectCallFixup {
   uint16_t source_call_sreg = 0;             ///< Ordinary low-SGPR alias; zero for a special pair.
   uint16_t source_call_selector = 0;         ///< Raw SOP1 selector of the recovered PC pair.
   RegisterRef source_call_carrier{RegClass::SGPR, 0, 2}; ///< Architectural pair identity.
+  /// @brief Low SGPR of the pair the builder range itself writes.
+  ///
+  /// @details Usually the same pair the consumer reads, and for a plain getpc/add/swappc chain
+  /// it always is. A lane-banked dispatcher breaks the two apart: it builds the address in a
+  /// scratch pair, stashes it with `v_writelane_b32`, and restores it into the consumer's pair
+  /// with `v_readlane_b32` much later. patch_recovered_builder_fixups regenerates only the add
+  /// half of the builder and leaves the original `s_getpc_b64` where it is, so the replacement
+  /// has to name the pair that getpc writes. Naming the consumer's pair instead emits an add
+  /// against a getpc that wrote a different register: it corrupts the consumer's pair, breaks
+  /// the stash the dispatcher still reads back, and leaves a getpc/add pairing that the next
+  /// translation's relocation lattice reads as a code address naming no body at all.
+  uint16_t source_builder_sreg = 0;
   bool source_is_call = false; ///< Whether the consumer is a call-like swappc.
   /// @brief True when the recovered fact for this consumer was incomplete: at least
   /// one predecessor path left the PC pair at an unconstrained value. The concrete

@@ -44,6 +44,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -135,6 +136,57 @@ int try_connect(const std::string &path) {
     return -1;
   }
   return sock;
+}
+
+bool is_proc_maps_path(const char *path) {
+  if (!path || !std::string_view(path).starts_with("/proc/"))
+    return false;
+  const std::string_view name(path);
+  return name.ends_with("/maps") || name.ends_with("/smaps");
+}
+
+int open_proc_maps_snapshot(const char *path, int flags) {
+  if (!is_proc_maps_path(path) || (flags & O_ACCMODE) != O_RDONLY)
+    return -1;
+
+  auto &libc = rocjitsu::libc_passthrough();
+  int source = libc.openat(AT_FDCWD, path, flags, 0);
+  if (source < 0)
+    return -1;
+  std::string contents;
+  std::array<char, 16384> buffer{};
+  while (true) {
+    ssize_t count = libc.read(source, buffer.data(), buffer.size());
+    if (count <= 0)
+      break;
+    contents.append(buffer.data(), static_cast<size_t>(count));
+  }
+  int read_errno = errno;
+  libc.close(source);
+  if (contents.find("/memfd:rocjitsu_remote_kfd (deleted)") == std::string::npos) {
+    errno = read_errno;
+    return -1;
+  }
+
+  constexpr std::string_view marker = "/memfd:rocjitsu_remote_kfd (deleted)";
+  size_t position = 0;
+  while ((position = contents.find(marker, position)) != std::string::npos) {
+    contents.replace(position, marker.size(), "/dev/kfd");
+    position += sizeof("/dev/kfd") - 1;
+  }
+
+  int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
+  if (snapshot < 0)
+    return -1;
+  if (libc.write(snapshot, contents.data(), contents.size()) !=
+          static_cast<ssize_t>(contents.size()) ||
+      lseek(snapshot, 0, SEEK_SET) < 0) {
+    int saved_errno = errno;
+    libc.close(snapshot);
+    errno = saved_errno;
+    return -1;
+  }
+  return snapshot;
 }
 
 /// @brief Connect to the daemon for this invocation's per-PID runtime directory.
@@ -266,6 +318,7 @@ public:
 
   static void init() {
     new (storage_) InterposerContext();
+    ctx.owner_pid_ = getpid();
     // Resolve the per-invocation runtime directory once here, in the library
     // constructor: this runs single-threaded before any app code (and thus before
     // any app fork). Writing it once here keeps invocation_runtime_dir() an
@@ -299,9 +352,9 @@ public:
     // remote_ aliasing the parent's daemon connection — the next interposed
     // open()/ioctl()/close() in that child would then deadlock or corrupt the
     // parent's connection. pthread_atfork's child handler runs inside libc fork,
-    // covering every fork that goes through glibc. (vfork/posix_spawn children run
-    // no atfork handlers by design, but they may only exec/_exit, so there is no
-    // interposer state for them to corrupt.) reset_after_fork() is idempotent. It is
+    // covering every fork that goes through glibc. vfork/posix_spawn children run
+    // no atfork handlers; interposed close() detects that window by owner PID and
+    // avoids mutating the parent-shared context. reset_after_fork() is idempotent. It is
     // NOT strictly async-signal-safe — container clear()/destructors call free() and it
     // closes the child's dmabuf-dup fds — so it relies on the standard fork-then-exec /
     // single-threaded-fork assumption (the same one the remote_ handling documents
@@ -321,6 +374,7 @@ public:
   /// body): under the supported single-threaded-fork model they are provably
   /// unlocked, and reconstructing them would be undefined behavior.
   void reset_after_fork() {
+    owner_pid_ = getpid();
     active_driver_.store(nullptr, std::memory_order_release);
     // fork() copies the parent std::thread object (so it looks joinable) but does
     // NOT reproduce the engine thread in the child. Release the owning handle
@@ -475,6 +529,8 @@ public:
   /// (reset_after_fork() intentionally does not clear it) and thus reconnects to
   /// the same daemon rather than recomputing a dir under its own PID.
   const std::string &invocation_runtime_dir() const { return invocation_runtime_dir_; }
+
+  bool owned_by_current_process() const { return owner_pid_ == getpid(); }
 
   // No lock needed: the snapshot keeps the RemoteDriver alive, and its handshake
   // metadata (topology/drm paths, gpu_info) is immutable after open() — close()
@@ -2031,6 +2087,7 @@ private:
     destroy_local_vm();
   }
 
+  pid_t owner_pid_ = 0;
   rj_vm_t *rj_vm_ = nullptr;
   /// @brief Owner of the local VM engine loop; null when no local VM is running.
   /// @details Deliberately unique_ptr<std::thread>, NOT std::jthread: a jthread
@@ -2357,6 +2414,9 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
+  if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
+    return snapshot;
+
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
     return drm_fd.fd;
 
@@ -2449,6 +2509,9 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
+    if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
+      return snapshot;
+
     if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
       return drm_fd.fd;
 
@@ -2488,6 +2551,11 @@ RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
 
 RJ_INTERPOSER_EXPORT int close(int fd) {
   assert(InterposerContext::real().ready());
+  // A vfork child shares the parent's address space until exec/_exit but has a
+  // separate descriptor table. Descriptor cleanup in that window must close the
+  // child's fd without clearing the parent's KFD/DRM bookkeeping.
+  if (!InterposerContext::ctx.owned_by_current_process())
+    return static_cast<int>(InterposerContext::real().close(fd));
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is
@@ -2718,42 +2786,43 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return 0;
       }
       case AMDGPU_INFO_DEV_INFO: {
-        if (info->return_size >= sizeof(drm_amdgpu_info_device)) {
-          auto *dev = static_cast<drm_amdgpu_info_device *>(out);
-          dev->device_id = gpu->device_id;
-          dev->chip_rev = gpu->revision_id;
-          dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
-              gpu->gfx_target_version, gpu->revision_id);
-          dev->pci_rev = gpu->pci_revision_id;
-          dev->family = gpu->family_id;
-          // libdrm reports shader engines, which GpuInfo already stores
-          // directly; the KFD array_count these helpers invert is the derived
-          // value. Round-tripping through drm_shader_engine_count keeps the two
-          // views pinned to one definition.
-          dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-              gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
-          dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-          dev->gpu_counter_freq = 100000;
-          dev->max_engine_clock = gpu->max_engine_clk_fcompute;
-          dev->max_memory_clock = gpu->mem_clk_max;
-          dev->wave_front_size = gpu->wave_front_size;
-          dev->num_cu_per_sh = gpu->num_cu_per_sh;
-          dev->num_hw_gfx_contexts =
-              rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
-          dev->vram_type = gpu->vram_type;
-          dev->vram_bit_width = gpu->mem_width;
-          dev->cu_active_number =
-              rocjitsu::kmd::drm_cu_active_number(gpu->array_count_per_xcc(), gpu->num_cu_per_sh);
-          // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
-          // range. Mirror the KFD GPUVM aperture used elsewhere.
-          dev->virtual_address_offset = 0x200000;       // 2 MiB
-          dev->virtual_address_max = 0x800000000000ULL; // 47-bit canonical
-          dev->virtual_address_alignment = 0x1000;      // 4 KiB
-          dev->pte_fragment_size = 0x200000;            // 2 MiB
-          dev->gart_page_size = 0x1000;                 // 4 KiB
-          dev->high_va_offset = 0xffff800000000000ULL;
-          dev->high_va_max = 0xffffffffffffffffULL;
-        }
+        drm_amdgpu_info_device dev{};
+        dev.device_id = gpu->device_id;
+        dev.chip_rev = gpu->revision_id;
+        dev.external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+            gpu->gfx_target_version, gpu->revision_id);
+        dev.pci_rev = gpu->pci_revision_id;
+        dev.family = gpu->family_id;
+        // libdrm reports shader engines, which GpuInfo already stores directly;
+        // round-trip the derived KFD array_count to keep the two views pinned to
+        // one definition.
+        dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+            gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
+        dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+        dev.gpu_counter_freq = 100000;
+        dev.max_engine_clock = gpu->max_engine_clk_fcompute;
+        dev.max_memory_clock = gpu->mem_clk_max;
+        dev.wave_front_size = gpu->wave_front_size;
+        dev.num_cu_per_sh = gpu->num_cu_per_sh;
+        dev.num_hw_gfx_contexts =
+            rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
+        dev.vram_type = gpu->vram_type;
+        dev.vram_bit_width = gpu->mem_width;
+        dev.cu_active_number =
+            rocjitsu::kmd::drm_cu_active_number(gpu->simd_count, gpu->simd_per_cu);
+        // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
+        // range. Mirror the KFD GPUVM aperture used elsewhere.
+        dev.virtual_address_offset = 0x200000;       // 2 MiB
+        dev.virtual_address_max = 0x800000000000ULL; // 47-bit canonical
+        dev.virtual_address_alignment = 0x1000;      // 4 KiB
+        dev.pte_fragment_size = 0x200000;            // 2 MiB
+        dev.gart_page_size = 0x1000;                 // 4 KiB
+        dev.high_va_offset = 0xffff800000000000ULL;
+        dev.high_va_max = 0xffffffffffffffffULL;
+
+        // Older libdrm headers use a shorter trailing struct. The kernel ABI
+        // returns the prefix that fits instead of withholding every field.
+        std::memcpy(out, &dev, std::min<size_t>(info->return_size, sizeof(dev)));
         return 0;
       }
       default:
@@ -3321,6 +3390,10 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
       }
     }
   }
+  if ((flags & MAP_FIXED) && addr) {
+    if (auto *driver = InterposerContext::ctx.driver())
+      return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
+  }
   return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
 }
 
@@ -3339,8 +3412,10 @@ RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
   assert(InterposerContext::real().ready());
-  if ((advice == MADV_HUGEPAGE || advice == MADV_DONTFORK) &&
-      reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL)
+  const bool high_gpu_address = reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL;
+  if (advice == MADV_HUGEPAGE && high_gpu_address)
+    return 0;
+  if (advice == MADV_DONTFORK && high_gpu_address && InterposerContext::ctx.driver_is_simulated())
     return 0;
   return InterposerContext::real().madvise(addr, length, advice);
 }
@@ -3383,6 +3458,10 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
   if (!path || !mode)
     return nullptr;
 
+  int open_flags = InterposerContext::fopen_flags_from_mode(mode);
+  if (int snapshot = open_proc_maps_snapshot(path, open_flags); snapshot >= 0)
+    return fdopen(snapshot, mode);
+
   const char *actual = path;
   std::string redirected;
   if (!InterposerContext::in_construction) {
@@ -3393,8 +3472,7 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
       actual = redirected.c_str();
   }
 
-  int fd = InterposerContext::real().openat(AT_FDCWD, actual,
-                                            InterposerContext::fopen_flags_from_mode(mode), 0644);
+  int fd = InterposerContext::real().openat(AT_FDCWD, actual, open_flags, 0644);
   if (fd < 0)
     return nullptr;
   return fdopen(fd, mode);

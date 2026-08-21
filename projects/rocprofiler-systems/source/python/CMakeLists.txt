@@ -106,6 +106,7 @@ rocprofiler_systems_target_compile_definitions(libpyrocprofiler-systems-interfac
 add_custom_target(libpyrocprofsys)
 
 file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys/*.py)
+list(FILTER PYTHON_FILES EXCLUDE REGEX "/tests/")
 foreach(_IN ${PYTHON_FILES})
     string(
         REPLACE
@@ -150,3 +151,7 @@ configure_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/pyproject.toml
     COPYONLY
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(rocprofsys/tests)
+endif()

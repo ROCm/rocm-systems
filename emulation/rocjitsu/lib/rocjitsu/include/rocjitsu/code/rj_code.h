@@ -43,8 +43,9 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
   ROCJITSU_CODE_ARCH_RV64I = 10,
-  /// @brief gfx1250 ISA architecture.
-  ROCJITSU_CODE_ARCH_GFX1250 = 11,
+  /// @brief Compute Data Network Architecture 5 (CDNA5).
+  /// @note Keep this at the former GFX1250 value for C API compatibility.
+  ROCJITSU_CODE_ARCH_CDNA5 = 11,
   // \NPI new ISA family: add its public architecture identifier here and wire
   // its closed-world semantics through the ISA traits, properties, and users.
   /// @brief Number of named, built-in architectures.

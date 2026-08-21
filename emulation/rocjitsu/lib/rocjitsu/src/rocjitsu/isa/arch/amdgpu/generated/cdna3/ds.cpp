@@ -2728,12 +2728,6 @@ DecodeResult decodeDsReadU8D16Ds(const MachineInst *opcode, const DecodeErrorEmi
 }
 } // namespace detail
 
-void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
     : Ds("ds_read_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8D16HiDs)),
@@ -2764,12 +2758,6 @@ DecodeResult decodeDsReadU8D16HiDs(const MachineInst *opcode,
 }
 } // namespace detail
 
-void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
     : Ds("ds_read_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadI8D16Ds)),
@@ -2798,12 +2786,6 @@ DecodeResult decodeDsReadI8D16Ds(const MachineInst *opcode, const DecodeErrorEmi
   return std::make_unique<DsReadI8D16Ds>(opcode);
 }
 } // namespace detail
-
-void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
     : Ds("ds_read_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2835,12 +2817,6 @@ DecodeResult decodeDsReadI8D16HiDs(const MachineInst *opcode,
 }
 } // namespace detail
 
-void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
     : Ds("ds_read_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU16D16Ds)),
@@ -2869,12 +2845,6 @@ DecodeResult decodeDsReadU16D16Ds(const MachineInst *opcode, const DecodeErrorEm
   return std::make_unique<DsReadU16D16Ds>(opcode);
 }
 } // namespace detail
-
-void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
     : Ds("ds_read_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2905,12 +2875,6 @@ DecodeResult decodeDsReadU16D16HiDs(const MachineInst *opcode,
   return std::make_unique<DsReadU16D16HiDs>(opcode);
 }
 } // namespace detail
-
-void DsReadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 DsAddF64Ds::DsAddF64Ds(const MachineInst *inst)
     : Ds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst),

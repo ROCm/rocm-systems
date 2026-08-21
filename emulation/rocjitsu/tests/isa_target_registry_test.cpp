@@ -334,8 +334,8 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetRegistry &registry = default_isa_target_registry();
   ASSERT_TRUE(registry.ok()) << registry.error();
   const std::vector<std::string> expected = {
-      "cdna1", "cdna2",   "cdna3", "cdna4",   "rdna1",  "rdna2",
-      "rdna3", "rdna3_5", "rdna4", "gfx1250", "risc-v",
+      "cdna1", "cdna2",   "cdna3", "cdna4", "rdna1",  "rdna2",
+      "rdna3", "rdna3_5", "rdna4", "cdna5", "risc-v",
   };
   std::vector<std::string> actual;
   for (const IsaTargetDescriptor &target : registry.targets())
@@ -364,6 +364,9 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetDescriptor *gfx1151 = registry.find(ROCJITSU_CODE_TARGET_GFX1151);
   ASSERT_NE(gfx1151, nullptr);
   EXPECT_EQ(gfx1151->id, "rdna3_5");
+  const IsaTargetDescriptor *gfx1250 = registry.find("gfx1250");
+  ASSERT_NE(gfx1250, nullptr);
+  EXPECT_EQ(gfx1250->id, "cdna5");
   EXPECT_NE(Decoder::create(registry, "gfx942"), nullptr);
   EXPECT_NE(Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA3), nullptr);
   EXPECT_EQ(registry.find("rv32i"), nullptr);

@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -28,6 +29,17 @@ void warn_cluster_peer_writes_ignored_once() {
     util::Logger::warn(
         "race detector does not model cluster LDS multicast peer writes; peer writes are ignored");
   });
+}
+
+uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
+                                const amdgpu::Wavefront &wave) {
+  if (state.is_load && wave.cu().sram_ecc() && (state.d16_lo || state.d16_hi))
+    return ExecutionPlugin::kFullByteMask;
+  if (state.d16_lo)
+    return ExecutionPlugin::kLowHalfByteMask;
+  if (state.d16_hi)
+    return ExecutionPlugin::kHighHalfByteMask;
+  return ExecutionPlugin::kFullByteMask;
 }
 
 } // namespace
@@ -282,7 +294,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
         rs->checkVgprWrite(static_cast<int>(logicalBase + i), wf.exec(), byte_mask, type);
       }
     }
-    uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+    uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     rs->registerLdsEvent(wf.pc, type, std::move(registers), wf.exec(), wf.wf_size(),
                          std::span<const uint32_t>(laneAddrs, wf.wf_size()), d.elem_size,
                          byte_mask);
@@ -290,6 +302,8 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
+    if (d.exec_mask == 0)
+      return;
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
@@ -313,16 +327,16 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       std::vector<uint32_t> registers(d.num_elems);
-      uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+      uint8_t byte_mask = vector_memory_byte_mask(d, wf);
       for (uint32_t i = 0; i < d.num_elems; ++i) {
         registers[i] = logicalBase + i;
-        rs->checkVgprWrite(static_cast<int>(logicalBase + i), wf.exec(), byte_mask,
+        rs->checkVgprWrite(static_cast<int>(logicalBase + i), d.exec_mask, byte_mask,
                            MemoryEventType::GLOBAL_TO_VGPR);
       }
-      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), wf.exec(),
+      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
                         byte_mask);
     } else if (!d.is_load) {
-      rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, wf.exec());
+      rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask);
     }
   }
 
