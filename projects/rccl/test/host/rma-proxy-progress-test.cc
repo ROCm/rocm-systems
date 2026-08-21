@@ -411,4 +411,40 @@ TEST_F(RmaProxyProgressTest, GroupPut_AllOpsFit_MovesToInProgressAndAdvancesCI) 
     EXPECT_EQ(cis_[peer], 1u);                // consumer index advanced once
 }
 
+// A group whose ops don't all fit under the per-target credit budget stays
+// pending -- the proxy issues only what credit allows, does not enqueue the
+// half-issued group to the in-progress queue, does not advance the consumer
+// index, and issues the remainder on a later poll once credit frees up.
+TEST_F(RmaProxyProgressTest, GroupPut_PartialCredit_StaysPendingUntilCreditFrees) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    // Budget of 2 credits for `target`; a group of 3 ops all targeting it.
+    ctx_->maxInflightRequests = 2;
+    ncclRmaProxyDesc* desc = PushPendingPutGroup(peer, {target, target, target});
+
+    // First poll: credit covers only 2 of the 3 ops, so the group stays
+    // pending -- not enqueued, CI not advanced.
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 2);                 // only credit-worth issued
+    EXPECT_EQ(InProgressHead(peer), nullptr);      // NOT enqueued while partial
+    EXPECT_EQ(cis_[peer], 0u);                      // CI NOT advanced
+
+    // Re-polling with no freed credit makes no further progress.
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 2);
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+    EXPECT_EQ(cis_[peer], 0u);
+
+    // Completing the two in-flight ops frees their credit; the next poll issues
+    // the held-back third op and only then moves the group to in-progress.
+    net_.completeRequest(desc->putSignalGroup.ops[0].request);
+    net_.completeRequest(desc->putSignalGroup.ops[1].request);
+
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 3);                 // remaining op now issued
+    EXPECT_EQ(InProgressHead(peer), desc);         // fully issued -> in-progress
+    EXPECT_EQ(cis_[peer], 1u);                      // CI advanced exactly once
+}
+
 }  // namespace
