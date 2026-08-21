@@ -30,8 +30,6 @@ test_categories:
       - "rocrtstFunc.MemoryFillTest"
       - "rocrtstFunc.AgentProp_UUID"
       - "rocrtstFunc.AgentPropertiesTests"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
       - "rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest"
       - "DoorbellTypeValidation.*"
     exclude:
@@ -112,13 +110,14 @@ test_categories:
       - "rocrtstFunc.Queue_Create_Batch_Test"
       - "rocrtstFunc.Queue_Create_SDMA_Create_Destroy_Test"
       - "rocrtstFunc.Queue_Create_Invalid_Args_Test"
+      - "rocrtstFunc.TrapHandler_NoTrap"
+      - "rocrtstFunc.TrapHandler_Abort"
+      - "rocrtstFunc.TrapHandler_Generic"
       - "rocrtstNeg.Memory_Negative_Tests"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -196,6 +195,9 @@ test_categories:
       - "rocrtstFunc.Queue_Create_Batch_Test"
       - "rocrtstFunc.Queue_Create_SDMA_Create_Destroy_Test"
       - "rocrtstFunc.Queue_Create_Invalid_Args_Test"
+      - "rocrtstFunc.TrapHandler_NoTrap"
+      - "rocrtstFunc.TrapHandler_Abort"
+      - "rocrtstFunc.TrapHandler_Generic"
       - "rocrtstNeg.Memory_Negative_Tests"
       - "rocrtstNeg.Queue_Validation_InvalidDimension"
       - "rocrtstNeg.Queue_Validation_InvalidGroupMemory"
@@ -212,8 +214,6 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -291,6 +291,9 @@ test_categories:
       - "rocrtstFunc.Queue_Create_Batch_Test"
       - "rocrtstFunc.Queue_Create_SDMA_Create_Destroy_Test"
       - "rocrtstFunc.Queue_Create_Invalid_Args_Test"
+      - "rocrtstFunc.TrapHandler_NoTrap"
+      - "rocrtstFunc.TrapHandler_Abort"
+      - "rocrtstFunc.TrapHandler_Generic"
       - "rocrtstNeg.Memory_Negative_Tests"
       - "rocrtstNeg.Queue_Validation_InvalidDimension"
       - "rocrtstNeg.Queue_Validation_InvalidGroupMemory"
@@ -309,8 +312,6 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
-      - "HotswapRewrite.RetargetCacheServesSecondLoadFromCache"
-      - "HotswapRewrite.RetargetCacheClearResetsCacheSize"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

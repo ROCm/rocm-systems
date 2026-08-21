@@ -1129,7 +1129,7 @@ class TestDeriveVectorUnary:
             enc_field_names={'opsel'},
             encoding_map=None,
             enc_name='',
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
 
         cpp = gen_cvt_fp8(ctx)
@@ -1456,7 +1456,7 @@ class TestDeriveVectorUnary:
             ['src0', 'src1'],
             sem.semantic_class,
             sem.operation,
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
         assert 'util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl())' in cpp
 
@@ -2031,8 +2031,8 @@ class TestDeriveFlatLoad:
         [
             ('GLOBAL_LOAD_TR4_B64', 2, 1),
             ('GLOBAL_LOAD_TR6_B96', 3, 2),
-            ('GLOBAL_LOAD_TR8_B64', 2, 3),
-            ('GLOBAL_LOAD_TR_B64', 2, 3),
+            ('GLOBAL_LOAD_TR8_B64', 2, 6),
+            ('GLOBAL_LOAD_TR_B64', 2, 6),
             ('GLOBAL_LOAD_TR16_B128', 4, 4),
             ('GLOBAL_LOAD_TR_B128', 4, 4),
         ],
@@ -2234,8 +2234,8 @@ class TestDeriveDsRead:
         [
             ('DS_LOAD_TR4_B64', 'ds_read_tr_b4', 2, 1),
             ('DS_LOAD_TR6_B96', 'ds_read_tr_b6', 3, 2),
-            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 3),
-            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 3),
+            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 6),
+            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 6),
             ('DS_LOAD_TR16_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_LOAD_TR_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 5),

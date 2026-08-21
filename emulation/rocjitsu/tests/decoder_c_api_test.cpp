@@ -28,7 +28,7 @@ static_assert(std::is_same_v<decltype(rj_code_inst_next(nullptr)), const rj_code
 
 TEST(DecoderCApiTest, InvalidInstructionReturnsErrorAndClearsOutput) {
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_GFX1250, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   auto *instruction = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
