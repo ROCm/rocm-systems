@@ -4,9 +4,9 @@
 
 .. _rocprofiler-systems-at-a-glance:
 
-=================================
+******************************************************
 ROCm Systems Profiler at a glance
-=================================
+******************************************************
 
 ROCm Systems Profiler (``rocprofiler-systems``) captures the entire application stack in a single, unified timeline: CPU function calls, GPU kernel dispatches, MPI collectives, OpenMP regions, memory allocations, OS scheduling events, and GPU telemetry such as temperature, power, utilization, and interconnect bandwidth.
 
