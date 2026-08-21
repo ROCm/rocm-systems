@@ -41,6 +41,7 @@
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/mpip.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
@@ -678,7 +679,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
                 sampling::pause();
-                component::mpi_gotcha::pause();
+                component::pause_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
@@ -692,7 +693,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
                 sampling::resume();
-                component::mpi_gotcha::resume();
+                component::resume_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();

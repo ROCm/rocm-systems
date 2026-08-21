@@ -151,6 +151,23 @@ std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
 
+// Timestamp of a pause whose zero-valued sample could not be written because the
+// sampling thread held the AMD SMI lock. Zero means nothing is outstanding.
+std::atomic<std::int64_t> g_pending_pause_ts{ 0 };
+
+// Requires type_mutex<category::amd_smi> to be held.
+void
+write_pause_samples(std::int64_t timestamp)
+{
+    for(auto& slice : g_collector_slices)
+    {
+        slice.pause(timestamp);
+    }
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
+#endif
+}
+
 // Tears down the AMD SMI collector slices and marks the sampler uninitialized.
 // This is the only teardown performed on the post-fork reinit path: that reinit
 // exists solely to refresh AMD SMI device handles in the child.
@@ -330,6 +347,37 @@ post_process()
 void
 pause()
 {
+    const auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+
+    // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
+    // application thread leaving a traced region. Hand the timestamp to the
+    // sampling thread rather than waiting for the sweep to finish.
+    std::unique_lock _lk{ type_mutex<category::amd_smi>(), std::try_to_lock };
+
+    if(!_lk.owns_lock())
+    {
+        g_pending_pause_ts.store(timestamp, std::memory_order_release);
+        return;
+    }
+
+    if(pmc::get_state() != state::process::Active || !is_initialized())
+    {
+        return;
+    }
+
+    write_pause_samples(timestamp);
+}
+
+void
+flush_pending_pause()
+{
+    const auto timestamp = g_pending_pause_ts.exchange(0, std::memory_order_acq_rel);
+    if(timestamp == 0)
+    {
+        return;
+    }
+
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(pmc::get_state() != state::process::Active || !is_initialized())
@@ -337,16 +385,7 @@ pause()
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
-
-    for(auto& slice : g_collector_slices)
-    {
-        slice.pause(timestamp);
-    }
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
-#endif
+    write_pause_samples(timestamp);
 }
 
 void
