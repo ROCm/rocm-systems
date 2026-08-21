@@ -155,6 +155,29 @@
         }
       ]
     },
+    "a_netib_multithread": {
+      "extends": "a_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A17: four worker threads per rank, each on its own NET/IB context and connection. Mirrors how a framework process with several communicators drives the plugin from several proxy threads.",
+      "tests": [
+        {
+          "name": "A17_NetIB_MultiThread_SimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent connection.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_SequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection.",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
+          "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
+          "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
 
     "a_gin": {
       "extends": "a_base",
@@ -448,6 +471,7 @@
     { "name": "A14. GIN enable gate (ROCM-27070)",    "config": "a_gin_enable_gate", "enabled": true },
     { "name": "A15. GIN AINIC backend (ROCM-27070)",  "config": "a_gin_ainic_backend", "enabled": true },
     { "name": "A16. Component - Bootstrap socket poll", "config": "a_socket_poll_bootstrap", "enabled": true },
+    { "name": "A17. Component - NetIb multithread",   "config": "a_netib_multithread", "enabled": true },
 
     { "name": "B1. IB baseline",                     "config": "b1_ib",             "enabled": true },
     { "name": "B2. CAST alltoall full (1K-16G)",     "config": "b_alltoall_cast_full", "enabled": true },

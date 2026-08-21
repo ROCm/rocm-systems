@@ -372,7 +372,7 @@
       "tests": [
         {
           "name": "NetIB_VNic_LargeTransfer",
-          "description": "64MB payload striped across doubled QPs on vNIC",
+          "description": "64MB payload striped across doubled QPs on vNIC (single worker)",
           "test_filter": "NetIbMPITest.LargeTransfer_VNic"
         },
         {
@@ -595,6 +595,22 @@
       ]
     },
 
+    "cast_shim_leak_guard": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "Runs the shim-leak probe in a plain CAST configuration, where RCCL_IB_FAULT_INJECTION is simply absent. The damage a leak does is process-wide and has nothing to do with threading, so the guard belongs in an ordinary run and not only in the threaded fault suites.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_FaultShimsAbsentUnlessRequested",
+          "description": "Arming an ops-level fault must be refused while RCCL_IB_FAULT_INJECTION is off, which is only true while the libibverbs shims are absent. If they are present, every poll_cq in the process pays for a global mutex twice",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        }
+      ]
+    },
     "cast_stress": {
       "extends": "cast_base",
       "timeout": 600,
@@ -976,13 +992,17 @@
         "NCCL_NET": "ib-cast"
       }
     },
-    "net_ib_multithread_independent": {
+    "net_ib_multithread_base": {
       "extends": "net_ib_base",
       "timeout": 300,
+      "description": "Shared environment for the threaded suites. Deliberately carries no tests: extends merges test lists rather than replacing them, so a threaded suite that extended a suite with tests would also run those tests, at whatever worker count it sets.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,INIT"
-      },
+      }
+    },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_multithread_base",
       "tests": [
         {
           "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
@@ -993,6 +1013,11 @@
           "name": "NetIB_MultiThread_IndependentSequentialTransfers",
           "description": "Independent worker connections concurrently execute sequential host-memory transfers",
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_ProgressDoesNotSerialize",
+          "description": "Gate: the same transfer loop at one worker and at all of them, so a lock held across a progress call shows up as time that scales with the worker count. Skips below four workers",
+          "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
         }
       ]
     },
@@ -1007,6 +1032,50 @@
     "net_ib_multithread_independent_16": {
       "extends": "net_ib_multithread_independent",
       "command_args": "--net_ib_nthreads=16"
+    },
+    "cast_wrr_split_long_interval": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "Extends cast_base rather than cast_wrr_split so it does not also inherit that suite's tests, several of which need the RTT timer to fire and would fail at this interval.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_EnableDisableSched_LongInterval",
+          "description": "Toggle schedEnable mid-connection. Needs an update interval above 10 s so the RTT timer cannot rewrite tokens mid-assertion; the default 50 us makes this test skip",
+          "test_filter": "NetIbMPITest.CastEnableDisableSched"
+        }
+      ]
+    },
+    "cast_wrr_no_split_long_interval": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "Extends cast_base rather than cast_wrr_no_split for the same reason as its split counterpart.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_WeightsDistributionOneRound_LongInterval",
+          "description": "Two-phase WRR distribution with the RTT timer suspended",
+          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound"
+        },
+        {
+          "name": "Cast_AlternatingWrrNonWrr_LongInterval",
+          "description": "Toggle doWrr mid-connection with the RTT timer suspended",
+          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr"
+        },
+        {
+          "name": "Cast_EnableDisableSplitData_LongInterval",
+          "description": "Toggle splitData at the threshold with the RTT timer suspended",
+          "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -1122,6 +1191,12 @@
       "name": "NET IB - CAST Max QPs (QPS=128)",
       "description": "Full round-robin with 1 token per QP at maximum QP count (hardware-capped)",
       "config": "cast_max_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST shim leak guard",
+      "description": "The libibverbs ops shims must not be installed in a plain run",
+      "config": "cast_shim_leak_guard",
       "enabled": true
     },
     {
@@ -1284,6 +1359,18 @@
       "name": "NET IB - Multithread Independent Connections (16)",
       "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WRR+Split, long update interval",
+      "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
+      "config": "cast_wrr_split_long_interval",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WRR only, long update interval",
+      "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
+      "config": "cast_wrr_no_split_long_interval",
       "enabled": true
     }
   ]
