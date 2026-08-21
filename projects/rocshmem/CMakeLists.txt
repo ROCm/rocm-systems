@@ -110,8 +110,6 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 # Try to find AMD SMI library
 find_package(amd_smi QUIET)
 
-find_package(hip QUIET)
-
 set(HAVE_AMDSMI_GPU_FABRIC_INFO FALSE)
 
 if(TARGET amd_smi)
