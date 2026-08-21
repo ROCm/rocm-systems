@@ -319,6 +319,27 @@ def _build_request_edges(
     return Text.from_markup("\n".join(lines))
 
 
+# --- Membw guided analysis annotations (gfx950 only) ---
+
+
+def _format_supporting_display(
+    supporting: tuple,
+) -> tuple[Any, str]:
+    """Format supporting metrics for chart annotation.
+
+    Single metric: returns (value, "%").
+    Multiple metrics: returns (pipe-joined string, "").
+    """
+    if not supporting:
+        return (None, "%")
+    if len(supporting) == 1:
+        return (supporting[0].value, "%")
+    return (
+        " | ".join(s.display for s in supporting),
+        "",
+    )
+
+
 def _collect_stall_rows(
     membw: Optional[MemBwAnalysisResult],
     level: str,
@@ -341,8 +362,8 @@ def _collect_active_leaves(
     if node.state != "active":
         return
     if node.level == level and not any(c.state == "active" for c in node.children):
-        value = node.supporting[0].value if node.supporting else None
-        rows.append((f"[!] {node.label}", value, "%", COLORS["stall"], False))
+        value, unit = _format_supporting_display(node.supporting)
+        rows.append((f"[!] {node.label}", value, unit, COLORS["stall"], False))
     for child in node.children:
         _collect_active_leaves(child, level, rows)
 
@@ -368,7 +389,7 @@ def _build_l1_stack(
     vl1_rows: list[CachePanelRow] = [
         ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
     ]
-    gl1_stall_rows = _collect_stall_rows(membw, "GL1")
+    gl1_stall_rows = _collect_stall_rows(membw, "GL1")  # gfx950 membw
     vl1_rows.extend(gl1_stall_rows)
 
     vl1_border = COLORS["stall"] if gl1_stall_rows else COLORS["block"]
@@ -598,7 +619,7 @@ def create_mem_chart_diagram(
     l2_rows: list[CachePanelRow] = [
         ("Hit", metrics["l2_hit"], "%", COLORS["hit"]),
     ]
-    gl2_stall_rows = _collect_stall_rows(membw, "GL2")
+    gl2_stall_rows = _collect_stall_rows(membw, "GL2")  # gfx950 membw
     l2_rows.extend(gl2_stall_rows)
     l2_border = COLORS["stall"] if gl2_stall_rows else COLORS["block"]
     l2 = build_cache_panel(
@@ -625,7 +646,7 @@ def create_mem_chart_diagram(
         ],
         std_arrows,
     )
-    if is_gfx950:
+    if is_gfx950:  # gfx950 membw: EA stall annotations in Data Fabric
         ea_content = _build_ea_stall_content(membw)
         ea_border = COLORS["stall"] if ea_content else COLORS["block"]
         fabric = build_ip_block(
