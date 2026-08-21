@@ -16,12 +16,13 @@ set -uo pipefail
 
 BASE="origin/develop"
 PR=""; NAME=""; BRANCH=""
+need_val() { [[ $# -ge 2 ]] || { echo "error: $1 needs a value" >&2; exit 2; }; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -p|--pr)     PR="$2"; shift 2;;
-    -b|--branch) BRANCH="$2"; shift 2;;
-    --base)      BASE="$2"; shift 2;;
+    -p|--pr)     need_val "$@"; PR="$2"; shift 2;;
+    -b|--branch) need_val "$@"; BRANCH="$2"; shift 2;;
+    --base)      need_val "$@"; BASE="$2"; shift 2;;
     -h|--help)   tail -n +2 "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0;;
     -*) echo "unknown flag: $1" >&2; exit 2;;
     *)  NAME="$1"; shift;;

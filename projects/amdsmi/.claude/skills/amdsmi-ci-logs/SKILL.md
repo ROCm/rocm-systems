@@ -30,7 +30,12 @@ gh run view <RUN_ID> --repo $REPO --log-failed    # only failed steps (fastest t
 gh run view --repo $REPO --job <JOB_ID> --log     # one job, full log
 ```
 
-Logs can be large — redirect to a file and grep, don't dump inline:
+`--log-failed` only filters at the **run** level. Combined with `--job` it is
+silently ignored and you get the whole job log.
+
+A rocm-systems run is big (a failed-only run log can exceed 80k lines), so
+redirect to a file and grep. Never `head -n` a run log for triage: the amdsmi
+failure is usually far below the first screenful of some other project's output.
 
 ```bash
 gh run view <RUN_ID> --repo $REPO --log > "${TMPDIR:-/tmp}/ci-<RUN_ID>.log"
@@ -60,13 +65,16 @@ gh run list --repo $REPO --branch "$BR" --limit 10
 `gh-ci-logs.sh <run-id|run-url|job-url> [--failed] [-r owner/repo] [-o outdir]`
 parses the id(s), writes the summary, full log, and artifacts under
 `$TMPDIR/ci-<run-id>/`, and prints that directory. Repo defaults to
-`ROCm/rocm-systems` (override with `-r` or `GH_CI_REPO`).
+`ROCm/rocm-systems` (override with `-r` or `GH_CI_REPO`). It exits non-zero if
+the run can't be read, so a 404 never lands in the log file as if it were output.
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
 | Reading the truncated web/job view | `--log` / `--log-failed` gives the full text |
+| `head -200` on a run log to triage | The amdsmi failure is often tens of thousands of lines in — `grep` instead |
+| Expecting `--log-failed` to filter a single job | It only filters at run level; job logs come back whole |
 | Looking for test reports in the log | They're **artifacts** — `gh run download` |
 | Dumping a huge log inline | Redirect to `$TMPDIR`, then `grep` |
 | Guessing which run belongs to a PR | `gh pr checks <PR#>` links the exact run |

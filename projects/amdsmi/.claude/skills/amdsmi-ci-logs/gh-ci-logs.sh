@@ -17,11 +17,12 @@ REPO="${GH_CI_REPO:-ROCm/rocm-systems}"
 OUTDIR=""
 LOG_FLAG="--log"
 ARG=""
+need_val() { [[ $# -ge 2 ]] || { echo "error: $1 needs a value" >&2; exit 2; }; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -r|--repo)  REPO="$2"; shift 2;;
-    -o|--out)   OUTDIR="$2"; shift 2;;
+    -r|--repo)  need_val "$@"; REPO="$2"; shift 2;;
+    -o|--out)   need_val "$@"; OUTDIR="$2"; shift 2;;
     --failed)   LOG_FLAG="--log-failed"; shift;;
     -h|--help)  tail -n +2 "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0;;
     -*) echo "unknown flag: $1" >&2; exit 2;;
@@ -47,14 +48,34 @@ mkdir -p "$OUTDIR"
 echo "repo=$REPO run=$RUN_ID job=${JOB_ID:-<all>} out=$OUTDIR" >&2
 
 # Run summary: jobs, conclusion, artifact names.
-gh run view "$RUN_ID" --repo "$REPO" > "$OUTDIR/summary.txt" 2>&1 || true
+# Keep stderr out of the output files so a failed call never looks like a log.
+if ! gh run view "$RUN_ID" --repo "$REPO" > "$OUTDIR/summary.txt" 2> "$OUTDIR/gh.err"; then
+  echo "error: cannot read run $RUN_ID in $REPO" >&2
+  cat "$OUTDIR/gh.err" >&2
+  rm -f "$OUTDIR/summary.txt" "$OUTDIR/gh.err"
+  exit 1
+fi
+
+# gh ignores --log-failed when a single job is selected, so don't claim otherwise.
+if [[ -n "$JOB_ID" && "$LOG_FLAG" == "--log-failed" ]]; then
+  echo "note: --failed does not apply to a single job; writing the full job log" >&2
+fi
 
 # Full log — a single job if one was given, else the whole run.
 if [[ -n "$JOB_ID" ]]; then
-  gh run view --repo "$REPO" --job "$JOB_ID" "$LOG_FLAG" > "$OUTDIR/job-${JOB_ID}.log" 2>&1 || true
+  LOG_FILE="$OUTDIR/job-${JOB_ID}.log"
+  gh run view --repo "$REPO" --job "$JOB_ID" --log > "$LOG_FILE" 2> "$OUTDIR/gh.err"
 else
-  gh run view "$RUN_ID" --repo "$REPO" "$LOG_FLAG" > "$OUTDIR/run.log" 2>&1 || true
+  LOG_FILE="$OUTDIR/run.log"
+  gh run view "$RUN_ID" --repo "$REPO" "$LOG_FLAG" > "$LOG_FILE" 2> "$OUTDIR/gh.err"
 fi
+
+if [[ ! -s "$LOG_FILE" ]]; then
+  echo "warning: no log retrieved (expired or still running)" >&2
+  cat "$OUTDIR/gh.err" >&2
+  rm -f "$LOG_FILE"
+fi
+rm -f "$OUTDIR/gh.err"
 
 # Artifacts (test reports, packages) — hidden behind the run summary page.
 if gh run download "$RUN_ID" --repo "$REPO" -D "$OUTDIR/artifacts" 2>/dev/null; then

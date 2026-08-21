@@ -9,9 +9,10 @@ set -uo pipefail
 OUTDIR=""
 RUN_CPP=1
 RUN_PY=1
+need_val() { [[ $# -ge 2 ]] || { echo "error: $1 needs a value" >&2; exit 2; }; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -o|--out)    OUTDIR="$2"; shift 2;;
+    -o|--out)    need_val "$@"; OUTDIR="$2"; shift 2;;
     --no-cpp)    RUN_CPP=0; shift;;
     --no-python) RUN_PY=0; shift;;
     -h|--help)   tail -n +2 "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0;;
@@ -29,7 +30,8 @@ OUTDIR="${OUTDIR:-${TMPDIR:-/tmp}/amdsmi-tests-${STAMP}}"
 mkdir -p "$OUTDIR"
 echo "logs -> $OUTDIR" >&2
 
-declare -a NAMES RCS
+NAMES=()
+RCS=()
 
 # C++ GTest with the skip blacklist + ASIC filter.
 if [[ "$RUN_CPP" == 1 ]]; then
@@ -65,10 +67,10 @@ fi
 # Summary.
 echo
 echo "===== SUMMARY ($OUTDIR) ====="
+[[ ${#NAMES[@]} -eq 0 ]] && { echo "  (no suites ran)"; exit 2; }
 fail=0
 for i in "${!NAMES[@]}"; do
   if [[ "${RCS[$i]}" == 0 ]]; then status=PASS; else status=FAIL; fail=1; fi
   printf '  %-20s %s (rc=%s)\n' "${NAMES[$i]}" "$status" "${RCS[$i]}"
 done
-[[ ${#NAMES[@]} -eq 0 ]] && { echo "  (no suites ran)"; exit 2; }
 exit $fail
