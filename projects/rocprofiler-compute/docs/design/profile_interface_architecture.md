@@ -444,8 +444,10 @@ Implementation notes:
   `compact_pass_rocpd_dbs` drops unused `rocpd_info_pmc` / `rocpd_pmc_event`
   catalog data and vacuums the database (~15 MiB → ~1 MiB per pass); analyze
   is unchanged (kernel metadata from DB, counters from CSV).
-- Analyze still accepts legacy `results_*.csv.gz` workloads until golden fixtures
-  are regenerated in a follow-up change.
+- Golden workloads must use the `out/{pass}/` layout; legacy `results_*.csv.gz`
+  is no longer read by analyze.
+- Remaining golden workloads still carry legacy artifacts until re-profiled on
+  matching hardware.
 
 ```mermaid
 sequenceDiagram

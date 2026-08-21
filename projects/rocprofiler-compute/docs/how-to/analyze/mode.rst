@@ -24,11 +24,6 @@ choose.
    ``pmc_perf.csv.gz`` for analysis. If the workload directory already contains a
    ``pmc_perf.csv.gz``, that file is used as-is.
 
-.. note::
-
-   Reading legacy ``results_*.csv.gz`` artifacts is deprecated and will be
-   removed once golden workloads are regenerated.
-
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 

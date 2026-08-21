@@ -141,23 +141,17 @@ NaN,,,""",
     assert "Profiling data could be corrupt" in error_args[1]
 
 
-def test_validate_workload_completely_empty_gzip_csv(tmp_path):
-    """
-    Test validate_workload with a valid gzip file containing no CSV data.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts function detects empty CSV file.
-    """
+def test_validate_workload_legacy_results_csv_not_supported(tmp_path):
+    """Legacy results_*.csv.gz artifacts are no longer accepted."""
     from unittest.mock import patch
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
     result_file = workload_dir / "results_pmc_perf_0.csv.gz"
-    result_file.write_bytes(gzip.compress(b""))
+    result_file.write_bytes(
+        gzip.compress(b"GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n")
+    )
 
     console_error_calls = []
 
@@ -169,10 +163,8 @@ def test_validate_workload_completely_empty_gzip_csv(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert error_args[0] == "profiling"
-    assert "No counter data" in error_args[1]
-    assert str(result_file) in error_args[1]
-    assert "Profiling data could be corrupt" in error_args[1]
+    assert error_args[0] == "analysis"
+    assert "Legacy results_*.csv.gz workloads are no longer supported" in error_args[1]
 
 
 def test_validate_workload_headers_only_csv(tmp_path):

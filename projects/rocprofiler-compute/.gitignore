@@ -19,6 +19,8 @@ pmc_kernel_top.csv
 VERSION.sha
 **/_build
 **/out
+!tests/workloads/**/out/
+!tests/workloads/**/out/**
 
 # temp files
 /tests/Testing
