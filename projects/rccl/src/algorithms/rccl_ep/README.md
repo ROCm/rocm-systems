@@ -26,8 +26,9 @@ load/store access to peer memory -- no GIN backend and no rocSHMEM.
     CMakeLists.txt standalone build
 
 The Python surface is driven from HIP through a flat C ABI rather than a torch
-extension, which keeps the binding independent of the torch version. Nothing in
-RCCL's own build references this directory, so it is inert until built here.
+extension, which keeps the binding independent of the torch version. No RCCL
+library target builds these sources; the unit tests include the headers
+directly, so the module is otherwise inert until built here.
 
 ## Build
 

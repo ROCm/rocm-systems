@@ -308,6 +308,7 @@ if(BUILD_TESTS)
       CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/RcclEpTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -355,6 +356,12 @@ if(BUILD_TESTS)
     if(NOT RCCL_GFX1250_TDM_HEADER)
       message(WARNING "SDK lacks hip/amd_detail/amd_gfx1250_TDM.h; tdm:: entry points will compile to no-op stubs and device/TestTdmCopy.cpp will report TDM as unsupported")
     endif()
+
+    # rccl_ep is header-only and is not hipified, so its tests include it
+    # straight from the source tree. Scope it to the one file: its device/ and
+    # include/ header names are generic enough to shadow src/ for other TUs.
+    set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
