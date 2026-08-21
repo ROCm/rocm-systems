@@ -152,10 +152,10 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     }
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") &&
              (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather ||
-              info->func == ncclFuncReduceScatter)) {
+              info->func == ncclFuncReduceScatter || info->func == ncclFuncAlltoAll)) {
     // gfx1250 single-node Ring fallback protocol selection.
     // Cutoffs in archThresholds are TBD from sweep data (AICOMRCCL-1756); zeros = stay SIMPLE.
-    if (comm->archThresholds != nullptr) {
+    if (comm->archThresholds != nullptr && (size_t)info->func < RCCL_DDA_FUNC_COUNT) {
       const size_t ll    = comm->archThresholds->llCutoff[info->func];
       const size_t ll128 = comm->archThresholds->ll128Cutoff[info->func];
       if (ll > 0 && sizePerRank <= ll) {

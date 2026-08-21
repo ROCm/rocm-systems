@@ -202,6 +202,10 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
 bool rcclCeAllReduceAllowed(struct ncclComm* comm);
+// CE AllReduce knobs (defined in rccl_wrap.cc).
+RCCL_PARAM_DECLARE(CeAllReduce);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM_DECLARE(CeArMaxMsgBytes);  // -1 = use ceArMax from arch table
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
 // collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
 // will not service the call per the caller-computed `ceAllReduceAllowed` (non-gfx1250 only; gfx1250
