@@ -228,25 +228,17 @@ get_signal_worker(bool reset = false)
     static auto*& _v = common::static_object<signal_worker_state>::construct();
     auto&         sw = *CHECK_NOTNULL(_v);
 
-    const auto reset_signal_worker_state = [](signal_worker_state& obj) {
-        if(obj.eventfd >= 0)
-        {
-            if(::close(obj.eventfd) != 0)
-            {
-                ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
-                             << strerror(errno);
-            }
-        }
-
-        std::memset(static_cast<void*>(&obj), 0, sizeof(obj));
-        ::new(static_cast<void*>(&obj)) signal_worker_state{};
-    };
-
     if(reset)
     {
         // Post-fork child: the parent's eventfd/thread are invalid here. Close the fd and reset
         // in place (never run ~std::thread() on the parent's still-joinable thread).
-        reset_signal_worker_state(sw);
+        if(sw.eventfd >= 0 && ::close(sw.eventfd) != 0)
+        {
+            ROCP_WARNING << "signal worker: close(eventfd) after fork failed: " << strerror(errno);
+        }
+
+        std::memset(static_cast<void*>(&sw), 0, sizeof(sw));
+        ::new(static_cast<void*>(&sw)) signal_worker_state{};
     }
 
     return sw;
@@ -4293,6 +4285,10 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
+// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
+int signal_abort_flush_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -4634,13 +4630,40 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     }
 
     // SIGABRT can't defer: returning lets abort() re-raise SIG_DFL before the worker flushes.
-    // So wait for the flush here, then return into abort(). This is the one path that can still
-    // block on a lock the interrupted thread holds — acceptable since we're already aborting.
+    // So wait for the flush here, then return into abort(). Unlike the async signals, this can
+    // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
+    // paths, e.g. heap-corruption detection. Bound the wait with
+    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // beats a hung process. <= 0 waits forever.
     if(signo == SIGABRT)
     {
         if(worker_notified)
+        {
+            // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
+            // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
+            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            auto       deadline = timespec{};
+            if(bounded)
+            {
+                clock_gettime(CLOCK_MONOTONIC, &deadline);
+                deadline.tv_sec += signal_abort_flush_timeout_sec;
+            }
+
             while(sw.finalize_done.load(std::memory_order_acquire) == 0)
-                syscall(SYS_futex, &sw.finalize_done, FUTEX_WAIT, 0, nullptr, nullptr, 0);
+            {
+                if(syscall(SYS_futex,
+                           &sw.finalize_done,
+                           FUTEX_WAIT_BITSET,
+                           0,
+                           bounded ? &deadline : nullptr,
+                           nullptr,
+                           FUTEX_BITSET_MATCH_ANY) == -1 &&
+                   errno == ETIMEDOUT)
+                {
+                    break;
+                }
+            }
+        }
         return;
     }
 
@@ -4782,7 +4805,10 @@ rocprofv3_signal(int signum, sighandler_t handler)
     if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
-    get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+    // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
+    // rationale in rocprofv3_sigaction.
+    if(!get_chained_signals().at(signum) && handler != SIG_DFL)
+        get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
 
     return get_signal_function()(
         signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
