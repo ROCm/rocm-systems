@@ -15,6 +15,7 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -137,8 +138,11 @@ struct settings_policy
     /**
      * @brief hipFile metrics selected by ROCPROFSYS_HIPFILE_METRICS.
      *
-     * Accepts "all"/"on" (default), "none"/"off", or a comma or semicolon separated list
-     * of the metric keys in METRIC_TABLE (e.g. "read_bytes,write_bytes").
+     * Accepts "all"/"on", "none"/"off", or a comma or semicolon separated list of group
+     * keys (e.g. "fastpath,fallback,bandwidth"), case-insensitively. Each key selects a
+     * read/write pair. The setting's own default ("fastpath, fallback, bandwidth") is
+     * registered in config.cpp; the "all" below applies only when the setting is absent
+     * entirely, as it is in unit tests.
      */
     static hipfile::enabled_metrics get_hipfile_enabled_metrics()
     {
@@ -153,32 +157,40 @@ struct settings_policy
     static hipfile::enabled_metrics parse_hipfile_enabled_metrics(
         const std::string& setting)
     {
+        // Case and stray whitespace are folded away exactly as ROCPROFSYS_AMD_SMI_METRICS
+        // does it, so "All" and " fastpath, fallback " behave as written.
+        std::string normalized;
+        normalized.reserve(setting.size());
+        for(const char ch : setting)
+        {
+            if(ch == ' ' || ch == '\t') continue;
+            normalized.push_back(
+                static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+
         hipfile::enabled_metrics metrics;
 
-        if(setting.empty() || setting == "all" || setting == "on")
+        if(normalized.empty() || normalized == "all" || normalized == "on")
         {
             metrics.value = hipfile::ALL_HIPFILE_METRICS;
             return metrics;
         }
-        if(setting == "none" || setting == "off")
+        if(normalized == "none" || normalized == "off")
         {
             metrics.value = 0U;
             return metrics;
         }
 
-        for(const auto& token : parse_name_list(setting))
+        for(const auto& token : parse_name_list(normalized))
         {
-            const auto found = std::find_if(
-                hipfile::METRIC_TABLE.begin(), hipfile::METRIC_TABLE.end(),
-                [&token](const auto& metric) { return token == metric.key; });
-
-            if(found == hipfile::METRIC_TABLE.end())
+            const auto mask = hipfile::metric_group_mask(token);
+            if(mask == 0U)
             {
-                LOG_WARNING("Unknown hipFile metric '{}' in {}, ignoring", token,
+                LOG_WARNING("Unknown hipFile metric group '{}' in {}, ignoring", token,
                             env_vars::HIPFILE_METRICS);
                 continue;
             }
-            metrics.value |= (1U << found->bit);
+            metrics.value |= mask;
         }
         return metrics;
     }

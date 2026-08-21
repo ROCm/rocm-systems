@@ -643,6 +643,14 @@ configure_settings(bool _init)
         "use hipFile; sets HIPFILE_STATS_LEVEL=1 automatically.",
         false, "backend", "hipfile", "rocm", "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::HIPFILE_METRICS,
+        "hipFile metrics to collect: bytes, ops, fastpath, fallback, unaligned, errors, "
+        "bandwidth. Each name selects both the read and the write track. An empty value "
+        "implies 'all' and 'none' suppresses all.",
+        "fastpath, fallback, bandwidth", "backend", "hipfile", "rocm",
+        "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SAMPLING,
                               "Enable statistical sampling of call-stack", false,
                               "backend", "sampling");

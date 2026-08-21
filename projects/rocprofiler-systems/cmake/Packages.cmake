@@ -305,33 +305,59 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-# hipFile telemetry is optional and off unless the package is found. When it is built,
-# the backend links libhipfile through the hip::hipfile imported target (a DT_NEEDED
-# dependency), matching how the profiler consumes amd_smi and other ROCm libraries.
-# The collector's unit tests do not participate in that: they drive a mock wrapper with
-# test-local fake structs, so they build and run with this option OFF.
-set(ROCPROFSYS_BUILD_HIPFILE OFF CACHE INTERNAL "Build hipFile stats support" FORCE)
-if(ROCPROFSYS_USE_HIPFILE)
+# hipFile telemetry is built by default, but only when a new enough package is present:
+# ROCPROFSYS_BUILD_HIPFILE demotes itself to OFF below rather than failing the configure,
+# so a box without hipFile still builds. Packagers who hit trouble with the feature can
+# force it off with -DROCPROFSYS_BUILD_HIPFILE=OFF; that decision is separate from
+# ROCPROFSYS_USE_HIPFILE, which turns collection on and off at run time.
+#
+# When it is built, the backend links libhipfile through the hip::hipfile imported target
+# (a DT_NEEDED dependency), matching how the profiler consumes amd_smi and other ROCm
+# libraries. The collector's unit tests do not participate in that: they drive a mock
+# wrapper with test-local fake structs, so they build and run with this option OFF.
+#
+# The per-GPU stats API this collector is built on (hipFileGetStatsL3) first ships in
+# hipFile 0.5.0; older packages do not declare the symbol at all, so this is a hard
+# requirement rather than a preference. Declared once here because the backend's runtime
+# guard checks the same number against the libhipfile actually loaded into the process.
+#
+# Overridable so a pre-release hipFile that carries the stats API without having bumped
+# its version yet can still be built against, e.g.
+# -DROCPROFSYS_HIPFILE_MIN_VERSION=0.4.0. Lowering it below 0.5.0 only makes sense when
+# the package is known to export hipFileGetStatsL3; if it does not, the build fails at
+# the wrapper instead.
+set(ROCPROFSYS_HIPFILE_MIN_VERSION
+    "0.5.0"
+    CACHE STRING
+    "Minimum hipFile version required for GPU-direct storage I/O telemetry"
+)
+
+if(ROCPROFSYS_BUILD_HIPFILE)
     find_package(
         hipfile
+        ${ROCPROFSYS_HIPFILE_MIN_VERSION}
         ${rocprofiler_systems_FIND_QUIETLY}
         HINTS ${ROCMVersion_DIR} ${ROCM_PATH}
         PATHS ${ROCMVersion_DIR} ${ROCM_PATH}
     )
     if(hipfile_FOUND)
-        set(ROCPROFSYS_BUILD_HIPFILE
-            ON
-            CACHE INTERNAL
-            "Build hipFile stats support"
-            FORCE
-        )
-        message(STATUS "hipFile stats support enabled (headers: ${hipfile_INCLUDE_DIRS})")
-    else()
         message(
             STATUS
-            "hipFile stats support disabled: hipfile package not found. Set "
-            "-Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add the install prefix to "
-            "CMAKE_PREFIX_PATH."
+            "hipFile stats support enabled (version: ${hipfile_VERSION}, headers: "
+            "${hipfile_INCLUDE_DIRS})"
+        )
+    else()
+        # Shadow the cache entry with a normal variable rather than overwriting it: every
+        # downstream if(ROCPROFSYS_BUILD_HIPFILE) guard, the compile definition, and the
+        # feature summary see OFF, while the cached request stays ON so that installing
+        # hipFile and reconfiguring picks it up instead of staying off permanently.
+        set(ROCPROFSYS_BUILD_HIPFILE OFF)
+        message(
+            STATUS
+            "hipFile stats support disabled: no hipfile package >= "
+            "${ROCPROFSYS_HIPFILE_MIN_VERSION} was found (the per-GPU stats API is not "
+            "present before then). Set -Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add "
+            "the install prefix to CMAKE_PREFIX_PATH."
         )
     endif()
 endif()
