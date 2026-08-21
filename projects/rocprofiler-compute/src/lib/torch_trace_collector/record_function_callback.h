@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "args_capture.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
@@ -132,6 +133,7 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
 
         // Emit the ROCTX range. RecordFunction ops are torch-backed.
         std::string wire_string = build_marker_string(stack);
+        append_args_segment(wire_string, build_leaf_args(record_fn));
         wire_string += '|';
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());

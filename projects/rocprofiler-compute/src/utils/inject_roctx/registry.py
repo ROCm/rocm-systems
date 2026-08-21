@@ -3,7 +3,7 @@
 
 """Backend registry for inject_roctx.
 
-Backends are discovered by importing _backends.<name> on demand. Each
+Backends are discovered by importing backends.<name> on demand. Each
 backend module must call register at import time.
 """
 
@@ -11,7 +11,7 @@ import importlib
 from collections.abc import Iterable
 from typing import Protocol
 
-_BACKENDS_PKG = f"{__package__}._backends"
+_BACKENDS_PKG = f"{__package__}.backends"
 
 
 class Backend(Protocol):

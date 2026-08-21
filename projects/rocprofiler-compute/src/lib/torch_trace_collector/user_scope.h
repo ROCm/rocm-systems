@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "args_capture.h"
 #include "marker_stack.h"
 #include "process_state.h"
 #include "scope_guard.h"
@@ -81,9 +82,12 @@ inline std::unique_ptr<c10::DebugInfoGuard> make_userscope_guard(const std::vect
     }
 }
 
-// Pushes a USER_SCOPE frame and emits a ROCTX range. When non-empty,
-// backend is appended to the range as "|<backend>".
-inline void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
+// Pushes a USER_SCOPE frame and emits a ROCTX range. When non-empty, args is
+// appended as "|args=<encoded>" before the "|<backend>" suffix.
+inline void push_user_scope(const std::string& marker,
+                            const std::string& context,
+                            const std::string& backend,
+                            const std::string& args = std::string(""))
 {
     try
     {
@@ -114,6 +118,7 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
             });
 
         std::string wire_string = build_marker_string(thread.stack);
+        append_args_segment(wire_string, args);
         if (!backend.empty())
         {
             wire_string += '|';

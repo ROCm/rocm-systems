@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from utils.inject_roctx._backends import torch_trace_fingerprint
+from utils.inject_roctx.backends import torch_trace_fingerprint
 
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
@@ -117,8 +117,8 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
 def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
     # parents[4] reaches the install prefix from this file's location in
-    # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
-    # <prefix>/libexec/<project>/utils/inject_roctx/_backends when installed.
+    # both layouts: <repo>/src/utils/inject_roctx/backends in dev, and
+    # <prefix>/libexec/<project>/utils/inject_roctx/backends when installed.
     install_root = _THIS_DIR.parents[4]
     so_name = f"torch_trace_collector-{tag}.so"
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
