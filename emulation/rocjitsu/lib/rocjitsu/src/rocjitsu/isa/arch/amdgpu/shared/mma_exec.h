@@ -385,6 +385,20 @@ inline InputLoc wmma_f8f6f4_mixed_subbyte_input_loc(uint32_t dim, uint32_t K, ui
   return wmma_f8f6f4_ab_input_loc(dim, K, i, k, data_bits);
 }
 
+// Mixed 8-bit/sub-byte F8F6F4 forms retain the pre-VOP+WMMA-fix layout for the
+// 8-bit operand. Keep this separate from the ordinary 8-bit path: all-8-bit
+// dense WMMA uses wmma_f8f6f4_ab_input_loc and its K=128 layout.
+inline InputLoc wmma_f8f6f4_mixed_eight_bit_input_loc(uint32_t dim, uint32_t K, uint32_t i,
+                                                      uint32_t k) {
+  if (dim == 16 && K == 128) {
+    const uint32_t lane = i + 16u * ((k >> 2) & 1u);
+    const uint32_t reg = ((k >> 1) & 1u) + 2u * ((k >> 3) & 1u) + 4u * ((k >> 4) & 1u) +
+                         8u * ((k >> 5) & 1u) + 16u * ((k >> 6) & 1u);
+    return wmma_packed_input_loc(lane, 2u * reg + (k & 1u), /*data_bits=*/8);
+  }
+  return wmma_input_loc(dim, K, i, k, /*data_bits=*/8);
+}
+
 inline InputLoc wmma_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                       uint32_t data_bits, bool mixed_subbyte) {
   if (mixed_subbyte)
@@ -402,11 +416,15 @@ inline InputLoc wmma_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t 
                                  uint32_t b_bits) {
   if (M == 32 && K == 128 && a_bits == 4 && b_bits == 4)
     return wmma_f4_32x16x128_a_input_loc(row, k);
+  if (a_bits == 8 && b_bits < 8)
+    return wmma_f8f6f4_mixed_eight_bit_input_loc(M, K, row, k);
   return wmma_f8f6f4_input_loc(M, K, row, k, a_bits, a_bits < 8 && b_bits == 8);
 }
 
 inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t k, uint32_t a_bits,
                                  uint32_t b_bits) {
+  if (b_bits == 8 && a_bits < 8)
+    return wmma_f8f6f4_mixed_eight_bit_input_loc(N, K, col, k);
   return wmma_f8f6f4_input_loc(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
 }
 

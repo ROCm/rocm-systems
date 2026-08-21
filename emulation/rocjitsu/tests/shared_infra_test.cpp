@@ -921,6 +921,28 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
   }
 }
 
+TEST(MfmaExecTest, WmmaF8f6f4K128MixedEightBitRetainsPreVopLayout) {
+  for (uint32_t index = 0; index < 16; ++index) {
+    for (uint32_t k = 0; k < 128; ++k) {
+      SCOPED_TRACE(::testing::Message() << "index=" << index << " k=" << k);
+      const uint32_t expected_lane = index + 16u * ((k >> 2u) & 1u);
+      const uint32_t expected_reg = ((k >> 1u) & 1u) + 2u * ((k >> 3u) & 1u) +
+                                    4u * ((k >> 4u) & 1u) + 8u * ((k >> 5u) & 1u) +
+                                    16u * ((k >> 6u) & 1u);
+      const uint32_t expected_slot = 2u * expected_reg + (k & 1u);
+
+      const auto mixed_a = amdgpu::wmma_a_input_loc(16, 128, index, k, /*a_bits=*/8, /*b_bits=*/6);
+      const auto mixed_b = amdgpu::wmma_b_input_loc(16, 128, index, k, /*a_bits=*/4, /*b_bits=*/8);
+      for (const auto &actual : {mixed_a, mixed_b}) {
+        EXPECT_EQ(actual.lane, expected_lane);
+        EXPECT_EQ(actual.vgpr_offset, expected_slot / 4u);
+        EXPECT_EQ(actual.sub_element, expected_slot % 4u);
+        EXPECT_EQ(actual.data_bits, 8u);
+      }
+    }
+  }
+}
+
 TEST(MfmaExecTest, Cdna4ScaledMfmaInputLocMatchesSiliconQualifiedLayouts) {
   constexpr std::array<uint32_t, 3> widths = {8, 6, 4};
   for (const auto &[dim, k_size] :
