@@ -105,6 +105,12 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     minimal
 )
 
+# hipFile telemetry workload; only buildable when rocprof-sys was configured
+# with hipFile support (ROCPROFSYS_BUILD_HIPFILE provides hip::hipfile).
+if(ROCPROFSYS_BUILD_HIPFILE)
+    list(APPEND ROCPROFSYS_EXAMPLE_DIRS hipfile-io)
+endif()
+
 foreach(_example_dir IN LISTS ROCPROFSYS_EXAMPLE_DIRS)
     if(NOT "${_example_dir}" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
         add_subdirectory(${_example_dir})
