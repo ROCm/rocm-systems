@@ -100,12 +100,16 @@ struct LaunchParams {
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool hipParams_;           //!< If this is launched through hipParams_
+  // Distinguish an implicit {1,1,1} default from the same tuple supplied through
+  // hipLaunchAttributeClusterDimension, notably for kernels compiled with empty cluster metadata.
+  bool clusterDimsSpecified_;
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
                uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
                uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
-               uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false)
+               uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false,
+               bool clusterDimsSpecified = false)
       : global_(static_cast<uint32_t>(globalX), static_cast<uint32_t>(globalY),
                 static_cast<uint32_t>(globalZ)),
         local_(static_cast<uint16_t>(localX), static_cast<uint16_t>(localY),
@@ -115,6 +119,7 @@ struct LaunchParams {
         grid_(gridX, gridY, gridZ),
         sharedMemBytes_(sharedMemBytes),
         hipParams_(hipParams),
+        clusterDimsSpecified_(clusterDimsSpecified),
         validConfig_(true) {
     if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
       validConfig_ = false;
@@ -179,17 +184,16 @@ struct LaunchParams {
 
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
 struct HIPLaunchParams : public LaunchParams {
-
-  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
-                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes, const Device& device,
+  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
+                  uint32_t blockZ, uint32_t sharedMemBytes, const Device& device,
                   uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0,
-                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1,
-                  uint32_t clusterY = 1, uint32_t clusterZ = 1)
-                  : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
-                                 static_cast<size_t>(gridY) * blockY + globalY_remainder,
-                                 static_cast<size_t>(gridZ) * blockZ + globalZ_remainder,
-                                 blockX, blockY, blockZ, sharedMemBytes, device, clusterX, clusterY,
-                                 clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
+                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1, uint32_t clusterY = 1,
+                  uint32_t clusterZ = 1, bool clusterDimsSpecified = false)
+      : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
+                     static_cast<size_t>(gridY) * blockY + globalY_remainder,
+                     static_cast<size_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY,
+                     blockZ, sharedMemBytes, device, clusterX, clusterY, clusterZ, gridX, gridY,
+                     gridZ, true /*hipParams*/, clusterDimsSpecified) {}
 };
 
 //! A container for the local and global worksizes.
