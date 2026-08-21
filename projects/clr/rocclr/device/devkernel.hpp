@@ -10,6 +10,8 @@
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
 
+#include <mutex>
+
 namespace amd {
 class Device;
 class KernelSignature;
@@ -210,13 +212,20 @@ class Kernel {
     size_t wavesPerSimdHint_;       //!< waves per simd hit
     size_t constMemSize_;           //!< size of user-allocated constant memory
     size_t maxDynamicSharedSizeBytes_;
+    int runtimeClusterSize_[3];           //!< runtime-required cluster dimensions
+    int kernelMaxDynamicSharedSizeBytes_; //!< device-wide kernel attribute value
+    int kernelPreferredShmemCarveout_;    //!< device-wide kernel carveout attribute
+    bool nonPortableClusterSizeAllowed_;  //!< whether non-portable cluster sizes are allowed
+    int clusterSchedulingPolicyPreference_;  //!< preferred cluster scheduling policy
     std::string compileVecTypeHint_;  //!< kernel compiled vector type hint
 
     int maxOccupancyPerCu_;           //!< Max occupancy per compute unit in threads
     bool isWGPMode_;                  //!< kernel compiled in WGP/cumode
     bool uniformWorkGroupSize_;       //!< uniform work group size option
     bool hasClusterAttr_;             //!< cluster metadata present in code object
-    uint8_t groupMemCarveout_;        //!< LDS carveout
+    bool hasFuncMaxDynamicSharedSize_;  //!< context/function-level override was set
+    bool hasFuncPreferredShmemCarveout_;  //!< context/function-level override was set
+    int groupMemCarveout_;            //!< effective LDS carveout; -1 selects device default
   };
 
   //! Default constructor
@@ -229,6 +238,8 @@ class Kernel {
   const WorkGroupInfo* workGroupInfo() const { return &workGroupInfo_; }
   //! Returns the kernel info structure for filling in
   WorkGroupInfo* workGroupInfo() { return &workGroupInfo_; }
+  //! Serializes mutable runtime attributes for this device kernel
+  std::mutex& attributeLock() const { return attributeLock_; }
 
   //! Returns the kernel signature
   const amd::KernelSignature& signature() const { return *signature_; }
@@ -402,6 +413,7 @@ class Kernel {
   Kernel& operator=(const Kernel&);
 
   std::unordered_map<size_t, size_t> patchReferences_;  //!< Patch table for references
+  mutable std::mutex attributeLock_;                     //!< mutable runtime attributes
 
   enum KernelKind { Normal = 0, Init = 1, Fini = 2 };
 

@@ -144,8 +144,14 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
-  const device::Kernel::WorkGroupInfo* wrkGrpInfo =
-      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0]))->workGroupInfo();
+  const device::Kernel* device_kernel =
+      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0]));
+  if (device_kernel == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  std::scoped_lock lock(device_kernel->attributeLock());
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = device_kernel->workGroupInfo();
   if (wrkGrpInfo == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
   }
@@ -175,7 +181,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = 0;
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      *value = static_cast<int>(wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_);
+      *value = static_cast<int>(wrkGrpInfo->maxDynamicSharedSizeBytes_);
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       *value = wrkGrpInfo->groupMemCarveout_;
@@ -207,7 +213,10 @@ inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc(func)) {
+    hipLibrary_t library = nullptr;
+    if (PlatformState::Instance().IsValidDynFunc(func) ||
+        PlatformState::Instance().GetFunctionLibrary(
+            reinterpret_cast<hipKernel_t>(const_cast<void*>(func)), &library)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       return hipErrorInvalidDeviceFunction;
@@ -230,7 +239,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   if (func == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-  if (attr < 0 || attr > hipFuncAttributeMax) {
+  if (attr < 0 || attr >= hipFuncAttributeMax) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -238,7 +247,10 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc((func))) {
+    hipLibrary_t library = nullptr;
+    if (PlatformState::Instance().IsValidDynFunc(func) ||
+        PlatformState::Instance().GetFunctionLibrary(
+            reinterpret_cast<hipKernel_t>(const_cast<void*>(func)), &library)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -252,6 +264,10 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   }
   device::Kernel* d_kernel =
       (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  std::scoped_lock lock(d_kernel->attributeLock());
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
     if ((value < 0) ||
@@ -260,6 +276,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
+    d_kernel->workGroupInfo()->hasFuncMaxDynamicSharedSize_ = true;
   }
 
   if (attr == hipFuncAttributePreferredSharedMemoryCarveout) {
@@ -267,6 +284,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->groupMemCarveout_ = value;
+    d_kernel->workGroupInfo()->hasFuncPreferredShmemCarveout_ = true;
   }
   HIP_RETURN(hipSuccess);
 }
@@ -288,8 +306,10 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
   if (hipSuccess != status) {
     HIP_RETURN(status);
   }
+  std::scoped_lock lock(d_kernel->attributeLock());
   d_kernel->workGroupInfo()->groupMemCarveout_ =
       amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig));
+  d_kernel->workGroupInfo()->hasFuncPreferredShmemCarveout_ = true;
 
   HIP_RETURN(hipSuccess);
 }
@@ -393,29 +413,50 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 }
 
 // =================================================================================================
-bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
-                                 amd::LaunchParams& launch_params) {
+hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
+                                       amd::LaunchParams& launch_params) {
 
   const amd::Device& device = stream->vdev()->device();
   amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
-  // If cluster size from device kernel is > 1, then we need to update the cluster params.
-  if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
-      devKernel->getClusterSize(2) > 1) {
-    if (!launch_params.UpdateClusterLaunchParams(devKernel->getClusterSize(0),
-                                                 devKernel->getClusterSize(1),
-                                                 devKernel->getClusterSize(2))) {
+  if (devKernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  std::scoped_lock attribute_lock(devKernel->attributeLock());
+  const auto* work_group_info = devKernel->workGroupInfo();
+  const bool has_runtime_cluster = work_group_info->runtimeClusterSize_[0] != 0 ||
+                                   work_group_info->runtimeClusterSize_[1] != 0 ||
+                                   work_group_info->runtimeClusterSize_[2] != 0;
+  const bool has_required_cluster = work_group_info->hasClusterAttr_ || has_runtime_cluster;
+  const size_t cluster_x = work_group_info->hasClusterAttr_
+                               ? work_group_info->clusterSize_[0]
+                               : work_group_info->runtimeClusterSize_[0];
+  const size_t cluster_y = work_group_info->hasClusterAttr_
+                               ? work_group_info->clusterSize_[1]
+                               : work_group_info->runtimeClusterSize_[1];
+  const size_t cluster_z = work_group_info->hasClusterAttr_
+                               ? work_group_info->clusterSize_[2]
+                               : work_group_info->runtimeClusterSize_[2];
+
+  if (has_required_cluster && (cluster_x == 0 || cluster_y == 0 || cluster_z == 0)) {
+    return hipErrorInvalidClusterSize;
+  }
+
+  // If the kernel has a complete required cluster size, update the launch params.
+  if (has_required_cluster && (cluster_x > 1 || cluster_y > 1 || cluster_z > 1)) {
+    if (!launch_params.UpdateClusterLaunchParams(cluster_x, cluster_y, cluster_z)) {
       LogPrintfError("This is not a valid Cluster Launch, please recheck parameters"
                      "global[0]: %d, global[1]: %d, global[2]: %d, local[0]: %d, local[1]: %d,"
-                     "local[2] :%d, numClusters[0]: %d, numClusters[1]: %d, numClusters[2]: %d",
+                     "local[2] :%d, numClusters[0]: %zu, numClusters[1]: %zu, "
+                     "numClusters[2]: %zu",
                       launch_params.global_[0], launch_params.grid_[1],
                       launch_params.global_[2], launch_params.local_[0],
                       launch_params.local_[1], launch_params.local_[2],
-                      devKernel->getClusterSize(0), devKernel->getClusterSize(1),
-                      devKernel->getClusterSize(2));
-      return false;
+                      cluster_x, cluster_y, cluster_z);
+      return hipErrorInvalidClusterSize;
     }
   }
-  return true;
+  return hipSuccess;
 }
 
 // =================================================================================================
@@ -429,8 +470,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   amd::Kernel* kernel = hip::asKernel(f);
 
   // Check if the kernel metadata has cluster info we need to act on.
-  if (!UpdateNumClustersFromKernel(stream, kernel, launch_params)) {
-    return hipErrorInvalidValue;
+  if (hipError_t status = UpdateNumClustersFromKernel(stream, kernel, launch_params);
+      status != hipSuccess) {
+    return status;
   }
 
   size_t globalWorkOffset[3] = {0};

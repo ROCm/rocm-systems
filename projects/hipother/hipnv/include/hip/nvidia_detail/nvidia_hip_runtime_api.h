@@ -27,6 +27,7 @@
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_12080 12080
 #define CUDA_13000 13000
 
 #ifdef __cplusplus
@@ -3995,7 +3996,13 @@ inline static hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramI
 inline static hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
   return hipCUResultTohipError(cuKernelSetAttribute(attrib, value, kernel, dev));
 }
-
+#if CUDA_VERSION >= CUDA_12080
+inline static hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr,
+                                                        int value, int device) {
+  return hipCUDAErrorTohipError(cudaKernelSetAttributeForDevice(
+      reinterpret_cast<cudaKernel_t>(kernel), static_cast<cudaFuncAttribute>(attr), value, device));
+}
+#endif
 inline static hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   return hipCUResultTohipError(cuKernelGetFunction(pFunc, kernel));
 }
