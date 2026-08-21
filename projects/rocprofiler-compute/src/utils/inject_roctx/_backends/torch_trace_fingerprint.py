@@ -1,12 +1,21 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Source fingerprint for the torch_trace_collector extension."""
+"""Artifact tag for the torch_trace_collector extension.
 
-from __future__ import annotations
+The tag names one build of the extension: the Python and torch versions it was
+compiled against, and a fingerprint of the C++ inputs it was compiled from. The
+loader uses it to find a matching artifact and CMake uses it to name the one it
+produces, so both sides call ``artifact_tag`` rather than assembling their own.
+
+Importing this module must not import torch: the loader imports it in
+environments where torch is absent. ``artifact_tag`` imports torch when called.
+"""
 
 import hashlib
+import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] is <repo>/src or <install>/libexec/<project>.
@@ -35,8 +44,10 @@ _COLLECTOR_HEADER_NAMES = (
     "wire_format.h",
 )
 
+MISSING_FINGERPRINT = "missing"
 
-def required_input_paths() -> tuple[Path, ...]:
+
+def required_input_paths() -> Tuple[Path, ...]:
     """Named collector sources and headers, CMakeLists.txt, and shared headers."""
     return (
         *(_SO_SOURCE_DIR / name for name in _COLLECTOR_SOURCE_NAMES),
@@ -46,7 +57,7 @@ def required_input_paths() -> tuple[Path, ...]:
     )
 
 
-def fingerprint_input_paths() -> tuple[Path, ...]:
+def fingerprint_input_paths() -> Tuple[Path, ...]:
     """Collector ``*.cpp`` and ``*.h`` files, CMakeLists.txt, and shared headers."""
     inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
     inputs |= set(_SHARED_UTILS_HEADERS)
@@ -55,18 +66,61 @@ def fingerprint_input_paths() -> tuple[Path, ...]:
 
 
 def source_fingerprint() -> str:
-    """First 12 hex digits of a SHA-256 of ``<basename>:<file-sha256>``
-    lines, or ``"missing"``."""
+    """First 12 hex digits of a SHA-256 over ``<name>:<file-sha256>`` lines.
+
+    Returns ``MISSING_FINGERPRINT`` when no input is readable, so a tree with no
+    sources produces a tag that cannot collide with a real build.
+    """
     catalog_hash = hashlib.sha256()
+    unreadable = []
     n_files = 0
     for path in fingerprint_input_paths():
         try:
             data = path.read_bytes()
         except OSError:
+            unreadable.append(path)
             continue
         digest = hashlib.sha256(data).hexdigest()
         catalog_hash.update(f"{path.name}:{digest}\n".encode("ascii"))
         n_files += 1
-    if n_files == 0:
-        return "missing"
+    # A tag built from a subset of the inputs would name an artifact that does
+    # not correspond to the sources it was built from.
+    if unreadable or n_files == 0:
+        return MISSING_FINGERPRINT
     return catalog_hash.hexdigest()[:12]
+
+
+def torch_version() -> Optional[str]:
+    """The running interpreter's torch version without its local segment.
+
+    CMake reads the same value from ``Torch_VERSION``, which carries no local
+    segment, so the ``+rocm``/``+cu`` suffix is dropped here to match.
+    """
+    try:
+        import torch
+    except Exception:
+        return None
+    return torch.__version__.split("+", 1)[0]
+
+
+def artifact_tag() -> Optional[str]:
+    """Return ``py{major}.{minor}_torch{version}_src{fingerprint}``, or ``None``
+    when torch is not importable.
+    """
+    version = torch_version()
+    if version is None:
+        return None
+    return (
+        f"py{sys.version_info.major}.{sys.version_info.minor}"
+        f"_torch{version}_src{source_fingerprint()}"
+    )
+
+
+if __name__ == "__main__":
+    # CMake resolves the tag by running this module; see the collector's
+    # CMakeLists.txt. An empty line means torch was not importable.
+    #
+    # Running a file as a script puts its own directory first on sys.path, and
+    # this one holds torch.py, which would shadow the real torch package.
+    sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != _THIS_DIR]
+    print(artifact_tag() or "")

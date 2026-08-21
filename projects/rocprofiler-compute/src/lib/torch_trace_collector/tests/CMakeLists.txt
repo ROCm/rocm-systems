@@ -48,24 +48,18 @@ if(_ttc_openblas_dir)
 endif()
 list(JOIN _ttc_test_ld_paths ":" _ttc_test_ld_path)
 
-if(TEST_FROM_INSTALL)
-    set(_ttc_test_cmd tests/${target})
-else()
-    set(_ttc_test_cmd $<TARGET_FILE:${target}>)
-endif()
-add_test(NAME ${target} COMMAND ${_ttc_test_cmd})
-set_tests_properties(
+# The root CMakeLists.txt registers this test alongside the other native
+# gtests; publish the search path torch needs to resolve its own dependencies.
+set_target_properties(
     ${target}
-    PROPERTIES
-        LABELS "profile"
-        ENVIRONMENT "LD_LIBRARY_PATH=${_ttc_test_ld_path}:$ENV{LD_LIBRARY_PATH}"
+    PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_ttc_test_ld_path}"
 )
 
 if(INSTALL_TESTS)
     install(
         TARGETS ${target}
         RUNTIME
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler-compute/tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CMAKE_PROJECT_NAME}/tests
             COMPONENT tests
     )
 endif()

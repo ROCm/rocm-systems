@@ -67,8 +67,13 @@ def assert_simple_net_operator(output):
 
 @pytest.fixture(scope="module")
 def torch_trace_workload_state():
-    """Clean the shared profiled workload directory at module teardown."""
-    state = {"dir": None}
+    """Clean the shared profiled workload directory at module teardown.
+
+    ``dir`` is set as soon as the directory exists so teardown always cleans it.
+    ``profiled`` gates reuse, so a failed profile is not silently handed to the
+    tests that follow.
+    """
+    state = {"dir": None, "profiled": False}
     yield state
     if state["dir"] is not None:
         common.clean_output_dir(config["cleanup"], state["dir"])
@@ -81,7 +86,7 @@ def torch_trace_profiled_workload(
 ):
     """Profile simple_net with --torch-trace and return the workload directory."""
     require_torch(gpu=True)
-    if torch_trace_workload_state["dir"] is None:
+    if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
         torch_trace_workload_state["dir"] = workload_dir
         returncode = binary_handler_profile_rocprof_compute(
@@ -96,6 +101,7 @@ def torch_trace_profiled_workload(
             app_name="torch_test_app",
         )
         assert returncode == 0, "Profiling the torch application failed"
+        torch_trace_workload_state["profiled"] = True
     return torch_trace_workload_state["dir"]
 
 

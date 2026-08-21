@@ -21,102 +21,15 @@ _FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
 
 # ---------------------------------------------------------------------------
-# compute_tag / fingerprint
+# compute_tag
 # ---------------------------------------------------------------------------
 
 
-def test_compute_tag_returns_well_formed_string():
-    """The cache tag follows ``py<X>.<Y>_torch<ver>_src<12-hex>``."""
-    tag = inject_roctx_loader.compute_tag()
-    if tag is None:
-        pytest.skip("torch not importable")
-    parts = tag.split("_")
-    assert any(p.startswith("py") for p in parts)
-    assert any(p.startswith("torch") for p in parts)
-    src_components = [p for p in parts if p.startswith("src")]
-    assert len(src_components) == 1, (
-        f"expected exactly one '_src...' component in tag {tag!r}"
-    )
-    src_value = src_components[0][len("src") :]
-    assert src_value == "missing" or (
-        len(src_value) == 12 and all(c in "0123456789abcdef" for c in src_value)
-    ), f"unexpected src component {src_value!r} in tag {tag!r}"
-    import torch
-
-    torch_components = [p for p in parts if p.startswith("torch")]
-    assert len(torch_components) == 1, (
-        f"expected exactly one '_torch...' component in tag {tag!r}"
-    )
-    assert torch_components[0] == "torch" + torch.__version__.split("+", 1)[0]
-
-
-def test_compute_tag_is_stable_across_calls():
-    """``compute_tag()`` returns the same value for repeated calls in one process."""
-    assert inject_roctx_loader.compute_tag() == inject_roctx_loader.compute_tag()
-
-
-def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
-    """A single-byte edit to any input changes the fingerprint."""
-    cpp = tmp_path / "torch_trace_collector.cpp"
-    cmake = tmp_path / "CMakeLists.txt"
-    cpp.write_text("// fingerprint test source\n")
-    cmake.write_text("# fingerprint test buildfile\n")
-    monkeypatch.setattr(
-        torch_trace_fingerprint,
-        "fingerprint_input_paths",
-        lambda: (cpp, cmake),
-    )
-
-    baseline = torch_trace_fingerprint.source_fingerprint()
-    assert len(baseline) == 12
-
-    for input_path in (cpp, cmake):
-        original = input_path.read_bytes()
-        input_path.write_bytes(original + b"\n# mutation\n")
-        mutated = torch_trace_fingerprint.source_fingerprint()
-        assert mutated != baseline, (
-            f"editing {input_path.name} did not change the fingerprint"
-        )
-        input_path.write_bytes(original)
-        assert torch_trace_fingerprint.source_fingerprint() == baseline
-
-
-def test_source_fingerprint_excludes_tool_version_file():
-    """The tool ``VERSION`` file is not a fingerprint input."""
-    for path in torch_trace_fingerprint.fingerprint_input_paths():
-        assert path.name != "VERSION", (
-            f"VERSION should not be in fingerprint_input_paths; saw {path}"
-        )
-
-
-def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
-    tmp_path,
-    monkeypatch,
-):
-    """When no inputs are readable, the fingerprint is the ``"missing"`` sentinel."""
-    monkeypatch.setattr(
-        torch_trace_fingerprint,
-        "fingerprint_input_paths",
-        lambda: (tmp_path / "does_not_exist.cpp",),
-    )
-    assert torch_trace_fingerprint.source_fingerprint() == "missing"
-
-
-def test_source_fingerprint_separates_input_boundaries(tmp_path, monkeypatch):
-    """Reshuffling bytes across input boundaries changes the fingerprint."""
-    a = tmp_path / "a.cpp"
-    b = tmp_path / "b.txt"
-    monkeypatch.setattr(
-        torch_trace_fingerprint, "fingerprint_input_paths", lambda: (a, b)
-    )
-
-    a.write_bytes(b"AB")
-    b.write_bytes(b"C")
-    fp1 = torch_trace_fingerprint.source_fingerprint()
-    a.write_bytes(b"A")
-    b.write_bytes(b"BC")
-    fp2 = torch_trace_fingerprint.source_fingerprint()
-    assert fp1 != fp2, "fingerprint collided across an input boundary"
+def test_compute_tag_delegates_to_the_shared_implementation():
+    """The loader and the collector's CMakeLists.txt must agree byte for byte,
+    so the loader does not assemble a tag of its own.
+    """
+    assert inject_roctx_loader.compute_tag() == torch_trace_fingerprint.artifact_tag()
 
 
 # ---------------------------------------------------------------------------
@@ -129,13 +42,14 @@ def torch_trace_collector_module_sources():
     return sorted(
         p
         for p in torch_trace_fingerprint.fingerprint_input_paths()
-        if p.suffix in (".cpp", ".h") and p.parent == inject_roctx_loader._SO_SOURCE_DIR
+        if p.suffix in (".cpp", ".h")
+        and p.parent == torch_trace_fingerprint._SO_SOURCE_DIR
     )
 
 
 def cmake_declared_sources():
     """C++ files named in ``add_library`` and ``_ttc_headers`` in CMakeLists.txt."""
-    text = inject_roctx_loader._SO_BUILDFILE.read_text()
+    text = torch_trace_fingerprint._SO_BUILDFILE.read_text()
     names = set()
 
     header_block = re.search(r"set\(_ttc_headers(.*?)\)", text, re.DOTALL)
@@ -150,13 +64,13 @@ def cmake_declared_sources():
 
 def test_fingerprint_inputs_cover_every_build_input():
     """Every file the build consumes is a fingerprint input."""
-    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    src_dir = torch_trace_fingerprint._SO_SOURCE_DIR
     if not src_dir.is_dir():
         pytest.skip(f"module sources not present at {src_dir}")
 
     declared = cmake_declared_sources()
     assert declared, (
-        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        f"no sources parsed from {torch_trace_fingerprint._SO_BUILDFILE}; "
         "the build file changed shape and this parser needs updating"
     )
 
@@ -174,13 +88,13 @@ def test_fingerprint_inputs_cover_every_build_input():
 
 def test_required_input_paths_cover_every_build_input():
     """Every file the build consumes is a required input."""
-    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    src_dir = torch_trace_fingerprint._SO_SOURCE_DIR
     if not src_dir.is_dir():
         pytest.skip(f"module sources not present at {src_dir}")
 
     declared = cmake_declared_sources()
     assert declared, (
-        f"no sources parsed from {inject_roctx_loader._SO_BUILDFILE}; "
+        f"no sources parsed from {torch_trace_fingerprint._SO_BUILDFILE}; "
         "the build file changed shape and this parser needs updating"
     )
 
@@ -216,7 +130,7 @@ def test_required_input_paths_include_missing_files(tmp_path, monkeypatch):
 
 def test_required_input_paths_exist_in_the_source_tree():
     """Every required input exists in the source tree."""
-    src_dir = inject_roctx_loader._SO_SOURCE_DIR
+    src_dir = torch_trace_fingerprint._SO_SOURCE_DIR
     if not src_dir.is_dir():
         pytest.skip(f"module sources not present at {src_dir}")
     missing = [
@@ -230,7 +144,7 @@ def test_required_input_paths_exist_in_the_source_tree():
 def test_torch_trace_collector_source_avoids_torch_umbrella_headers():
     """No module source may include ``<torch/{extension,all,torch}.h>``."""
     sources = torch_trace_collector_module_sources()
-    assert sources, f"no C++ sources under {inject_roctx_loader._SO_SOURCE_DIR}"
+    assert sources, f"no C++ sources under {torch_trace_fingerprint._SO_SOURCE_DIR}"
 
     forbidden = (
         "<torch/extension.h>",
@@ -267,7 +181,7 @@ def test_torch_trace_collector_source_uses_narrow_includes():
 
 def test_cmake_buildfile_does_not_override_output_name():
     """``CMakeLists.txt`` must not set ``OUTPUT_NAME``."""
-    cmake_path = inject_roctx_loader._SO_BUILDFILE
+    cmake_path = torch_trace_fingerprint._SO_BUILDFILE
     assert cmake_path.is_file(), f"missing CMakeLists.txt at {cmake_path}"
     active_lines = [
         line
@@ -283,7 +197,7 @@ def test_cmake_buildfile_strips_lib_prefix():
     """``CMakeLists.txt`` sets ``PREFIX ""`` so the artifact is not ``lib``-prefixed."""
     import re
 
-    cmake_path = inject_roctx_loader._SO_BUILDFILE
+    cmake_path = torch_trace_fingerprint._SO_BUILDFILE
     active_lines = [
         line
         for line in cmake_path.read_text().splitlines()
@@ -294,9 +208,14 @@ def test_cmake_buildfile_strips_lib_prefix():
     assert re.search(r'PREFIX\s+""', active_src), 'must set PREFIX ""'
 
 
-def test_cmake_buildfile_hardcodes_cxx11_abi():
-    """Official ROCm libtorch 2.10+ is CXX11 ABI."""
-    cmake_path = inject_roctx_loader._SO_BUILDFILE
+def test_cmake_buildfile_does_not_pin_the_cxx11_abi():
+    """The collector inherits the toolchain's default ABI.
+
+    Every supported Linux toolchain already defaults to the CXX11 ABI that ROCm
+    libtorch is built with, so pinning it would only misdescribe the rare build
+    that differs, and the artifact tag carries no ABI field to tell them apart.
+    """
+    cmake_path = torch_trace_fingerprint._SO_BUILDFILE
     active_lines = [
         line
         for line in cmake_path.read_text().splitlines()
@@ -304,8 +223,8 @@ def test_cmake_buildfile_hardcodes_cxx11_abi():
     ]
     active_src = "\n".join(active_lines)
 
-    assert "PUBLIC _GLIBCXX_USE_CXX11_ABI=1" in active_src, (
-        "the collector must compile with CXX11 ABI to match ROCm libtorch 2.10+"
+    assert "_GLIBCXX_USE_CXX11_ABI" not in active_src, (
+        "the collector must not pin _GLIBCXX_USE_CXX11_ABI"
     )
     assert "TORCH_TRACE_CXX11_ABI" not in active_src, (
         "ABI must not be a configure cache variable"
@@ -319,6 +238,28 @@ def test_loader_and_cmake_agree_on_artifact_filename_shape():
     src = inspect.getsource(inject_roctx_loader._try_runtime_build)
     assert 'f"torch_trace_collector-{tag}.so"' in src, (
         "artifact filename has changed; update this test accordingly"
+    )
+
+
+def test_cmake_takes_the_tag_from_the_loader_rather_than_deriving_it():
+    """CMake must not re-derive the tag.
+
+    A second implementation would name a target the loader does not look for as
+    soon as the two disagree on any component.
+    """
+    cmake_src = torch_trace_fingerprint._SO_BUILDFILE.read_text()
+
+    assert "TORCH_TRACE_ARTIFACT_TAG" in cmake_src, (
+        "cmake must accept the tag the loader already computed"
+    )
+    assert "torch_trace_collector-${_tag}" in cmake_src, (
+        "the target must be named from the tag verbatim"
+    )
+    assert "file(SHA256" not in cmake_src, (
+        "cmake must not hash the sources; torch_trace_fingerprint owns that"
+    )
+    assert "Torch_VERSION" not in cmake_src, (
+        "cmake must not assemble a torch version into the tag"
     )
 
 
@@ -413,8 +354,8 @@ def _set_so_inputs_present(monkeypatch, tmp_path):
     cpp.write_text("// stub\n")
     module_cpp.write_text("// stub\n")
     cml.write_text("# stub\n")
-    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE_DIR", src_dir)
-    monkeypatch.setattr(inject_roctx_loader, "_SO_BUILDFILE", cml)
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_SOURCE_DIR", src_dir)
+    monkeypatch.setattr(torch_trace_fingerprint, "_SO_BUILDFILE", cml)
     monkeypatch.setattr(
         torch_trace_fingerprint,
         "fingerprint_input_paths",
@@ -576,12 +517,9 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
         f"-DTORCH_TRACE_PYTHON must equal sys.executable; "
         f"saw {finder.configure_options!r}"
     )
-    assert (
-        f"-DTORCH_TRACE_SOURCE_FINGERPRINT={_FAKE_TAG.rpartition('_src')[2]}"
-        in finder.configure_options
-    ), (
-        f"-DTORCH_TRACE_SOURCE_FINGERPRINT must be the tag's src suffix; "
-        f"saw {finder.configure_options!r}"
+    assert f"-DTORCH_TRACE_ARTIFACT_TAG={_FAKE_TAG}" in finder.configure_options, (
+        f"cmake must be handed the whole tag so it names the target the loader "
+        f"looks for; saw {finder.configure_options!r}"
     )
     assert "-DBUILD_TORCH_TRACE_COLLECTOR=ON" in finder.configure_options, (
         "the extension must be required so an absent torch is an error"
