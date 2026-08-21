@@ -105,6 +105,15 @@ SharedSignal* SharedSignalPool_t::alloc() {
   return ret;
 }
 
+SharedSignal* SharedSignalPool_t::alloc(int agent_node_id, int flags) {
+  // Refuse rather than ignore.  Silently returning host memory for a placement
+  // request is the defect this overload exists to make impossible.
+  if (agent_node_id != 0 || flags != 0)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
+                             "SharedSignalPool_t cannot honour a placement request.");
+  return alloc();
+}
+
 void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
