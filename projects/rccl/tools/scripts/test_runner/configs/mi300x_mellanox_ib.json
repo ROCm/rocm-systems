@@ -2334,6 +2334,40 @@
       ]
     },
 
+    "suspend_resume_single_proc_multi_gpu_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "SuspendResume_SingleProcMultiGpu_CuMem1",   "description": "One rank owning several GPUs via ncclCommInitAll: grouped Suspend/Resume, caller-device preservation, intra-process peer-import round trip (NCCL_CUMEM_ENABLE=1)", "test_filter": "SuspendResumeSingleProcMultiGpu.*" }
+      ]
+    },
+
+    "suspend_resume_mem_manager_disabled": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_DISABLE_MEM_MANAGER": "1"
+      },
+      "tests": [
+        { "name": "SuspendResume_MemManagerDisabled",          "description": "Suspend/Resume rejected when the memory manager is disabled; NCCL_DISABLE_MEM_MANAGER must be set before process start because NCCL_PARAM caches it", "test_filter": "SuspendResumeArgValidation.MemManagerDisabledRejected" }
+      ]
+    },
+
     "ce_base": {
       "extends": "default",
       "is_gtest": true,
@@ -3556,9 +3590,17 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall); excludes Phase-1 VA signal tests (gin_device_signal_phase1) and tests with dedicated entries below",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall)",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext",
           "timeout": 600
+        },
+        {
+          "name": "GIN_DeviceMPI_MultiContext",
+          "description": "GIN device tests driven across multiple GIN contexts (NCCL_GIN_NCONTEXTS=4): put/putValue-inline/counter+signal/VA-signal, one block per context",
+          "test_filter": "GinMPIDeviceTests.*_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
         },
         {
           "name": "GIN_MultiContext_NonPowerOf2",
@@ -4195,6 +4237,18 @@
       "name": "Suspend/Resume - Public API (CUMEM=1)",
       "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=1 (exercises CUMEM path where supported)",
       "config": "suspend_resume_public_api_cumem1",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Single-process multi-GPU (CUMEM=1)",
+      "description": "One rank owning several GPUs via ncclCommInitAll, NCCL_CUMEM_ENABLE=1 (exercises the intra-process peer-import path in p2pMap)",
+      "config": "suspend_resume_single_proc_multi_gpu_cumem1",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Memory manager disabled",
+      "description": "Suspend/Resume rejected when NCCL_DISABLE_MEM_MANAGER=1 is set before process start",
+      "config": "suspend_resume_mem_manager_disabled",
       "enabled": true
     },
     {

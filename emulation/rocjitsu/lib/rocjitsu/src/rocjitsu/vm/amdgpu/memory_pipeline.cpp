@@ -141,12 +141,13 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   // For sub-dword elements (u8, u16), at least 1 VGPR is used.
   // For 8-byte elements (b64), 2 VGPRs per element.
   uint32_t total_bytes = d.num_elems * d.elem_size;
-  uint32_t vgpr_count = is_atomic ? (d.elem_size / 4) : std::max(1u, total_bytes / 4);
+  uint32_t vgpr_count =
+      is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
-  // buffer loads return 0. exec_mask is the effective EXEC at issue time;
-  // ordinary OOB accesses retain it while ignored resource types clear it.
-  // lane_mask has OOB lanes removed. The difference gives exec-active OOB lanes.
+  // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
+  // accesses retain it while architecturally ignored resource types clear it.
+  // lane_mask has OOB lanes removed. The difference gives issue-active OOB lanes.
   uint64_t exec = d.exec_mask;
   uint64_t oob_mask = exec & ~d.lane_mask; // exec-active but OOB
   if (oob_mask) {
@@ -489,7 +490,6 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     d.wg_id = wf.wg_id();
     d.wf_id = wf.wf_id();
   }
-
   if (d.atomic_op != AtomicOp::NONE) {
     execute_atomic_rmw(d, l2_, wf.process_id());
     return;
@@ -500,18 +500,22 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   // scratch, not of the instruction, so issue the two groups separately rather
   // than striding a global lane's second dword by lane_count*4. Uniform waves
   // (including every dedicated SCRATCH op) take the single-request path.
-  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & d.lane_mask : 0;
-  const uint64_t plain_lanes = d.lane_mask & ~scratch_lanes;
+  const uint64_t request_lanes = transpose_request_lane_mask(d);
+  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
+  const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
 
   if (d.is_load) {
+    const uint64_t request_lanes = transpose_request_lane_mask(d);
+    const uint64_t scratch_request_lanes = scratch_lanes & request_lanes;
+    const uint64_t plain_request_lanes = plain_lanes & request_lanes;
     d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-    if (scratch_lanes)
-      l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
+    if (scratch_request_lanes)
+      l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
                 d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
-    if (plain_lanes)
-      l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
+    if (plain_request_lanes)
+      l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
                 d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
   } else {
@@ -543,7 +547,6 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     d.wg_id = wf.wg_id();
     d.wf_id = wf.wf_id();
   }
-
   if (d.atomic_op != AtomicOp::NONE) {
     execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data);
     if (d.ds2_active) {
@@ -554,8 +557,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    lds.vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                    d.response_data.data());
+    lds.vector_load(d.per_lane_addr.data(), transpose_request_lane_mask(d), d.elem_size,
+                    d.num_elems, d.response_data.data());
     if (d.ds2_active) {
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
       lds.vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,

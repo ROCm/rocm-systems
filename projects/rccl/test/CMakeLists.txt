@@ -456,6 +456,7 @@ if(BUILD_TESTS)
       ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
@@ -465,6 +466,7 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
       PluginCompatV10_test.cpp
@@ -479,6 +481,7 @@ if(BUILD_TESTS)
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
+      transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp

@@ -37,7 +37,7 @@ constexpr int kDdaLL128DataElems = 15;                // payload words per 128B 
 // Derive slot stride from max per-rank bytes.
 constexpr size_t kDdaLLSlotStridePkts = kDdaLLMaxPerRankBytes / 8;  // 16384 pkts (16B lines)
 constexpr size_t kDdaLL128SlotStrideLines =
-    (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
+  (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
 
 // Compute the fabric scratch allocation from the runtime configuration.
 // An explicit buffer-size override takes precedence over derived sizing.
@@ -50,8 +50,8 @@ constexpr size_t kDdaLL128SlotStrideLines =
 // Collectives that need more scratch (e.g., LL128 AR with large messages) are
 // bounded by the eligibility check (scratchNeeded > ddaScratchBytes), which
 // causes them to fall through to Simple path.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled,
-                                     int64_t ddaThreshold, int64_t llEnabled, int64_t ll128Enabled) {
+inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
+                                     int64_t llEnabled, int64_t ll128Enabled) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }

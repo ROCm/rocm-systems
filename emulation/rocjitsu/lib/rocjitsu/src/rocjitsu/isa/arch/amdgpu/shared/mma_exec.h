@@ -100,6 +100,16 @@ inline uint32_t src_base(uint32_t vb, int ev) {
   return (ev >= 256) ? vb + static_cast<uint32_t>(ev - 256) : vb + static_cast<uint32_t>(ev);
 }
 
+/// Apply GPR_IDX only when an MMA operand resolves to the architectural VGPR
+/// bank. AccVGPRs occupy the unified storage range above ACC_VGPR_OFFSET but
+/// are not selected by MODE.GPR_IDX_EN.
+inline uint32_t apply_gpr_idx_to_mma_base(const Wavefront &wf, uint32_t vb, uint32_t base,
+                                          VgprMsbRole role) {
+  if (base >= vb + ACC_VGPR_OFFSET)
+    return base;
+  return vb + apply_gpr_idx(wf, base - vb, role);
+}
+
 /// Sentinel value indicating the accumulator comes from a register, not a constant.
 constexpr uint32_t ACC_FROM_VGPR = UINT32_MAX;
 
@@ -260,6 +270,8 @@ inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
 
   if (dim == 16 && K >= 32) {
     uint32_t block_elems = elems_per_group / 2;
+    if (data_bits == 8)
+      block_elems = 8;
     if (data_bits == 4 && K == 128)
       block_elems = 16;
     if (block_elems != 0) {
@@ -351,7 +363,7 @@ inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t 
 
 inline InputLoc wmma_f8f6f4_ab_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                          uint32_t data_bits) {
-  if (dim == 16 && K == 128 && data_bits <= 8) {
+  if (dim == 16 && K == 128 && data_bits < 8) {
     const uint32_t lane = i + 16u * ((k >> 2) & 1u);
     const uint32_t reg = ((k >> 1) & 1u) + 2u * ((k >> 3) & 1u) + 4u * ((k >> 4) & 1u) +
                          8u * ((k >> 5) & 1u) + 16u * ((k >> 6) & 1u);
@@ -513,6 +525,14 @@ struct SwmmacIndexLoc {
 
 inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bits, uint32_t row,
                                        uint32_t compressed_k, uint32_t index_entries) {
+  // CDNA5 K=128 8-bit sparse A follows the ordinary 16x64 8-bit layout.
+  // Its index fields occupy the same physical lane/slot as the corresponding
+  // compressed A element.
+  if (M == 16 && K == 128 && elem_bits == 8 && index_entries == 32) {
+    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
+    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
+    return {lane, slot};
+  }
   // RDNA4 K=32 SWMMAC uses the gfx12 builtin layout: each row's 16 sparse
   // 2-bit entries are split across two lanes. f16/bf16 split by pairs of
   // K-groups; fp8/bf8/iu8 split linearly by the low/high K=16 block.
@@ -545,6 +565,11 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 inline InputLoc swmmac_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t compressed_k,
                                    uint32_t elem_bits) {
+  if (M == 16 && K == 128 && elem_bits == 8) {
+    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
+    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
+    return wmma_packed_input_loc(lane, slot, elem_bits);
+  }
   if (M == 16 && K == 32) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -580,6 +605,11 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
 
 inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t dense_k,
                                    uint32_t elem_bits) {
+  if (N == 16 && K == 128 && elem_bits == 8) {
+    const uint32_t lane = col + 16u * ((dense_k >> 4) & 1u);
+    const uint32_t slot = (dense_k & 15u) + 16u * (dense_k >> 5);
+    return wmma_packed_input_loc(lane, slot, elem_bits);
+  }
   if (N == 16 && K == 32) {
     if (elem_bits == 8)
       return wmma_packed_input_loc(col + 16u * (dense_k / 16u), dense_k % 16u, elem_bits);

@@ -40,8 +40,11 @@ enum DppCtrl : uint32_t {
   ROW_HALF_MIRROR = 0x141,
   ROW_BCAST15 = 0x142,
   ROW_BCAST31 = 0x143,
-  ROW_SHARE_BASE = 0x150,
-  ROW_SHARE_MAX = 0x15F,
+  ROW_SELECT_BASE = 0x150,
+  ROW_SELECT_MAX = 0x15F,
+  // MI400 names this range DPP_ROW_SHARE. Keep aliases for ISA-specific code.
+  ROW_SHARE_BASE = ROW_SELECT_BASE,
+  ROW_SHARE_MAX = ROW_SELECT_MAX,
   ROW_XMASK_BASE = 0x160,
   ROW_XMASK_MAX = 0x16F,
 };
@@ -49,12 +52,26 @@ enum DppCtrl : uint32_t {
 /// @brief Return true when a DPP control can read past a row or wave edge.
 ///
 /// These controls leave some destination lanes unwritten when BOUND_CTRL is
-/// zero. Rotates, mirrors, quad permutations, row-share, and row-xmask always
+/// zero. Rotates, mirrors, quad permutations, row-select, and row-xmask always
 /// map to valid lanes.
 inline bool dpp_ctrl_produces_oob(uint32_t dpp_ctrl) {
   return (dpp_ctrl >= ROW_SHL1 && dpp_ctrl <= ROW_SHL_MAX) ||
          (dpp_ctrl >= ROW_SHR1 && dpp_ctrl <= ROW_SHR_MAX) || dpp_ctrl == WF_SHL1 ||
          dpp_ctrl == WF_SRL1 || dpp_ctrl == ROW_BCAST15 || dpp_ctrl == ROW_BCAST31;
+}
+
+/// @brief Return true for a documented DPP16 control encoding.
+inline bool dpp_ctrl_is_valid(uint32_t dpp_ctrl, bool allow_wave_ops, bool allow_row_bcast,
+                              bool allow_row_xmask) {
+  return dpp_ctrl <= QUAD_PERM_MAX || (dpp_ctrl >= ROW_SHL1 && dpp_ctrl <= ROW_SHL_MAX) ||
+         (dpp_ctrl >= ROW_SHR1 && dpp_ctrl <= ROW_SHR_MAX) ||
+         (dpp_ctrl >= ROW_ROR1 && dpp_ctrl <= ROW_ROR_MAX) ||
+         (allow_wave_ops && (dpp_ctrl == WF_SHL1 || dpp_ctrl == WF_ROL1 || dpp_ctrl == WF_SRL1 ||
+                             dpp_ctrl == WF_ROR1)) ||
+         dpp_ctrl == ROW_MIRROR || dpp_ctrl == ROW_HALF_MIRROR ||
+         (allow_row_bcast && (dpp_ctrl == ROW_BCAST15 || dpp_ctrl == ROW_BCAST31)) ||
+         (dpp_ctrl >= ROW_SELECT_BASE && dpp_ctrl <= ROW_SELECT_MAX) ||
+         (allow_row_xmask && dpp_ctrl >= ROW_XMASK_BASE && dpp_ctrl <= ROW_XMASK_MAX);
 }
 
 inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 == SRC_DPP8_FI_1; }

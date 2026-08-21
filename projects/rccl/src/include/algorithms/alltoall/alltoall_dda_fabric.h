@@ -24,9 +24,8 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__
-  void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count, int selfRank,
-                         int nRanks, FabricGpuBarrier barrier) {
+  __global__ void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                    int selfRank, int nRanks, FabricGpuBarrier barrier) {
   barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume

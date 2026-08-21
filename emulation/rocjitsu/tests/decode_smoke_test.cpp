@@ -55,6 +55,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -94,7 +95,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 528u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
@@ -1000,6 +1001,34 @@ struct RdnaVopdExecutionCase {
 };
 
 class RdnaVopdExecutionSmokeTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
+  const auto &tc = GetParam();
+  const auto words = make_vopdxy_pair(9, 8);
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_wave64_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_wave64_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_wave64", cfg,
+                                            &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 64);
+  ASSERT_NE(wf, nullptr);
+
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+}
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
   const auto &tc = GetParam();

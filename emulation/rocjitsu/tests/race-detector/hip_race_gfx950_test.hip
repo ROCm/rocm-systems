@@ -1176,33 +1176,10 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
   EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
 }
 
-// TODO(newling): D16 (partial-register) HIP tests.
-//
-// Concrete gap: the rocjitsu CU's read_vgpr always reads the full 32-bit
-// register, so checkVgprRead is called with byteMask=0xF. Sub-dword store
-// instructions (ds_write_b16, global_store_short) only consume 16 bits of
-// the source VGPR, but trigger a full-register race check — false positive
-// when the other half has a pending D16 load.
-//
-// Fix: add read_vgpr_masked(reg, lane, byteMask) to the CU, and have the
-// codegen (_gen_ds_write in codegen.py, esz <= 2) emit the masked variant.
-// See compute_unit.h for details. The original race-emulator solved this
-// with Wave::getHalfVgpr(reg, lane, hi) which passed byteMask=0x3/0xC.
-// See /home/jnewling/workspace/rocm-libraries/shared/race-emulator/tests/
-// race_tests.cpp (D16_LdsLoad_NoFalsePositive, D16_HiLoadOutstanding_LoReadSafe)
-// for the original tests exercising this.
-//
-// The write-side byte mask propagation IS done: registerEvent/registerLdsEvent
-// pass 0x3/0xC from VectorMemState::d16_lo/hi. The core D16 tests using
-// RaceTestBuilder (which bypasses read_vgpr) pass correctly.
-//
-// Deeper observation: even if an instruction reads "garbage" from pending
-// bytes, it only matters if that garbage propagates to an observable side
-// effect (global store, host-visible memory). Garbage churned through
-// computation but never stored is arguably not a user-visible race. The
-// current race detector flags at the point of register read, which is
-// conservative. A more precise (but much harder) approach would track
-// whether tainted values reach observable side effects.
+// gfx950 enables SRAM ECC, so D16 loads write the full 32-bit VGPR and the
+// race detector registers a full-byte-mask pending write. Independent
+// low/high-half D16 behavior applies only to targets without SRAM ECC and is
+// covered by the architecture-parameterized C++ plugin tests.
 
 // --- VGPR WAW: pending load then instruction write ---
 
