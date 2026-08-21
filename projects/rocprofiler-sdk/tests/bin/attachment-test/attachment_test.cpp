@@ -270,6 +270,11 @@ main(int argc, char** argv)
         std::cout << "Attachment test process " << getpid() << " received signal " << SIGWINCH
                   << "\n";
     }
+    if(const auto* forwarding_test = std::getenv("ROCPROFILER_TEST_FORWARDING"))
+    {
+        std::cout << "Attachment test observed ROCPROFILER_TEST_FORWARDING=" << forwarding_test
+                  << "\n";
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     if(child_pid > 0)

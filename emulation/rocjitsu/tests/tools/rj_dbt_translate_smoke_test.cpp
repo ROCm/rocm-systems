@@ -736,8 +736,8 @@ TEST(RjDbtTranslate, RejectsInvalidRewriteDischargeOptionCombinations) {
   ASSERT_TRUE(error.has_value());
   EXPECT_EQ(*error, "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation");
 
-  options.guest_arch = ROCJITSU_CODE_ARCH_GFX1250;
-  options.host_arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
   options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
   options.skip_failed_kernels = true;

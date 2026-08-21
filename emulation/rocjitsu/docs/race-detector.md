@@ -58,7 +58,7 @@ int main() {
 
 Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-`gfx950_cdna4.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+`gfx950_mi355x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
 higher — the emulator does not currently support unoptimized (`-O0`) GPU code
 objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
@@ -150,8 +150,12 @@ races. Some examples:
   `s_waitcnt lgkmcnt` insufficient).
 - **SGPR races**: a scalar register is read before a pending scalar load has
   completed (`s_waitcnt lgkmcnt` insufficient).
-- **LDS races**: an LDS byte is read or written by one wave while another wave
-  has an outstanding write to the same byte, without an intervening `s_barrier`.
+- **LDS races**: an LDS byte is read by one wave while another wave has an
+  outstanding write to the same byte, or written by one wave while another
+  wave has an outstanding read of the same byte, without an intervening
+  `s_barrier`;
+  or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
+  before the required `s_waitcnt vmcnt`.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -161,7 +165,11 @@ the affected bytes, and LDS races are tracked per byte.
 Every in-flight memory operation has an **event** that goes through the
 following lifecycle:
 
-1. **ACTIVE** — the operation is in flight.
+1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
+   the same wave remain ordered with respect to each other, so a later
+   same-wave DS read or write does not race solely because the earlier DS event
+   is still active. Direct-to-LDS VMEM writes still require the owning wave to
+   wait for `vmcnt` before reading the destination bytes.
 1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
    This means the event is no longer in flight from the perspective of the wave
    that issued the operation, but is still in flight from the perspective of

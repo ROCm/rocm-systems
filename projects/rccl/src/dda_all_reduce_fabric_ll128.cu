@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 // Runtime-adjustable LL128 AllReduce block size (threads/block). Must be a
 // multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
@@ -56,16 +57,12 @@ static inline unsigned ddaLL128ArThreads(unsigned dflt) {
   return dflt;
 }
 
-template <typename T>
-static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                     cudaStream_t stream) {
-  const int nRanks = comm->nRanks;
-  const size_t bytes = count * sizeof(T);
-  const size_t nWords = bytes >> 3;
+// Single source of the launch geometry: 1-D grid over 128B line-groups (each
+// block has threads/16 groups), capped by the block count and clamped so
+// flatBlockId (blockIdx.x) stays within the device epoch array.
+static inline std::pair<dim3, dim3> ddaAllReduceFabricLL128Geom(ncclComm* comm, size_t count, int typeSize) {
+  const size_t nWords = ((size_t)count * (size_t)typeSize) >> 3;
   const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
-  const size_t slotStrideLines = ddaLL128ArSlotLines(numLines);
-
-  // 1D grid over line-groups; each block has threads/16 groups.
   const unsigned threads = ddaLL128ArThreads(1024); // multiple of 16 (lanes/line)
   const size_t groups = threads / (unsigned)kDdaLL128Lanes;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
@@ -76,13 +73,25 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   if (blocks == 0) {
     blocks = 1;
   }
-  // flatBlockId (blockIdx.x) must stay within the device epoch array.
   if ((int)blocks > comm->ddaLLEpochLen) {
     blocks = (unsigned)comm->ddaLLEpochLen;
     if (blocks == 0) blocks = 1;
   }
-  dim3 block(threads);
-  dim3 grid(blocks);
+  return std::make_pair(dim3(blocks), dim3(threads));
+}
+
+template <typename T>
+static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                                     cudaStream_t stream) {
+  const int nRanks = comm->nRanks;
+  const size_t bytes = count * sizeof(T);
+  const size_t nWords = bytes >> 3;
+  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  const size_t slotStrideLines = ddaLL128ArSlotLines(numLines);
+
+  auto gridBlock = ddaAllReduceFabricLL128Geom(comm, count, sizeof(T));
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -159,6 +168,11 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   }
 
   return true;
+}
+
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllReduceFabricLL128Geom(comm, count, ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

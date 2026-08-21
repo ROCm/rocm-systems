@@ -210,6 +210,7 @@ set(SRC_FILES
   include/proxy.h
   include/ras.h
   include/rccl_common.h
+  include/rccl_decision.h
   include/rccl_vars.h
   include/register.h
   include/register_inline.h
@@ -1238,7 +1239,18 @@ target_link_libraries(rccl PRIVATE   hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
-  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+  find_package(rocm-core QUIET)
+  if(TARGET rocm-core)
+    target_link_libraries(rccl PRIVATE rocm-core)
+  else()
+    find_library(ROCM_CORE_LIB NAMES rocm-core
+      HINTS "${ROCMCORE_PATH}" "${ROCM_PATH}"
+      PATH_SUFFIXES lib lib64)
+    if(NOT ROCM_CORE_LIB)
+      message(FATAL_ERROR "Could not find librocm-core")
+    endif()
+    target_link_libraries(rccl PRIVATE ${ROCM_CORE_LIB})
+  endif()
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
