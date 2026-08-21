@@ -1888,6 +1888,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-torch-histc"]["run_timeout_seconds"], 300
         )
+        self.assertEqual(
+            workloads["pytorch-torch-sort"][
+                "record_replay_runtime_sample_stride"
+            ],
+            1,
+        )
+        self.assertEqual(
+            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300
+        )
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -2607,6 +2616,10 @@ class ConSanValidationTest(unittest.TestCase):
             ("pytorch-torch-histc", "gfx950", "1"),
             ("pytorch-torch-histc", "gfx1201", None),
             ("pytorch-torch-histc", "gfx1250", None),
+            ("pytorch-torch-sort", "gfx942", None),
+            ("pytorch-torch-sort", "gfx950", "1"),
+            ("pytorch-torch-sort", "gfx1201", None),
+            ("pytorch-torch-sort", "gfx1250", None),
         ):
             with self.subTest(workload=workload_id, target=target):
                 workload = validation.WORKLOAD_BY_ID[workload_id]

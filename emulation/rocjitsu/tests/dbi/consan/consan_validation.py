@@ -1537,6 +1537,14 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
+        # The segmented sort is likewise a compact four-row dispatch. Its
+        # current token misses the production stride entirely even though all
+        # 56,884 accesses and 6,032 barriers are instrumented. Select each
+        # workgroup for validation and bound the resulting dense replay.
+        "pytorch-torch-sort": {
+            "record_replay_runtime_sample_stride": 1,
+            "run_timeout_seconds": 300,
+        },
     },
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after

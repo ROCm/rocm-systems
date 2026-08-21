@@ -501,6 +501,13 @@ members run under baseline and SuperCollider on gfx950 simulation and physical
 gfx950. They pin exact results, diagnostic behavior, and the CDNA descriptor
 growth that keeps dense return-PC scratch below the physical special-register
 tail without making the generalized all-engine fixture artificially large.
+The separate `RepeatedDispatchIdentity` pair remains the portable behavioral
+contract for Record/Replay identity across compact repeated launches. The
+physical `torch.sort` no-evidence result was a validation-cadence issue rather
+than new device semantics: a gfx950-only stride-1 policy now qualifies the
+four-row E2E schedule, while unit tests prove other targets retain their
+production defaults. No prototype-specific device fixture is added for that
+harness policy.
 
 **Defects now guarded:** the common and target pairs reproduce the reduced
 wide-load spill-window corruption, the AccVGPR-boundary entry-state bug, and
