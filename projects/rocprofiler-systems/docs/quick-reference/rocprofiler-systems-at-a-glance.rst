@@ -64,7 +64,7 @@ The feature set is spread across several how-to and conceptual pages; this table
 How it works
 =============
 
-ROCm Systems Profiler collects CPU-side data using one of two instrumentation modes, then collects GPU tracing, CPU counters, GPU metrics, MPI, OpenMP, and Python data through a shared data collection layer:
+ROCm Systems Profiler collects data through several mechanisms - binary instrumentation, statistical sampling, callback APIs, and symbol interception - and merges CPU, GPU, communication, and system metrics into shared trace/profile output.
 
 .. image:: ../data/how_systems_profiler_works.png
    :width: 60%
