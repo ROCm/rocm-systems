@@ -379,4 +379,20 @@ TEST_F(RmaProxyProgressTest, SinglePut_IssuesOnceCompletionFreesCredit) {
     EXPECT_EQ(cis_[peer], 1u);
 }
 
+TEST_F(RmaProxyProgressTest, IssuePutSignal_NullRequestOnSuccess_ReturnsError) {
+    const uint32_t target = 1;
+
+    // The network violates its contract: reports success but hands back a
+    // NULL request handle.
+    net_.forceNullOnSuccess = true;
+
+    ncclRmaPutSignalOp op{};
+    op.targetRank = static_cast<int>(target);
+    op.signal.op = 0;  // iput path
+
+    // The defensive guard rejects it rather than counting a bogus credit.
+    EXPECT_EQ(ncclRmaProxyIssuePutSignal(&rma_, ctx_.get(), &op), ncclInternalError);
+    EXPECT_EQ(inflight_[target], 0u);
+}
+
 }  // namespace
