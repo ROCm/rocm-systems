@@ -80,7 +80,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 35ed46c376f22431411a497dac08db894060a522 # 2026-08-19
+          ref: b40b12b879f110f966f47719a0dd0cfe4a6f0c3a # 2026-08-21 commit
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
