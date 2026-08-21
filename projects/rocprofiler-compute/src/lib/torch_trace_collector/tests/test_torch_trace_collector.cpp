@@ -96,18 +96,21 @@ constexpr std::uint64_t kThreadB = 2;
 constexpr std::uint64_t kThreadC = 3;
 
 // The first `count` sequence numbers that hash to `shard` for `thread_id`.
-std::vector<std::int64_t> seq_nrs_on_shard(std::size_t shard, std::uint64_t thread_id, std::size_t count)
+std::vector<std::int64_t> sequence_numbers_on_shard(
+    std::size_t shard, std::uint64_t thread_id, std::size_t count)
 {
-    std::vector<std::int64_t> seq_nrs;
-    seq_nrs.reserve(count);
-    for (std::int64_t seq_nr = 0; seq_nrs.size() < count; ++seq_nr)
+    std::vector<std::int64_t> sequence_numbers;
+    sequence_numbers.reserve(count);
+    for (std::int64_t sequence_number = 0; sequence_numbers.size() < count;
+         ++sequence_number)
     {
-        if (SnapshotStore::shard_index(SnapshotKey{seq_nr, thread_id}) == shard)
+        if (SnapshotStore::shard_index(SnapshotKey{sequence_number, thread_id})
+            == shard)
         {
-            seq_nrs.push_back(seq_nr);
+            sequence_numbers.push_back(sequence_number);
         }
     }
-    return seq_nrs;
+    return sequence_numbers;
 }
 
 std::size_t count_in_marker_path(const std::string& wire, const std::string& needle)
@@ -319,35 +322,46 @@ TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
 
 TEST_F(TorchTraceCollectorTest, EvictsOldestPastSoftCap)
 {
-    const auto seq_nrs = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto sequence_numbers = sequence_numbers_on_shard(
+        0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        snapshots().save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(
+            sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
     ASSERT_EQ(stats().snapshots_dropped.load(), 0u);
 
-    snapshots().save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    snapshots().save(
+        sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
     EXPECT_EQ(stats().snapshots_dropped.load(), 1u);
 
     std::vector<StackEntry> out;
-    EXPECT_FALSE(snapshots().consume(seq_nrs.front(), kThreadA, &out));
-    EXPECT_TRUE(snapshots().consume(seq_nrs.back(), kThreadA, &out));
+    EXPECT_FALSE(snapshots().consume(sequence_numbers.front(), kThreadA, &out));
+    EXPECT_TRUE(snapshots().consume(sequence_numbers.back(), kThreadA, &out));
 }
 
 TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
-    const auto seq_nrs     = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
-    const auto other_shard = seq_nrs_on_shard(1, kThreadA, 1);
+    const auto sequence_numbers = sequence_numbers_on_shard(
+        0, kThreadA, SnapshotStore::kShardSoftCap + 1);
+    const auto other_shard_sequence_numbers =
+        sequence_numbers_on_shard(1, kThreadA, 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        snapshots().save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(
+            sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
-    snapshots().save(other_shard.front(), kThreadA, std::vector<StackEntry>{{"shard1", "v"}});
+    snapshots().save(
+        other_shard_sequence_numbers.front(),
+        kThreadA,
+        std::vector<StackEntry>{{"shard1", "v"}});
 
-    snapshots().save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    snapshots().save(
+        sequence_numbers.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
 
     std::vector<StackEntry> out;
-    EXPECT_TRUE(snapshots().consume(other_shard.front(), kThreadA, &out));
+    EXPECT_TRUE(snapshots().consume(
+        other_shard_sequence_numbers.front(), kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "shard1");
 }
@@ -525,7 +539,7 @@ TEST_F(TorchTraceCollectorTest, DedupesIdenticalPrefix)
     EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
-TEST_F(TorchTraceCollectorRealOpsTest, FwdBwdCounterSanity)
+TEST_F(TorchTraceCollectorRealOpsTest, ForwardBackwardCountersStayBalanced)
 {
     install();
 
