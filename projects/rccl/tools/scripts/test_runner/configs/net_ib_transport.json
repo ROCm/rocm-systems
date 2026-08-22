@@ -1246,6 +1246,104 @@
           "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
         }
       ]
+    },
+    "fault_multithread_base": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "IB-CAST fault environment for the threaded suites, carrying no tests of its own for the reason given in net_ib_multithread_base. Port failover is on and port recovery is left at its default of off: the failover tests here assert that failover absorbed the error and that the device is no longer Ok, which recovery would undo underneath them. Concurrent recovery is covered by fault_recovery_multithread_2 and the nightly drift suite, which enable it. RCCL_IB_FAULT_INJECTION stays off: these tests use the per-communicator pre-call hooks and have no use for the libibverbs ops shims, which add two acquisitions of one process-global mutex to every poll_cq and whose registry is per device, so one worker's clear disarms every other worker's faults.",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      }
+    },
+    "fault_inject_multithread": {
+      "extends": "fault_multithread_base",
+      "tests": [
+        {
+          "name": "FaultInj_ShimsAbsentUnlessRequested",
+          "description": "With RCCL_IB_FAULT_INJECTION off, arming an ops-level fault must be refused: if it succeeds the libibverbs shims are installed, and their poll_cq takes one process-global mutex per call, serializing progress for the whole process",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        },
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring: proves injected fault state stays inside its communicator",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorIsFatal",
+          "description": "Every worker arms error injection on its own QPs and must observe the failure itself",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_MultiThread_DelayDataIntegrity",
+          "description": "Every worker slows its own QP 0 and still delivers intact data while the others load the device",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data cleanly on a second connection",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverCqeErrorRecovered",
+          "description": "N links fail at once, so the process-global recovery thread serves several communicators",
+          "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverLargeMessage",
+          "description": "Concurrent 64 KB messages survive their own link failure byte for byte",
+          "test_filter": "NetIbMPITest.FailoverLargeMessageDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverMultiRequest",
+          "description": "Every worker posts several messages, then breaks its own QP 0, then requires all of them to arrive intact with no fatal error, while the other workers do the same to their own connections. Whether a request was still on the wire at the transition is not observable from a worker, so it is not asserted; the repost count is logged as diagnostics",
+          "test_filter": "NetIbMPITest.FailoverMultiRequestInFlight"
+        }
+      ]
+    },
+    "fault_inject_multithread_2": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "fault_inject_multithread_4": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "fault_recovery_nightly_drift": {
+      "extends": "fault_multithread_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_PostRecoveryPingPongHoldsSync",
+          "description": "Ten blocking messages on a recovered connection must not leave the two ranks a message apart (open finding, expected to fail some runs)",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+        }
+      ]
+    },
+    "fault_recovery_multithread_2": {
+      "extends": "fault_multithread_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_RecoverySuccessRestoresTraffic",
+          "description": "Concurrent recoveries share one global recovery thread, then every worker's traffic must resume",
+          "test_filter": "NetIbMPITest.RecoverySuccessRestoresTraffic"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -1571,6 +1669,30 @@
       "name": "NET IB - CAST WRR only, long update interval",
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_no_split_long_interval",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (2)",
+      "description": "2 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "4 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Recovery Multithread (2)",
+      "description": "Concurrent link recoveries through the single process-global recovery thread",
+      "config": "fault_recovery_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Recovery Nightly Drift (2)",
+      "description": "Open finding: post-recovery ping-pong drifts a message apart",
+      "config": "fault_recovery_nightly_drift",
       "enabled": true
     }
   ]
