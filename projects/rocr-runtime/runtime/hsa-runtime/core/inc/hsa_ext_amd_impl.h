@@ -101,6 +101,9 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
                                            hsa_signal_t* signal);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs, uint32_t num_descs);
+
+// Mirrors Amd Extension Apis
 uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* signals,
                                  hsa_signal_condition_t* conds, hsa_signal_value_t* values,
                                  uint64_t timeout_hint, hsa_wait_state_t wait_hint,
