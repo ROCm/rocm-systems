@@ -296,20 +296,37 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
 }
 
 // Device-side (in-kernel wall_clock64) timing for the GIN-SDMA AllGather (-D 3),
-// via the shared gin_devtime scaffold. Opt-in through NCCL_GIN_ANVIL_DEVICE_TIMING
-// (legacy NCCL_GIN_ANVIL_A2A_DEVICE_TIMING): 1=augment (print an extra #[ag-devtime]
-// line next to the graph numbers), 2=device-time-only (report the in-kernel latency
-// as the out-of-place metric; in-place keeps normal timing). loop/skip via
-// NCCL_GIN_ANVIL_AG_DEVTIME_LOOP/_SKIP (default 10/10). Self-selects the same size-
-// adaptive CTA count as the perf path (decoupled from -V), threading the host-
-// resolved per-collective sdmaThreshold so the timed tier matches the launched cfg.
+// via the shared gin_devtime scaffold. Opt-in via --device_timing: 1=augment
+// (print an extra #[ag-devtime] line next to the graph numbers), 2=device-time-only
+// (report the in-kernel latency as the out-of-place metric; in-place keeps normal
+// timing). loop/skip come from --devtime_loop/--devtime_skip (default 10/10); size-
+// tier overrides via --devtime_loop_mid/_large and --devtime_skip_mid/_large. Self-
+// selects the same size-adaptive CTA count as the perf path (decoupled from -V),
+// threading the host-resolved per-collective sdmaThreshold so the timed tier matches
+// the launched cfg.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
-  static const int loop = gin_devtime::envInt("NCCL_GIN_ANVIL_AG_DEVTIME_LOOP", 10);
-  static const int skip = gin_devtime::envInt("NCCL_GIN_ANVIL_AG_DEVTIME_SKIP", 10);
+  if (!deviceTimingMode) return testSuccess;
+
+  // Only the GIN hybrid impl (-D 3) provisions the GIN signals/barriers the timed
+  // body relies on. Other device impls would fault or hang on missing GIN state.
+  if (deviceImpl != 3) return testSuccess;
 
   const size_t count = args->nbytes / wordSize(type);   // per-rank input-chunk count
-  if (count == 0 || loop < 1) return testSuccess;
+  if (count == 0 || devtimeLoop < 1) return testSuccess;
+
+  const size_t chunkBytes = count * (size_t)wordSize(type);
+  int loop = devtimeLoop;
+  int skip = devtimeSkip < 0 ? 0 : devtimeSkip;
+  if (devtimeLoopLarge > 0 && chunkBytes >= (size_t)64 * 1024 * 1024) {
+    loop = devtimeLoopLarge;
+    if (devtimeSkipLarge >= 0) skip = devtimeSkipLarge;
+    else skip = (skip < 1) ? skip : 1;
+  } else if (devtimeLoopMid > 0 && chunkBytes >= (size_t)8 * 1024 * 1024) {
+    loop = devtimeLoopMid;
+    if (devtimeSkipMid >= 0) skip = devtimeSkipMid;
+    else skip = (skip < 2) ? skip : 2;
+  }
 
   auto kernel = SPECIALIZE_KERNEL(GinHybridAllGatherTimedKernel, type, op);
   if (kernel == nullptr) return testSuccess;
@@ -317,10 +334,9 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
   // Match the perf path: self-select the size-adaptive CTA count (decoupled from -V)
   // so the device-timed number reflects the launched configuration.
-  const size_t agChunkBytes = count * (size_t)wordSize(type);
   static const size_t agCtasEnv = AllGatherParseCtasEnv();
   const int gridCtas = gin_sdma_allgather::allGatherCtas(
-      agChunkBytes, sdmaThreshold, agCtasEnv,
+      chunkBytes, sdmaThreshold, agCtasEnv,
       gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
@@ -335,7 +351,10 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
       },
       &devUs));
 
-  if (outDeltaSec != nullptr) { *outDeltaSec = devUs * 1.0e-6; return testSuccess; }
+  if (outDeltaSec != nullptr) {
+    *outDeltaSec = (devUs > 0.0) ? devUs * 1.0e-6 : -1.0;
+    return testSuccess;
+  }
 
   if (args->proc == 0 && args->thread == 0 && devUs > 0.0) {
     int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
