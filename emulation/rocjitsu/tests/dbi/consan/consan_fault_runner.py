@@ -74,6 +74,7 @@ _FAULT_RESERVATION_LOG_OUTCOMES = {
 _FAULT_RESERVATION_NOT_REQUESTED = "not-requested"
 
 _RESOURCE_PLAN_ALTERNATIVE_KINDS = {
+    "empty_accumulator_descriptor_growth",
     "guest_operand_overlap_spill",
     "spill_backed_operand_recovery",
 }

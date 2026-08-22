@@ -1420,6 +1420,47 @@ class ConSanFaultRunnerTest(unittest.TestCase):
             metrics["resource_plan_alternative_parse_error"],
         )
 
+    def test_resource_plan_alternative_parser_accepts_empty_accumulator_growth(
+        self,
+    ) -> None:
+        parsed = runner._parse_consan_log(
+            "\n".join(
+                (
+                    "[rocjitsu-dbi-hooks] ConSan MOI resources reader=7 "
+                    "alternative_attempts=1 alternative_selected=1 "
+                    "alternative_rejected=0 alternative_superseded=0 "
+                    "alternative_contributed=0 alternative_vetoed=0",
+                    "[rocjitsu-dbi-hooks] ConSan MOI resource-alternative "
+                    "reader=7 site=access candidate=43768 text_offset=0x138170 "
+                    "attempt=0 kind=empty_accumulator_descriptor_growth "
+                    "scratch_count=10 source=descriptor-growth reason=none "
+                    "outcome=selected",
+                )
+            )
+        )
+
+        metrics = parsed["metrics"]
+        self.assertTrue(metrics["resource_plan_alternatives_complete"])
+        self.assertIsNone(metrics["resource_plan_alternative_parse_error"])
+        self.assertTrue(parsed["coverage"]["evidence_complete"])
+        self.assertEqual(
+            metrics["resource_plan_alternatives"],
+            [
+                {
+                    "reader": "7",
+                    "site": "access",
+                    "candidate": 43768,
+                    "text_offset": 0x138170,
+                    "attempt": 0,
+                    "kind": "empty_accumulator_descriptor_growth",
+                    "scratch_count": 10,
+                    "source": "descriptor-growth",
+                    "reason": "none",
+                    "outcome": "selected",
+                }
+            ],
+        )
+
     def test_resource_plan_alternative_parser_rejects_inconsistent_counts(self) -> None:
         parsed = runner._parse_consan_log(
             "\n".join(

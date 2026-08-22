@@ -1611,10 +1611,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # The segmented sort is likewise a compact four-row dispatch. Its
         # current token misses the production stride entirely even though all
         # 56,884 accesses and 6,032 barriers are instrumented. Select each
-        # workgroup for validation and bound the resulting dense replay.
+        # workgroup for validation. The clean process completes in about 33
+        # seconds and the reviewed diagnostic fault in about 51 seconds, so a
+        # 60-second target envelope bounds both without weakening the cadence.
         "pytorch-torch-sort": {
             "record_replay_runtime_sample_stride": 1,
-            "run_timeout_seconds": 300,
+            "run_timeout_seconds": 60,
         },
         # The exact norm/softmax device interval completes in about 27.5
         # seconds, while the same official PyTorch wheel spends about 4.7
