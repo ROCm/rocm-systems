@@ -453,11 +453,12 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
   const auto expanded_count = [](uint64_t count, uint64_t headroom) {
     return util::saturating_mul(count, headroom);
   };
-  const auto expanded_candidate = [&](uint64_t headroom) {
+  const auto expanded_candidate = [&](uint64_t lane_headroom) {
     ConSanMoiAutoReportInventory candidate = inventory;
-    candidate.barrier_event_count = expanded_count(static_barriers, headroom);
-    candidate.atomic_event_count = expanded_count(static_atomics, headroom);
-    candidate.fence_event_count = expanded_count(static_fences, headroom);
+    const uint64_t barrier_headroom = std::max<uint64_t>(lane_headroom / 64u, 1u);
+    candidate.barrier_event_count = expanded_count(static_barriers, barrier_headroom);
+    candidate.atomic_event_count = expanded_count(static_atomics, lane_headroom);
+    candidate.fence_event_count = expanded_count(static_fences, lane_headroom);
     if (candidate.record_replay_bank_count_adaptive) {
       uint64_t diagnostic_count = util::saturating_mul(
           candidate.access_range_count, candidate.record_replay_access_dispatch_bank_count);
@@ -470,7 +471,7 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
     return candidate;
   };
   for (;;) {
-    uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
+    uint64_t headroom = kConSanMoiRecordReplayDynamicLaneEventHeadroom;
     for (;;) {
       ConSanMoiAutoReportInventory candidate = expanded_candidate(headroom);
       const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(candidate);

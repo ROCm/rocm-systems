@@ -176,23 +176,22 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options.moi_exec_save_sgpr.has_value() &&
       (options.moi_runtime_sample_stride > 1u || candidates.size() > 8u ||
        has_unreachable_function_candidate || has_spill_backed_scalar_assignment);
-  // The later persistent-epoch pass excludes split-barrier signals and
-  // runtime kernels. Reserve the same candidate set here; counting the full
-  // inventory leaves a large unused prefix before every access relay.
-  const uint64_t reserved_barrier_island_count =
-      use_indirect_appended && options.moi_track_barriers
-          ? moi_reserved_barrier_island_count(result, options)
-          : 0u;
-  const uint64_t reserved_barrier_slot_words = has_branch_only_scalar_assignment
-                                                   ? kMoiRecordReplayBarrierRelaySlotWords
-                                                   : kIndirectIslandWords;
+  // The later synchronization passes exclude split-barrier signals and
+  // runtime kernels. Reserve the same barrier and fence candidate sets here;
+  // otherwise the access and barrier passes can consume every reachable
+  // island before a compiler release/acquire fence is lowered.
+  const uint64_t reserved_sync_island_count =
+      use_indirect_appended ? moi_reserved_record_replay_sync_island_count(result, options) : 0u;
+  const uint64_t reserved_sync_slot_words =
+      has_branch_only_scalar_assignment
+          ? kMoiRecordReplayBarrierRelaySlotWords
+          : (options.moi_track_atomics ? kMoiLocalIndirectIslandWords : kIndirectIslandWords);
   const uint64_t indirect_body_begin =
       original_text_size +
-      reserved_barrier_island_count * reserved_barrier_slot_words * sizeof(uint32_t) +
+      reserved_sync_island_count * reserved_sync_slot_words * sizeof(uint32_t) +
       candidates.size() * access_slot_words * sizeof(uint32_t);
-  const uint64_t access_island_begin = original_text_size + reserved_barrier_island_count *
-                                                                reserved_barrier_slot_words *
-                                                                sizeof(uint32_t);
+  const uint64_t access_island_begin =
+      original_text_size + reserved_sync_island_count * reserved_sync_slot_words * sizeof(uint32_t);
   uint64_t indirect_body_cursor = indirect_body_begin;
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   std::span<const uint8_t> original_text;
@@ -433,21 +432,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   std::vector<uint64_t> generated_branch_relay_offers;
   std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
   if (use_indirect_appended && access_slot_words > access_relay_words) {
-    generated_branch_relay_offers.reserve(2u * static_cast<size_t>(reserved_barrier_island_count) +
+    generated_branch_relay_offers.reserve(2u * static_cast<size_t>(reserved_sync_island_count) +
                                           2u * candidates.size());
-    generated_branch_relay_ranges.reserve(static_cast<size_t>(reserved_barrier_island_count) +
+    generated_branch_relay_ranges.reserve(static_cast<size_t>(reserved_sync_island_count) +
                                           candidates.size());
     // The barrier prefix can itself be longer than one SOPP hop. Keep two
     // words per slot outside the seven-word barrier island so branch-only
     // reservoir discovery and final access routing have a continuous first
     // foothold without consuming storage owned by the later barrier pass.
-    if (reserved_barrier_slot_words > kIndirectIslandWords) {
-      for (uint64_t index = 0u; index < reserved_barrier_island_count; ++index) {
+    // Only the branch-only layout owns a dedicated two-word spine. An
+    // eight-word synchronization slot must remain intact for a later fence.
+    if (reserved_sync_slot_words == kMoiRecordReplayBarrierRelaySlotWords) {
+      for (uint64_t index = 0u; index < reserved_sync_island_count; ++index) {
         const uint64_t begin =
             original_text_size +
-            (index * reserved_barrier_slot_words + kIndirectIslandWords) * sizeof(uint32_t);
+            (index * reserved_sync_slot_words + kIndirectIslandWords) * sizeof(uint32_t);
         const uint64_t end =
-            original_text_size + (index + 1u) * reserved_barrier_slot_words * sizeof(uint32_t);
+            original_text_size + (index + 1u) * reserved_sync_slot_words * sizeof(uint32_t);
         generated_branch_relay_ranges.emplace_back(begin, end);
         for (uint64_t relay = begin; relay < end; relay += sizeof(uint32_t))
           generated_branch_relay_offers.push_back(relay);
@@ -1165,12 +1166,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
   // Reservoir discovery is intentionally performed before final access
   // selection so a branch-only candidate can establish a complete-text
-  // routing frontier even when that candidate is later omitted.  The barrier
-  // pass is an independent downstream consumer of that frontier.  Preserve
-  // every planned reservoir when barriers are enabled; otherwise an access
-  // batch that happens not to claim one leaves the later barrier batch with
-  // only its appended bank and no original-text foothold.
-  if (options.moi_track_barriers && moi_reserved_barrier_island_count(result, options) != 0u) {
+  // routing frontier even when that candidate is later omitted. The sync
+  // passes are independent downstream consumers of that frontier. Preserve
+  // every planned reservoir when synchronization is enabled; otherwise an
+  // access batch that happens not to claim one can strand a later pass.
+  if (moi_reserved_record_replay_sync_island_count(result, options) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }
@@ -1872,11 +1872,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     result.elf_bytes = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
-    if (reserved_barrier_island_count != 0u) {
+    if (reserved_sync_island_count != 0u) {
       result.moi_reserved_barrier_island_begin = original_text_size;
       result.moi_reserved_barrier_island_slot_words =
-          static_cast<uint32_t>(reserved_barrier_slot_words);
-      result.moi_reserved_barrier_island_count = reserved_barrier_island_count;
+          static_cast<uint32_t>(reserved_sync_slot_words);
+      result.moi_reserved_barrier_island_count = reserved_sync_island_count;
     }
     result.moi_generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
     result.modified = true;

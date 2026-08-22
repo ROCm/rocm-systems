@@ -1636,7 +1636,8 @@ private:
         diagnostic.first_instruction_offset = resolved->instruction_offset;
       }
     }
-    for (uint32_t i = 0; i < visible_fences; ++i) {
+    const uint32_t fence_sample_count = consan_moi_auto_detail_log_count(visible_fences);
+    for (uint32_t i = 0; i < fence_sample_count; ++i) {
       const rocjitsu::ConSanMoiFenceRecord &fence = fences[i];
       log_message(kLogInfo,
                   "ConSan MOI auto fence reader=%llu index=%u event_index=%u owner=%u "
@@ -1647,6 +1648,11 @@ private:
                   fence.workgroup_x, fence.workgroup_y, fence.workgroup_z, fence.instruction_offset,
                   static_cast<unsigned>(fence.kind), fence.scope, fence.semantics,
                   static_cast<unsigned long long>(fence.communication_token));
+    }
+    if (visible_fences > fence_sample_count) {
+      log_message(kLogInfo, "ConSan MOI auto fence reader=%llu omitted=%u after log limit=%u",
+                  static_cast<unsigned long long>(entry.reader),
+                  visible_fences - fence_sample_count, kConSanMoiAutoDetailLogLimit);
     }
     if (!replay_access_records.empty() || visible_barriers != 0 || visible_atomics != 0 ||
         visible_fences != 0) {
@@ -1717,6 +1723,7 @@ private:
                     "dropped_barriers=%u unsupported_access=%u unsupported_atomics=%u "
                     "unsupported_fences=%u diagnostics=%u "
                     "conflict=%s metadata_full=%s diagnostic_capacity_exhausted=%s "
+                    "release_metadata_max=%u acquired_metadata_max=%u "
                     "diagnostic_capacity=%u replay_scratch_diagnostic_capacity=%u "
                     "provenance_repaired=%u provenance_unresolved=%u "
                     "shadow_entries=%zu",
@@ -1731,9 +1738,10 @@ private:
                     replay.unsupported_fence_count, replay.emitted_diagnostic_count,
                     replay.conflict ? "true" : "false", replay.metadata_full ? "true" : "false",
                     replay.diagnostic_capacity_exhausted ? "true" : "false",
-                    header->diagnostic_capacity, replay_header.diagnostic_capacity,
-                    provenance.repaired_diagnostic_count, provenance.unresolved_diagnostic_count,
-                    exact_shadow_entries.size());
+                    replay.maximum_atomic_release_metadata_count,
+                    replay.maximum_acquired_epoch_metadata_count, header->diagnostic_capacity,
+                    replay_header.diagnostic_capacity, provenance.repaired_diagnostic_count,
+                    provenance.unresolved_diagnostic_count, exact_shadow_entries.size());
         for (uint32_t i = 0; i < replay_visible_diagnostics; ++i) {
           const rocjitsu::ConSanMoiDiagnosticRecord &diagnostic = diagnostics[i];
           log_message(kLogInfo,
@@ -1786,7 +1794,7 @@ private:
       ++sampled_records;
     }
 
-    const uint32_t barrier_sample_count = std::min<uint32_t>(visible_barriers, 4u);
+    const uint32_t barrier_sample_count = consan_moi_auto_detail_log_count(visible_barriers);
     for (uint32_t i = 0; i < barrier_sample_count; ++i) {
       const rocjitsu::ConSanMoiBarrierRecord &record = barriers[i];
       log_message(kLogInfo,
@@ -1797,7 +1805,7 @@ private:
                   static_cast<unsigned long long>(record.lane_mask));
     }
 
-    const uint32_t atomic_sample_count = std::min<uint32_t>(visible_atomics, 4u);
+    const uint32_t atomic_sample_count = consan_moi_auto_detail_log_count(visible_atomics);
     for (uint32_t i = 0; i < atomic_sample_count; ++i) {
       const rocjitsu::ConSanMoiAtomicRecord &record = atomics[i];
       log_message(kLogInfo,
@@ -1811,7 +1819,7 @@ private:
                   record.instruction_offset, static_cast<unsigned long long>(record.atomic_address),
                   record.scope, record.semantics);
     }
-    const uint32_t diagnostic_sample_count = std::min<uint32_t>(visible_diagnostics, 4u);
+    const uint32_t diagnostic_sample_count = consan_moi_auto_detail_log_count(visible_diagnostics);
     for (uint32_t i = 0; i < diagnostic_sample_count; ++i) {
       const rocjitsu::ConSanMoiDiagnosticRecord &record = diagnostics[i];
       const char *backend_key_label =

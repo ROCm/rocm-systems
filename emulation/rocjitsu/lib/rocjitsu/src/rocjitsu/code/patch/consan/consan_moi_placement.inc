@@ -63,6 +63,19 @@ constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
   return std::min<uint64_t>(count, options.max_patches);
 }
 
+[[nodiscard]] uint64_t moi_reserved_record_replay_sync_island_count(const ConSanResult &result,
+                                                                    const ConSanOptions &options) {
+  const uint64_t barrier_count =
+      options.moi_track_barriers ? moi_reserved_barrier_island_count(result, options) : 0u;
+  const uint64_t fence_count =
+      options.moi_track_atomics
+          ? std::min<uint64_t>(std::ranges::count_if(result.moi_fence_candidates,
+                                                     &ConSanMoiFenceCandidate::eligible),
+                               options.max_patches)
+          : 0u;
+  return barrier_count + fence_count;
+}
+
 [[nodiscard]] constexpr uint32_t
 moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);

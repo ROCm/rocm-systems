@@ -1203,8 +1203,10 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       auto operator<=>(const ReportedDiagnosticKey &) const = default;
     };
 
-    ReplayWorkgroupState(uint64_t exact_byte_capacity, uint32_t access_capacity)
-        : exact_byte_shadow(exact_byte_capacity, access_capacity) {}
+    ReplayWorkgroupState(uint64_t exact_byte_capacity, uint32_t access_capacity,
+                         size_t synchronization_capacity)
+        : exact_byte_shadow(exact_byte_capacity, access_capacity),
+          synchronization_metadata_capacity(synchronization_capacity) {}
 
     uint64_t generation = 0;
     uint32_t workgroup_x = 0;
@@ -1215,6 +1217,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     std::vector<uint64_t> exported_exact_shadow_entries;
     std::vector<ConSanMoiAtomicReleaseRecord> atomic_release_records;
     std::vector<ConSanMoiAcquiredEpochToken> acquired_epoch_tokens;
+    size_t synchronization_metadata_capacity = 0;
     std::set<ReportedDiagnosticKey> reported_diagnostics;
     bool in_barrier_run = false;
   };
@@ -1261,9 +1264,12 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         return state;
     }
 
+    const size_t synchronization_metadata_capacity =
+        synchronization_metadata_capacity_for_workgroup(generation, workgroup_x, workgroup_y,
+                                                        workgroup_z);
     ReplayWorkgroupState state(static_cast<uint64_t>(exact_shadow_entries.size()) *
                                    consan_moi_exact_shadow::granule_bytes,
-                               replay.published_access_count);
+                               replay.published_access_count, synchronization_metadata_capacity);
     state.generation = generation;
     state.workgroup_x = workgroup_x;
     state.workgroup_y = workgroup_y;
@@ -1271,17 +1277,57 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     state.owner_epochs.resize(consan_moi_exact_shadow::max_owner + 1u);
     if (!first_workgroup_index)
       state.exported_exact_shadow_entries.resize(exact_shadow_entries.size());
-    // Atomic and fence synchronization share one causal clock. A component
-    // imported through either mechanism can be published by the other.
-    const size_t synchronization_metadata_capacity =
-        synchronization_metadata_capacity_for_workgroup(generation, workgroup_x, workgroup_y,
-                                                        workgroup_z);
-    state.atomic_release_records.resize(synchronization_metadata_capacity);
-    state.acquired_epoch_tokens.resize(synchronization_metadata_capacity);
     workgroups.push_back(std::move(state));
     if (!first_workgroup_index)
       first_workgroup_index = workgroups.size() - 1u;
     return workgroups.back();
+  };
+
+  // Atomic and fence synchronization share one sparse causal clock. The
+  // event-count-squared value above is a fail-closed capacity bound, not a
+  // mandate to allocate and scan that many empty entries. Grow by at most one
+  // component per possible producer owner for the current operation and trim
+  // unused tail slots immediately afterward.
+  constexpr size_t kMaximumCausalComponents = consan_moi_exact_shadow::max_owner + 1u;
+  const auto grow_causal_metadata = [=](auto &records, size_t capacity) {
+    if (records.size() >= capacity)
+      return;
+    const size_t growth = std::min(kMaximumCausalComponents, capacity - records.size());
+    records.resize(records.size() + growth);
+  };
+  const auto trim_unused_causal_metadata = [](auto &records) {
+    while (!records.empty() && !records.back().valid)
+      records.pop_back();
+  };
+  const auto bounded_metadata_count = [](size_t size) {
+    return size > std::numeric_limits<uint32_t>::max() ? std::numeric_limits<uint32_t>::max()
+                                                       : static_cast<uint32_t>(size);
+  };
+  const auto replay_atomic_release = [&](ReplayWorkgroupState &state, uint64_t generation,
+                                         uint64_t address, uint32_t producer_owner_id,
+                                         uint32_t producer_epoch, uint32_t instruction_offset) {
+    grow_causal_metadata(state.atomic_release_records, state.synchronization_metadata_capacity);
+    const ConSanMoiAtomicSyncResult result = consan_moi_record_replay_atomic_release(
+        state.atomic_release_records, state.acquired_epoch_tokens, generation, address,
+        producer_owner_id, producer_epoch, instruction_offset);
+    trim_unused_causal_metadata(state.atomic_release_records);
+    replay.maximum_atomic_release_metadata_count =
+        std::max(replay.maximum_atomic_release_metadata_count,
+                 bounded_metadata_count(state.atomic_release_records.size()));
+    return result;
+  };
+  const auto replay_atomic_acquire = [&](ReplayWorkgroupState &state, uint64_t generation,
+                                         uint64_t address, uint32_t consumer_owner_id,
+                                         uint32_t instruction_offset) {
+    grow_causal_metadata(state.acquired_epoch_tokens, state.synchronization_metadata_capacity);
+    const ConSanMoiAtomicSyncResult result = consan_moi_record_replay_atomic_acquire(
+        state.atomic_release_records, state.acquired_epoch_tokens, generation, address,
+        consumer_owner_id, instruction_offset);
+    trim_unused_causal_metadata(state.acquired_epoch_tokens);
+    replay.maximum_acquired_epoch_metadata_count =
+        std::max(replay.maximum_acquired_epoch_metadata_count,
+                 bounded_metadata_count(state.acquired_epoch_tokens.size()));
+    return result;
   };
 
   const auto make_access_conflict_diagnostic = [](const ConSanMoiExactByteAccess &first,
@@ -1445,15 +1491,15 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       }
       const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
       if (acquire) {
-        const ConSanMoiAtomicSyncResult token_result = consan_moi_record_replay_atomic_acquire(
-            state.atomic_release_records, state.acquired_epoch_tokens, generation,
-            record.communication_token, record.owner_id, record.instruction_offset);
+        const ConSanMoiAtomicSyncResult token_result =
+            replay_atomic_acquire(state, generation, record.communication_token, record.owner_id,
+                                  record.instruction_offset);
         replay.metadata_full |= token_result.metadata_full;
       }
       if (release) {
-        const ConSanMoiAtomicSyncResult release_result = consan_moi_record_replay_atomic_release(
-            state.atomic_release_records, state.acquired_epoch_tokens, generation,
-            record.communication_token, record.owner_id, epoch, record.instruction_offset);
+        const ConSanMoiAtomicSyncResult release_result =
+            replay_atomic_release(state, generation, record.communication_token, record.owner_id,
+                                  epoch, record.instruction_offset);
         replay.metadata_full |= release_result.metadata_full;
       }
       continue;
@@ -1483,26 +1529,23 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       case ConSanMoiAtomicEventKind::Release:
         if (record.operation != ConSanMoiAtomicOperation::CompareExchange ||
             *outcome == ConSanMoiAtomicOutcome::Success)
-          atomic_result = consan_moi_record_replay_atomic_release(
-              state.atomic_release_records, state.acquired_epoch_tokens, generation,
-              record.atomic_address, record.owner_id, epoch, record.instruction_offset);
+          atomic_result = replay_atomic_release(state, generation, record.atomic_address,
+                                                record.owner_id, epoch, record.instruction_offset);
         break;
       case ConSanMoiAtomicEventKind::Acquire:
-        atomic_result = consan_moi_record_replay_atomic_acquire(
-            state.atomic_release_records, state.acquired_epoch_tokens, generation,
-            record.atomic_address, record.owner_id, record.instruction_offset);
+        atomic_result = replay_atomic_acquire(state, generation, record.atomic_address,
+                                              record.owner_id, record.instruction_offset);
         break;
       case ConSanMoiAtomicEventKind::AcquireRelease: {
         // RMW and CAS both consume the prior value. Failed CAS does not
         // publish the release half of an acquire-release event.
-        atomic_result = consan_moi_record_replay_atomic_acquire(
-            state.atomic_release_records, state.acquired_epoch_tokens, generation,
-            record.atomic_address, record.owner_id, record.instruction_offset);
+        atomic_result = replay_atomic_acquire(state, generation, record.atomic_address,
+                                              record.owner_id, record.instruction_offset);
         if (record.operation != ConSanMoiAtomicOperation::CompareExchange ||
             *outcome == ConSanMoiAtomicOutcome::Success) {
-          const ConSanMoiAtomicSyncResult release_result = consan_moi_record_replay_atomic_release(
-              state.atomic_release_records, state.acquired_epoch_tokens, generation,
-              record.atomic_address, record.owner_id, epoch, record.instruction_offset);
+          const ConSanMoiAtomicSyncResult release_result =
+              replay_atomic_release(state, generation, record.atomic_address, record.owner_id,
+                                    epoch, record.instruction_offset);
           atomic_result.metadata_full |= release_result.metadata_full;
         }
         break;

@@ -3665,6 +3665,13 @@ TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRe
       0, 1));
 }
 
+TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
+  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(0), 0u);
+  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(3), 3u);
+  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(4), 4u);
+  EXPECT_EQ(rocjitsu::consan_hook::consan_moi_auto_detail_log_count(19'064), 4u);
+}
+
 TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapacity) {
   std::vector<rocjitsu::ConSanMoiAccessRecord> records(1u << 16u);
   records.front().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
@@ -5265,7 +5272,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
     ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
     ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
     ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
     ScopedEnvVar selected_fault(fault_environment, "1");
     ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
@@ -5315,7 +5322,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
@@ -5741,7 +5748,8 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
   ASSERT_EQ(g_core_memory_headers_at_free.size(), 2u);
   for (const auto &header : g_core_memory_headers_at_free) {
     EXPECT_TRUE(rocjitsu::consan_moi_report_header_is_current(header));
-    EXPECT_EQ(header.atomic_record_capacity, rocjitsu::kConSanMoiRecordReplayDynamicEventHeadroom);
+    EXPECT_EQ(header.atomic_record_capacity,
+              rocjitsu::kConSanMoiRecordReplayDynamicLaneEventHeadroom);
     EXPECT_GT(header.diagnostic_capacity, 0u);
   }
 }
@@ -6119,7 +6127,7 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6177,7 +6185,7 @@ TEST(HsaHooksUnitTest, AutoReplayCompactsSparseFixedCapacityBeforeReplay) {
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6220,7 +6228,7 @@ TEST(HsaHooksUnitTest, AutoReplayBoundsSparseShadowAndFailsClosedForOverlimitRan
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6265,7 +6273,7 @@ TEST(HsaHooksUnitTest, AutoReplayInvalidSiteTokensMakeDynamicEvidenceIncomplete)
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6308,7 +6316,7 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
   ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");

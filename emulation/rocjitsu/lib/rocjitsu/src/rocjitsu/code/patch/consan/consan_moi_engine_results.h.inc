@@ -28,6 +28,8 @@ struct ConSanMoiRecordReplayResult {
   uint32_t unsupported_atomic_count = 0;
   uint32_t unsupported_fence_count = 0;
   uint32_t emitted_diagnostic_count = 0;
+  uint32_t maximum_atomic_release_metadata_count = 0;
+  uint32_t maximum_acquired_epoch_metadata_count = 0;
   bool diagnostic_capacity_exhausted = false;
   bool metadata_full = false;
   bool conflict = false;

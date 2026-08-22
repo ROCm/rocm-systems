@@ -4414,6 +4414,41 @@ TEST(ConSanMoi, AutoReportInventoryReservesRecordReplaySyncHeadroom) {
   EXPECT_EQ(plan.layout.barrier_record_capacity, kConSanMoiRecordReplayDynamicEventHeadroom);
 }
 
+TEST(ConSanMoi, AutoReportInventoryReservesLaneScaledRecordReplayFenceHeadroom) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> text_words = {
+      0xD81A0004u,
+      0x00000302u, // ds_write_b32 v2, v3 offset:4
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDE708004u,
+      0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
+      0xDE508004u,
+      0x027F0000u, // global_load_dword v2, v[0:1], off offset:4 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xE0A48000u,
+      0x00000000u, // buffer_inv sc1
+      build_s_endpgm(kArch),
+  };
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "lane_scaled_fence_headroom");
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const ConSanMoiAutoReportInventory inventory =
+      inventory_consan_moi_auto_report(result, options, bytes);
+
+  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  EXPECT_EQ(inventory.fence_event_count, 2u * kConSanMoiRecordReplayDynamicLaneEventHeadroom);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.fence_record_capacity, 2u * kConSanMoiRecordReplayDynamicLaneEventHeadroom);
+}
+
 TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatObjects) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
@@ -10041,11 +10076,12 @@ TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountL
   }));
 }
 
-TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesEveryReservedBarrierRelay) {
+TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesReservedBarrierAndFenceRelays) {
   // Stream-K-like generated kernels can have many LDS accesses but only a
-  // handful of phase barriers.  The access pass reserves one compact relay
-  // per barrier before appending its own relays; the barrier pass must not
-  // consume that reservation using a wider, incompatible island shape.
+  // handful of phase barriers and language-level release/acquire operations.
+  // The access pass must reserve independent compact relays for both later
+  // synchronization passes; barrier lowering must not consume the fence
+  // reservation.
   constexpr uint32_t kAccessCount = 80u;
   constexpr uint32_t kBarrierCount = 5u;
   constexpr size_t kTextWords = 5'000u;
@@ -10062,6 +10098,23 @@ TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesEveryReservedBarrierRelay) 
       text_words[cursor++] = *barrier;
     }
   }
+  const std::array<uint32_t, 5> release_sequence = {
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDE708004u,
+      0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
+  };
+  const std::array<uint32_t, 5> acquire_sequence = {
+      0xDE508004u,
+      0x027F0000u, // global_load_dword v2, v[0:1], off offset:4 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xE0A48000u,
+      0x00000000u, // buffer_inv sc1
+  };
+  std::ranges::copy(release_sequence, text_words.begin() + cursor);
+  cursor += release_sequence.size();
+  std::ranges::copy(acquire_sequence, text_words.begin() + cursor);
   text_words.back() = build_s_endpgm(kArch);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
@@ -10070,9 +10123,10 @@ TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesEveryReservedBarrierRelay) 
   options.moi_report_buffer_address = 0x123456780000ull;
   // Leave independent headroom for both record domains; the production
   // layout partitions one shared backing buffer between them.
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(256u, 0, 0, 0, 256u);
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(256u, 0, 0, 0, 256u, 0u, 256u);
   options.moi_track_barriers = true;
-  options.moi_track_atomics = false;
+  options.moi_track_atomics = true;
   options.moi_runtime_sample_stride = 65'536u;
   options.max_patches = 96u;
 
@@ -10091,6 +10145,10 @@ TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesEveryReservedBarrierRelay) 
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             kBarrierCount)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                               &ConSanPatchInfo::kind),
+            2u)
       << testing::PrintToString(result.warnings);
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable indirect entry island") != std::string::npos;

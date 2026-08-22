@@ -1357,6 +1357,44 @@ TEST(ConSanMoi, RecordReplayPropagatesOrderingAcrossAtomicAndFence) {
   EXPECT_EQ(header.diagnostic_count, 0u);
 }
 
+TEST(ConSanMoi, RecordReplayRepeatedFenceTraceGrowsCausalMetadataOnDemand) {
+  // Stream-K compiler fences execute per lane and can produce thousands of
+  // records for one static release/acquire pair. Replay capacity is bounded by
+  // the trace, but live causal metadata should follow distinct relationships,
+  // not eagerly allocate the square of the event count.
+  constexpr uint32_t kFenceCount = 4096u;
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/0,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  std::vector<ConSanMoiRecordReplayFenceEvent> fences(kFenceCount);
+  for (uint32_t index = 0; index < kFenceCount; ++index) {
+    ConSanMoiRecordReplayFenceEvent &fence = fences[index];
+    fence.generation = 7;
+    fence.owner_id = index % 2u;
+    fence.instruction_offset = index % 2u == 0u ? 0x100u : 0x200u;
+    fence.event_index = index + 1u;
+    fence.kind =
+        index % 2u == 0u ? ConSanMoiFenceEventKind::Release : ConSanMoiFenceEventKind::Acquire;
+    fence.scope = 2;
+    fence.communication_token = 0x4000;
+  }
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, std::span<const ConSanMoiAccessRecord>{}, std::span<const ConSanMoiBarrierRecord>{},
+      std::span<const ConSanMoiRecordReplayAtomicEvent>{}, fences, diagnostics, shadow);
+
+  EXPECT_EQ(replay.processed_fence_count, kFenceCount);
+  EXPECT_EQ(replay.unsupported_fence_count, 0u);
+  EXPECT_FALSE(replay.metadata_full);
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.maximum_atomic_release_metadata_count, 1u);
+  EXPECT_EQ(replay.maximum_acquired_epoch_metadata_count, 1u);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
 TEST(ConSanMoi, RecordReplayAtomicReleaseDirectlyOrdersFenceAcquire) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,

@@ -798,6 +798,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
   if (result.moi_reserved_barrier_island_begin &&
       result.moi_reserved_barrier_island_count == reserved_barrier_count &&
       (result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayIndirectIslandWords ||
+       result.moi_reserved_barrier_island_slot_words == kMoiLocalIndirectIslandWords ||
        result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayBarrierRelaySlotWords) &&
       reserved_barrier_count <=
           std::numeric_limits<uint64_t>::max() /
@@ -896,8 +897,11 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
   if (const auto spined = find_spined_prefix())
     return spined;
 
-  const std::optional<uint64_t> required_island_bytes =
-      checked_reserved_bytes(kMoiRecordReplayIndirectIslandWords);
+  const uint32_t plain_island_words =
+      result.moi_reserved_barrier_island_slot_words == kMoiLocalIndirectIslandWords
+          ? kMoiLocalIndirectIslandWords
+          : kMoiRecordReplayIndirectIslandWords;
+  const std::optional<uint64_t> required_island_bytes = checked_reserved_bytes(plain_island_words);
   if (!required_island_bytes)
     return std::nullopt;
 
@@ -910,7 +914,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     if (is_reserved_nop_range(candidate_begin, *required_island_bytes)) {
       return MoiReservedBarrierIslandLayout{
           .begin = candidate_begin,
-          .slot_words = kMoiRecordReplayIndirectIslandWords,
+          .slot_words = plain_island_words,
           .reserved_slot_count = reserved_barrier_count,
       };
     }
@@ -925,7 +929,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     if (is_reserved_nop_range(candidate_begin, *required_island_bytes)) {
       return MoiReservedBarrierIslandLayout{
           .begin = candidate_begin,
-          .slot_words = kMoiRecordReplayIndirectIslandWords,
+          .slot_words = plain_island_words,
           .reserved_slot_count = reserved_barrier_count,
       };
     }
@@ -1318,10 +1322,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   const uint64_t indirect_island_bytes = kIndirectIslandWords * sizeof(uint32_t);
   const std::optional<MoiReservedBarrierIslandLayout> barrier_island_layout =
-      options.moi_exec_save_sgpr ? find_record_replay_reserved_barrier_island_begin(
-                                       old_text, result, arch, planned_candidates.size(),
-                                       moi_reserved_barrier_island_count(result, options))
-                                 : std::nullopt;
+      options.moi_exec_save_sgpr
+          ? find_record_replay_reserved_barrier_island_begin(
+                old_text, result, arch, planned_candidates.size(),
+                moi_reserved_record_replay_sync_island_count(result, options))
+          : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
         barrier_island_layout->reserved_slot_count * barrier_island_layout->slot_words;
@@ -2611,7 +2616,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (options.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, selected_candidates.size(),
-        moi_reserved_barrier_island_count(result, options));
+        moi_reserved_record_replay_sync_island_count(result, options));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
                                       reserved_barrier_island_layout->slot_words;
