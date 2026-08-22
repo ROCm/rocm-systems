@@ -222,6 +222,8 @@ class Workload:
     overhead_processes: int
     fault_families: tuple[str, ...]
     fault_filter: str | None = None
+    command_arguments: tuple[str, ...] = ()
+    command_environment: tuple[tuple[str, str], ...] = ()
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
     record_replay_runtime_sample_stride: int | None = None
@@ -502,6 +504,28 @@ WORKLOADS = (
         run_timeout_seconds=60,
         tensile_inner_timeout_seconds=55,
         tensile_expected_numeric_rows=1,
+    ),
+    Workload(
+        id="hip-matmul-m128-n128-k128",
+        priority="P0",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx950-hip-matmul/cases/"
+            "hip-matmul/hip_matmul_matmul"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        command_arguments=("-m", "128", "-n", "128", "-k", "128"),
+        command_environment=(("FIXED_ITERATIONS", "1"),),
+        targets=("gfx950",),
+        run_timeout_seconds=120,
     ),
     Workload(
         id="tensile-sk-sgemm-quick",
@@ -1201,6 +1225,25 @@ def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
         _validate_tensile_sharding(workload)
+        if any(
+            not name
+            or not isinstance(value, str)
+            or name.startswith(CONTROLLED_ENV_PREFIX)
+            or name in HSA_TOOL_ENVIRONMENT
+            for name, value in workload.command_environment
+        ):
+            raise RuntimeError(
+                f"{workload.id} has an invalid command environment"
+            )
+        if any(not argument for argument in workload.command_arguments):
+            raise RuntimeError(f"{workload.id} has an empty command argument")
+        if workload.kind != "native-executable" and (
+            workload.command_arguments or workload.command_environment
+        ):
+            raise RuntimeError(
+                f"{workload.id} declares a native command contract for "
+                f"kind {workload.kind}"
+            )
         if workload.tensile_expected_client_passes is not None and (
             workload.kind != "tensile"
             or workload.tensile_expected_client_passes <= 0
@@ -2171,6 +2214,8 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
         }
     if workload.kind == "gtest":
         return {"executable": workspace / workload.relative_path}
+    if workload.kind == "native-executable":
+        return {"executable": workspace / workload.relative_path}
     source = workspace / workload.relative_path
     if workload.sharktank_workload in {"tp1", "tp2"}:
         assets = source.parent / "assets"
@@ -2231,14 +2276,20 @@ def _doctor(
     tools = {tool: shutil.which(tool) for tool in required_tools}
     for workload in workloads:
         for label, path in _input_files(workspace, target, workload).items():
-            executable = workload.kind == "tensile" and label in {
-                "python",
-                "client",
-                "wrapper",
-                "rocjitsu",
-                "llvm-readelf",
-                "amdclang++",
-            }
+            executable = (
+                workload.kind == "native-executable" and label == "executable"
+            ) or (
+                workload.kind == "tensile"
+                and label
+                in {
+                    "python",
+                    "client",
+                    "wrapper",
+                    "rocjitsu",
+                    "llvm-readelf",
+                    "amdclang++",
+                }
+            )
             path_checks[f"workload:{workload.id}:{label}"] = {
                 "path": str(path),
                 "present": path.is_file()
@@ -2346,6 +2397,7 @@ def _clean_environment(
         and key not in ignored_environment
         and key not in SOFTWARE_MODEL_ENVIRONMENT
     }
+    environment.update(dict(workload.command_environment))
     if target is not None:
         environment["HIP_TARGET"] = target
     if workload.kind == "llama":
@@ -2814,6 +2866,8 @@ def _workload_command(
         if inner_repetitions_override is not None:
             command.extend(["--fixed-iterations", str(inner_repetitions_override)])
         return command
+    if workload.kind == "native-executable":
+        return [str(workspace / workload.relative_path), *workload.command_arguments]
     executable = workspace / workload.relative_path
     selected_filter = (
         workload.fault_filter or workload.clean_filter
@@ -3169,7 +3223,7 @@ def _workload_runtime_identity(
 ) -> dict[str, object]:
     if workload.kind == "llama":
         return _llama_runtime_identity(workspace, target, workload)
-    if workload.kind in {"gtest", "rdna4-matmul"}:
+    if workload.kind in {"gtest", "native-executable", "rdna4-matmul"}:
         executable = _input_files(workspace, target, workload)["executable"]
         environment = _clean_environment(None, workload, None, target, workspace)
         return {
@@ -3403,10 +3457,10 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
         workspace / "hip-moi",
         Path(__file__).resolve().parents[5],
     ]
+    if workload.corpus == "rocjitsu-test-corpus":
+        roots.append(workspace / "rocjitsu-test-corpus")
     if workload.kind == "tensile":
         paths = resolve_tensile_validation_paths(workspace)
-        if workload.corpus == "rocjitsu-test-corpus":
-            roots.append(workspace / "rocjitsu-test-corpus")
         roots.append(paths.tensilelite)
     if workload.kind == "llama":
         roots.append(workspace / "rocjitsu-test-corpus")
@@ -5891,6 +5945,10 @@ def _run_profile(
                 measurement_runs = [
                     _json_measurements(log, workload.kind.capitalize()) for log in logs
                 ]
+        elif workload.kind == "native-executable":
+            timing_samples = {
+                "process": [elapsed * 1_000.0 for elapsed in elapsed_seconds]
+            }
         else:
             timing_samples = _gtest_timing_samples(logs)
         timing = {

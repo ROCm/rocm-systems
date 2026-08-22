@@ -1792,6 +1792,22 @@ class ConSanValidationTest(unittest.TestCase):
         ):
             validation._validate_workload_manifest()
 
+    def test_workload_manifest_rejects_instrumentation_command_environment(
+        self,
+    ) -> None:
+        invalid = replace(
+            validation.WORKLOAD_BY_ID["hip-matmul-m128-n128-k128"],
+            command_environment=(("RJ_CONSAN_MAX_PATCHES", "1"),),
+        )
+        with (
+            mock.patch.object(validation, "WORKLOADS", (invalid,)),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "hip-matmul-m128-n128-k128 has an invalid command environment",
+            ),
+        ):
+            validation._validate_workload_manifest()
+
     def test_gfx950_manifest_includes_portable_pytorch_workloads(self) -> None:
         workload_ids = {
             workload["id"] for workload in validation._manifest("gfx950")["workloads"]
@@ -1806,6 +1822,68 @@ class ConSanValidationTest(unittest.TestCase):
                 "pytorch-norm-softmax",
             }.issubset(workload_ids)
         )
+
+    def test_gfx950_manifest_registers_exact_hip_matmul_row(self) -> None:
+        gfx950 = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx950")["workloads"]
+        }
+        row = gfx950["hip-matmul-m128-n128-k128"]
+        self.assertEqual(row["kind"], "native-executable")
+        self.assertEqual(
+            row["relative_path"],
+            (
+                "rocjitsu-test-corpus-build/kernels-gfx950-hip-matmul/cases/"
+                "hip-matmul/hip_matmul_matmul"
+            ),
+        )
+        self.assertEqual(
+            row["command_arguments"], ("-m", "128", "-n", "128", "-k", "128")
+        )
+        self.assertEqual(row["command_environment"], (("FIXED_ITERATIONS", "1"),))
+        self.assertEqual(row["fault_families"], ("barrier-drop",))
+        self.assertNotIn(
+            "hip-matmul-m128-n128-k128",
+            {
+                workload["id"]
+                for workload in validation._manifest("gfx942")["workloads"]
+            },
+        )
+
+    def test_hip_matmul_command_contract_is_shared_by_all_phases(self) -> None:
+        workspace = Path("/workspace")
+        workload = validation.WORKLOAD_BY_ID["hip-matmul-m128-n128-k128"]
+        expected = [
+            str(workspace / workload.relative_path),
+            "-m",
+            "128",
+            "-n",
+            "128",
+            "-k",
+            "128",
+        ]
+        for phase in ("clean", "overhead", "fault"):
+            with self.subTest(phase=phase):
+                self.assertEqual(
+                    validation._workload_command(
+                        workspace,
+                        "gfx950",
+                        workload,
+                        phase,
+                        workspace / "unused.json",
+                    ),
+                    expected,
+                )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            environment = validation._clean_environment(
+                "record-replay",
+                workload,
+                Path("/hook.so"),
+                "gfx950",
+                workspace,
+            )
+        self.assertEqual(environment["FIXED_ITERATIONS"], "1")
+        self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
 
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
