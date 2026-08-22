@@ -44,6 +44,10 @@
 /** Force ncclCeLaunchBatchOps() to return ncclSystemError. */
 #define CE_FAULT_LAUNCH_OP 0x04U
 
+/** Reproduce the pre-fix CE AllReduce bug that omitted recvbuff's
+ * window-relative base offset when addressing remote LSA peers. */
+#define CE_FAULT_LEGACY_RECV_OFFSET 0x08U
+
 // ---------------------------------------------------------------------------
 // Inline implementations – ncclComm is defined in comm.h, ncclResult_t in nccl.h.
 // All three functions are defined here so callers need not link against a
