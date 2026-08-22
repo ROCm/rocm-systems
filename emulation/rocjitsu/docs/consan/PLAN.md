@@ -267,7 +267,7 @@ cells repaired.
    `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
    whole-suite timing after the latest tranche and interpret it against the
    documented 5--20-minute heuristic on the reference host at that host's
-   configured parallelism. The current 127.59-second run is below the lower
+   configured parallelism. The current 126.89-second run is below the lower
    review threshold, so the residual coverage audit remains active; do not add
    artificial work merely to consume time.
 9. Produce a `gfx950` counterpart to
