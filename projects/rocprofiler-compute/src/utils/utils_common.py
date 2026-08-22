@@ -7,7 +7,6 @@ import ctypes
 import errno
 import io
 import os
-import pty
 import re
 import select
 import shutil
@@ -479,7 +478,7 @@ def capture_subprocess_output(
     # Use a PTY in profile mode to prevent instrumentation output from
     # being interleaved with workload output.
     if profileMode:
-        pty_parent_fd, pty_child_fd = pty.openpty()
+        pty_parent_fd, pty_child_fd = os.openpty()
         stdout_arg = pty_child_fd
         stderr_arg = pty_child_fd
     else:
@@ -705,7 +704,7 @@ def load_panel_configs(
                 panel_config = config_yml["Panel Config"]
                 for data_source in panel_config["data source"]:
                     metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table["metric"] is None:
+                    if metric_table and metric_table.get("metric") is None:
                         metric_table["metric"] = {}
                 configs[panel_config["id"]] = panel_config
 
@@ -1152,6 +1151,15 @@ def reconfigure_stdio_utf8() -> None:
         except (AttributeError, io.UnsupportedOperation):
             pass
 
+def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
+    """Extract the base workload directory from the (possibly nested) value."""
+    if isinstance(workload_dir, list):
+        return (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    return workload_dir
 
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
     """
@@ -1162,14 +1170,9 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                is_valid=True if CSV is valid, False otherwise
                error_message contains description if invalid
     """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
+    base_dir = _workload_base_dir(workload_dir)
+    if base_dir is None:
+        return False, "Workload directory is not set"
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 

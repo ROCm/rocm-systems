@@ -13,6 +13,7 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
+from utils.mem_chart_common import format_mem_chart_heading
 from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
@@ -729,11 +730,6 @@ def process_table_data(
     return result_df
 
 
-def _mem_chart_heading(panel_id: int, normal_unit: str) -> str:
-    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
-    section = max(0, int(panel_id)) // 100
-    return f"{section}. Memory Chart (Normalization: {normal_unit})"
-
 
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
     """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
@@ -833,9 +829,9 @@ def format_table_output(
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
+                    chart_title=format_mem_chart_heading(
                         args.normal_unit,
+                        panel_id=int(table_config["id"]),
                     ),
                 )
                 + "\n"
@@ -844,9 +840,9 @@ def format_table_output(
             content += (
                 mem_chart_gfx1250.plot_mem_chart(
                     mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
+                    chart_title=format_mem_chart_heading(
                         args.normal_unit,
+                        panel_id=int(table_config["id"]),
                     ),
                 )
                 + "\n"
@@ -855,9 +851,9 @@ def format_table_output(
             content += (
                 mem_chart_gfx9.plot_mem_chart(
                     mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
+                    chart_title=format_mem_chart_heading(
                         args.normal_unit,
+                        panel_id=int(table_config["id"]),
                     ),
                 )
                 + "\n"
@@ -1050,9 +1046,9 @@ def show_all(
 
         # Emit merged gfx115x mem_chart for the panel
         if mem_chart_data and not _tty_view_is_table(args):
-            heading = _mem_chart_heading(
-                int((panel or {}).get("id", 300)),
+            heading = format_mem_chart_heading(
                 args.normal_unit,
+                panel_id=int((panel or {}).get("id", 300)),
             )
             if is_gfx115x(gpu_arch):
                 panel_content += (
