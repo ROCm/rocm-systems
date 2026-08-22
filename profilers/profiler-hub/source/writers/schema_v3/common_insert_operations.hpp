@@ -164,7 +164,9 @@ public:
                              uint64_t                                 timestamp,
                              std::optional<primary_key_t>             event_pk)
     {
-        if(trace_env.track_name.has_value() && event_pk.has_value())
+        if(trace_env.track_name.has_value() && event_pk.has_value() &&
+           trace_env.node_id.has_value() && trace_env.process_id.has_value() &&
+           trace_env.thread_id.has_value())
         {
             const writer_types::track_info_t  track_info = { trace_env.track_name.value(),
                                                              "{}",
