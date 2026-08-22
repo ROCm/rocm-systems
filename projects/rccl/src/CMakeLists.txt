@@ -124,6 +124,7 @@ set(SRC_FILES
   include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
   include/algorithms/all_reduce/all_reduce_dda_ll.h
+  include/algorithms/all_reduce/all_reduce_dda_ll_twoshot.h
   include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
