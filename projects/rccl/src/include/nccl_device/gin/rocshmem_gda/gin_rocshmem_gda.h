@@ -29,8 +29,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-      if ((required == cuda::thread_scope_system) && (given > required)) {
-        __threadfence_system();
+      // HIP thread_scope (hip_compat.h): system is the MAX value, so a caller that
+      // only guaranteed a weaker scope has given < required -> add a system fence.
+      if ((required == cuda::thread_scope_system) && (given < required)) {
+        NCCL_GIN_THREADFENCE_SYSTEM();
       }
 
       // Skip zero-length RDMA writes (0-byte put_nbi can stall quiet()/flush() -> deadlock); signal still delivered, matching native rocSHMEM/PROXY.
@@ -85,8 +87,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
 
-      if ((required == cuda::thread_scope_system) && (given > required)) {
-        __threadfence_system();
+      // HIP thread_scope (hip_compat.h): system is the MAX value, so a caller that
+      // only guaranteed a weaker scope has given < required -> add a system fence.
+      if ((required == cuda::thread_scope_system) && (given < required)) {
+        NCCL_GIN_THREADFENCE_SYSTEM();
       }
 
       // lkey=0: put_nbi copies srcVal inline into the WQE
