@@ -257,7 +257,15 @@ cells repaired.
    barrier body emitted earlier in the same pass because only committed
    patches bounded it. A focused host unit now requires both inventories, the
    exact dual-precision gfx1250 row passes under all four engines, and both
-   architecture ledgers record the result.
+   architecture ledgers record the result. The next useful gfx1250
+   Record/Replay yellow, Tensile `015_spmm_f8_ml`, then yielded a target-native
+   sparse-FP8 checked-in pair and direct emulator unit covering packed
+   low/D16-high stores, byte/transposed metadata loads, live SWMMAC publication,
+   exact numerical/canary results, and the missing-edge diagnostic. All ten
+   focused device rows pass. Fresh 30- and 180-second inventories remained in
+   active 64-way Tensile code generation before their first object load, so the
+   E2E cell remains yellow pending paired/fault evidence and rotates under the
+   tactical-latency rule; the durable behavioral coverage is retained.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in
@@ -296,9 +304,10 @@ cells repaired.
    `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
    whole-suite timing after the latest tranche and interpret it against the
    documented 5--20-minute heuristic on the reference host at that host's
-   configured parallelism. The current 137.692-second run is below the lower
-   review threshold, so the residual coverage audit remains active; do not add
-   artificial work merely to consume time.
+   configured parallelism. The current 2,095-row run passes in 135.70 seconds
+   wall time at `-j64`, below the lower review threshold, so the residual
+   coverage audit remains active; do not add artificial work merely to consume
+   time.
 9. Produce a `gfx950` counterpart to
    [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md), based on fresh
    correctness, coverage, fault-detection, overhead, containment, and

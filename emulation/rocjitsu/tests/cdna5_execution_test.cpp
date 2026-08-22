@@ -286,6 +286,39 @@ TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, DsStoreB8D16HiSelectsUpperHalf) {
+  amdgpu::GpuMemory memory("gfx1250_ds_d16_hi_memory");
+  amdgpu::L2Cache l2("gfx1250_ds_d16_hi_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_ds_d16_hi_cu", config, &memory, &l2);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1u);
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  compute_unit->write_vgpr(vgpr_base + 1, 0, 0x100u);
+  compute_unit->write_vgpr(vgpr_base + 2, 0, 0x5a5a00a5u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint32_t, 2> words = {
+      0xda800001u, // ds_store_b8_d16_hi v1, v2 offset:1
+      0x00000201u,
+  };
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(std::string_view(store->mnemonic()), "ds_store_b8_d16_hi");
+  compute_unit->execute_and_route(std::move(store), *wave);
+
+  EXPECT_EQ(compute_unit->lds().read8(wave->lds_base() + 0x101u), 0x5au);
+}
+
 TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

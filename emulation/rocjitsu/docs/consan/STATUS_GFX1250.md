@@ -730,7 +730,7 @@ solution kernels while a numeric run selects only a subset.
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
 | P2 | `006_sk_hgemm_quick` | 🟧 136 exact numeric passes with zero failures; first 143-solution problem remains active at 300 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.02x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟧 Current tip executes 189 exact rows with zero failures before the fixed 180-second bound | Record/Replay and Sampled are accepted; SuperCollider and Inline Shadow lack a full-client verdict. |
-| P3 | `015_spmm_f8_ml` stress | 🟧 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟨 Current clean E2E accepts all eight generated clients with 172,468/172,468 accesses and 3,060/3,060 barriers. Multi-block exact-size sharding now preserves all eight clients in each of three concurrent size slices, but the large-size baseline's first client remains compute-active beyond five minutes; paired and reviewed-fault bundles remain | 🟩 All eight generated clients exact; 172,468/172,468 accesses and 6,120/6,120 barriers; paired 4.88x; reviewed fault, containment, and health accepted | 🟧 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Sampled is accepted; Record/Replay lacks paired/fault evidence, and the other profiles remain bounded. |
+| P3 | `015_spmm_f8_ml` stress | 🟧 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟨 Current clean E2E accepts all eight generated clients with 172,468/172,468 accesses and 3,060/3,060 barriers. Multi-block exact-size sharding now preserves all eight clients in each of three concurrent size slices, but the large-size baseline's first client remains compute-active beyond five minutes; paired and reviewed-fault bundles remain. A new quick target-native sparse-FP8 behavioral pair covers packed low/D16-high stores, byte/transposed metadata loads, live SWMMAC publication, and the missing-edge diagnostic in all ten baseline/engine rows. | 🟩 All eight generated clients exact; 172,468/172,468 accesses and 6,120/6,120 barriers; paired 4.88x; reviewed fault, containment, and health accepted | 🟧 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Sampled is accepted; Record/Replay lacks paired/fault evidence, and the other profiles remain bounded. |
 | P2 | `019_spmm_f16_sb` closure | 🟧 9,546/9,546 accesses patched; first client exceeds 300 seconds without a numeric row | 🟩 Four exact orientations; 31,265/31,265 accesses; current paired 2.48x | 🟧 9,546/9,546 accesses and 646/646 applicable barriers patched; first client exceeds 300 seconds without a numeric row | 🟧 9,546/9,546 accesses and 323/323 barriers patched; first client exceeds 300 seconds without a numeric row | Sampled is accepted; the other profiles retain the bounded partial results shown in their cells. |
 | Survey | Remaining Tensile configurations | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows, including full `019_spmm_f16_sb` bundle | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | Survey complete; selected high-signal rows above define the executable denominator. |
 
@@ -757,6 +757,31 @@ after five minutes, so the attempt is terminated before Record/Replay rather
 than spending a second long cycle. This is bounded duration evidence, not a
 paired result or promotion; the cell remains yellow and rotates. The earlier
 clean full-client coverage result remains valid.
+
+Two fresh current-tip inventory attempts,
+`prep-20260822-gfx1250-spmm-f8ml-inventory-current-c131` and
+`prep-20260822-gfx1250-spmm-f8ml-inventory-current-c131-t180`, reached their
+30- and 180-second bounds while still performing active 64-way Tensile code
+generation, before loading the first object or collecting coverage. This is
+generation latency rather than evidence of a RocJitsu or ConSan hang, so the
+full-client cell rotates instead of consuming another long iteration.
+Previously generated code establishes the relevant target-native idiom:
+`TensileLibrary_gfx1250.co` contains 620
+`v_swmmac_f32_16x16x128_fp8_fp8` operations, 1,920 each of `ds_store_b8` and
+`ds_store_b8_d16_hi`, 14,080 `ds_load_u8`, 240 `ds_load_tr8_b64`, 5,120
+`ds_bpermute_b32`, and 421 split-barrier signal/wait pairs.
+
+The checked-in `Gfx1250SparseFp8Pipeline` correct/incorrect pair now extracts
+the device-observable contract without depending on prototype placement. Both
+members stage packed FP8 bytes and sparse metadata and execute the live native
+SWMMAC; the correct member requires packed `0x5aa5`, exact 64.0f matrix output,
+control values and canaries with no diagnostic, while the incorrect member
+removes only the producer/consumer barrier and requires the intended conflict.
+All ten baseline and four-engine rows pass. The direct host unit
+`Gfx1250ExecutionTest.DsStoreB8D16HiSelectsUpperHalf` also requires the exact
+D16-high payload byte at the encoded offset. This materially closes a quick
+coverage gap but does not supply paired overhead or reviewed-fault E2E
+evidence; Record/Replay therefore remains yellow.
 
 ### 2026-08-21 `007_sk_mxf4gemm_tdm` Record/Replay far-fence fix
 
