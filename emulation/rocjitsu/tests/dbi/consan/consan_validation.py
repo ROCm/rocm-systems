@@ -75,6 +75,13 @@ PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
+QWEN_BUILD_MANIFEST_SCHEMA_VERSION = 1
+QWEN_COMPILE_OPTIONS = (
+    "--iree-hal-target-device=hip",
+    "--iree-opt-level=O3",
+    "--iree-parameter-encoder-output-scope=encoded",
+    "--iree-parameter-encoder-mode=overlay",
+)
 PYTORCH_OVERHEAD_PROCESSES = 10
 STREAMK_WORKLOAD_IDS = ("streamk-arrival", "tree-atomic-or")
 STREAMK_FAULT_FAMILIES = ("atomic-weaken-order", "atomic-weaken-scope")
@@ -2380,6 +2387,9 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
         data = root / "hf" / "qwen3-600m"
         return {
             "vmfb": root / target / "qwen3-600m.vmfb",
+            "build-manifest": root / target / "qwen3-600m.consan-build.json",
+            "source": workspace
+            / "iree-test-suites/torch_models/qwen3-600m/model.mlir",
             "parameters": data / "real_weights.irpa",
             "input": data / "inference_input.0.bin",
             "expected": data / "inference_output.0.bin",
@@ -2410,6 +2420,115 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
         "input": assets / "forward_bs4_arg0_input_ids.irpa",
         "expected": assets / "forward_bs4_expected_result0_last_hidden_state_f32.irpa",
     }
+
+
+def _qwen_compile_options(target: str, encoder_output: Path) -> tuple[str, ...]:
+    return (
+        f"--iree-rocm-target={target}",
+        *QWEN_COMPILE_OPTIONS,
+        f"--iree-parameter-encoder-output-file={encoder_output}",
+    )
+
+
+def _qwen_build_manifest(
+    target: str,
+    source: Path,
+    vmfb: Path,
+    compiler: Path,
+    encoder_output: Path,
+) -> dict[str, object]:
+    return {
+        "schema_version": QWEN_BUILD_MANIFEST_SCHEMA_VERSION,
+        "workload": "qwen-prefill",
+        "target": target,
+        "source": {"path": str(source), "sha256": sha256_file(source)},
+        "compiler": {"path": str(compiler), "sha256": sha256_file(compiler)},
+        "compile_options": list(_qwen_compile_options(target, encoder_output)),
+        "vmfb": {"path": str(vmfb), "sha256": sha256_file(vmfb)},
+    }
+
+
+def _qwen_build_check(workspace: Path, target: str) -> dict[str, object]:
+    inputs = _input_files(workspace, target, WORKLOAD_BY_ID["qwen-prefill"])
+    manifest_path = inputs["build-manifest"]
+    result: dict[str, object] = {
+        "ok": False,
+        "manifest": str(manifest_path),
+        "reasons": [],
+    }
+    reasons = result["reasons"]
+    assert isinstance(reasons, list)
+    if not manifest_path.is_file():
+        reasons.append("missing canonical Qwen build manifest; run prepare")
+        return result
+    try:
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        reasons.append(f"cannot read canonical Qwen build manifest: {error}")
+        return result
+    if not isinstance(document, dict):
+        reasons.append("canonical Qwen build manifest is not a JSON object")
+        return result
+    expected_options = list(
+        _qwen_compile_options(
+            target, manifest_path.with_name("qwen3-600m.parameter-encoder.mlir")
+        )
+    )
+    scalar_expectations = {
+        "schema_version": QWEN_BUILD_MANIFEST_SCHEMA_VERSION,
+        "workload": "qwen-prefill",
+        "target": target,
+        "compile_options": expected_options,
+    }
+    for field, expected in scalar_expectations.items():
+        if document.get(field) != expected:
+            reasons.append(f"Qwen build manifest has stale {field}")
+    for field, path in (("source", inputs["source"]), ("vmfb", inputs["vmfb"])):
+        record = document.get(field)
+        if (
+            not path.is_file()
+            or not isinstance(record, dict)
+            or record.get("sha256") != sha256_file(path)
+        ):
+            reasons.append(f"Qwen build manifest {field} hash does not match")
+    result["ok"] = not reasons
+    return result
+
+
+def _prepare_qwen(workspace: Path, target: str) -> dict[str, object]:
+    workload = _workload_for_target(target, "qwen-prefill")
+    inputs = _input_files(workspace, target, workload)
+    source = inputs["source"]
+    if not source.is_file():
+        raise ValidationError(f"missing Qwen source MLIR: {source}")
+    compiler_name = shutil.which("iree-compile")
+    if compiler_name is None:
+        raise ValidationError("iree-compile is required to prepare Qwen")
+    compiler = Path(compiler_name).resolve()
+    vmfb = inputs["vmfb"]
+    vmfb.parent.mkdir(parents=True, exist_ok=True)
+    candidate = vmfb.with_name(f"qwen3-600m.{os.getpid()}.next.vmfb")
+    encoder_output = vmfb.with_name("qwen3-600m.parameter-encoder.mlir")
+    command = [
+        str(compiler),
+        str(source),
+        *_qwen_compile_options(target, encoder_output),
+        "-o",
+        str(candidate),
+    ]
+    completed = subprocess.run(command, check=False)
+    if completed.returncode != 0:
+        raise ValidationError(
+            f"Qwen compilation failed with exit code {completed.returncode}"
+        )
+    if not candidate.is_file() or candidate.stat().st_size == 0:
+        raise ValidationError("Qwen compilation produced no VMFB")
+    os.replace(candidate, vmfb)
+    document = _qwen_build_manifest(
+        target, source, vmfb, compiler, encoder_output
+    )
+    atomic_write_json(inputs["build-manifest"], document)
+    return document
 
 
 def _doctor(
@@ -2506,10 +2625,14 @@ def _doctor(
                 "python": str(python),
                 "detail": "interpreter or TensileLite package is missing",
             }
+    artifacts = {}
+    if any(workload.kind == "qwen" for workload in workloads):
+        artifacts["qwen-prefill"] = _qwen_build_check(workspace, target)
     ok = (
         all(item["present"] for item in path_checks.values())
         and all(tools.values())
         and all(item["ok"] for item in runtimes.values())
+        and all(item["ok"] for item in artifacts.values())
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2519,6 +2642,7 @@ def _doctor(
         "workloads": list(selected_ids),
         "paths": path_checks,
         "runtimes": runtimes,
+        "artifacts": artifacts,
         "tools": tools,
     }
 
@@ -8983,6 +9107,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     manifest = subparsers.add_parser("manifest", help="print the executable matrix")
     manifest.add_argument("--json", action="store_true")
 
+    prepare = subparsers.add_parser(
+        "prepare", help="build a canonical external workload artifact"
+    )
+    prepare.add_argument(
+        "--workload", choices=("qwen-prefill",), required=True
+    )
+
     explain = subparsers.add_parser(
         "explain", help="expand commands, settings, and fault expectations"
     )
@@ -9184,6 +9315,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{workload.priority} {workload.id}: {faults}")
             return 0
         workspace = _workspace_from_environment()
+        if args.command == "prepare":
+            result = _prepare_qwen(workspace, target)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
         if args.command == "explain":
             if selection.is_all:
                 workload_ids = tuple(
@@ -9227,6 +9362,11 @@ def main(argv: list[str] | None = None) -> int:
                         f"{state:7} {runtime} runtime {item['python']}: "
                         f"{json.dumps(item['detail'], sort_keys=True)}"
                     )
+                    for reason in item.get("reasons", ()):
+                        print(f"        reason: {reason}")
+                for artifact, item in result.get("artifacts", {}).items():
+                    state = "ok" if item["ok"] else "STALE"
+                    print(f"{state:7} artifact {artifact}: {item['manifest']}")
                     for reason in item.get("reasons", ()):
                         print(f"        reason: {reason}")
             return 0 if result["ok"] else 1

@@ -494,6 +494,26 @@ decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
 `record-replay`, `sampled`, and `inline-shadow`.
 
+### Canonical Qwen artifact preparation
+
+Qwen validation must not reuse an untracked VMFB whose compiler pipeline and
+target options are unknown. Build the full model from the unchanged
+`iree-test-suites` MLIR with the validator before `doctor` or `run`:
+
+```sh
+python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
+  --target "$CONSAN_VALIDATION_TARGET" prepare --workload qwen-prefill
+```
+
+`prepare` runs `iree-compile` with the HIP target, the selected gfx target,
+`-O3`, and parameter-overlay encoding. It atomically installs
+`qwen3-600m.vmfb` in the generated test-suite tree and writes a sidecar
+manifest containing the source, compiler, option, and VMFB hashes. `doctor`
+rejects a missing manifest, a source or VMFB changed after preparation, or a
+manifest that does not name the canonical options. The external parameter,
+input, and expected-output files remain unchanged; preparation does not reduce
+the model or weaken its 151,936-logit oracle.
+
 ## Clean correctness and coverage
 
 Choose a new artifact root. A row directory must not already exist:

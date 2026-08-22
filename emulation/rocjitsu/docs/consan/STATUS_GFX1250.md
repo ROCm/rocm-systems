@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Current-tip B0 RocJitsu A/B reaches the ordinary 30-second bound even in the uninstrumented baseline. Record/Replay patches 1000/1000 accesses plus 92/92 barriers in 106 ms and emits a valid 4,064,224-byte replacement before reaching the same execution bound; no oracle or teardown verdict is available. Longer prior evidence reaches execution, while selected-object history diagnosed 17 generated long-return targets | 🟧 Current-hook RocJitsu execution retains complete 1000/1000 access plus 90/90 barrier instrumentation and a 3,945,440-byte object, remains dispatch-active through 198 observed launches including the final 151,936-cluster output kernel, but has no oracle or teardown verdict within 600 seconds | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
+| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Recompiling the unchanged source with the current O3 pipeline removes obsolete giant runtime transpose initializers: the exact full 151,936-logit baseline now passes in 64.49 seconds with the original 2.9-GB parameters. Record/Replay is statically complete at 846/846 accesses plus 80/80 barriers, transforms in 90 ms, and reaches execution, but remains dispatch-active after 28 launches at the bounded 180-second limit and therefore has no final replay/oracle verdict. Preserve this as an explicit emulator-throughput deferral rather than repeatedly extending the wait | 🟧 Current-hook RocJitsu execution retains complete 1000/1000 access plus 90/90 barrier instrumentation and a 3,945,440-byte object, remains dispatch-active through 198 observed launches including the final 151,936-cluster output kernel, but has no oracle or teardown verdict within 600 seconds | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -56,6 +56,38 @@ preserve an earlier green claim.
 | **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
 | **P4 Jakub cooperative matmul** | 🟩 Current clean-revision four-oracle row in 7.50 seconds with complete 70/70 access coverage; prior paired and reviewed-fault evidence retained | 🟩 Current clean-revision four-oracle row in 10.18 seconds with complete 70/70 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired and reviewed-fault evidence retained | 🟩 Final candidate-tree recheck passes all four oracles in 7.06 seconds with complete 70/70 accesses plus 8/8 applicable barriers and complete static and dynamic verdicts; the code-object-wide cluster-tuple gate reservation regression remains fixed, and prior paired and reviewed-fault evidence is retained | 🟩 Current clean-revision four-oracle row in 7.37 seconds with complete 70/70 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired and reviewed-fault evidence retained |
+
+### 2026-08-22 bounded Qwen Record/Replay revalidation
+
+The generated gfx1250 VMFB previously in the workspace was stale relative to
+the current IREE O3 pipeline.  It retained a giant
+`151936x1024` runtime-transpose initializer and did not complete even an exact
+uninstrumented run within 600 seconds.  Recompiling the unchanged checked-in
+MLIR with the current compiler and the parameter-overlay options documented in
+[VALIDATION.md](VALIDATION.md) removes that obsolete initializer.  The new
+219,405-byte VMFB passes the unchanged full-model oracle against the original
+2.9-GB parameter archive and 151,936-logit reference in 64.49 seconds through
+RocJitsu.  This is a build-artifact readiness repair, not a reduced model or a
+weaker oracle.
+
+The paired Record/Replay run discovers and patches all 846 accesses and all 80
+barriers in the applicable object, with zero unsupported or resource-failed
+sites and a 90-ms transform.  It then remains inside execution after 28
+dispatches at the 180-second bound, before final replay, teardown, or the exact
+oracle.  The cell therefore remains orange with a concrete return point:
+improve or isolate instrumented emulator throughput, or introduce a separately
+reviewed reduced E2E denominator, before repeating full qualification.  Do not
+turn this into an unbounded wait.
+
+The durable behavioral disposition is already cross-target.  The adjacent
+`ReusedLdsGemmPipeline` pair owns Qwen's same-storage reader-retirement edge,
+and `HeterogeneousObject` owns its multi-kernel attribution shape; both run
+correct/no-diagnostic and incorrect/required-diagnostic members through all
+four engines on CDNA3/4/5 and RDNA3/4, plus physical CDNA4.  The compiler
+kernarg-preload variant separately covers the generated CDNA3/CDNA4 entry
+shape.  The remaining Qwen gap is completion and performance evidence for the
+full gfx1250 emulation row, not an uncovered device-observable synchronization
+contract.
 
 ### 2026-08-21 fixed-stack Inline scalar-route regression
 

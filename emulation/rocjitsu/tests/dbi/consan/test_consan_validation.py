@@ -2885,6 +2885,95 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/workspace"), "gfx1250", ("pytorch-torch-mode",), launcher
         )
 
+    def test_qwen_prepare_pins_o3_overlay_and_hashes_the_artifact(self) -> None:
+        with temporary_root() as workspace:
+            source = (
+                workspace
+                / "iree-test-suites/torch_models/qwen3-600m/model.mlir"
+            )
+            source.parent.mkdir(parents=True)
+            source.write_text("module {}\n", encoding="utf-8")
+            compiler = workspace / "tools/iree-compile"
+            compiler.parent.mkdir(parents=True)
+            compiler.write_bytes(b"compiler")
+
+            def compile_qwen(command, *, check):
+                self.assertFalse(check)
+                output = Path(command[command.index("-o") + 1])
+                output.write_bytes(b"canonical-vmfb")
+                return SimpleNamespace(returncode=0)
+
+            with (
+                mock.patch.object(
+                    validation.shutil, "which", return_value=str(compiler)
+                ),
+                mock.patch.object(
+                    validation.subprocess, "run", side_effect=compile_qwen
+                ) as run,
+            ):
+                manifest = validation._prepare_qwen(workspace, "gfx1250")
+
+            command = run.call_args.args[0]
+            self.assertIn("--iree-rocm-target=gfx1250", command)
+            self.assertIn("--iree-hal-target-device=hip", command)
+            self.assertIn("--iree-opt-level=O3", command)
+            self.assertIn("--iree-parameter-encoder-mode=overlay", command)
+            self.assertEqual(
+                manifest["source"]["sha256"], validation.sha256_file(source)
+            )
+            vmfb = validation._input_files(
+                workspace,
+                "gfx1250",
+                validation.WORKLOAD_BY_ID["qwen-prefill"],
+            )["vmfb"]
+            self.assertEqual(vmfb.read_bytes(), b"canonical-vmfb")
+            self.assertTrue(validation._qwen_build_check(workspace, "gfx1250")["ok"])
+
+            source.write_text("module { func.func @changed() }\n", encoding="utf-8")
+            stale = validation._qwen_build_check(workspace, "gfx1250")
+            self.assertFalse(stale["ok"])
+            self.assertIn(
+                "Qwen build manifest source hash does not match", stale["reasons"]
+            )
+
+            source.write_text("module {}\n", encoding="utf-8")
+            vmfb.write_bytes(b"manually-replaced-vmfb")
+            replaced = validation._qwen_build_check(workspace, "gfx1250")
+            self.assertFalse(replaced["ok"])
+            self.assertEqual(
+                replaced["reasons"],
+                ["Qwen build manifest vmfb hash does not match"],
+            )
+
+    def test_qwen_doctor_rejects_an_unmanifested_vmfb(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
+        with temporary_root() as workspace:
+            hook = (
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            hook.parent.mkdir(parents=True)
+            hook.write_bytes(b"hook")
+            (workspace / "iree-test-suites").mkdir()
+            (workspace / "iree-test-suites-build").mkdir()
+            inputs = validation._input_files(workspace, "gfx1250", workload)
+            for label, path in inputs.items():
+                if label == "build-manifest":
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
+            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
+                doctor = validation._doctor(
+                    workspace, "gfx1250", ("qwen-prefill",)
+                )
+
+        self.assertFalse(doctor["ok"])
+        self.assertFalse(doctor["artifacts"]["qwen-prefill"]["ok"])
+        self.assertIn(
+            "missing canonical Qwen build manifest; run prepare",
+            doctor["artifacts"]["qwen-prefill"]["reasons"],
+        )
+
     def test_workload_doctor_requires_only_selected_inputs_and_tools(self) -> None:
         with temporary_root() as workspace:
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
