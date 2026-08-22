@@ -347,9 +347,6 @@ ncclGin_t ncclGinIbGdaki = {"GIN_IB_GDAKI",
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
 
-// Cap on physical segments per symmetric buffer
-#define NCCL_RMA_MAX_SEGMENTS 16
-
 struct ncclRmaIbProxyMrHandle {
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs; remote view

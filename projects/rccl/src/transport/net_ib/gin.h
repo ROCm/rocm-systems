@@ -12,6 +12,13 @@
 #include <stdint.h>
 #include "nccl.h"
 
+// Cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
+// describes only the first physical segment, so registration allocates one MR
+// per segment up to this limit.
+#ifndef NCCL_RMA_MAX_SEGMENTS
+#define NCCL_RMA_MAX_SEGMENTS 16
+#endif
+
 struct ncclGinIbCollComm {
   void* ctx;
   int rank;
