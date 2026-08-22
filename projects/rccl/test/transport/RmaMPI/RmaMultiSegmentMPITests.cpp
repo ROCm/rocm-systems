@@ -14,6 +14,7 @@
 #include "RmaMultiSegmentHelpers.hpp"
 #include "../../HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
+#include "../../../src/transport/net_ib/gin.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -26,10 +27,6 @@ namespace RCCLRmaTests
 
 namespace
 {
-
-// Mirrors NCCL_RMA_MAX_SEGMENTS in src/transport/net_ib/gin.cc (not exposed to
-// the test target); update if the backend cap changes.
-constexpr int    kRmaMaxSegments = 16;
 
 constexpr size_t kSegRequestBytes = 2u * 1024 * 1024;
 constexpr int    kNumSegments     = 4;
@@ -945,7 +942,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
             GTEST_SKIP() << "multi-segment path not exercised on this host";
     }
 
-    const int kOverCap = kRmaMaxSegments + 1;
+    const int kOverCap = NCCL_RMA_MAX_SEGMENTS + 1;
     MultiSegmentVmmBuffer* big = AllocSym(kOverCap, kSegRequestBytes);
     if (SyncSkip(big == nullptr))
         GTEST_SKIP() << "Could not allocate " << kOverCap << " VMM segments";
@@ -954,7 +951,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
     ncclResult_t r = RegMr(big->ptr, big->totalSize, &mh, &gh);
     EXPECT_EQ(r, ncclInvalidUsage)
         << "registration of a " << kOverCap << "-segment buffer should be rejected "
-        << "with ncclInvalidUsage (cap=" << kRmaMaxSegments << "), got " << r;
+        << "with ncclInvalidUsage (cap=" << NCCL_RMA_MAX_SEGMENTS << "), got " << r;
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
 }
 
