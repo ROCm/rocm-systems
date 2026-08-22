@@ -801,8 +801,18 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   for (int i = 0; i < n; i++) {
     localElem[i].addr = (uint64_t)data[i];
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandles[i];
+    if (mhandleWrapper == NULL) {
+      WARN("NET/IB: irecv[%d] has a NULL mhandle", i);
+      ret = ncclInternalError;
+      goto irecvFail;
+    }
     // Send all applicable rkeys (segment 0 alias for the single-segment path).
     for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+      if (mhandleWrapper->mrs[j] == NULL) {
+        WARN("NET/IB: irecv[%d] missing MR for device %d", i, j);
+        ret = ncclInternalError;
+        goto irecvFail;
+      }
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
     }
     // Multi-segment: publish the full receiver segment layout so the
@@ -814,6 +824,11 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       for (int s = 0; s < mhandleWrapper->nSegments; s++) {
         localElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
         for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+          if (mhandleWrapper->segMrs[s][j] == NULL) {
+            WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
+            ret = ncclInternalError;
+            goto irecvFail;
+          }
           localElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
         }
       }
@@ -903,6 +918,64 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+      wr.sg_list = &comm->devs[i].gpuFlush.sge;
+      wr.num_sge = 1;
+      wr.opcode = IBV_WR_RDMA_READ;
+      wr.send_flags = IBV_SEND_SIGNALED;
+
+      TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
+      TIME_START(4);
+      struct ibv_send_wr* bad_wr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+      TIME_STOP(4);
+
+      ncclIbAddEvent(req, i);
+
+      TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
+    } else if (mhandle && mhandle->nSegments > 1) {
+      // GPUDirect writes landed in per-segment MRs. A 4-byte read of data[last]
+      // only fences the first touched segment; post one RDMA_READ per overlapping
+      // segment (chained, last SIGNALED) so every MR is fenced, matching GIN.
+      int flushSeg[NCCL_IB_MAX_SEGMENTS];
+      int nFlushSeg =
+        ncclIbSegmentsOverlappingRange(mhandle->nSegments, mhandle->segStart, mhandle->segLen, (uintptr_t)data[last],
+                                       (size_t)sizes[last], flushSeg, NCCL_IB_MAX_SEGMENTS);
+      if (nFlushSeg < 1) {
+        WARN("NET/IB: flush buffer %p size %d does not overlap any registered segment", data[last], sizes[last]);
+        ret = ncclInternalError;
+        goto iflushFail;
+      }
+      struct ibv_send_wr segWr[NCCL_IB_MAX_SEGMENTS];
+      memset(segWr, 0, sizeof(segWr));
+      for (int s = 0; s < nFlushSeg; s++) {
+        int seg = flushSeg[s];
+        uintptr_t segBase = mhandle->segStart[seg];
+        uintptr_t rangeStart = (uintptr_t)data[last];
+        uintptr_t flushAddr = rangeStart > segBase ? rangeStart : segBase;
+        struct ibv_mr* flushMr = mhandle->segMrs[seg][i];
+        if (flushMr == NULL) {
+          WARN("NET/IB: flush missing MR for segment %d device %d", seg, i);
+          ret = ncclInternalError;
+          goto iflushFail;
+        }
+        segWr[s].wr_id = wr.wr_id;
+        segWr[s].wr.rdma.remote_addr = (uint64_t)flushAddr;
+        segWr[s].wr.rdma.rkey = flushMr->rkey;
+        segWr[s].sg_list = &comm->devs[i].gpuFlush.sge;
+        segWr[s].num_sge = 1;
+        segWr[s].opcode = IBV_WR_RDMA_READ;
+        segWr[s].send_flags = (s == nFlushSeg - 1) ? IBV_SEND_SIGNALED : 0;
+        segWr[s].next = (s + 1 < nFlushSeg) ? &segWr[s + 1] : NULL;
+      }
+      TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-segment flush request (req=%p, comm=%p, wr_id=%ld)", __func__,
+            nFlushSeg, req, req->base, wr.wr_id);
+      TIME_START(4);
+      struct ibv_send_wr* bad_wr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &segWr[0], &bad_wr), iflushRet, iflushFail);
+      TIME_STOP(4);
+      ncclIbAddEvent(req, i);
     } else {
       wr.wr.rdma.remote_addr = (uint64_t)data[last];
       // Multi-segment: the read fences the start of data[last]; pick its segment MR.
@@ -913,23 +986,23 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
         goto iflushFail;
       }
       wr.wr.rdma.rkey = flushMr->rkey;
+      wr.sg_list = &comm->devs[i].gpuFlush.sge;
+      wr.num_sge = 1;
+      wr.opcode = IBV_WR_RDMA_READ;
+      wr.send_flags = IBV_SEND_SIGNALED;
+
+      TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
+      TIME_START(4);
+      struct ibv_send_wr* bad_wr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+      TIME_STOP(4);
+
+      ncclIbAddEvent(req, i);
+
+      TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
+            wr.wr_id);
     }
-    wr.sg_list = &comm->devs[i].gpuFlush.sge;
-    wr.num_sge = 1;
-    wr.opcode = IBV_WR_RDMA_READ;
-    wr.send_flags = IBV_SEND_SIGNALED;
-
-    TRACE(NCCL_NET, "NET/IB: %s: Posting a flush request (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-          wr.wr_id);
-    TIME_START(4);
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
-    TIME_STOP(4);
-
-    ncclIbAddEvent(req, i);
-
-    TRACE(NCCL_NET, "NET/IB: %s: Flush request posted (req=%p, comm=%p, wr_id=%ld)", __func__, req, req->base,
-          wr.wr_id);
   }
 
   *request = req;
