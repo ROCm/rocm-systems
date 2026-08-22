@@ -1041,8 +1041,14 @@ protected:
  *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
- * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
- *   "... numSegments 4"
+ * The collective operates on four segments per half, while ncclCommRegister
+ * covers the complete eight-segment allocation. NET registration must count
+ * that full range (numSegments 8). Intra-node IPC may still log the four-segment
+ * operation half.
+ *
+ * Confirmation in the logs (NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=REG):
+ *   NET: "... numSegments 8"
+ *   IPC: "... numSegments 4"
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1102,9 +1108,11 @@ TEST_F(UBR_MultiSegment, Generic)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
-        << "Expected 'numSegments " << (kNumSegments / 2)
-        << "' in log - the multi-segment registration branch did not fire";
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments) ||
+                checker.hasNumSegments(kNumSegments / 2))
+        << "Expected NET 'numSegments " << kNumSegments
+        << "' for the complete ncclCommRegister range, or IPC 'numSegments "
+        << (kNumSegments / 2) << "' for the operation half";
 }
 
 /**
