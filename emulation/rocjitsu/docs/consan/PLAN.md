@@ -50,9 +50,24 @@ prototype fixes.
 The following rules jointly define the preparation loop and its priorities.
 None is optional merely because another rule currently offers faster visible
 progress. After this plan-only checkpoint, the first execution step is to
-resolve and, if necessary, merge the freshly fetched `origin/develop`, then
-repair and regression-test any integration breakage before resuming the
-validation loop.
+resolve the freshly fetched `origin/develop` against `HEAD`. If it has advanced,
+merge it with a merge commit; if it is already an ancestor, record the no-op
+checkpoint instead of manufacturing an empty merge. Repair every resulting
+build or test failure, and add a focused regression for every behavioral defect
+exposed by the integration, before resuming the validation loop.
+
+These rules are one combined queue, not independent aspirations: base
+integration gates trustworthy evidence; the engine and severity ordering picks
+work globally across both architecture ledgers; each investigation must leave
+behind durable test coverage; and fast-loop omissions remain debts that the
+periodic and final full-matrix runs must discharge.
+
+The completion unit in this phase is therefore not "prototype fix" or "status
+cell promoted." It is a reviewed behavioral contract: the relevant host-unit
+regression, checked-in correct/incorrect device pair, or both; every meaningful
+transport of that contract to CDNA3/4/5 and RDNA3/4; the minimum prototype fix
+needed to satisfy it; and current validation evidence. A fix without that test
+asset remains unfinished even if its end-to-end reproducer passes.
 
 1. Keep a current base. At each qualification checkpoint, resolve the freshly
    fetched `origin/develop`. If it is newer, merge it with a merge commit, then
@@ -96,7 +111,8 @@ validation loop.
    genuinely cannot yield a focused checked-in regression, record the concrete
    reason instead of silently losing the evidence. Coverage expansion is also a
    deliverable when it exposes no new prototype defect and changes no ledger
-   color.
+   color: a clean investigation can still reveal an uncovered user idiom, and
+   harvesting that idiom into a test is progress in its own right.
 6. Generalize every new and existing test by behavior rather than by its source
    architecture. Translate target-native device code as necessary--the device
    code need not be textually identical--and cover every semantically
@@ -152,8 +168,9 @@ cells repaired.
 
 ### Remaining work
 
-1. At later qualification checkpoints, fetch and merge any newer
-   `origin/develop` with a merge commit. Repair every resulting build or test
+1. As the immediate next execution step, resolve the freshly fetched
+   `origin/develop`; then repeat this at later qualification checkpoints. Merge
+   any newer tip with a merge commit. Repair every resulting build or test
    failure and add a focused host-unit or device regression for each behavioral
    defect exposed by the integration before accepting the merge. The freshly
    fetched `550548c58ae9` checkpoint is already incorporated; do not create an
@@ -212,7 +229,7 @@ cells repaired.
    `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
    whole-suite timing after the latest tranche and interpret it against the
    documented 5--20-minute heuristic on the reference host at that host's
-   configured parallelism. The current 118.75-second run is below the lower
+   configured parallelism. The current 127.59-second run is below the lower
    review threshold, so the residual coverage audit remains active; do not add
    artificial work merely to consume time.
 9. Produce a `gfx950` counterpart to
