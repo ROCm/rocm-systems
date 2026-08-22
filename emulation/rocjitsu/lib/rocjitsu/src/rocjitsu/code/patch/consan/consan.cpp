@@ -60,8 +60,8 @@ namespace {
 
 [[nodiscard]] bool ordinary_acquire_metadata_compatible_impl(
     const ConSanSyncEvent &load, const ConSanSyncSequence &load_sequence,
-    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence,
-    bool require_same_block) {
+    const ConSanSyncEvent &cache, const ConSanSyncSequence &cache_sequence, bool require_same_block,
+    bool allow_rdna3_cache_pair_member = false) {
   const auto same_owners = [](std::span<const ConSanExecutionOwner> lhs,
                               std::span<const ConSanExecutionOwner> rhs) {
     return !lhs.empty() && lhs.size() == rhs.size() &&
@@ -76,7 +76,10 @@ namespace {
          load.confidence == ConSanSemanticConfidence::Conservative && load.raw_scope &&
          (*load.raw_scope == 2u || *load.raw_scope == 3u) &&
          cache.kind == ConSanSyncEventKind::Fence &&
-         cache.operation == ConSanSyncOperation::Fence && cache.mnemonic == "global_inv" &&
+         cache.operation == ConSanSyncOperation::Fence &&
+         (cache.mnemonic == "global_inv" || cache.mnemonic == "buffer_inv" ||
+          (allow_rdna3_cache_pair_member &&
+           (cache.mnemonic == "buffer_gl1_inv" || cache.mnemonic == "buffer_gl0_inv"))) &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
          load.code_object_fingerprint == cache.code_object_fingerprint &&
          load.container_name == cache.container_name && load.in_kernel == cache.in_kernel &&

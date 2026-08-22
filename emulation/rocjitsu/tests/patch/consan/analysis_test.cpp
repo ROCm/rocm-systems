@@ -3063,6 +3063,93 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   EXPECT_FALSE(acquire.identity.empty());
 }
 
+TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
+  const std::vector<uint32_t> text_words = {
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDD058004u,
+      0x01000203u, // global_atomic_cmpswap v1, v3, v[2:3], s[0:1] offset:4 sc0
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDE508004u,
+      0x027F0000u, // global_load_dword v2, v[0:1], off offset:4 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xE0A48000u,
+      0x00000000u, // buffer_inv sc1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "cas_ordinary_acquire"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.sync_events.size(), 4u)
+      << "fault sites: " << testing::PrintToString(result.fault_sites)
+      << "\nkernels: " << testing::PrintToString(result.kernels)
+      << "\nwarnings: " << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.sync_sequences.size(), 2u) << testing::PrintToString(result.sync_sequences);
+  const auto release = std::ranges::find(result.sync_sequences, ConSanSyncMemoryRole::Release,
+                                         &ConSanSyncSequence::memory_role);
+  const auto acquire = std::ranges::find(result.sync_sequences, ConSanSyncMemoryRole::Acquire,
+                                         &ConSanSyncSequence::memory_role);
+  ASSERT_NE(release, result.sync_sequences.end());
+  ASSERT_NE(acquire, result.sync_sequences.end());
+  EXPECT_EQ(release->kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(release->operation, ConSanSyncOperation::AtomicCompareExchange);
+  EXPECT_EQ(acquire->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(acquire->operation, ConSanSyncOperation::OrdinaryLoad);
+  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible))
+      << testing::PrintToString(result.moi_fence_candidates);
+  EXPECT_EQ(result.moi_fence_candidates[0].memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(result.moi_fence_candidates[1].memory_role, ConSanSyncMemoryRole::Acquire);
+}
+
+TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
+  const auto wait = build_rdna3_s_wait_vmcnt0(kArch);
+  const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+  const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+  ASSERT_TRUE(wait);
+  const std::vector<uint32_t> text_words = {
+      0xDC524004u,
+      0x027C0000u, // global_load_b32 v2, v[0:1], off offset:4 glc
+      *wait,       gl1[0], gl1[1], gl0[0], gl0[1], build_s_endpgm(kArch),
+  };
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna3_lds_code_object(text_words, "ordinary_acquire_cache_pair"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.sync_events.size(), 3u) << testing::PrintToString(result.sync_events);
+  ASSERT_EQ(result.sync_sequences.size(), 1u) << testing::PrintToString(result.sync_sequences);
+  const ConSanSyncSequence &sequence = result.sync_sequences.front();
+  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(sequence.operation, ConSanSyncOperation::OrdinaryLoad);
+  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  EXPECT_NE(sequence.identity.find("|acquire-cache="), std::string::npos);
+  EXPECT_NE(sequence.identity.find("|acquire-cache-tail="), std::string::npos);
+  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  const auto admitted =
+      std::ranges::find(result.moi_fence_candidates, true, &ConSanMoiFenceCandidate::eligible);
+  ASSERT_NE(admitted, result.moi_fence_candidates.end())
+      << testing::PrintToString(result.moi_fence_candidates);
+  EXPECT_EQ(
+      std::ranges::count(result.moi_fence_candidates, true, &ConSanMoiFenceCandidate::eligible),
+      1u);
+  EXPECT_EQ(admitted->memory_role, ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(admitted->communication_event_identity, result.sync_events.front().identity);
+  const auto prefix =
+      std::ranges::find(result.moi_fence_candidates, false, &ConSanMoiFenceCandidate::eligible);
+  ASSERT_NE(prefix, result.moi_fence_candidates.end());
+  EXPECT_EQ(prefix->rejection_reason, "paired-acquire-prefix-covered-by-tail");
+}
+
 TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);

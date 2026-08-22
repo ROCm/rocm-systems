@@ -1357,6 +1357,58 @@ TEST(ConSanMoi, RecordReplayPropagatesOrderingAcrossAtomicAndFence) {
   EXPECT_EQ(header.diagnostic_count, 0u);
 }
 
+TEST(ConSanMoi, RecordReplayAtomicReleaseDirectlyOrdersFenceAcquire) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  records[0].wave_id = 0;
+  records[0].event_index = 0;
+  records[0].instruction_offset = 0x10;
+  records[0].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+  records[0].lds_byte_count = 4;
+  records[0].cell_count = 1;
+  records[1].wave_id = 1;
+  records[1].event_index = 3;
+  records[1].instruction_offset = 0x20;
+  records[1].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read);
+  records[1].lds_byte_count = 4;
+  records[1].cell_count = 1;
+
+  std::array<ConSanMoiRecordReplayAtomicEvent, 1> atomics{};
+  atomics[0].owner_id = 0;
+  atomics[0].atomic_address = 0x4000;
+  atomics[0].instruction_offset = 0x100;
+  atomics[0].event_index = 1;
+  atomics[0].kind = ConSanMoiAtomicEventKind::Release;
+
+  std::array<ConSanMoiRecordReplayFenceEvent, 1> fences{};
+  fences[0].owner_id = 1;
+  fences[0].instruction_offset = 0x200;
+  fences[0].event_index = 2;
+  fences[0].kind = ConSanMoiFenceEventKind::Acquire;
+  fences[0].scope = 2;
+  fences[0].communication_token = 0x4000;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, records, std::span<const ConSanMoiBarrierRecord>{}, atomics, fences, diagnostics,
+      shadow);
+
+  EXPECT_EQ(replay.processed_access_count, 2u);
+  EXPECT_EQ(replay.processed_atomic_count, 1u);
+  EXPECT_EQ(replay.processed_fence_count, 1u);
+  EXPECT_EQ(replay.unsupported_atomic_count, 0u);
+  EXPECT_EQ(replay.unsupported_fence_count, 0u);
+  EXPECT_FALSE(replay.metadata_full);
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
 TEST(ConSanMoi, RecordReplayAtomicEventsRequireMatchingAddress) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,

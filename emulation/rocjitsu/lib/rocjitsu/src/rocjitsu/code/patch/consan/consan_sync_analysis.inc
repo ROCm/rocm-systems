@@ -1838,9 +1838,28 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
       continue;
     }
 
+    const auto sequence_has_cache_member = [&](std::string_view mnemonic) {
+      return std::ranges::any_of(
+          sequence->member_event_identities, [&](const std::string &identity) {
+            const auto event = event_by_identity.find(identity);
+            return event != event_by_identity.end() && event->second.unique &&
+                   event->second.event != nullptr && event->second.event->mnemonic == mnemonic;
+          });
+    };
+    const bool rdna3_acquire_pair_head =
+        addressed_ordinary && sequence->memory_role == ConSanSyncMemoryRole::Acquire &&
+        fence.mnemonic == "buffer_gl1_inv" && sequence_has_cache_member("buffer_gl0_inv");
+    const bool rdna3_acquire_pair_tail =
+        addressed_ordinary && sequence->memory_role == ConSanSyncMemoryRole::Acquire &&
+        fence.mnemonic == "buffer_gl0_inv" && sequence_has_cache_member("buffer_gl1_inv");
+    if (rdna3_acquire_pair_head) {
+      candidate.rejection_reason = "paired-acquire-prefix-covered-by-tail";
+      result.moi_fence_candidates.push_back(std::move(candidate));
+      continue;
+    }
     if (is_release_cache_event(&fence))
       candidate.memory_role = ConSanSyncMemoryRole::Release;
-    else if (is_acquire_cache_event(&fence))
+    else if (is_acquire_cache_event(&fence) || rdna3_acquire_pair_tail)
       candidate.memory_role = ConSanSyncMemoryRole::Acquire;
     else {
       candidate.rejection_reason = "unsupported-cache-operation";
@@ -2155,8 +2174,12 @@ void associate_ordinary_release_sync_sequences(
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
     ConSanResult &result) {
+  struct Association {
+    size_t cache_index = 0;
+    std::optional<size_t> cache_tail_index;
+  };
   const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
-  std::unordered_map<size_t, size_t> associations;
+  std::unordered_map<size_t, Association> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
   for (size_t load_index = 0; load_index < result.sync_sequences.size(); ++load_index) {
     const ConSanSyncSequence &load_sequence = result.sync_sequences[load_index];
@@ -2169,6 +2192,7 @@ void associate_ordinary_acquire_sync_sequences(
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
+    std::vector<Association> rdna3_pair_matches;
     const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
                                               ? UINT64_MAX
                                               : load_sequence.end_text_offset + 64u;
@@ -2196,12 +2220,65 @@ void associate_ordinary_acquire_sync_sequences(
                                                     /*require_same_block=*/same_block))
         cache_matches.push_back(cache_index);
     }
-    if (bounded_metadata_matches.size() != 1u || cache_matches.size() != 1u ||
-        bounded_metadata_matches.front() != cache_matches.front() ||
-        claimed_cache_sequences.contains(cache_matches.front()))
+
+    if (bounded_metadata_matches.empty()) {
+      for (auto it =
+               fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+           it != fence_indices.end(); ++it) {
+        const size_t first_index = *it;
+        const ConSanSyncSequence &first = result.sync_sequences[first_index];
+        if (first.begin_text_offset > maximum_cache_offset)
+          break;
+        const auto tail_it = std::next(it);
+        if (tail_it == fence_indices.end())
+          break;
+        const size_t tail_index = *tail_it;
+        const ConSanSyncSequence &tail = result.sync_sequences[tail_index];
+        const ConSanSyncEvent *first_event = first_sequence_event(events, first);
+        const ConSanSyncEvent *tail_event = first_sequence_event(events, tail);
+        if (first_event == nullptr || tail_event == nullptr ||
+            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *first_event, first,
+                                                       /*require_same_block=*/false,
+                                                       /*allow_rdna3_cache_pair_member=*/true) ||
+            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *tail_event, tail,
+                                                       /*require_same_block=*/false,
+                                                       /*allow_rdna3_cache_pair_member=*/true) ||
+            !is_rdna3_acquire_cache_pair(first, tail, events, blocks)) {
+          continue;
+        }
+        const auto path = prove_bounded_acquire_path(load_sequence, first, blocks,
+                                                     /*require_wait_for_same_block=*/true);
+        if (!path)
+          continue;
+        const bool same_block = *path == BoundedAcquirePathKind::SameBlock;
+        if (!ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *first_event, first,
+                                                       /*require_same_block=*/same_block,
+                                                       /*allow_rdna3_cache_pair_member=*/true) ||
+            !ordinary_acquire_metadata_compatible_impl(*load, load_sequence, *tail_event, tail,
+                                                       /*require_same_block=*/same_block,
+                                                       /*allow_rdna3_cache_pair_member=*/true)) {
+          continue;
+        }
+        rdna3_pair_matches.push_back({first_index, tail_index});
+      }
+    }
+
+    std::optional<Association> association;
+    if (bounded_metadata_matches.size() == 1u && cache_matches.size() == 1u &&
+        bounded_metadata_matches.front() == cache_matches.front()) {
+      association = Association{cache_matches.front(), std::nullopt};
+    } else if (bounded_metadata_matches.empty() && cache_matches.empty() &&
+               rdna3_pair_matches.size() == 1u) {
+      association = rdna3_pair_matches.front();
+    }
+    if (!association || claimed_cache_sequences.contains(association->cache_index) ||
+        (association->cache_tail_index &&
+         claimed_cache_sequences.contains(*association->cache_tail_index)))
       continue;
-    associations.emplace(load_index, cache_matches.front());
-    claimed_cache_sequences.insert(cache_matches.front());
+    associations.emplace(load_index, *association);
+    claimed_cache_sequences.insert(association->cache_index);
+    if (association->cache_tail_index)
+      claimed_cache_sequences.insert(*association->cache_tail_index);
   }
 
   std::vector<ConSanSyncSequence> associated;
@@ -2215,18 +2292,35 @@ void associate_ordinary_acquire_sync_sequences(
       continue;
     }
     ConSanSyncSequence sequence = std::move(result.sync_sequences[index]);
-    ConSanSyncSequence &cache = result.sync_sequences[association->second];
+    ConSanSyncSequence &cache = result.sync_sequences[association->second.cache_index];
+    ConSanSyncSequence *cache_tail =
+        association->second.cache_tail_index
+            ? &result.sync_sequences[*association->second.cache_tail_index]
+            : nullptr;
     sequence.memory_role = ConSanSyncMemoryRole::Acquire;
     sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
     sequence.confidence = combine_consan_sync_confidence(sequence.confidence, cache.confidence);
+    if (cache_tail != nullptr)
+      sequence.confidence =
+          combine_consan_sync_confidence(sequence.confidence, cache_tail->confidence);
     sequence.confidence_reason = "bounded ordinary-load/acquire-cache compiler-bookkeeping proof";
     sequence.identity += "|acquire-cache=" + cache.identity;
-    sequence.end_text_offset = cache.end_text_offset;
+    if (cache_tail != nullptr)
+      sequence.identity += "|acquire-cache-tail=" + cache_tail->identity;
+    sequence.end_text_offset =
+        cache_tail != nullptr ? cache_tail->end_text_offset : cache.end_text_offset;
     sequence.in_cyclic_cfg_component |= cache.in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= cache.inside_scalar_clause;
     sequence.member_event_identities.insert(sequence.member_event_identities.end(),
                                             cache.member_event_identities.begin(),
                                             cache.member_event_identities.end());
+    if (cache_tail != nullptr) {
+      sequence.in_cyclic_cfg_component |= cache_tail->in_cyclic_cfg_component;
+      sequence.inside_scalar_clause |= cache_tail->inside_scalar_clause;
+      sequence.member_event_identities.insert(sequence.member_event_identities.end(),
+                                              cache_tail->member_event_identities.begin(),
+                                              cache_tail->member_event_identities.end());
+    }
     associated.push_back(std::move(sequence));
   }
   result.sync_sequences = std::move(associated);
@@ -2284,7 +2378,9 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
       if (site.text_offset != event.text_offset)
         continue;
       ++match_count;
-      if (site.support_reason != ConSanOrdinaryMemorySupportReason::Supported ||
+      if ((site.support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+           site.support_reason !=
+               ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly) ||
           !event.static_byte_offset || !site.raw_ioffset ||
           *event.static_byte_offset != *site.raw_ioffset)
         continue;
@@ -2296,6 +2392,18 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
                     .address_vgpr_count = 1,
                     .address_sgpr = site.address_sgpr,
                     .address_sgpr_count = 2,
+                    .static_byte_offset = *site.raw_ioffset};
+      } else if (event.address_source == ConSanSyncAddressSource::GlobalScalarVector &&
+                 site.address_vgpr && site.raw_saddr &&
+                 (*site.raw_saddr == kCdnaGlobalNoSaddrEncoding ||
+                  *site.raw_saddr == kRdna3GlobalNoSaddrEncoding ||
+                  *site.raw_saddr == rdna4::OPR_SREG_NULL)) {
+        operands = {.kind = ConSanCommunicationAddressKind::Ordinary,
+                    .source = event.address_source,
+                    .address_vgpr = *site.address_vgpr,
+                    .address_vgpr_count = 2,
+                    .address_sgpr = std::nullopt,
+                    .address_sgpr_count = 0,
                     .static_byte_offset = *site.raw_ioffset};
       } else if (event.address_source == ConSanSyncAddressSource::FlatVector && site.address_vgpr) {
         operands = {.kind = ConSanCommunicationAddressKind::Ordinary,

@@ -1762,6 +1762,44 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
   for (const ConSanFunctionInfo &function : result.functions)
     append(function.name, false, std::nullopt, function.atomic_sites);
+  std::vector<AtomicRecordCandidate> ordinary_candidates;
+  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
+  for (AtomicRecordCandidate &atomic : ordinary_candidates) {
+    const auto role = sampled_atomic_role(atomic.event_kind, /*is_rmw=*/false);
+    const auto scope =
+        atomic.site.raw_scope ? sampled_atomic_scope(*atomic.site.raw_scope) : std::nullopt;
+    if (!role || !scope || atomic.site.width_bits == 0u || atomic.site.width_bits % 8u != 0u) {
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync skipped an unqualified ordinary atomic sequence in " +
+          atomic.container_name);
+      continue;
+    }
+    consan_detail::SampledAtomicSemantics semantics{
+        .role = *role,
+        .scope = *scope,
+        .outcome = ConSanMoiSampledSyncOutcome::NotApplicable,
+        .byte_count = atomic.site.width_bits / 8u,
+        .descriptor = 0u,
+        .cas_failure_descriptor = std::nullopt,
+    };
+    const auto encoded = encode_consan_moi_sampled_sync_metadata({
+        .address = 1u,
+        .byte_count = semantics.byte_count,
+        .kind = ConSanMoiSampledSyncKind::Atomic,
+        .role = semantics.role,
+        .scope = semantics.scope,
+        .outcome = semantics.outcome,
+    });
+    if (encoded.classification != ConSanMoiSampledSyncClassification::Valid) {
+      result.warnings.emplace_back(
+          "ConSan MOI sampled atomic sync rejected ordinary atomic metadata in " +
+          atomic.container_name);
+      continue;
+    }
+    semantics.descriptor = encoded.packed.descriptor;
+    const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
+    candidates.push_back({std::move(atomic), semantics, sequence_end, 0, 1, false, std::nullopt});
+  }
   if (!options.test_kernel_name_filter.empty()) {
     std::erase_if(candidates, [&](const Candidate &candidate) {
       return candidate.atomic.container_name.find(options.test_kernel_name_filter) ==
@@ -1905,16 +1943,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       const Candidate &candidate = candidates[candidate_index];
       if (!owner_executes_candidate(*window.owner, candidate))
         continue;
+      const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
       const bool release_side =
           (window.access_kind == ConSanLdsAccessKind::Write ||
            window.access_kind == ConSanLdsAccessKind::Atomic) &&
-          (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
-           candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
+          (semantic_role & static_cast<uint32_t>(ConSanMoiSampledSyncRole::Release)) != 0u;
       const bool acquire_side =
           (window.access_kind == ConSanLdsAccessKind::Read ||
            window.access_kind == ConSanLdsAccessKind::Atomic) &&
-          (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
-           candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
+          (semantic_role & static_cast<uint32_t>(ConSanMoiSampledSyncRole::Acquire)) != 0u;
       std::optional<SampledCfgDistance> distance;
       Association::Side side = Association::Side::Release;
       if (release_side) {
@@ -1957,12 +1994,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                    association.side == missing_side;
           }))
         continue;
+      const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
       const bool role_has_side =
-          missing_side == Association::Side::Release
-              ? candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
-                    candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease
-              : candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
-                    candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease;
+          (semantic_role & static_cast<uint32_t>(missing_side == Association::Side::Release
+                                                     ? ConSanMoiSampledSyncRole::Release
+                                                     : ConSanMoiSampledSyncRole::Acquire)) != 0u;
       if (!role_has_side)
         continue;
       std::optional<Association> best;
@@ -2156,7 +2192,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     candidate_options.scratch_vgpr = resources->base;
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == ConSanRegisterAllocationSource::SpillRequired &&
-        sampled_atomic_guest_preserves_address(site);
+        sampled_atomic_guest_preserves_address(site, candidate.atomic.is_rmw);
     const ConSanMoiAtomicAddressPlan address_plan =
         plan_consan_moi_atomic_address(site, resources->base, resources->count, resources->source,
                                        arch, allow_post_guest_spill_operand_overlap);

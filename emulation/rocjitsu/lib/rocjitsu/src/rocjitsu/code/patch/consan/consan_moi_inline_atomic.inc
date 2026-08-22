@@ -35,6 +35,15 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     append_inline_atomic_candidates(kernel, sync_index, candidates);
   for (const ConSanFunctionInfo &function : result.functions)
     append_inline_atomic_candidates(function, sync_index, candidates);
+  std::vector<AtomicRecordCandidate> ordinary_candidates;
+  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
+  std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
+                       [](const auto &candidate) {
+                         // The current inline transaction can import after a complete ordinary
+                         // acquire sequence. Ordinary release publication needs a separate
+                         // pre-guest transaction contract and is not admitted by this tranche.
+                         return candidate.event_kind == ConSanMoiAtomicEventKind::Acquire;
+                       });
   apply_test_container_filter(candidates, options);
   if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
     return;
@@ -42,8 +51,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       std::remove_if(candidates.begin(), candidates.end(),
                      [&](const auto &candidate) {
                        const ConSanMoiInlineAtomicSupport support =
-                           classify_consan_moi_inline_atomic_support(candidate.site,
-                                                                     candidate.event_kind, arch);
+                           classify_consan_moi_inline_atomic_support(
+                               candidate.site, candidate.event_kind, arch, candidate.is_rmw);
                        if (support == ConSanMoiInlineAtomicSupport::Supported)
                          return false;
                        result.warnings.emplace_back(
@@ -78,6 +87,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<MoiPrivateEpochLayout> private_layout;
+    uint32_t relocated_guest_size = 0;
+    std::vector<uint32_t> trailing_guest_words;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
@@ -90,7 +101,30 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       break;
     const AtomicRecordCandidate &candidate = candidates[candidate_index];
     const ConSanAtomicSite &site = candidate.site;
-    if (site.text_offset > old_text.size() || site.size > old_text.size() - site.text_offset) {
+    uint32_t relocated_guest_size = site.size;
+    std::vector<uint32_t> trailing_guest_words;
+    if (!candidate.is_rmw &&
+        candidate.ordered_sequence_end_text_offset > site.text_offset + site.size) {
+      const uint64_t sequence_end = candidate.ordered_sequence_end_text_offset;
+      const BasicBlock *site_block = block_for_offset(resource_state.block_index, site.text_offset);
+      const BasicBlock *sequence_end_block =
+          block_for_offset(resource_state.block_index, sequence_end - sizeof(uint32_t));
+      const uint64_t sequence_size = sequence_end - site.text_offset;
+      if (site_block == nullptr || sequence_end_block != site_block ||
+          sequence_size > std::numeric_limits<uint32_t>::max() ||
+          sequence_size % sizeof(uint32_t) != 0u || sequence_end > old_text.size()) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline atomic patch could not relocate an ordinary acquire suffix in " +
+            candidate.container_name);
+        continue;
+      }
+      relocated_guest_size = static_cast<uint32_t>(sequence_size);
+      trailing_guest_words.resize((relocated_guest_size - site.size) / sizeof(uint32_t));
+      std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
+                  trailing_guest_words.size() * sizeof(uint32_t));
+    }
+    if (site.text_offset > old_text.size() ||
+        relocated_guest_size > old_text.size() - site.text_offset) {
       result.errors.emplace_back("ConSan MOI inline atomic patch site is outside .text");
       return;
     }
@@ -104,7 +138,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             return false;
           const uint64_t patch_end =
               patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
-          return site.text_offset < patch_end && patch.anchor_offset < site.text_offset + site.size;
+          return site.text_offset < patch_end &&
+                 patch.anchor_offset < site.text_offset + relocated_guest_size;
         });
     if (overlaps_existing_patch) {
       result.warnings.emplace_back(
@@ -227,7 +262,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     planned_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
                                   std::move(spill), std::move(scalar_spill),
-                                  std::move(private_layout)});
+                                  std::move(private_layout), relocated_guest_size,
+                                  std::move(trailing_guest_words)});
   }
   // Retain every admitted release even when this code object contains no
   // acquire. Its consumer can live in another large code object, and pruning
@@ -340,7 +376,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           });
       const bool stranded = !compute_sopp_branch_simm16(anchor, placement_planner.appended_end()) &&
                             !appended_reachable && !indirect_allocator.has_reachable(anchor);
-      if (stranded && planned.candidate.site.size >= 2u * sizeof(uint32_t))
+      if (stranded && planned.relocated_guest_size >= 2u * sizeof(uint32_t))
         owner_groups[planned.candidate.container_name].push_back(index);
     }
 
@@ -352,7 +388,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     for (const PlannedInlineAtomic &planned : planned_candidates) {
       fixed_claims.emplace_back(planned.candidate.site.text_offset,
-                                planned.candidate.site.text_offset + planned.candidate.site.size);
+                                planned.candidate.site.text_offset + planned.relocated_guest_size);
     }
     std::ranges::sort(fixed_claims);
     size_t merged_claim_count = 0u;
@@ -552,12 +588,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
               layout.inline_causal_snapshots_offset, layout.inline_causal_snapshot_capacity,
               layout.inline_acquired_epoch_token_slots_offset,
               layout.inline_acquired_epoch_token_capacity, cave_offset,
-              planned.candidate.site.text_offset + planned.candidate.site.size,
-              guest_instruction_offset, result.errors);
+              planned.candidate.site.text_offset + planned.relocated_guest_size,
+              guest_instruction_offset, result.errors, planned.trailing_guest_words);
           if (!cave_words)
             return;
           const auto placement = placement_planner.plan_indirect_appended(
-              planned.candidate.site.text_offset, planned.candidate.site.size,
+              planned.candidate.site.text_offset, planned.relocated_guest_size,
               cave_words->size() * sizeof(uint32_t), &reservation_error);
           if (!placement || placement->body_offset != cave_offset ||
               new_text.size() != cave_offset) {
@@ -707,18 +743,18 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             result.errors.emplace_back("ConSan MOI inline atomic dense anchor failed");
             return;
           }
-          std::vector<uint32_t> anchor_words(planned.candidate.site.size / sizeof(uint32_t),
+          std::vector<uint32_t> anchor_words(planned.relocated_guest_size / sizeof(uint32_t),
                                              build_s_nop(0, arch));
           anchor_words[0] = *route_key;
           anchor_words[1] = build_s_branch(*branch, arch);
           std::memcpy(new_text.data() + planned.candidate.site.text_offset, anchor_words.data(),
-                      planned.candidate.site.size);
+                      planned.relocated_guest_size);
 
           ConSanPatchInfo info;
           info.kind = ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
           info.anchor_offset = planned.candidate.site.text_offset;
           info.trampoline_offset = body.offset;
-          info.original_size = planned.candidate.site.size;
+          info.original_size = planned.relocated_guest_size;
           info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
           info.scratch_vgpr = planned.resources.base;
@@ -757,7 +793,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const ConSanAtomicSite &site = candidate.site;
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
-    const uint64_t return_text_offset = site.text_offset + site.size;
+    const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
@@ -785,7 +821,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         layout.inline_causal_snapshots_offset, layout.inline_causal_snapshot_capacity,
         layout.inline_acquired_epoch_token_slots_offset,
         layout.inline_acquired_epoch_token_capacity, cave_text_offset, return_text_offset,
-        guest_instruction_offset, result.errors);
+        guest_instruction_offset, result.errors, planned.trailing_guest_words);
     if (!cave_words)
       return;
 
@@ -805,7 +841,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        site.text_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
+        site.text_offset, planned.relocated_guest_size, cave_words->size() * sizeof(uint32_t),
+        &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI inline atomic placement failed: " + placement_error);
       return;
@@ -821,7 +858,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       result.errors.emplace_back("ConSan MOI inline atomic forward branch is out of range");
       return;
     }
-    std::vector<uint32_t> anchor_words(site.size / sizeof(uint32_t), build_s_nop(0, arch));
+    std::vector<uint32_t> anchor_words(planned.relocated_guest_size / sizeof(uint32_t),
+                                       build_s_nop(0, arch));
     if (anchor_words.empty()) {
       result.errors.emplace_back("ConSan MOI inline atomic patch empty anchor");
       return;
@@ -842,7 +880,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.kind = ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
     info.anchor_offset = site.text_offset;
     info.trampoline_offset = cave_text_offset;
-    info.original_size = site.size;
+    info.original_size = planned.relocated_guest_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
@@ -994,6 +1032,64 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     guest_atomic_words.push_back(word);
   }
 
+  const uint64_t base = *options.moi_report_buffer_address;
+  const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  words.push_back(build_v_mov_b32_e32(recorded_address_vgpr,
+                                      vector_source_vgpr(address_plan.result_address_vgpr), arch));
+  words.push_back(build_v_mov_b32_e32(
+      static_cast<uint16_t>(recorded_address_vgpr + 1u),
+      vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+
+  const bool reserve_event_before_guest =
+      is_compare_exchange && (candidate.event_kind == ConSanMoiAtomicEventKind::Release ||
+                              candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease);
+  const uint16_t reserved_event_index_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 7u);
+  if (reserve_event_before_guest) {
+    if (!append_save_moi_special_state(words, options, arch)) {
+      errors.emplace_back(
+          "ConSan MOI release CAS could not preserve VCC/SCC before event reservation");
+      return std::nullopt;
+    }
+    const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
+    const auto save_active_exec =
+        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+    const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+        lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
+    const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+        lane_rank_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
+        vector_source_vgpr(lane_rank_vgpr), arch);
+    const auto first_active_lane = instrumentation::build_v_cmp_eq_u32_vcc(
+        scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
+    const auto narrow_exec =
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+    const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+    const auto restore_exec =
+        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+    if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_exec ||
+        !saved_exec_wait || !restore_exec) {
+      errors.emplace_back("ConSan MOI release CAS could not select its event publisher");
+      return std::nullopt;
+    }
+    words.push_back(*save_active_exec);
+    words.push_back(*saved_exec_wait);
+    words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
+    words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
+    words.push_back(*first_active_lane);
+    words.push_back(*narrow_exec);
+    if (!append_atomic_fetch_add_one_u32(words,
+                                         base + offsetof(ConSanMoiReportHeader, event_counter),
+                                         reserved_event_index_vgpr, *options.scratch_vgpr, arch)) {
+      errors.emplace_back("ConSan MOI release CAS could not reserve its causal event index");
+      return std::nullopt;
+    }
+    words.push_back(*restore_exec);
+    if (!append_restore_moi_special_state(words, options, arch)) {
+      errors.emplace_back(
+          "ConSan MOI release CAS could not restore VCC/SCC after event reservation");
+      return std::nullopt;
+    }
+  }
+
   const bool record_before_guest_release =
       candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange;
   if (!record_before_guest_release) {
@@ -1003,19 +1099,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
   }
 
-  const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-  words.push_back(build_v_mov_b32_e32(recorded_address_vgpr,
-                                      vector_source_vgpr(address_plan.result_address_vgpr), arch));
-  words.push_back(build_v_mov_b32_e32(
-      static_cast<uint16_t>(recorded_address_vgpr + 1u),
-      vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
-
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not save VCC/SCC");
     return std::nullopt;
   }
 
-  const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t atomic_record_base = base + atomic_records_offset;
   const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
@@ -1120,6 +1208,17 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
   }
   record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
+  const auto append_record_event_index = [&]() {
+    if (reserve_event_before_guest) {
+      return append_dynamic_atomic_store_u32_vgpr(
+          record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index),
+          reserved_event_index_vgpr, slot_vgpr, *options.scratch_vgpr, arch);
+    }
+    return append_dynamic_atomic_event_index_store(
+        record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
+        atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,
+        *options.scratch_vgpr, arch);
+  };
   // Probe-local owner derivation uses the record-emitter temporary. Preserve
   // it before reserving the event index, which reuses that VGPR.
   if ((derived_owner_vgpr &&
@@ -1134,10 +1233,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           record_words, kDynamicAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation), options, slot_vgpr,
           *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
-      !append_dynamic_atomic_event_index_store(
-          record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, event_index), slot_vgpr,
-          *options.scratch_vgpr, arch) ||
+      !append_record_event_index() ||
       !append_dynamic_atomic_store_workgroup_source(
           record_words, atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_x),
           workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
@@ -1254,14 +1350,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 }
 
 [[nodiscard]] std::optional<ConSanMoiSampledSyncRole>
-sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
+sampled_atomic_role(ConSanMoiAtomicEventKind kind, bool is_rmw) {
   switch (kind) {
   case ConSanMoiAtomicEventKind::Release:
-    return ConSanMoiSampledSyncRole::RmwRelease;
+    return is_rmw ? ConSanMoiSampledSyncRole::RmwRelease : ConSanMoiSampledSyncRole::Release;
   case ConSanMoiAtomicEventKind::Acquire:
-    return ConSanMoiSampledSyncRole::RmwAcquire;
+    return is_rmw ? ConSanMoiSampledSyncRole::RmwAcquire : ConSanMoiSampledSyncRole::Acquire;
   case ConSanMoiAtomicEventKind::AcquireRelease:
-    return ConSanMoiSampledSyncRole::RmwAcquireRelease;
+    return is_rmw ? std::optional(ConSanMoiSampledSyncRole::RmwAcquireRelease) : std::nullopt;
   }
   return std::nullopt;
 }
@@ -1278,13 +1374,16 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
   return std::nullopt;
 }
 
-[[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicSite &site) {
+[[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicSite &site,
+                                                          bool is_rmw = true) {
   if (!site.addr_vgpr || !site.dst_vgpr)
     return true;
   const uint16_t address_count =
       site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_") ? 1u : 2u;
+  const bool ordinary_load = !is_rmw && (site.mnemonic.starts_with("flat_load") ||
+                                         site.mnemonic.starts_with("global_load"));
   const uint16_t destination_count =
-      site.returns_old_value.value_or(false)
+      site.returns_old_value.value_or(false) || ordinary_load
           ? static_cast<uint16_t>(std::max<uint32_t>(site.width_bits / 32u, 1u))
           : 0u;
   return destination_count == 0u ||
@@ -1317,7 +1416,9 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind) {
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  return append_moi_flat_load_wait(words, arch);
+  // A non-RMW candidate carries its compiler-emitted wait/cache suffix. Do
+  // not splice a generic atomic wait into that target-native sequence.
+  return !candidate.is_rmw || append_moi_flat_load_wait(words, arch);
 }
 
 struct SampledAtomicPreludeState {
@@ -1433,7 +1534,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const bool guest_first =
       spill && sampled_atomic_spill_overlaps_guest_operands(*spill, candidate.site);
   assert(!defer_guest || !guest_first);
-  const bool guest_preserves_address = sampled_atomic_guest_preserves_address(candidate.site);
+  const bool guest_preserves_address =
+      sampled_atomic_guest_preserves_address(candidate.site, candidate.is_rmw);
   assert(!guest_first || guest_preserves_address);
   if (guest_first && !guest_preserves_address) {
     errors.emplace_back("ConSan MOI sampled atomic overlap spill cannot preserve guest address");
@@ -1534,7 +1636,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
-  const auto role = sampled_atomic_role(candidate.event_kind);
+  const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
   const auto scope = sampled_atomic_scope(*candidate.site.raw_scope);
   if (!role || !scope ||
       (static_cast<uint32_t>(*role) & static_cast<uint32_t>(ConSanMoiSampledSyncRole::Acquire)) ==
@@ -1547,7 +1649,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       candidate.site.size > bytes.size() - candidate.site.file_offset)
     return std::nullopt;
 
-  const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
+  const bool is_cas = candidate.is_rmw && consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
                  !candidate.site.returns_old_value.value_or(false)))
     return std::nullopt;
@@ -1564,10 +1666,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return std::nullopt;
     return encoded.packed.descriptor;
   };
-  const auto success_descriptor = descriptor_for(is_cas ? ConSanMoiSampledSyncOutcome::CasSuccess
-                                                 : candidate.site.returns_old_value.value_or(false)
-                                                     ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
-                                                     : ConSanMoiSampledSyncOutcome::RmwNoReturn);
+  const auto success_descriptor =
+      descriptor_for(!candidate.is_rmw ? ConSanMoiSampledSyncOutcome::NotApplicable
+                     : is_cas          ? ConSanMoiSampledSyncOutcome::CasSuccess
+                     : candidate.site.returns_old_value.value_or(false)
+                         ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
+                         : ConSanMoiSampledSyncOutcome::RmwNoReturn);
   const auto failure_descriptor =
       is_cas ? descriptor_for(ConSanMoiSampledSyncOutcome::CasFailure) : success_descriptor;
   if (!success_descriptor || !failure_descriptor)
@@ -1831,7 +1935,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   if (!address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u)
     return std::nullopt;
-  const auto role = sampled_atomic_role(candidate.event_kind);
+  const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
   const auto scope = sampled_atomic_scope(*candidate.site.raw_scope);
   if (!role || !scope)
     return std::nullopt;
@@ -1850,7 +1954,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   }
 
-  const bool is_cas = consan_atomic_is_compare_exchange(candidate.site);
+  const bool is_cas = candidate.is_rmw && consan_atomic_is_compare_exchange(candidate.site);
   if (is_cas && (!candidate.site.data_vgpr || !candidate.site.dst_vgpr ||
                  !candidate.site.returns_old_value.value_or(false))) {
     errors.emplace_back("ConSan MOI sampled atomic metadata requires an exact CAS outcome");
@@ -1872,10 +1976,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return std::nullopt;
     return encoded.packed.descriptor;
   };
-  const auto success_descriptor = descriptor_for(is_cas ? ConSanMoiSampledSyncOutcome::CasSuccess
-                                                 : candidate.site.returns_old_value.value_or(false)
-                                                     ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
-                                                     : ConSanMoiSampledSyncOutcome::RmwNoReturn);
+  const auto success_descriptor =
+      descriptor_for(!candidate.is_rmw ? ConSanMoiSampledSyncOutcome::NotApplicable
+                     : is_cas          ? ConSanMoiSampledSyncOutcome::CasSuccess
+                     : candidate.site.returns_old_value.value_or(false)
+                         ? ConSanMoiSampledSyncOutcome::RmwReturnsOld
+                         : ConSanMoiSampledSyncOutcome::RmwNoReturn);
   const auto failure_descriptor =
       is_cas ? descriptor_for(ConSanMoiSampledSyncOutcome::CasFailure) : success_descriptor;
   if (!success_descriptor || !failure_descriptor)

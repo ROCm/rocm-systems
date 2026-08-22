@@ -12,8 +12,8 @@ structure.
 
 ## 1. Preparation work
 
-**Status: the device tier is operational; residual coverage and end-to-end
-qualification work remains**
+**Status: the device tier is operational; the current-base merge, residual
+coverage, and end-to-end qualification work remain**
 
 The immediate starting action for this phase is to merge the already-fetched
 `origin/develop` into the current branch with a merge commit. Repair every
@@ -83,11 +83,12 @@ or implementation choices.
 
 ### Remaining work
 
-1. At each qualification checkpoint, fetch and merge any newer
-   `origin/develop` into this branch with a merge commit. Repair every resulting
-   build or test regression and add a focused host-unit or device regression
-   for each behavioral defect exposed by the integration before accepting the
-   checkpoint as current.
+1. First merge the already-fetched `origin/develop` into this branch with a
+   merge commit. Repair every resulting build or test failure and add a focused
+   host-unit or device regression for each behavioral defect exposed by the
+   integration before accepting the merge. At later qualification checkpoints,
+   fetch and merge any newer `origin/develop` and apply the same standard before
+   treating the checkpoint as current.
 2. Continue making both the conventional host-unit suite and the checked-in
    device suite comprehensive. Close meaningful gaps identified by the
    capability audit, [VALIDATION.md](VALIDATION.md), or Aorta. Device scenarios
@@ -136,7 +137,8 @@ or implementation choices.
    invocation and keep it fully green on RocJitsu `gfx942`, `gfx950`,
    `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
    whole-suite timing after the latest tranche and keep it within the documented
-   5--20-minute `-j64` heuristic on the reference host.
+   5--20-minute heuristic on the reference host at that host's configured
+   parallelism.
 9. Produce a `gfx950` counterpart to
    [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md), based on fresh
    correctness, coverage, fault-detection, overhead, containment, and

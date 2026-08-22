@@ -952,6 +952,57 @@ std::vector<uint8_t> make_cdna4_lds_code_object(std::span<const uint32_t> text_w
   return image;
 }
 
+struct Cdna4CasOrdinaryAcquireFixture {
+  std::vector<uint8_t> bytes;
+  std::array<uint32_t, 5> acquire_sequence{};
+  uint64_t acquire_text_offset = 0;
+};
+
+// Small host-side form of the checked-in CAS-publication device contract:
+// one release CAS publishes an LDS write and a language-level atomic load,
+// lowered as global_load + wait + buffer_inv, acquires before an LDS read.
+Cdna4CasOrdinaryAcquireFixture
+make_cdna4_cas_ordinary_acquire_fixture(std::string_view kernel_name) {
+  constexpr std::array<uint32_t, 5> kAcquireSequence = {
+      0xDE508004u,
+      0x027F0000u, // global_load_dword v2, v[0:1], off offset:4 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xE0A48000u,
+      0x00000000u, // buffer_inv sc1
+  };
+  std::vector<uint32_t> words = {
+      0xD81A0004u,
+      0x00000302u, // ds_write_b32 v2, v3 offset:4
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDD058004u,
+      0x01000203u, // global_atomic_cmpswap v1, v3, v[2:3], s[0:1] offset:4 sc0
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+  };
+  const uint64_t acquire_text_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), kAcquireSequence.begin(), kAcquireSequence.end());
+  words.insert(words.end(), {
+                                0xD86C0004u,
+                                0x04000002u, // ds_read_b32 v4, v2 offset:4
+                            });
+  words.resize(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(words, kernel_name, /*vgpr_granulated=*/0u,
+                                 /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/1u);
+  append_kernel_metadata_note(bytes, kernel_name, /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/0u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::array<uint8_t, 3>{64u, 1u, 1u});
+  return {
+      .bytes = std::move(bytes),
+      .acquire_sequence = kAcquireSequence,
+      .acquire_text_offset = acquire_text_offset,
+  };
+}
+
 std::vector<uint8_t> make_cdna3_lds_code_object(std::span<const uint32_t> text_words,
                                                 std::string_view kernel_name = "lds_probe",
                                                 uint32_t vgpr_granulated = 0u,

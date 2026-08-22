@@ -123,11 +123,14 @@ TEST(ConSan, FaultInventoryRetainsMalformedOrdinaryMemoryAsTypedUnsupported) {
   EXPECT_TRUE(site->sync_sequence_identity == std::nullopt);
 }
 
-TEST(ConSan, FaultInventoryTypesOrdinaryMemoryOnUnsupportedArchitecture) {
+TEST(ConSan, FaultInventoryDecodesGfx1250VglobalMemoryForSynchronization) {
+  constexpr auto load = cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                             {.saddr = 124, .vdst = 1, .scope = 2, .vaddr = 0});
   const std::array<uint32_t, 4> text_words = {
-      0xEE050000u, 0x00000000u,
-      0x00000000u, // gfx1250 global_load_b32
-      0xBFB00000u, // s_endpgm
+      load[0],
+      load[1],
+      load[2],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "future_global_load");
   ConSanOptions options = moi_options();
@@ -140,8 +143,12 @@ TEST(ConSan, FaultInventoryTypesOrdinaryMemoryOnUnsupportedArchitecture) {
   });
   ASSERT_NE(site, result.fault_sites.end());
   EXPECT_EQ(site->ordinary_memory_support_reason,
-            ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture);
+            ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
   EXPECT_EQ(site->size, 3u * sizeof(uint32_t));
+  EXPECT_EQ(site->width_bits, 32u);
+  EXPECT_NE(site->decoded_operands.find("dst_vgpr=1"), std::string::npos);
+  EXPECT_NE(site->decoded_operands.find("addr_vgpr=0"), std::string::npos);
+  EXPECT_NE(site->decoded_operands.find("raw_scope=2"), std::string::npos);
 }
 
 TEST(ConSan, FaultInventoryDecodesGfx1250BufferMemoryForSynchronization) {

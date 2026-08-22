@@ -291,13 +291,19 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
                                                 uint16_t vcc_save_sgpr, uint16_t scc_save_sgpr,
                                                 rj_code_arch_t arch);
 
-[[nodiscard]] constexpr ConSanMoiInlineAtomicSupport classify_consan_moi_inline_atomic_support(
-    const ConSanAtomicSite &site, ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch) {
-  const bool is_flat = site.mnemonic.starts_with("flat_atomic");
-  const bool is_vglobal = site.mnemonic.starts_with("global_atomic");
+[[nodiscard]] constexpr ConSanMoiInlineAtomicSupport
+classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
+                                          ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch,
+                                          bool is_rmw = true) {
+  const bool is_flat = site.mnemonic.starts_with("flat_atomic") ||
+                       (!is_rmw && (site.mnemonic.starts_with("flat_load") ||
+                                    site.mnemonic.starts_with("flat_store")));
+  const bool is_vglobal = site.mnemonic.starts_with("global_atomic") ||
+                          (!is_rmw && (site.mnemonic.starts_with("global_load") ||
+                                       site.mnemonic.starts_with("global_store")));
   if (!is_flat && !is_vglobal)
     return ConSanMoiInlineAtomicSupport::NonFlatAddress;
-  const bool is_compare_exchange = consan_atomic_is_compare_exchange(site);
+  const bool is_compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
   (void)event_kind;
   if (site.width_bits != 32)
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;

@@ -121,9 +121,9 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
+  options.moi_dispatch_id_sgpr = 20;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
-  options.moi_dispatch_id_sgpr = 20;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -503,6 +503,47 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   };
   expect_unified_atomic_wait(*release_claim_and_commit);
   expect_unified_atomic_wait(*acquired_token_transaction);
+}
+
+TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
+  const Cdna4CasOrdinaryAcquireFixture fixture =
+      make_cdna4_cas_ordinary_acquire_fixture("inline_cas_ordinary_acquire");
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.moi_owner_sgpr = 60;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 64;
+  options.moi_dispatch_id_vgpr = 50;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(fixture.bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto acquire = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
+           patch.anchor_offset == fixture.acquire_text_offset;
+  });
+  ASSERT_NE(acquire, result.patches.end())
+      << testing::PrintToString(result.patches) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(acquire->original_size, fixture.acquire_sequence.size() * sizeof(uint32_t));
+  ASSERT_TRUE(acquire->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, acquire->trampoline_offset, acquire->trampoline_size);
+  const size_t guest_word =
+      (*acquire->relocated_guest_instruction_offset - acquire->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_LE(guest_word + fixture.acquire_sequence.size(), cave.size());
+  EXPECT_TRUE(std::equal(fixture.acquire_sequence.begin(), fixture.acquire_sequence.end(),
+                         cave.begin() + static_cast<ptrdiff_t>(guest_word)));
 }
 
 TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
@@ -2843,8 +2884,8 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 15;
-    options.moi_epoch_vgpr = 16;
+    options.moi_owner_vgpr = 16;
+    options.moi_epoch_vgpr = 17;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -2860,7 +2901,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
       return item.site_kind == ConSanResourceSiteKind::Atomic;
     });
     ASSERT_NE(plan, result.resource_plans.end());
-    EXPECT_EQ(plan->scratch_vgpr_count, 7u);
+    EXPECT_EQ(plan->scratch_vgpr_count, 8u);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());

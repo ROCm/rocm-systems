@@ -962,6 +962,8 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     const bool unowned_fence = fence_event != nullptr && fence_event->execution_owners.empty();
     const bool unassociated_cache_operation =
         fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
+    const bool covered_cache_pair_prefix =
+        fence.rejection_reason == "paired-acquire-prefix-covered-by-tail";
     if (!fence.eligible) {
       reason = ConSanSiteDispositionReason::IneligibleFence;
     } else if (communication == nullptr || unowned_communication) {
@@ -972,7 +974,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
                                 fence.in_kernel, fence.text_offset, "fence", reason, result,
                                 unowned_communication || unowned_fence ||
-                                    unassociated_cache_operation ||
+                                    unassociated_cache_operation || covered_cache_pair_prefix ||
                                     reason == ConSanSiteDispositionReason::IneligibleFence);
   }
 }

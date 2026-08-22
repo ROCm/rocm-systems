@@ -1406,69 +1406,6 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
                      return lhs.input_order < rhs.input_order;
                    });
 
-  struct FenceRelease {
-    uint64_t generation = 0;
-    uint32_t workgroup_x = 0;
-    uint32_t workgroup_y = 0;
-    uint32_t workgroup_z = 0;
-    uint32_t producer_owner_id = 0;
-    uint32_t epoch = 0;
-    uint32_t scope = 0;
-    uint32_t instruction_offset = 0;
-    uint64_t communication_token = 0;
-  };
-  std::vector<FenceRelease> fence_releases;
-  const size_t total_synchronization_event_count = atomic_events.size() + fence_events.size();
-  fence_releases.reserve(total_synchronization_event_count);
-
-  auto publish_fence = [&](const ConSanMoiRecordReplayFenceEvent &record, uint64_t generation,
-                           uint32_t epoch,
-                           std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens) {
-    const std::vector<ConSanMoiCausalEpochComponent> components =
-        collect_causal_epoch_components(acquired_epoch_tokens, generation, record.owner_id, epoch);
-    std::vector<std::optional<size_t>> targets(components.size());
-    size_t new_record_count = 0;
-    for (size_t component_index = 0; component_index < components.size(); ++component_index) {
-      for (size_t release_index = 0; release_index < fence_releases.size(); ++release_index) {
-        const FenceRelease &release = fence_releases[release_index];
-        if (release.generation == generation && release.workgroup_x == record.workgroup_x &&
-            release.workgroup_y == record.workgroup_y &&
-            release.workgroup_z == record.workgroup_z &&
-            release.producer_owner_id == components[component_index].owner_id &&
-            release.scope == record.scope &&
-            release.communication_token == record.communication_token) {
-          targets[component_index] = release_index;
-          break;
-        }
-      }
-      if (!targets[component_index])
-        ++new_record_count;
-    }
-    if (new_record_count > total_synchronization_event_count * total_synchronization_event_count -
-                               fence_releases.size())
-      return ConSanMoiAtomicSyncResult{/*metadata_full=*/true, /*updated_record_count=*/0};
-
-    ConSanMoiAtomicSyncResult result;
-    for (size_t component_index = 0; component_index < components.size(); ++component_index) {
-      const ConSanMoiCausalEpochComponent component = components[component_index];
-      if (!targets[component_index]) {
-        fence_releases.push_back({generation, record.workgroup_x, record.workgroup_y,
-                                  record.workgroup_z, component.owner_id, component.epoch,
-                                  record.scope, record.instruction_offset,
-                                  record.communication_token});
-        ++result.updated_record_count;
-        continue;
-      }
-      FenceRelease &release = fence_releases[*targets[component_index]];
-      if (component.epoch > release.epoch) {
-        release.epoch = component.epoch;
-        release.instruction_offset = record.instruction_offset;
-        ++result.updated_record_count;
-      }
-    }
-    return result;
-  };
-
   for (const ReplayEvent &event : events) {
     if (event.kind == ReplayEvent::Kind::Barrier) {
       const ConSanMoiBarrierRecord &record = barrier_records[event.record_index];
@@ -1508,29 +1445,15 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       }
       const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
       if (acquire) {
-        std::vector<ConSanMoiCausalEpochComponent> components;
-        components.reserve(fence_releases.size());
-        for (const FenceRelease &prior : fence_releases) {
-          // The current shadow tracks workgroup-local LDS. Even device/system
-          // fences cannot order an LDS owner in a different workgroup.
-          if (prior.generation != generation || prior.workgroup_x != record.workgroup_x ||
-              prior.workgroup_y != record.workgroup_y || prior.workgroup_z != record.workgroup_z ||
-              prior.producer_owner_id == record.owner_id ||
-              prior.communication_token != record.communication_token)
-            continue;
-          const uint32_t common_scope = std::min(prior.scope, record.scope);
-          if (common_scope < 1)
-            continue;
-          merge_causal_epoch_component(components, prior.producer_owner_id, prior.epoch);
-        }
-        const ConSanMoiAtomicSyncResult token_result =
-            record_acquired_epoch_components(state.acquired_epoch_tokens, components, generation,
-                                             record.owner_id, record.instruction_offset);
+        const ConSanMoiAtomicSyncResult token_result = consan_moi_record_replay_atomic_acquire(
+            state.atomic_release_records, state.acquired_epoch_tokens, generation,
+            record.communication_token, record.owner_id, record.instruction_offset);
         replay.metadata_full |= token_result.metadata_full;
       }
       if (release) {
-        const ConSanMoiAtomicSyncResult release_result =
-            publish_fence(record, generation, epoch, state.acquired_epoch_tokens);
+        const ConSanMoiAtomicSyncResult release_result = consan_moi_record_replay_atomic_release(
+            state.atomic_release_records, state.acquired_epoch_tokens, generation,
+            record.communication_token, record.owner_id, epoch, record.instruction_offset);
         replay.metadata_full |= release_result.metadata_full;
       }
       continue;
@@ -2682,13 +2605,11 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(ConSanMoiAtomicAddressSupport::MissingAddressOperands);
 
+  const bool global_form = site.mnemonic.starts_with("global_");
   const uint32_t flat_no_saddr =
-      rdna3_flat_encoding
-          ? (site.mnemonic.starts_with("global_atomic") ? kRdna3GlobalNoSaddrEncoding
-                                                        : kRdna3FlatNoSaddrEncoding)
-      : cdna_flat_encoding
-          ? (site.mnemonic.starts_with("global_atomic") ? kCdnaGlobalNoSaddrEncoding : 0u)
-          : flat_no_saddr_encoding(arch);
+      rdna3_flat_encoding  ? (global_form ? kRdna3GlobalNoSaddrEncoding : kRdna3FlatNoSaddrEncoding)
+      : cdna_flat_encoding ? (global_form ? kCdnaGlobalNoSaddrEncoding : 0u)
+                           : flat_no_saddr_encoding(arch);
   constexpr int32_t kSigned13Min = -(1 << 12);
   constexpr int32_t kSigned13Max = (1 << 12) - 1;
   constexpr int32_t kSigned24Min = -(1 << 23);

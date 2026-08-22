@@ -4,6 +4,15 @@ struct AtomicRecordCandidate {
   std::optional<uint64_t> kernel_descriptor_file_offset;
   ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
   bool uses_gfx1250_cluster_workgroup_id = false;
+  // Language-level atomic loads and stores can lower to an ordinary memory
+  // instruction followed by an ordering cache operation. Keep that semantic
+  // distinction explicit: their communication range participates in the
+  // atomic synchronization model, but there is no RMW outcome.
+  bool is_rmw = true;
+  // End of the complete ordered sequence in canonical .text coordinates.
+  // RMW instructions normally end at site.text_offset + site.size; an
+  // ordinary acquire includes its wait/cache suffix.
+  uint64_t ordered_sequence_end_text_offset = 0;
 };
 
 [[nodiscard]] bool atomic_record_candidate_semantics_equal(const AtomicRecordCandidate &lhs,
@@ -14,6 +23,8 @@ struct AtomicRecordCandidate {
   const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
   return lhs_in_kernel == rhs_in_kernel && lhs.event_kind == rhs.event_kind &&
          lhs.uses_gfx1250_cluster_workgroup_id == rhs.uses_gfx1250_cluster_workgroup_id &&
+         lhs.is_rmw == rhs.is_rmw &&
+         lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset &&
          std::tie(left.address_space_hint, left.text_offset, left.file_offset, left.size,
                   left.width_bits, left.dst_vgpr, left.addr_vgpr, left.data_vgpr, left.saddr_sgpr,
                   left.raw_op, left.raw_addr, left.raw_data0, left.raw_data1, left.raw_vdst,
@@ -265,6 +276,59 @@ void append_fence_record_candidates(const ConSanResult &result,
   }
 }
 
+// Normalize a qualified language-level atomic load/store sequence into the
+// same address-bearing input shape used by the MOI engines. This does not
+// reclassify the decoded instruction as an ISA atomic: is_rmw remains false,
+// and the complete ordered suffix remains part of the candidate contract.
+void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
+                                               const MoiSyncInventoryIndex &sync_index,
+                                               std::vector<AtomicRecordCandidate> &candidates) {
+  std::vector<FenceRecordCandidate> fence_candidates;
+  append_fence_record_candidates(result, sync_index, fence_candidates);
+  for (const FenceRecordCandidate &fence_candidate : fence_candidates) {
+    const ConSanSyncEvent *communication =
+        sync_index.event(fence_candidate.fence.communication_event_identity);
+    if (communication == nullptr || communication->kind != ConSanSyncEventKind::OrdinaryMemory)
+      continue;
+    const ConSanSyncSequence *sequence = sync_index.sequence(communication->identity);
+    if (sequence == nullptr || sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory)
+      continue;
+
+    std::optional<ConSanMoiAtomicEventKind> event_kind;
+    switch (fence_candidate.fence.memory_role) {
+    case ConSanSyncMemoryRole::Release:
+      event_kind = ConSanMoiAtomicEventKind::Release;
+      break;
+    case ConSanSyncMemoryRole::Acquire:
+      event_kind = ConSanMoiAtomicEventKind::Acquire;
+      break;
+    case ConSanSyncMemoryRole::Unknown:
+    case ConSanSyncMemoryRole::None:
+    case ConSanSyncMemoryRole::AcquireRelease:
+    case ConSanSyncMemoryRole::SequentiallyConsistent:
+      break;
+    }
+    if (!event_kind)
+      continue;
+
+    AtomicRecordCandidate candidate;
+    candidate.container_name = (fence_candidate.fence.in_kernel ? "kernel:" : "function:") +
+                               fence_candidate.fence.container_name;
+    candidate.site = fence_candidate.communication_site;
+    candidate.kernel_descriptor_file_offset = fence_candidate.kernel_descriptor_file_offset;
+    candidate.event_kind = *event_kind;
+    candidate.is_rmw = false;
+    candidate.ordered_sequence_end_text_offset = sequence->end_text_offset;
+    if (fence_candidate.fence.in_kernel) {
+      const auto kernel = std::ranges::find(result.kernels, fence_candidate.fence.container_name,
+                                            &ConSanKernelInfo::name);
+      if (kernel != result.kernels.end())
+        candidate.uses_gfx1250_cluster_workgroup_id = kernel->uses_gfx1250_cluster_workgroup_id;
+    }
+    candidates.push_back(std::move(candidate));
+  }
+}
+
 [[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicSite &site,
                                                    rj_code_arch_t arch) {
   if (site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_"))
@@ -283,10 +347,11 @@ void append_fence_record_candidates(const ConSanResult &result,
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicSite &site,
                                                    rj_code_arch_t arch) {
   // Dynamic Record/Replay publication needs seven VGPRs for the slot,
-  // address, value, and preserved guest atomic address. Compare-exchange
-  // temporarily retains both halves of its success mask before the common
-  // emitter reuses its value temporary.
-  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), 7u);
+  // address, value, and preserved guest atomic address. Compare-exchange also
+  // retains the pre-linearization event index while its success mask is
+  // captured and the common emitter publishes the completed record.
+  const uint16_t record_minimum = consan_atomic_is_compare_exchange(site) ? 8u : 7u;
+  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), record_minimum);
 }
 
 [[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch) {
@@ -2632,7 +2697,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     size_t inline_causal_snapshots_offset, uint32_t inline_causal_snapshot_capacity,
     size_t inline_acquired_token_slots_offset, uint32_t inline_acquired_token_capacity,
     uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
   ConSanOptions options = input_options;
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_TMP_VGPR");
@@ -2695,7 +2760,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 
   std::vector<uint32_t> words;
   words.reserve(
-      candidate.site.size / sizeof(uint32_t) + 96u +
+      candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
       (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
   if (spill)
@@ -3017,8 +3082,17 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  if (!append_moi_flat_load_wait(words, arch))
-    return std::nullopt;
+  if (candidate.is_rmw) {
+    if (!append_moi_flat_load_wait(words, arch))
+      return std::nullopt;
+  } else {
+    if (trailing_guest_words.empty()) {
+      errors.emplace_back(
+          "ConSan MOI inline ordinary acquire patch lacks its ordered guest suffix");
+      return std::nullopt;
+    }
+    words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
+  }
 
   if (!append_save_moi_special_state(words, options, arch) ||
       !append_inline_workgroup_key(words, *workgroup_sources, options, workgroup_key_vgpr,

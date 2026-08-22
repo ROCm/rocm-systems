@@ -9690,9 +9690,14 @@ TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(original_acquire);
-  ASSERT_GE(words.size(), original_acquire->size() + 2u);
-  EXPECT_TRUE(std::equal(original_acquire->begin(), original_acquire->end(), words.begin()));
-  EXPECT_EQ(words[original_acquire->size()],
+  ASSERT_TRUE(acquire_patch->relocated_guest_instruction_offset);
+  const size_t guest_word =
+      (*acquire_patch->relocated_guest_instruction_offset - acquire_patch->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_GE(words.size(), guest_word + original_acquire->size() + 2u);
+  EXPECT_TRUE(std::equal(original_acquire->begin(), original_acquire->end(),
+                         words.begin() + static_cast<ptrdiff_t>(guest_word)));
+  EXPECT_EQ(words[guest_word + original_acquire->size()],
             *instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
@@ -9927,8 +9932,8 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.moi_owner_vgpr = 16;
+  options.moi_epoch_vgpr = 17;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -9960,9 +9965,16 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   ASSERT_TRUE(original_cas);
   const auto guest =
       std::search(words.begin(), words.end(), original_cas->begin(), original_cas->end());
+  const std::vector<uint32_t> reserve_event = make_expected_fetch_add_one_words(
+      base + offsetof(ConSanMoiReportHeader, event_counter),
+      static_cast<uint16_t>(*options.scratch_vgpr + 7u), *options.scratch_vgpr);
+  const auto event_reservation =
+      std::search(words.begin(), words.end(), reserve_event.begin(), reserve_event.end());
   const auto outcome_compare = std::find(words.begin(), words.end(), *compare);
   ASSERT_NE(guest, words.end());
+  ASSERT_NE(event_reservation, words.end());
   ASSERT_NE(outcome_compare, words.end());
+  EXPECT_LT(event_reservation + reserve_event.size(), guest);
   EXPECT_LT(guest + original_cas->size(), outcome_compare);
   const uint32_t capture_success_lo = build_v_mov_b32_e32(
       static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
