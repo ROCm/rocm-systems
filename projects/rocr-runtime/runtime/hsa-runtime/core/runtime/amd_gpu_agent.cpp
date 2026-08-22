@@ -2540,6 +2540,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((uint32_t*)value) = 0;
       }
       break;
+    case HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED:
+      *((bool*)value) = SupportsOrderingEdgeSignal();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
