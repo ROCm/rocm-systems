@@ -19,7 +19,10 @@ in section 2. The current prototype will soon be replaced, so prototype repairs
 and E2E status promotions are supporting work, not the durable output. The
 durable output is a comprehensive, implementation-independent set of host-unit
 and checked-in device tests that can drive and automatically validate that
-rewrite.
+rewrite. An E2E status promotion or prototype repair without a corresponding
+test-coverage disposition is therefore not complete preparation work: extract
+the durable regression when possible, or record why no faithful checked-in
+reduction exists.
 
 The checked-in device tier and its coverage gaps are tracked in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md). E2E procedures and acceptance
@@ -68,32 +71,36 @@ evidence.
    the standing approximate 75% CDNA4 / 25% gfx1250 catch-up bias while CDNA4
    remains behind, without starving gfx1250. Once every applicable cell is
    green, make a fresh global pass over every green cell on one reviewed
-   revision.
+   revision. Latency-driven exceptions are explicit scheduling deferrals, not
+   silent changes to this priority or exemptions from final qualification.
 4. **Be tactical about slow tests.** Do not spend repeated long iterations
    merely waiting for an abnormally slow reproducer. Investigate the slowness
-   when it may itself reveal a defect or produce a smaller reproducer;
-   otherwise record the evidence, defer the cell, and move to another useful
-   item. Prefer fixing everything that can be learned from a slow cell before
-   rotating away. Deferral changes scheduling but never removes the cell from
-   the exit criteria.
+   when it may itself reveal a hang, performance defect, or smaller reproducer;
+   otherwise bound the experiment, record the evidence, defer the cell, and
+   move to another useful item. Prefer fixing everything that can be learned
+   without repeated long waits before rotating away. Deferral changes
+   scheduling but never removes the cell from the exit criteria.
 5. **Generalize behavioral ideas across architectures.** Make a deliberate,
    suite-wide pass over both new and already-existing ConSan host and device
    tests. For every contract, consider all five supported targets: CDNA3
    (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
    RDNA4 (`gfx1201`). Port the behavioral idea wherever it is semantically
-   applicable, adapting target-native device code and ISA details as necessary.
-   Historical `gfx950`-to-`gfx942` ports are examples, not a boundary;
-   cross-generation and CDNA/RDNA transports are expected for cross-cutting
-   behavior. Record a capability-based reason wherever a port is genuinely not
-   applicable.
+   applicable. A transport need not reuse identical device code: preserve the
+   behavioral contract while adapting target-native code, instruction forms,
+   and ISA details as necessary. Historical `gfx950`-to-`gfx942` ports are
+   examples, not a boundary; cross-generation and CDNA/RDNA transports are
+   expected for cross-cutting behavior. Record a capability-based reason
+   wherever a port is genuinely not applicable.
 6. **Use a two-speed test cadence.** In the inner loop, favor targeted host
    tests and all parallel RocJitsu-emulated configurations. It is acceptable to
    omit the serialized physical `gfx950` tier temporarily when it accounts for
    most of the device-suite latency, explicitly accepting the short-lived risk
    of a physical-only regression in exchange for faster iteration. Do not
-   disable that tier or treat an omitted run as passing. Run physical `gfx950`,
-   every emulator target, and the complete host suite periodically, after
-   relevant native-sensitive changes, and at final qualification.
+   disable that tier, redesign the checked-in tests around its omission, or
+   treat an omitted run as passing. Keep it separately filterable for fast
+   iteration, then run physical `gfx950`, every emulator target, and the
+   complete host suite periodically, after relevant native-sensitive changes,
+   and at final qualification.
 
 ### Per-investigation loop
 
@@ -162,7 +169,8 @@ evidence.
   each semantically applicable CDNA3/4/5 and RDNA3/4 target, or has a documented
   capability-based exclusion.
 - Every applicable cell in the CDNA4 and gfx1250 ledgers is green, followed by
-  a fresh global revalidation of all green cells on one reviewed revision.
+  a fresh global revalidation of all green cells on one reviewed revision;
+  this includes every cell tactically deferred because of abnormal latency.
 - That revision passes the complete conventional host suite and the full
   RocJitsu/physical device matrix. Physical `gfx950` and post-run health checks
   pass at regular milestones and final qualification even though inner-loop
