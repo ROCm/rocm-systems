@@ -1766,6 +1766,35 @@ above), not from renaming architecture-specific source.
 | P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟧 Exact collision-count oracles and dynamic execution pass in 7.05 seconds, but analysis/static coverage is incomplete with no applicable site | 🟨 Exact oracles pass in 8.41 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 8.48 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | 🟨 Exact oracles pass in 10.49 seconds with complete 27/27 ordinary-access coverage and no diagnostics; paired overhead remains | Current all-profile artifact `rebase-20260820-gfx950-pytorch-scatter-reduce-all-76lDCB`. The collision updates are relaxed singleton atomics, so—as on gfx1250—the ordered-atomic fault modes are typed N/A rather than causal coverage obligations. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟧 The repaired longer diagnostic passes the exact 3-4-5 norm and CPU-softmax oracle, is dynamically complete, and patches all 4,436/4,436 supported accesses. Static analysis remains incomplete because a separate library contains 384 unsupported accesses, and the 60.87-second device execution plus transformation still exceeds the ordinary 30-second contract | 🟨 The current 120-second diagnostic completes in 54.56 seconds and passes the exact 3-4-5 norm and CPU-softmax oracles with full 4,820/4,820 access plus 2,096/2,096 barrier coverage, zero diagnostics, and complete static, analysis, and dynamic verdicts. The ordinary 30-second latency contract, paired overhead, and reviewed-fault acceptance remain | 🟨 The current physical-gfx950 row passes the exact 3-4-5 norm and CPU-softmax oracle and the ordinary 30-second contract in 28.98 seconds. It has complete 4,820/4,820 access plus 2,030/2,030 barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; paired overhead, reviewed-fault, and clean-provenance acceptance remain | 🟥 The current 90-second diagnostic passes the exact oracle in 69.95 seconds and patches all 2,096 barriers, but only 4,779/4,820 accesses. Compact clobbered-address spill recovery is fixed; the remaining 41 full-pressure sites need a safe branch-only relay roughly 1.5 MiB away and fail the static verdict | Current Record/Replay artifact `rebase-20260821-gfx950-pytorch-norm-softmax-record-replay-current-v1` closes a validator mismatch between full report capacity and compact replay-scratch capacity and lifts that cell from red to yellow. Current Inline artifact `rebase-20260821-gfx950-pytorch-norm-softmax-inline-compact-clobber-v2` isolates the residual long-range route after the compact-load repair. Current Sampled artifact `rebase-20260821-gfx950-pytorch-norm-softmax-sampled-sparse-semantic-final` proves bounded sparse-report teardown and lifts the cell from red to yellow. Current SuperCollider diagnostic artifact `rebase-20260821-gfx950-pytorch-norm-softmax-sc-wave64-text-gate` proves the wave64 relay-reservoir and executable-text gate repairs. Current all-profile artifact `rebase-20260821-gfx950-pytorch-norm-softmax-all-current` retains the other current-tip frontiers. |
 
+### 2026-08-22 PyTorch TopK Record/Replay no-first-hop inventory
+
+Bounded physical diagnostics under
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-topk-rr-owner-debug-v1`
+and
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-topk-rr-nop-inventory-v1`
+preserve both exact TopK oracles and reproduce the unchanged
+232,814/239,722 access plus 6,743/11,423 barrier frontier. The 6,908 omitted
+accesses are all eight-byte instructions in 72 full-pressure owners; none of
+those owners contains an ordinary access with a dense router. The large object
+has zero pristine NOP relay words even before dense planning, and none of the
+6,908 sources can reach the generated appended relay bank as its first SOPP
+hop. Reducing direct-reservoir discovery to two words found no legal reservoir,
+and neither selected-access tails, dense-host tails, seven-word dense-entry
+compaction, nor owner-affine NOP allocation changed the physical coverage. The
+ineffective experiments were removed; in particular, live dense-entry
+instructions are not mislabeled as relay storage.
+
+A focused positive host regression now proves the independent useful rule:
+once a multiword Record/Replay access is selected, its dead replaced tail is
+exactly recorded and may extend the routing frontier for later selected
+accesses. The existing negative regression still proves that an intrinsically
+unreachable site is rejected before reserving its large body. These contracts
+do not claim that TopK is fixed: the remaining orange cell requires a design
+that creates owner-local routing capacity without incidental caves, most
+likely by explicitly relocating additional host instructions or by changing
+the full-pressure routing/code-layout ABI. Repeating long TopK runs without
+such a design change is deferred under the plan's tactical-latency rule.
+
 ### 2026-08-21 PyTorch norm/softmax Record/Replay barrier-only validation
 
 The current physical-gfx950 run completes in 54.56 seconds, passes the exact

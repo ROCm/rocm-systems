@@ -609,6 +609,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
   std::unordered_set<uint64_t> owned_relay_slots;
   std::unordered_set<uint64_t> nop_relay_slots;
   for (const ConSanPatchInfo &patch : result.patches) {
+    owned_relay_slots.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
     if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
          patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
         patch.original_size == 2u * sizeof(uint32_t))
@@ -1008,6 +1009,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
   std::unordered_set<uint64_t> relay_vertices;
   std::unordered_set<uint64_t> island_vertices;
   for (const ConSanPatchInfo &patch : result.patches) {
+    relay_vertices.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
     if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
          patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
         patch.original_size == 2u * sizeof(uint32_t))
@@ -1202,6 +1204,16 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   std::vector<std::string> errors;
   std::vector<const ConSanPatchInfo *> reservoirs;
   for (const ConSanPatchInfo &patch : result.patches) {
+    for (uint64_t offset : patch.branch_relay_offsets) {
+      const bool in_anchor =
+          offset >= patch.anchor_offset && offset - patch.anchor_offset < patch.original_size;
+      const bool in_trampoline = offset >= patch.trampoline_offset &&
+                                 offset - patch.trampoline_offset < patch.trampoline_size;
+      if ((!in_anchor && !in_trampoline) || offset % sizeof(uint32_t) != 0) {
+        errors.emplace_back("ConSan relay reservoir proof found stale branch-relay provenance");
+        return errors;
+      }
+    }
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir)
       reservoirs.push_back(&patch);
   }
@@ -1260,15 +1272,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   std::unordered_set<uint64_t> island_vertices;
   std::unordered_map<uint64_t, uint64_t> branch_only_relay_targets;
   for (const ConSanPatchInfo &patch : result.patches) {
-    for (uint64_t offset : patch.branch_relay_offsets) {
-      if (offset < patch.trampoline_offset ||
-          offset - patch.trampoline_offset >= patch.trampoline_size ||
-          offset % sizeof(uint32_t) != 0) {
-        errors.emplace_back("ConSan relay reservoir proof found stale branch-relay provenance");
-        return errors;
-      }
-      relay_vertices.insert(offset);
-    }
+    relay_vertices.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
     if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
       island_vertices.insert(patch.trampoline_offset);
     if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||

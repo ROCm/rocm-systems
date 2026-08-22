@@ -39,27 +39,33 @@ checked-in device suites are the durable asset that will make the section 2
 replacement automatically iterable. They must preserve behavior that matters
 to users, expose current target limitations precisely, and distinguish a safe
 new abstraction from a regression without depending on the prototype's layout
-or implementation choices.
+or implementation choices. The working-loop rules below are binding preparation
+requirements and feed the exit criteria; they are not merely suggested ways of
+organizing prototype fixes.
 
 ### Working loop and priority rules
 
 1. Keep a current base. At each qualification checkpoint, resolve the freshly
    fetched `origin/develop`. If it is newer, merge it with a merge commit, then
-   repair and regression-test any integration breakage before treating later
-   validation evidence as current. If it is already an ancestor, record the
-   checkpoint as current rather than manufacturing an empty merge.
+   repair every resulting build, host-unit, device, and relevant end-to-end
+   failure before treating later validation evidence as current. Add a focused
+   host-unit or device regression for every behavioral defect exposed by the
+   merge. If `origin/develop` is already an ancestor, record the checkpoint as
+   current rather than manufacturing an empty merge.
 2. Keep both [STATUS_CDNA4.md](STATUS_CDNA4.md) and
    [STATUS_GFX1250.md](STATUS_GFX1250.md) live. Update the relevant ledger in
    the same change whenever an investigation changes what is known about a
    cell; the documents must describe the state at every revision, not merely
    the intended end state.
-3. Use a lexicographic priority across both ledgers: engine first
+3. Use one global lexicographic priority across both ledgers: engine first
    (Record/Replay, Sampled, SuperCollider, Inline Shadow), then severity within
-   the active engine (red, orange, yellow, green). Keep CDNA4 and gfx1250 moving
-   under that ordering rather than completing one architecture before returning
-   to the other. Tactical latency may change which equally useful cell is taken
-   next, but it does not remove deferred higher-priority cells. After all
-   applicable cells are green, re-run every green cell on one reviewed
+   the active engine (red, orange, yellow, green). In particular, do not use a
+   lower-priority engine's red cells to bypass unfinished higher-priority-engine
+   cells merely because red looks worse than orange. Keep CDNA4 and gfx1250
+   moving under that ordering rather than completing one architecture before
+   returning to the other. Tactical latency may change which currently useful
+   cell is taken next, but it does not remove deferred higher-priority cells.
+   After all applicable cells are green, re-run every green cell on one reviewed
    revision.
 4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
    slowness when that is actionable; otherwise record and defer a slow cell and
@@ -81,9 +87,12 @@ or implementation choices.
 6. Generalize every new and existing test by behavior rather than by its source
    architecture. Translate target-native device code as necessary and cover
    every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
-   `gfx950`-to-`gfx942` transport is only one example, not the boundary. Treat
-   the suite-wide audit of already-existing tests as explicit preparation work,
-   not only as a rule applied to tests added from now on.
+   `gfx950`-to-`gfx942` transport is only one example, not the boundary. The
+   portable asset is the behavioral idea, not identical ISA bytes: transport
+   across generations and between CDNA and RDNA wherever an equivalent native
+   idiom exists. Treat the suite-wide audit of already-existing tests as
+   explicit preparation work, not only as a rule applied to tests added from
+   now on.
 7. Use fast host tests and parallel RocJitsu targets for the tight loop. It is
    acceptable to omit serialized physical `gfx950` temporarily when it
    dominates latency, but run it at regular checkpoints, after relevant native

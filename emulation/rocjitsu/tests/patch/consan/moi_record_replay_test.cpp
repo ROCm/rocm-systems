@@ -7905,6 +7905,98 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessWithoutDeadTransientScalarRegist
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kTextWords = 40'000u;
+  constexpr std::array<size_t, 4> kAccessWords = {1u, 12'000u, 24'000u, 36'000u};
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+  ASSERT_GT(guest->size(), 1u);
+
+  // This object deliberately has neither NOP caves nor 16-word relocatable
+  // donor runs. The last access can reach appended text directly; after it is
+  // selected, the dead tail of its multiword instruction must extend the
+  // frontier to the preceding access, and so on. This isolates the reusable
+  // multiword-anchor contract without depending on a particular E2E layout.
+  std::vector<uint32_t> text_words(kTextWords, build_s_branch(/*simm16=*/0, kArch));
+  for (size_t access_word : kAccessWords) {
+    ASSERT_LE(access_word + guest->size(), text_words.size());
+    std::copy(guest->begin(), guest->end(), text_words.begin() + access_word);
+  }
+  size_t cursor = kTextWords - 256u;
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+    text_words[cursor++] = build_s_branch(/*simm16=*/0, kArch);
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "record_replay_far_selected_anchor_tails", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(kAccessWords.size(), 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessWords.size();
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  const auto access_count = std::ranges::count(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_EQ(access_count, kAccessWords.size()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kAccessWords.size());
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
+  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
+
+  std::set<uint64_t> anchor_tail_offsets;
+  for (size_t access_word : kAccessWords) {
+    for (size_t word = 1u; word < guest->size(); ++word)
+      anchor_tail_offsets.insert((access_word + word) * sizeof(uint32_t));
+  }
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
+      return false;
+    const auto uses_anchor_tail = [&](uint64_t relay) {
+      return anchor_tail_offsets.contains(relay);
+    };
+    return std::ranges::any_of(patch.branch_only_entry_relay_offsets, uses_anchor_tail) ||
+           std::ranges::any_of(patch.branch_only_return_relay_offsets, uses_anchor_tail);
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+           std::ranges::any_of(patch.branch_relay_offsets,
+                               [&](uint64_t relay) { return anchor_tail_offsets.contains(relay); });
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+
+  ConSanResult stale_provenance = result;
+  const auto relay_owner = std::ranges::find_if(stale_provenance.patches, [](const auto &patch) {
+    return !patch.branch_relay_offsets.empty();
+  });
+  ASSERT_NE(relay_owner, stale_provenance.patches.end());
+  relay_owner->branch_relay_offsets.front() = std::numeric_limits<uint64_t>::max() - 3u;
+  const std::vector<std::string> validation_errors =
+      validate_consan_modified_elf(bytes, stale_provenance);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("stale branch-relay provenance") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
+}
+
 TEST(ConSanMoi, Cdna4RecordReplayRejectsFarAccessWithoutFirstHopBeforeReservingBody) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kTextWords = 40'000u;

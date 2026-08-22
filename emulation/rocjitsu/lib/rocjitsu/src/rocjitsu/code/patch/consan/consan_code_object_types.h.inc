@@ -405,9 +405,9 @@ struct ConSanPatchInfo {
   uint64_t trampoline_offset = 0;
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
-  /// Branch-relay words owned by this patch but placed after its primary
-  /// trampoline body. Relay-reservoir validation uses this exact provenance
-  /// when proving routes through appended text.
+  /// Branch-relay words owned by this patch, either in a dead tail of its
+  /// replaced anchor or after its primary trampoline body. Relay-reservoir
+  /// validation uses this exact provenance when proving routes.
   std::vector<uint64_t> branch_relay_offsets;
   /// Exact forward and return relay chains for a trampoline body whose
   /// anchor and continuation use branch-only control flow.  These routes do
