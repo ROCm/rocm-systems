@@ -470,6 +470,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     for (; cursor < end; cursor += sizeof(uint32_t))
       generated_branch_relay_offers.push_back(cursor);
   }
+  // Seed the immutable appended relay bank before reservoir discovery. A
+  // reservoir that cannot reach its displaced body directly may use this bank
+  // and previously planned reservoir tails to extend the frontier recursively.
+  for (uint64_t relay : generated_branch_relay_offers)
+    (void)branch_router.offer(relay, BranchOnlyRelayProvenance::GeneratedBank);
   DbiPatchPlacementPlanner branch_only_placement_planner(arch, original_text_size);
   if (use_indirect_appended && indirect_body_begin > original_text_size) {
     std::string reservation_error;
@@ -526,12 +531,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (block)
         reservoir_blocks.push_back(block.get());
     }
-    const uint64_t latest_source =
-        std::ranges::max(candidates, {}, &ConSanMoiCandidate::text_offset)->text_offset;
-    const uint64_t route_midpoint = latest_source + (indirect_body_begin - latest_source) / 2u;
+    uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
+    for (const ConSanMoiCandidate *candidate : candidates) {
+      if (uses_branch_only_scalar_spill(candidate))
+        route_frontier_source = std::min(route_frontier_source, candidate->text_offset);
+    }
+    if (route_frontier_source == std::numeric_limits<uint64_t>::max()) {
+      result.errors.emplace_back(
+          "ConSan MOI first-light probe lost its branch-only routing frontier");
+      return;
+    }
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_midpoint,
+            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
             2u * branch_only_candidate_count, branch_only_placement_planner,
             direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
@@ -549,6 +561,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   for (const auto &[relay, reservoir] : direct_branch_reservoirs.reservoir_by_relay) {
     (void)reservoir;
     branch_relay_offsets.insert(relay);
+  }
+  for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
+    if (!reservoir.route)
+      continue;
+    for (const BranchOnlyRelayClaim &claim : reservoir.route->claims)
+      branch_relay_offsets.erase(claim.offset);
   }
   const auto direct_or_forward_relay = [&](uint64_t source, uint64_t target) {
     if (compute_sopp_branch_simm16(source, target))
@@ -1019,17 +1037,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   if (local_entry_islands)
     pristine_branch_relay_offers = local_entry_islands->available_word_offsets();
-  size_t branch_relay_offer_count = direct_branch_reservoirs.reservoir_by_relay.size();
+  size_t branch_relay_offer_count = branch_router.available_count();
   if (!branch_only_patch_indices.empty()) {
     for (uint64_t relay : pristine_branch_relay_offers)
-      branch_relay_offer_count +=
-          branch_router.offer(relay, BranchOnlyRelayProvenance::PristineNop) ? 1u : 0u;
+      (void)branch_router.offer(relay, BranchOnlyRelayProvenance::PristineNop);
     for (uint64_t relay : generated_branch_relay_offers)
-      branch_relay_offer_count +=
-          branch_router.offer(relay, BranchOnlyRelayProvenance::GeneratedBank) ? 1u : 0u;
+      (void)branch_router.offer(relay, BranchOnlyRelayProvenance::GeneratedBank);
     for (uint64_t relay : selected_record_replay_anchor_relay_offsets)
-      branch_relay_offer_count +=
-          branch_router.offer(relay, BranchOnlyRelayProvenance::OwnedAnchor) ? 1u : 0u;
+      (void)branch_router.offer(relay, BranchOnlyRelayProvenance::OwnedAnchor);
+    branch_relay_offer_count = branch_router.available_count();
   }
   BranchOnlyRelaySearchLimits relay_limits;
   // A very large simultaneous exact solve is not useful for this monotonic

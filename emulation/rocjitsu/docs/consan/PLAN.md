@@ -105,7 +105,10 @@ validation loop.
    across generations and between CDNA and RDNA wherever an equivalent native
    idiom exists. Treat the suite-wide audit of already-existing tests as
    explicit preparation work, not only as a rule applied to tests added from
-   now on.
+   now on. Inventory both host-unit and device tests by behavioral contract,
+   then record an applicable, transported, or capability-based not-applicable
+   disposition for each of `gfx942`, `gfx950`, `gfx1250`, `gfx1100`, and
+   `gfx1201`.
 7. Use fast host tests and parallel RocJitsu targets for the tight loop. It is
    acceptable to omit serialized physical `gfx950` temporarily when it
    dominates latency, but run it at regular checkpoints, after relevant native
@@ -153,8 +156,11 @@ validation loop.
    applicable target, adapting the device code and target-native instruction
    forms as needed. The originating architecture does not define the coverage
    boundary: do not stop at historical `gfx950`-to-`gfx942` ports. Consider
-   CDNA3/4/5 and RDNA3/4 for every behavior, and record a capability-based
-   reason for each target where the contract is not applicable.
+   CDNA3/4/5 and RDNA3/4 for every behavior. Produce an explicit inventory that
+   assigns each existing host-unit and device contract an applicable,
+   transported, or capability-based not-applicable disposition on every target
+   so that an accidental architecture omission cannot look like a completed
+   audit.
 6. Stay tactical about latency. If a reproducer is abnormally slow, first ask
    whether the slowness itself is a defect that can be debugged or reduced.
    Avoid repeated long waits that provide no new information; defer a slow cell

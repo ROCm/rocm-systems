@@ -435,6 +435,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaClobberingLdsReduction|cdna_clobbering_lds_reduction|ConSanDeviceCdnaClobberingLdsReductionTest"
             "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
             "CdnaWave64LargeText|cdna_wave64_large_text|ConSanDeviceCdnaWave64LargeTextTest"
+            "CdnaRecordReplayLongRangeFullPressure|cdna_record_replay_long_range_full_pressure|ConSanDeviceCdnaRecordReplayLongRangeFullPressureTest|record-replay-only"
             "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
         )
     endif()
@@ -844,6 +845,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_clobbering_lds_reduction|cdna_clobbering_lds_reduction_test.hip"
             "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
             "cdna_wave64_large_text|cdna_wave64_large_text_test.hip"
+            "cdna_record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
             "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         )
     endif()

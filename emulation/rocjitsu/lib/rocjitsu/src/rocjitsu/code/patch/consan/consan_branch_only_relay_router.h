@@ -315,6 +315,9 @@ struct BranchOnlyDirectRelayReservoir {
   uint64_t anchor_offset = 0;
   std::vector<uint32_t> original_words;
   DbiPatchPlacement placement;
+  /// Present when the relocated sequence reaches its appended body through
+  /// already-owned branch-only relays instead of one direct SOPP hop.
+  std::optional<BranchOnlyRelayRoute> route;
   bool used = false;
 };
 
@@ -436,10 +439,16 @@ public:
   [[nodiscard]] bool commit(std::span<const BranchOnlyRelayRoute> routes,
                             std::string *error_out = nullptr);
 
+  /// Relocates safe ordinary instruction runs into appended storage and offers
+  /// their vacated tail words as materialized branch-only relays. A run that
+  /// cannot reach appended storage directly may use already planned relay
+  /// capacity, recursively extending the frontier toward
+  /// @p route_frontier_source. The router, placement planner, and reservoir
+  /// inventory are committed atomically.
   [[nodiscard]] bool plan_direct_reservoirs(
       std::span<BasicBlock *const> blocks, std::span<const uint8_t> pristine_text,
       std::span<const std::pair<uint64_t, uint64_t>> protected_ranges, rj_code_arch_t arch,
-      uint64_t route_midpoint, size_t target_relay_count,
+      uint64_t route_frontier_source, size_t target_relay_count,
       DbiPatchPlacementPlanner &placement_planner, BranchOnlyDirectRelayReservoirSet &reservoirs,
       std::string *error_out = nullptr, ConSanPlanningWorkTelemetry *work_telemetry = nullptr,
       const BranchOnlyDirectReservoirWorkLimits &work_limits = {});

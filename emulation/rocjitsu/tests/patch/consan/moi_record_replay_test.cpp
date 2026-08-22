@@ -7997,6 +7997,67 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
   })) << testing::PrintToString(validation_errors);
 }
 
+TEST(ConSanMoi, Cdna4RecordReplayRecursivelyRoutesInstructionReservoirs) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kTextWords = 100'000u;
+  constexpr std::array<size_t, 3> kDonorWords = {10'000u, 40'000u, 70'000u};
+  constexpr size_t kDonorWordCount = 16u;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+
+  // One-word branch blocks provide no incidental caves. Three explicit
+  // ordinary-instruction runs are each less than one SOPP hop apart, but only
+  // the last can directly reach appended text. The two earlier reservoirs
+  // must route through already-materialized later reservoirs, and selecting
+  // the earliest tail must retain that complete dependency chain.
+  std::vector<uint32_t> text_words(kTextWords, build_s_branch(/*simm16=*/0, kArch));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  const uint32_t donor = build_v_mov_b32_e32(/*vdst=*/31u, vector_source_vgpr(31u), kArch);
+  for (size_t donor_word : kDonorWords)
+    std::fill_n(text_words.begin() + donor_word, kDonorWordCount, donor);
+  size_t cursor = kTextWords - 128u;
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "record_replay_recursive_instruction_reservoirs", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            1u);
+  const auto routed_reservoir_count =
+      std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+               patch.original_size != 0u && patch.branch_only_continuation;
+      });
+  EXPECT_GE(routed_reservoir_count, 2u);
+  EXPECT_GE(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, kDonorWords.size());
+  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4RecordReplayRejectsFarAccessWithoutFirstHopBeforeReservingBody) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kTextWords = 40'000u;

@@ -706,7 +706,11 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
                               patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
                              patch.original_size >= sizeof(uint32_t) &&
                              patch.original_size % sizeof(uint32_t) == 0u;
-    if ((!is_lds_body && !is_flat_body && !is_moi_body) ||
+    const bool is_routed_reservoir =
+        patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+        branch_relay_reservoir_shape(patch) == BranchRelayReservoirShape::DirectInstruction &&
+        patch.original_size >= 2u * sizeof(uint32_t);
+    if ((!is_lds_body && !is_flat_body && !is_moi_body && !is_routed_reservoir) ||
         patch.trampoline_size < sizeof(uint32_t) || patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset) {
       errors.emplace_back("ConSan branch-only continuation proof found invalid geometry");
@@ -1454,10 +1458,16 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       return errors;
     }
     if (shape == BranchRelayReservoirShape::DirectInstruction) {
-      const auto entry_delta =
-          compute_sopp_branch_simm16(patch->anchor_offset, patch->trampoline_offset);
+      const uint64_t entry_target =
+          patch->branch_only_continuation && !patch->branch_only_entry_relay_offsets.empty()
+              ? patch->branch_only_entry_relay_offsets.front()
+              : patch->trampoline_offset;
+      const auto entry_delta = compute_sopp_branch_simm16(patch->anchor_offset, entry_target);
       const uint64_t return_source = patch->trampoline_offset + patch->original_size;
-      const uint64_t return_target = patch->anchor_offset + patch->original_size;
+      const uint64_t return_target =
+          patch->branch_only_continuation && !patch->branch_only_return_relay_offsets.empty()
+              ? patch->branch_only_return_relay_offsets.front()
+              : patch->anchor_offset + patch->original_size;
       const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
       if (!entry_delta || !return_delta ||
           read_word(replacement_text, patch->anchor_offset) != build_s_branch(*entry_delta, arch) ||

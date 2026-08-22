@@ -3149,10 +3149,131 @@ TEST(ConSanBranchOnlyRelayRouter, PreplannedDirectReservoirIsZeroCostRoutingCapa
     EXPECT_EQ(selected_planner.occupied_ranges().size(), occupied_before);
   };
 
-  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, 0u, 100'000u, 240'000u));
-  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, 1u, 120'000u, 300'000u));
+  const auto lower = std::ranges::min_element(reservoirs.reservoirs, {},
+                                              &BranchOnlyDirectRelayReservoir::anchor_offset);
+  const auto higher = std::ranges::max_element(reservoirs.reservoirs, {},
+                                               &BranchOnlyDirectRelayReservoir::anchor_offset);
+  const size_t lower_index = static_cast<size_t>(lower - reservoirs.reservoirs.begin());
+  const size_t higher_index = static_cast<size_t>(higher - reservoirs.reservoirs.begin());
+  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, lower_index, 100'000u, 240'000u));
+  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, higher_index, 120'000u, 300'000u));
   EXPECT_NE(direct_relay_owner(reservoirs.reservoirs[0].anchor_offset),
             direct_relay_owner(reservoirs.reservoirs[1].anchor_offset));
+}
+
+TEST(ConSanBranchOnlyRelayRouter, RoutedReservoirsRecursivelyExtendTheRelayFrontier) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kExcluded = 0x3000u;
+  constexpr size_t kTextWords = 100'000u;
+  constexpr std::array<size_t, 3> kDonorWords = {10'000u, 40'000u, 70'000u};
+  constexpr size_t kDonorWordCount = 16u;
+  constexpr uint64_t kGeneratedBankBytes = 200'000u;
+  constexpr uint64_t kGeneratedRelayStride = 16'384u;
+
+  std::vector<uint32_t> words(kTextWords, kExcluded);
+  for (size_t donor_word : kDonorWords)
+    std::fill_n(words.begin() + donor_word, kDonorWordCount, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  class ExcludedRelayTestDecoder : public RelayTestDecoder {
+  public:
+    DecodeResult decode(const rj_code_binary_inst_t *word,
+                        const DecodeErrorEmitter &emit_error) override {
+      if (*word == kExcluded)
+        return std::make_unique<RelayTestInstruction>("ds_read_b32", 4, 0u, std::nullopt, word);
+      return RelayTestDecoder::decode(word, emit_error);
+    }
+  } decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  ASSERT_TRUE(planner.reserve_appended_prefix(kGeneratedBankBytes));
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay = relay_test_text(object).size(); relay < planner.appended_end();
+       relay += kGeneratedRelayStride) {
+    for (uint64_t word = 0u; word < kDonorWordCount; ++word) {
+      ASSERT_TRUE(
+          router.offer(relay + word * sizeof(uint32_t), BranchOnlyRelayProvenance::GeneratedBank));
+    }
+  }
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  std::string error;
+
+  {
+    DbiPatchPlacementPlanner premise_planner = planner;
+    BranchOnlyRelayRouter premise_router = router;
+    const uint64_t anchor = kDonorWords.back() * sizeof(uint32_t);
+    const uint64_t original_size = kDonorWordCount * sizeof(uint32_t);
+    const auto placement = premise_planner.plan_indirect_appended(
+        anchor, original_size, original_size + sizeof(uint32_t), &error);
+    ASSERT_TRUE(placement) << error;
+    const auto route = premise_router.plan_pair(premise_planner, anchor, placement->body_offset,
+                                                placement->body_offset + original_size,
+                                                anchor + original_size, &error);
+    ASSERT_TRUE(route) << error;
+  }
+
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u,
+                                            kDonorWordCount - 1u, planner, reservoirs, &error))
+      << error;
+  ASSERT_EQ(reservoirs.reservoirs.size(), kDonorWords.size());
+  ASSERT_TRUE(std::ranges::all_of(
+      reservoirs.reservoirs, [](const auto &reservoir) { return reservoir.route.has_value(); }));
+  for (size_t index = 1u; index < reservoirs.reservoirs.size(); ++index) {
+    EXPECT_GT(reservoirs.reservoirs[index - 1u].anchor_offset,
+              reservoirs.reservoirs[index].anchor_offset);
+  }
+
+  const BranchOnlyDirectRelayReservoir &earliest = reservoirs.reservoirs.back();
+  const uint64_t selected_relay = earliest.anchor_offset + sizeof(uint32_t);
+  const std::array selected_claim = {BranchOnlyRelayClaim{
+      .offset = selected_relay,
+      .provenance = BranchOnlyRelayProvenance::OwnedReservoir,
+      .owner_affinity = BranchOnlyRelayOwnerIdentity::direct_reservoir(earliest.anchor_offset),
+      .owner_materialization = BranchOnlyRelayOwnerMaterialization::Paid,
+  }};
+  ASSERT_TRUE(reservoirs.mark_claims_used(selected_claim, &error)) << error;
+  EXPECT_TRUE(std::ranges::all_of(reservoirs.reservoirs,
+                                  [](const auto &reservoir) { return reservoir.used; }));
+}
+
+TEST(ConSanBranchOnlyRelayRouter, RoutedReservoirDoesNotConsumePristineNopCapacity) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kExcluded = 0x3000u;
+  constexpr size_t kTextWords = 100'000u;
+  constexpr size_t kDonorWord = 10'000u;
+  constexpr size_t kDonorWordCount = 16u;
+  constexpr std::array<uint64_t, 4> kPristineRelays = {140'000u, 140'004u, 270'000u, 270'004u};
+
+  std::vector<uint32_t> words(kTextWords, kExcluded);
+  std::fill_n(words.begin() + kDonorWord, kDonorWordCount, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  class ExcludedRelayTestDecoder : public RelayTestDecoder {
+  public:
+    DecodeResult decode(const rj_code_binary_inst_t *word,
+                        const DecodeErrorEmitter &emit_error) override {
+      if (*word == kExcluded)
+        return std::make_unique<RelayTestInstruction>("ds_read_b32", 4, 0u, std::nullopt, word);
+      return RelayTestDecoder::decode(word, emit_error);
+    }
+  } decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : kPristineRelays)
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::PristineNop));
+  const size_t available_before = router.available_count();
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  std::string error;
+
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u,
+                                            kDonorWordCount - 1u, planner, reservoirs, &error))
+      << error;
+  EXPECT_TRUE(reservoirs.reservoirs.empty());
+  EXPECT_TRUE(reservoirs.reservoir_by_relay.empty());
+  EXPECT_EQ(router.available_count(), available_before);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, DirectReservoirFailureRollsBackTheWholeCall) {
@@ -3191,12 +3312,14 @@ TEST(ConSanBranchOnlyRelayRouter, InventoriesUsedAndUnusedDirectReservoirFootpri
           .anchor_offset = 64u,
           .original_words = std::vector<uint32_t>(16u),
           .placement = {},
+          .route = std::nullopt,
           .used = true,
       },
       BranchOnlyDirectRelayReservoir{
           .anchor_offset = 256u,
           .original_words = std::vector<uint32_t>(32u),
           .placement = {},
+          .route = std::nullopt,
           .used = false,
       },
   };
@@ -3228,6 +3351,7 @@ TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) 
               .return_branch_offset = kBody + kOriginalSize,
               .return_target = kAnchor + kOriginalSize,
           },
+      .route = std::nullopt,
       .used = true,
   };
   // Model an unrelated appended allocation before this reservoir. Emission is
