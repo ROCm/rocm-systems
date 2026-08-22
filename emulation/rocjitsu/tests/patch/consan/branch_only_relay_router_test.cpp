@@ -3276,6 +3276,73 @@ TEST(ConSanBranchOnlyRelayRouter, RoutedReservoirsRecursivelyExtendTheRelayFront
                                   [](const auto &reservoir) { return reservoir.used; }));
 }
 
+TEST(ConSanBranchOnlyRelayRouter, DirectReservoirDemandCapacityMustHoldAcrossEveryCut) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kExcluded = 0x3000u;
+  constexpr size_t kTextWords = 100'000u;
+  constexpr size_t kDonorWords = 16u;
+  constexpr size_t kTargetRelayCount = 2u * (kDonorWords - 1u);
+  constexpr std::array<size_t, 6> kSufficientDonors = {
+      30'000u, 31'000u, 60'000u, 61'000u, 90'000u, 91'000u,
+  };
+
+  const auto plan = [&](bool sufficient_final_cut) {
+    std::vector<uint32_t> words(kTextWords, kExcluded);
+    for (size_t donor = 0u; donor < kSufficientDonors.size(); ++donor) {
+      // The insufficient case removes half the capacity from the cut nearest
+      // appended text. Capacity in the two earlier cuts cannot compensate for
+      // that bottleneck because every entry and return route crosses it.
+      if (!sufficient_final_cut && donor == kSufficientDonors.size() - 1u)
+        continue;
+      std::fill_n(words.begin() + kSufficientDonors[donor], kDonorWords, kRelayTestDonor);
+    }
+    words.push_back(kRelayTestEnd);
+    RelayTestCodeObject object(std::move(words));
+    class ExcludedRelayTestDecoder : public RelayTestDecoder {
+    public:
+      DecodeResult decode(const rj_code_binary_inst_t *word,
+                          const DecodeErrorEmitter &emit_error) override {
+        if (*word == kExcluded) {
+          return std::make_unique<RelayTestInstruction>("ds_read_b32", 4, 0u, std::nullopt, word);
+        }
+        return RelayTestDecoder::decode(word, emit_error);
+      }
+    } decoder;
+    auto blocks = BasicBlock::build(object, decoder, kArch);
+    const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+    DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter router;
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
+
+    EXPECT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                              /*route_frontier_source=*/0u, kTargetRelayCount,
+                                              planner, reservoirs, &error))
+        << error;
+    return reservoirs;
+  };
+
+  const BranchOnlyDirectRelayReservoirSet sufficient = plan(true);
+  ASSERT_EQ(sufficient.reservoirs.size(), kSufficientDonors.size());
+  EXPECT_EQ(sufficient.reservoir_by_relay.size(), kSufficientDonors.size() * (kDonorWords - 1u));
+  EXPECT_EQ(
+      std::ranges::min(sufficient.reservoirs, {}, &BranchOnlyDirectRelayReservoir::anchor_offset)
+          .anchor_offset,
+      kSufficientDonors.front() * sizeof(uint32_t));
+  EXPECT_EQ(std::ranges::count_if(sufficient.reservoirs,
+                                  [](const BranchOnlyDirectRelayReservoir &reservoir) {
+                                    return reservoir.route.has_value();
+                                  }),
+            4u);
+
+  const BranchOnlyDirectRelayReservoirSet insufficient = plan(false);
+  ASSERT_EQ(insufficient.reservoirs.size(), 1u);
+  EXPECT_EQ(insufficient.reservoirs.front().anchor_offset,
+            kSufficientDonors[kSufficientDonors.size() - 2u] * sizeof(uint32_t));
+  EXPECT_EQ(insufficient.reservoir_by_relay.size(), kDonorWords - 1u);
+  EXPECT_FALSE(insufficient.reservoirs.front().route.has_value());
+}
+
 TEST(ConSanBranchOnlyRelayRouter, RoutedReservoirDoesNotConsumePristineNopCapacity) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t kExcluded = 0x3000u;

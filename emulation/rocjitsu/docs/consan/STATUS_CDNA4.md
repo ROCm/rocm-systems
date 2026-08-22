@@ -1956,14 +1956,41 @@ and leaves every reservoir unused; the current rule passes final validation.
 
 A debugger stop at the large TopK planning call confirms that the current rule
 sees all 6,908 access demands and 4,680 barrier demands, with the earliest
-source at `.text` offset `0x23fcc`. Discovery nevertheless finds only the same
-400 legal donor reservoirs, clustered around offsets `0xe69878` through
-`0xe85a5c`; no safe relocatable run bridges that donor-free gap. All 400 are
-therefore pruned unused after the barrier batch rejects every affected entry
-route. This is now direct evidence for the deeper code-layout frontier rather
-than a missing cross-pass ownership or demand-accounting rule, so the cell
-remains orange and another long physical run is deferred until that design
-changes.
+source at `.text` offset `0x23fcc`. A complete inventory finds 57,155 legal
+reservoir candidates throughout `.text`, correcting the earlier inference that
+the 400 adopted reservoirs were the complete donor population. The limiting
+fact is instead a mandatory terminal branch-range cut: every affected access
+and barrier needs independent entry and return paths across that cut, for
+`2 * (6,908 + 4,680) = 23,176` relay words. The 400 reservoirs reachable while
+the recursive frontier advances to approximately `.text+0xe66204` provide only
+13,688 relay words, a deficit of 9,488. The final bounded scan examines 204
+candidates in that cut and rejects none for overlap, placement, routing, or
+dependency; all 204 have already been adopted. Capacity earlier in the object
+cannot compensate because every appended entry and return route must first
+cross this bottleneck.
+
+The paired host regression
+`DirectReservoirDemandCapacityMustHoldAcrossEveryCut` retains that
+architecture-independent planning invariant. Its sufficient member provides
+two 16-word donors in each of three recursive cuts and requires all six
+reservoirs, 90 relay words, and four recursively routed donors to reach the
+earliest cut. Its adjacent insufficient member removes half the terminal-cut
+capacity while retaining surplus donors in both earlier cuts; planning must
+stop at one local reservoir rather than falsely treating earlier capacity as a
+route. The focused test passes in 24 ms. The existing checked-in
+`CdnaRecordReplayLongRangeFullPressure` correct/incorrect device pair remains
+the observable TopK-derived contract for exact execution, no clean diagnostic,
+and the missing-publication conflict. Inflating a device fixture until it needs
+23,176 prototype relay paths would freeze an incidental implementation layout,
+so the distinct cut-capacity rule belongs in the host planner suite.
+
+This is direct evidence for a deeper routing/code-layout ABI frontier rather
+than missing candidate discovery, cross-pass ownership, demand accounting, or
+search effort. A production repair must either reduce the number of independent
+far-cut routes--for example through owner-local gateways or shared dispatch--or
+provide at least 9,488 additional legal relay words in the limiting cut. The
+cell remains orange, and another long physical run is deferred until such a
+design changes the capacity equation.
 
 ### 2026-08-21 PyTorch norm/softmax Record/Replay barrier-only validation
 

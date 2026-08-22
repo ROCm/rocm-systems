@@ -45,7 +45,42 @@ choices. The working-loop rules below are binding preparation requirements and
 feed the exit criteria; they are not merely suggested ways of organizing
 prototype fixes.
 
-### Acknowledged working contract
+### Acknowledged directives and working contract
+
+Section 1 explicitly acknowledges all of the preparation directives:
+
+- keep the branch integrated with the freshly fetched `origin/develop`, repair
+  all resulting breakage, and regression-test every behavioral integration
+  defect;
+- treat comprehensive host-unit and checked-in device tests as the primary
+  deliverable because they, rather than the soon-to-be-replaced prototype, are
+  the automatic iteration mechanism for section 2;
+- advance both the CDNA4 and gfx1250 end-to-end ledgers, updating each ledger as
+  its evidence changes;
+- prioritize engine columns in the strict order Record/Replay, Sampled,
+  SuperCollider, Inline Shadow, then lift the floor within the active column in
+  the strict order red, orange, yellow, green;
+- after every applicable cell first becomes green, revalidate the complete set
+  of greens together instead of relying on evidence accumulated across
+  unrelated revisions;
+- remain tactical about long-running tests: investigate abnormal slowness when
+  useful, otherwise record and defer the expensive cell rather than repeatedly
+  waiting without learning, while retaining it as an exit debt;
+- turn every useful end-to-end investigation into a focused host-unit
+  regression, a checked-in correct/incorrect device pair, or both, and regard a
+  prototype fix without that durable behavioral contract as incomplete;
+- audit existing as well as new ConSan tests for meaningful transport across
+  CDNA3/4/5 and RDNA3/4, adapting target-native code instead of limiting
+  transport to the historical `gfx950`-to-`gfx942` pattern; and
+- use fast host and RocJitsu-emulated tests in the tight loop, temporarily omit
+  serialized physical `gfx950` when its latency is disproportionate, and still
+  run the complete simulator/physical matrix periodically and at final
+  qualification.
+
+Tactical deferral can change the order in which useful evidence is gathered,
+but it never lowers the exit bar. Likewise, the CDNA4 catch-up bias guides time
+allocation without changing the engine-first, severity-second priority or
+allowing gfx1250 to starve.
 
 The following rules jointly define the preparation loop and its priorities.
 None is optional merely because another rule currently offers faster visible
@@ -191,6 +226,15 @@ cells repaired.
    75% CDNA4 / 25% gfx1250 time allocation without allowing either ledger to
    stall. Once every applicable cell is green, make a fresh global pass over
    all green cells rather than relying on accumulated historical evidence.
+   The current CDNA4 `torch.topk` Record/Replay orange is a deliberately
+   retained routing-ABI design debt, not an invitation to repeat the same long
+   run: its terminal branch-range cut supplies 13,688 relay words for 23,176
+   required entry/return paths. The paired host regression owns that
+   cross-cut-capacity invariant, while the existing TopK-derived device pair
+   owns observable correct/incorrect behavior. Resume the E2E row after an
+   owner-local gateway, shared-dispatch, or equivalent design changes that
+   capacity equation; meanwhile continue to the next useful Record/Replay
+   floor item.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in
