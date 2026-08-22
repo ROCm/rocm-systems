@@ -583,38 +583,33 @@ at 251,986,104 bytes and has zero live bytes or cleanup failures afterward;
 both physical-GPU health probes pass. All recorded source checkouts are clean,
 so the Record/Replay cell is green.
 
-### 2026-08-21 post-merge Hip-MOI tree atomic-OR simulator limitation
+### 2026-08-22 post-merge Hip-MOI tree atomic-OR prerequisite repair
 
-After merging `origin/develop`, the current broad non-device gate selects 1,627
-tests and passes 1,626, with exactly one failure:
-`ConSanGfx950HipMoiSim.TreeAtomicOr`. The original Hip-MOI correct workload
-still passes directly on the physical gfx950 in 0.12 seconds, and its paired
-incorrect workload also retains the expected physical diagnostic. The failure
-therefore does not change any physical ConSan matrix cell above.
+The post-merge broad non-device gate originally selected 1,581 tests and passed
+1,580, with `ConSanGfx950HipMoiSim.TreeAtomicOr` as its only failure. The
+external Hip-MOI correct workload produced 512 false conflicts in RocJitsu
+simulation even though its exact numerical oracle passed; its relaxed negative
+companion and both workloads on physical gfx950 behaved as expected.
 
-The RocJitsu simulation reproducer fails only the external Hip-MOI correct
-workload, with 512 false conflicts; its numerical oracle passes, and the
-relaxed negative workload passes. Instrumenting Hip-MOI's metadata protocol
-showed that all four producer release records are eventually published, but
-the final subgroup imports only producer 0's record: Hip-MOI's generic atomic
-acquire lookup stops as soon as *any* matching release record exists, before
-producers 1 and 2 have published their post-atomic metadata under this legal
-RocJitsu interleaving. Disabling Hip-MOI's lookup cache does not alter the
-outcome, so this is not stale cache state. At the final acquire, the simulator
-therefore observes per-producer tokens `[2, 0, 0, 0]`, whereas the physical
-gfx950 run observes `[2, 2, 2, 0]`.
+The failure was in Hip-MOI's metadata protocol rather than in ConSan or the
+simulator. All producer release RMWs were visible and all four metadata records
+were eventually published, but the final subgroup imported only producer 0's
+record. The generic acquiring-RMW path had a bounded four-probe window to cover
+post-RMW metadata publication, yet returned as soon as *any* matching producer
+was found. Under RocJitsu's legal interleaving, that return occurred before
+producers 1 and 2 published, yielding per-producer epoch tokens `[2, 0, 0, 0]`
+instead of `[2, 2, 2, 0]`.
 
-RocJitsu must not constrain legal scheduling merely to hide this external
-metadata-publication race. The corresponding checked-in ConSan tree atomic-OR
-correct/incorrect behavioral-contract pair passes in gfx950 simulation for the
-baseline and all four engines (10/10 tests), directly guarding ConSan's
-architecture behavior. The remaining external smoke failure is recorded as an
-upstream Hip-MOI protocol prerequisite rather than an emulator or ConSan
-regression; resolving it requires making Hip-MOI wait for all applicable
-post-atomic publishers instead of returning after the first record. A temporary
-diagnostic experiment that accumulated all retry probes instead of returning
-after the first hit produced `[2, 2, 2, 0]` and made the simulator test pass;
-that external Hip-MOI edit was then reverted and is not part of this branch.
+Hip-MOI commit `eef1431` (`Fix multi-producer atomic acquire retries`) now
+consumes the entire bounded retry window and accumulates every producer that
+publishes during it. This preserves the fixed bound and does not constrain
+RocJitsu scheduling. After rebuilding the gfx950 Hip-MOI fixture, the simulated
+tree atomic-OR correct/incorrect pair passes 2/2 in 0.70 seconds. Four focused
+physical gfx950 atomic suites, including that same pair, pass 4/4 under the
+physical-GPU lock. The checked-in ConSan `TreeAtomicOr` correct/incorrect pair
+continues to guard the sanitizer behavior across the baseline and all four
+engines. The integration-gate failure is resolved without a ConSan
+implementation change.
 
 ### 2026-08-21 Sampled independent scalar-proof repair
 
