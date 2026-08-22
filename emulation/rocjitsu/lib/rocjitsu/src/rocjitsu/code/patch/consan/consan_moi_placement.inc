@@ -4229,7 +4229,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
     const bool supports_compact_scalar_spill =
         (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) &&
-        instrumentation::is_admitted_arch(arch);
+        (instrumentation::is_admitted_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5);
     if (!selected && supports_compact_scalar_spill && address_free_scratch_private_limit(arch)) {
       const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
         return moi_scalar_contexts_conflict_with_physical_vcc(component_contexts->summaries, base,
@@ -4299,7 +4299,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // branch relays. Unlike the compact scalar-spill path above, this remains
     // valid without a dead indirect-PC pair or SCC slot.
     if (!selected && supports_compact_scalar_spill &&
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        (instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
         address_free_scratch_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
           !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
@@ -4350,6 +4350,14 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
         selected = candidate;
         branch_only_scalar_spill = true;
+        // A failed compact-router attempt may have found only a PC/SCC
+        // prefix. The branch-only ABI uses no indirect-router state; do not
+        // leak that abandoned partial tuple into the resolved assignment.
+        spill_pc.reset();
+        spill_call_return.reset();
+        spill_scc.reset();
+        spill_key.reset();
+        spill_visible.reset();
       }
     }
     if (!selected) {

@@ -5073,6 +5073,12 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   atomic_plan.text_offset = 0x40;
   atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
   atomic_plan.reason = rocjitsu::ConSanRegisterPlanReason::ForbiddenOverlap;
+  atomic_plan.scratch_vgpr_count = 10;
+  atomic_plan.current_vgpr_count = 64;
+  atomic_plan.max_referenced_vgpr_count = 61;
+  atomic_plan.ordinary_vgpr_limit = 256;
+  atomic_plan.required_vgpr_count = 64;
+  atomic_plan.owner_descriptor_file_offsets = {0x100};
   atomic_plan.alternatives = {
       {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
        .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
@@ -5087,6 +5093,13 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   fence_plan.text_offset = 0x60;
   fence_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
   fence_plan.reason = rocjitsu::ConSanRegisterPlanReason::NoLegalWindow;
+  fence_plan.scratch_vgpr_count = 8;
+  fence_plan.current_vgpr_count = 256;
+  fence_plan.max_referenced_vgpr_count = 256;
+  fence_plan.ordinary_vgpr_limit = 256;
+  fence_plan.required_vgpr_count = 256;
+  fence_plan.owner_descriptor_file_offsets = {0x200, 0x300};
+  fence_plan.has_indirect_vgpr_access = true;
   fence_plan.alternatives = {
       {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
        .source = rocjitsu::ConSanRegisterAllocationSource::Unsupported,
@@ -5109,6 +5122,18 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   EXPECT_NE(log.find("alternative_attempts=5 alternative_selected=1 "
                      "alternative_rejected=1 alternative_superseded=1 "
                      "alternative_contributed=1 alternative_vetoed=1"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("resource-failure reader=101 site=atomic reason=forbidden_overlap count=1 "
+                     "scratch_vgprs=10..10 current_vgprs=64..64 "
+                     "max_referenced_vgprs=61..61 ordinary_vgpr_limit=256..256 "
+                     "required_vgprs=64..64 owners=1..1 indirect_vgprs=false"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("resource-failure reader=101 site=fence reason=no_legal_window count=1 "
+                     "scratch_vgprs=8..8 current_vgprs=256..256 "
+                     "max_referenced_vgprs=256..256 ordinary_vgpr_limit=256..256 "
+                     "required_vgprs=256..256 owners=2..2 indirect_vgprs=true"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("attempt=0 kind=guest_operand_overlap_spill scratch_count=17 "

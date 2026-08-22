@@ -5151,7 +5151,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
   }));
 }
 
-TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelper) {
+TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_wave32 = true;
   fixture.second_wave32 = true;
@@ -5182,16 +5182,31 @@ TEST(ConSanMoi, RecordReplayOwnerLocalExecSaveRequiresCommonWindowForSharedHelpe
            plan.owner_descriptor_file_offsets.size() == 2u;
   });
   ASSERT_NE(shared_plan, result.resource_plans.end());
-  EXPECT_EQ(shared_plan->source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(shared_plan->reason, ConSanRegisterPlanReason::ForbiddenOverlap);
-  // The shared helper has one text body. Its callers' disjoint safe windows
-  // must not be represented as two incompatible per-owner assignments.
-  EXPECT_TRUE(std::ranges::none_of(
-      result.resolved_moi_transient_sgpr_assignments, [&](const auto &assignment) {
-        return std::ranges::find(shared_plan->owner_descriptor_file_offsets,
-                                 assignment.descriptor_file_offset) !=
-               shared_plan->owner_descriptor_file_offsets.end();
-      }));
+  EXPECT_NE(shared_plan->source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(shared_plan->reason, ConSanRegisterPlanReason::None);
+
+  // The shared helper has one text body. Its callers cannot use incompatible
+  // liveness-dead windows, but they can share one borrowed window because the
+  // branch-only route preserves that complete window before using it.
+  const ConSanMoiTransientSgprAssignment *common = nullptr;
+  for (uint64_t owner : shared_plan->owner_descriptor_file_offsets) {
+    const auto assignment =
+        std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                          &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+    ASSERT_NE(assignment, result.resolved_moi_transient_sgpr_assignments.end());
+    EXPECT_TRUE(assignment->spill_backed);
+    EXPECT_TRUE(assignment->branch_only_scalar_spill);
+    EXPECT_FALSE(assignment->indirect_pc_sgpr);
+    EXPECT_FALSE(assignment->indirect_scc_sgpr);
+    if (common)
+      EXPECT_EQ(assignment->exec_save_sgpr, common->exec_save_sgpr);
+    else
+      common = &*assignment;
+  }
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
@@ -5690,7 +5705,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   EXPECT_EQ(island_words[1], build_s_getpc_b64(*dense_assignment.indirect_pc_sgpr, kArch));
 }
 
-TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
+TEST(ConSanMoi, RecordReplayUsesBranchOnlySpillWithoutDeadRouterScalars) {
   const auto run = [](std::span<const uint16_t> dead) {
     std::vector<uint32_t> words;
     for (uint32_t index = 0; index < 9u; ++index) {
@@ -5715,24 +5730,40 @@ TEST(ConSanMoi, RecordReplayRejectsSpillRouterWithoutDeadPairAndScalars) {
     return try_patch_consan(make_gfx1250_code_object(words), options);
   };
 
-  // No aligned pair is dead, so the router cannot hold a PC.
+  const auto expect_branch_only = [](const ConSanResult &result) {
+    EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+    const ConSanMoiTransientSgprAssignment &assignment =
+        result.resolved_moi_transient_sgpr_assignments.front();
+    EXPECT_TRUE(assignment.spill_backed);
+    EXPECT_TRUE(assignment.branch_only_scalar_spill);
+    EXPECT_FALSE(assignment.indirect_pc_sgpr);
+    EXPECT_FALSE(assignment.indirect_scc_sgpr);
+    EXPECT_FALSE(assignment.dispatch_key_sgpr);
+    EXPECT_FALSE(assignment.call_return_sgpr);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                                 &ConSanPatchInfo::kind),
+              9u);
+    EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+             patch.branch_only_continuation;
+    }));
+    EXPECT_TRUE(result.final_validation_passed);
+  };
+
+  // No aligned pair is dead, so an indirect router cannot hold a PC. The
+  // complete borrowed window must instead use direct branch-only relays.
   const std::array<uint16_t, 5> no_pc_pair = {0u, 2u, 4u, 6u, 8u};
   const ConSanResult no_pc = run(no_pc_pair);
-  EXPECT_TRUE(consan_patch_succeeded(no_pc)) << testing::PrintToString(no_pc.errors);
-  EXPECT_TRUE(no_pc.resolved_moi_transient_sgpr_assignments.empty());
-  EXPECT_EQ(std::ranges::count(no_pc.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
-                               &ConSanPatchInfo::kind),
-            0u);
+  expect_branch_only(no_pc);
 
   // One dead pair and one scalar cannot retain both guest SCC and the dense
-  // dispatch key across the long jump.
+  // dispatch key across an indirect jump, so this shape uses the same direct
+  // branch-only contract.
   const std::array<uint16_t, 3> no_key_scalar = {0u, 1u, 4u};
   const ConSanResult no_key = run(no_key_scalar);
-  EXPECT_TRUE(consan_patch_succeeded(no_key)) << testing::PrintToString(no_key.errors);
-  EXPECT_TRUE(no_key.resolved_moi_transient_sgpr_assignments.empty());
-  EXPECT_EQ(std::ranges::count(no_key.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
-                               &ConSanPatchInfo::kind),
-            0u);
+  expect_branch_only(no_key);
 }
 
 TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
@@ -8159,6 +8190,55 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
   constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
   std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
       text_words, "record_replay_no_dead_transient_sgprs", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.dispatch_id_sgpr);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
+TEST(ConSanMoi, Gfx1250RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+
+  // Keep every allocatable ordinary scalar register live across the access.
+  // PyTorch TopK has independent fixed-stack owners with this shape: private
+  // spill storage is available, but no dead PC/SCC/key tuple exists for an
+  // indirect route to the appended Record/Replay body.
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  text_words[1] = 0xD8340000u;
+  text_words[2] = 0x00000000u; // ds_store_b32 v0, v0
+  size_t cursor = 3u;
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(
+      text_words, "gfx1250_record_replay_no_dead_transient_sgprs", kRdna4Wave64AllVgprsGranulated);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);

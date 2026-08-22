@@ -4790,6 +4790,78 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   resource_summary.alternative_attempts, resource_summary.alternative_selected,
                   resource_summary.alternative_rejected, resource_summary.alternative_superseded,
                   resource_summary.alternative_contributed, resource_summary.alternative_vetoed);
+      struct ResourceFailureSummary {
+        size_t count = 0;
+        uint16_t min_scratch_vgprs = std::numeric_limits<uint16_t>::max();
+        uint16_t max_scratch_vgprs = 0;
+        uint16_t min_current_vgprs = std::numeric_limits<uint16_t>::max();
+        uint16_t max_current_vgprs = 0;
+        uint16_t min_max_referenced_vgprs = std::numeric_limits<uint16_t>::max();
+        uint16_t max_max_referenced_vgprs = 0;
+        uint16_t min_ordinary_vgpr_limit = std::numeric_limits<uint16_t>::max();
+        uint16_t max_ordinary_vgpr_limit = 0;
+        uint16_t min_required_vgprs = std::numeric_limits<uint16_t>::max();
+        uint16_t max_required_vgprs = 0;
+        size_t min_owners = std::numeric_limits<size_t>::max();
+        size_t max_owners = 0;
+        bool has_indirect_vgpr_access = false;
+      };
+      constexpr size_t kResourceSiteKindCount =
+          static_cast<size_t>(rocjitsu::ConSanResourceSiteKind::Fence) + 1u;
+      constexpr size_t kRegisterPlanReasonCount =
+          static_cast<size_t>(rocjitsu::ConSanRegisterPlanReason::DynamicStack) + 1u;
+      std::array<std::array<ResourceFailureSummary, kRegisterPlanReasonCount>,
+                 kResourceSiteKindCount>
+          failure_summaries{};
+      for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
+        if (plan.source != rocjitsu::ConSanRegisterAllocationSource::Unsupported)
+          continue;
+        ResourceFailureSummary &summary = failure_summaries[static_cast<size_t>(plan.site_kind)]
+                                                           [static_cast<size_t>(plan.reason)];
+        ++summary.count;
+        summary.min_scratch_vgprs = std::min(summary.min_scratch_vgprs, plan.scratch_vgpr_count);
+        summary.max_scratch_vgprs = std::max(summary.max_scratch_vgprs, plan.scratch_vgpr_count);
+        summary.min_current_vgprs = std::min(summary.min_current_vgprs, plan.current_vgpr_count);
+        summary.max_current_vgprs = std::max(summary.max_current_vgprs, plan.current_vgpr_count);
+        summary.min_max_referenced_vgprs =
+            std::min(summary.min_max_referenced_vgprs, plan.max_referenced_vgpr_count);
+        summary.max_max_referenced_vgprs =
+            std::max(summary.max_max_referenced_vgprs, plan.max_referenced_vgpr_count);
+        summary.min_ordinary_vgpr_limit =
+            std::min(summary.min_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
+        summary.max_ordinary_vgpr_limit =
+            std::max(summary.max_ordinary_vgpr_limit, plan.ordinary_vgpr_limit);
+        summary.min_required_vgprs = std::min(summary.min_required_vgprs, plan.required_vgpr_count);
+        summary.max_required_vgprs = std::max(summary.max_required_vgprs, plan.required_vgpr_count);
+        summary.min_owners =
+            std::min(summary.min_owners, plan.owner_descriptor_file_offsets.size());
+        summary.max_owners =
+            std::max(summary.max_owners, plan.owner_descriptor_file_offsets.size());
+        summary.has_indirect_vgpr_access |= plan.has_indirect_vgpr_access;
+      }
+      for (size_t site_index = 0; site_index < kResourceSiteKindCount; ++site_index) {
+        for (size_t reason_index = 0; reason_index < kRegisterPlanReasonCount; ++reason_index) {
+          const ResourceFailureSummary &summary = failure_summaries[site_index][reason_index];
+          if (summary.count == 0)
+            continue;
+          log_message(kLogInfo,
+                      "ConSan MOI resource-failure reader=%llu site=%s reason=%s count=%zu "
+                      "scratch_vgprs=%u..%u current_vgprs=%u..%u "
+                      "max_referenced_vgprs=%u..%u ordinary_vgpr_limit=%u..%u "
+                      "required_vgprs=%u..%u owners=%zu..%zu indirect_vgprs=%s",
+                      static_cast<unsigned long long>(code_object_reader.handle),
+                      moi_resource_site_kind_name(
+                          static_cast<rocjitsu::ConSanResourceSiteKind>(site_index)),
+                      rocjitsu::consan_register_plan_reason_name(
+                          static_cast<rocjitsu::ConSanRegisterPlanReason>(reason_index)),
+                      summary.count, summary.min_scratch_vgprs, summary.max_scratch_vgprs,
+                      summary.min_current_vgprs, summary.max_current_vgprs,
+                      summary.min_max_referenced_vgprs, summary.max_max_referenced_vgprs,
+                      summary.min_ordinary_vgpr_limit, summary.max_ordinary_vgpr_limit,
+                      summary.min_required_vgprs, summary.max_required_vgprs, summary.min_owners,
+                      summary.max_owners, summary.has_indirect_vgpr_access ? "true" : "false");
+        }
+      }
       for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
         constexpr size_t kMaxLoggedResourceOwners = 8;
         std::string owner_names;
