@@ -1043,11 +1043,56 @@ struct MoiSgprRange {
 [[nodiscard]] std::optional<uint16_t>
 candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors) {
+  // Direct-to-LDS candidates materialize their implicit physical-lane address
+  // into dedicated scratch before this placeholder can be consumed.
+  if (candidate.direct_to_lds)
+    return 0u;
   if (!candidate.addr_vgpr) {
     errors.emplace_back("ConSan MOI probe requires an LDS address VGPR");
     return std::nullopt;
   }
   return *candidate.addr_vgpr;
+}
+
+[[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
+                                                            const ConSanMoiCandidate &candidate,
+                                                            uint16_t result_vgpr,
+                                                            uint16_t exec_save_sgpr,
+                                                            rj_code_arch_t arch) {
+  if (!candidate.direct_to_lds ||
+      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+    return false;
+  }
+  const uint16_t lane_stride_shift = candidate.width_bits == 32u    ? 2u
+                                     : candidate.width_bits == 96u  ? 4u
+                                     : candidate.width_bits == 128u ? 4u
+                                                                    : 0u;
+  if (lane_stride_shift == 0u)
+    return false;
+  const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kRdna4ExecLo, arch);
+  const auto activate_all_lanes =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch);
+  const auto lane_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+      result_vgpr, kScalarInlineNegativeOneOperand, scalar_positive_inline_u32(0u), arch);
+  const auto lane_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+      result_vgpr, kScalarInlineNegativeOneOperand, vector_source_vgpr(result_vgpr), arch);
+  const auto scale = instrumentation::build_v_lshlrev_b32(
+      result_vgpr, scalar_positive_inline_u32(lane_stride_shift), result_vgpr, arch);
+  const auto add =
+      instrumentation::build_v_add_u32(result_vgpr, scalar_operand_m0(arch), result_vgpr, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save_sgpr, arch);
+  if (!save_exec || !activate_all_lanes || !lane_lo || !lane_hi || !scale || !add ||
+      !restore_exec) {
+    return false;
+  }
+  words.push_back(*save_exec);
+  words.push_back(*activate_all_lanes);
+  words.insert(words.end(), lane_lo->begin(), lane_lo->end());
+  words.insert(words.end(), lane_hi->begin(), lane_hi->end());
+  words.push_back(*scale);
+  words.insert(words.end(), add->begin(), add->end());
+  words.push_back(*restore_exec);
+  return true;
 }
 
 [[nodiscard]] bool
@@ -1129,8 +1174,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
 sampled_access_can_emit_spill_over_guest_operands(const ConSanOptions &options,
                                                   const ConSanMoiCandidate &candidate) {
   return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.dst_vgpr &&
-         options.moi_owner_vgpr && !options.automatic_moi_private_epoch &&
-         !moi_uses_scalar_persistent_state(options) &&
+         !candidate.direct_to_lds && options.moi_owner_vgpr &&
+         !options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
          !candidate_requires_gfx1250_flat_offset_materialization(candidate);
 }
 
@@ -1140,7 +1185,8 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
   if (sampled_access_can_emit_spill_over_guest_operands(options, candidate))
     return true;
   if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.dst_vgpr ||
-      options.automatic_moi_private_epoch || moi_uses_scalar_persistent_state(options) ||
+      candidate.direct_to_lds || options.automatic_moi_private_epoch ||
+      moi_uses_scalar_persistent_state(options) ||
       candidate_requires_gfx1250_flat_offset_materialization(candidate)) {
     return false;
   }
@@ -1159,7 +1205,7 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
 [[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled &&
-         candidate.source == ConSanMoiCandidateSource::NativeLds &&
+         candidate.source == ConSanMoiCandidateSource::NativeLds && !candidate.direct_to_lds &&
          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
           instrumentation::is_cdna_family_arch(arch)) &&
          !candidate_requires_gfx1250_flat_offset_materialization(candidate);
@@ -1181,7 +1227,10 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
-      (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
+      ((candidate.direct_to_lds || moi_load_clobbers_address(candidate)) &&
+               flat_offset_address_count == 0u
+           ? 1u
+           : 0u) +
       flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
 }
 
@@ -1216,7 +1265,7 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
       // mode, and the persistent owner/epoch tail must not alias the bank.
       base_scratch_count + 1u +
       (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
-       : moi_load_clobbers_address(candidate)                            ? 1u
+       : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ? 1u
                                                                          : 0u) +
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
@@ -1725,7 +1774,7 @@ struct MoiOwnerRegisterReferenceSummary {
     return static_cast<uint16_t>(
         (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
         (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
-         : moi_load_clobbers_address(candidate) ||
+         : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
                  moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
              ? 1u
              : 0u) +

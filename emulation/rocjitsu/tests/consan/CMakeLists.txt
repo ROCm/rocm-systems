@@ -427,6 +427,7 @@ function(rj_add_consan_device_conformance_cases)
         list(
             APPEND _device_workloads
             "CdnaMfmaPipeline|cdna_mfma_pipeline|ConSanDeviceCdnaMfmaPipelineTest"
+            "CdnaDirectToLdsPublication|cdna_direct_to_lds_publication|ConSanDeviceCdnaDirectToLdsPublicationTest"
             "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
             "CdnaStreamkTwoTile|cdna_streamk_two_tile|ConSanDeviceCdnaStreamkTwoTileTest"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
@@ -839,6 +840,7 @@ function(rj_add_consan_device_fixture_targets target)
         list(
             APPEND _device_workload_sources
             "cdna_mfma_pipeline|cdna_mfma_pipeline_test.hip"
+            "cdna_direct_to_lds_publication|cdna_direct_to_lds_publication_test.hip"
             "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
             "cdna_streamk_two_tile|cdna_streamk_two_tile_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"

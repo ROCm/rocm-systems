@@ -884,6 +884,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const bool materialize_direct_to_lds = candidate.direct_to_lds;
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
       moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
@@ -891,9 +892,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
-  const uint16_t address_scratch_count =
-      static_cast<uint16_t>((materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u)) +
-                            (reserve_two_address_replay_scratch ? 1u : 0u));
+  const uint16_t address_scratch_count = static_cast<uint16_t>(
+      (materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u)) +
+      (materialize_direct_to_lds ? 1u : 0u) + (reserve_two_address_replay_scratch ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > 256u) {
     errors.emplace_back(options.moi_dynamic_access_records
@@ -1035,7 +1036,22 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
   // that effective address before executing the displaced guest instruction;
   // otherwise RecordReplay publishes the loaded payload as the LDS offset.
-  if (materialize_flat_offset && options.moi_dynamic_access_records) {
+  if (materialize_direct_to_lds) {
+    if (!options.moi_exec_save_sgpr) {
+      errors.emplace_back(
+          "ConSan MOI first-light direct-to-LDS probe requires an EXEC-save SGPR pair");
+      return std::nullopt;
+    }
+    const uint16_t materialized_address_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+    if (!append_materialize_direct_to_lds_address(words, candidate, materialized_address_vgpr,
+                                                  *options.moi_exec_save_sgpr, arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not materialize a direct-to-LDS "
+                          "destination");
+      return std::nullopt;
+    }
+    lds_byte_offset_vgpr = materialized_address_vgpr;
+  } else if (materialize_flat_offset && options.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
     words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,

@@ -2501,7 +2501,13 @@
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       moi_load_clobbers_address(candidate) && !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
-  if (materialize_flat_offset) {
+  if (candidate.direct_to_lds) {
+    saved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
+                                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+                                  options.moi_track_atomics) +
+                              inline_shadow_loop_scratch_count(options, candidate));
+  } else if (materialize_flat_offset) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
   } else if (spill_backed_lds_byte_offset_source) {
     // Address construction and local exchange consume the guest offset before
@@ -2593,8 +2599,22 @@
   // otherwise the loaded payload becomes the exact-shadow cell index.
   if (saved_lds_byte_offset_vgpr) {
     if (!spill_backed_lds_byte_offset_source) {
-      words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
-                                          vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+      if (candidate.direct_to_lds) {
+        if (!options.moi_exec_save_sgpr) {
+          errors.emplace_back(
+              "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
+          return std::nullopt;
+        }
+        if (!append_materialize_direct_to_lds_address(words, candidate, *saved_lds_byte_offset_vgpr,
+                                                      *options.moi_exec_save_sgpr, arch)) {
+          errors.emplace_back("ConSan MOI inline-shadow probe could not materialize a "
+                              "direct-to-LDS destination");
+          return std::nullopt;
+        }
+      } else {
+        words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
+                                            vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+      }
       if (materialize_flat_offset) {
         words.push_back(build_v_mov_b32_e32(
             static_cast<uint16_t>(*saved_lds_byte_offset_vgpr + 1u),

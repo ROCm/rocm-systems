@@ -1617,6 +1617,43 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   kernel.lds_sites.push_back(std::move(site));
 }
 
+[[nodiscard]] bool record_direct_to_lds_site(const Instruction &inst,
+                                             std::span<const uint8_t> instruction_bytes,
+                                             ConSanKernelInfo &kernel,
+                                             uint64_t instruction_text_offset,
+                                             rj_code_arch_t arch) {
+  const std::string_view mnemonic = inst.mnemonic();
+  const bool is_supported_load =
+      mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
+      mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+      !is_supported_load || instruction_bytes.size() != sizeof(cdna4::MubufMachineInst)) {
+    return false;
+  }
+
+  cdna4::MubufMachineInst raw{};
+  std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+  // In the LDS form VDATA is reserved rather than naming a VGPR. Restrict the
+  // prototype to the documented zero encoding, and to widths whose lane-slot
+  // geometry is architecturally established.
+  if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
+    return false;
+
+  ConSanLdsSite site;
+  site.kind = ConSanLdsAccessKind::Write;
+  site.supported_mvp = true;
+  site.direct_to_lds = true;
+  site.text_offset = instruction_text_offset;
+  site.file_offset = kernel.text_file_offset + instruction_text_offset;
+  site.size = static_cast<uint32_t>(inst.size());
+  site.width_bits = lds_width_bits(mnemonic);
+  // The destination is M0 plus an implicit physical-lane slot: four bytes for
+  // DWORD, sixteen for DWORDX3/DWORDX4. No address or payload VGPR is defined.
+  site.mnemonic = std::string(mnemonic);
+  kernel.lds_sites.push_back(std::move(site));
+  return true;
+}
+
 [[nodiscard]] ConSanBarrierSite::Scope barrier_scope_for_id(int32_t barrier_id) {
   switch (barrier_id) {
   case -4: // Cluster trap barrier.
@@ -2367,26 +2404,31 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
         call_targets->contains(instruction_text_offset))
       (*call_states)[instruction_text_offset] = flat_pointer_tracker;
     classify_instruction(*inst, kernel.stats);
+    const std::span<const uint8_t> instruction_bytes =
+        text.subspan(offset, static_cast<size_t>(inst_size));
+    if (record_direct_to_lds_site(*inst, instruction_bytes, kernel,
+                                  kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
+      ++kernel.stats.lds_write_count;
+    }
     record_lds_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     const std::span<const uint8_t> previous_instruction_bytes =
         previous_size == 0 ? std::span<const uint8_t>{}
                            : text.subspan(previous_offset, previous_size);
     record_barrier_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset),
-                        text.subspan(offset, static_cast<size_t>(inst_size)),
+                        instruction_bytes,
                         kernel.entry_text_offset + static_cast<uint64_t>(previous_offset),
                         previous_instruction_bytes, arch);
     record_fence_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     record_flat_site(*inst, flat_pointer_tracker, kernel,
                      kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
-                     text.subspan(offset, static_cast<size_t>(inst_size)));
+                     instruction_bytes);
     record_ordinary_memory_site(*inst, kernel,
                                 kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
-                                text.subspan(offset, static_cast<size_t>(inst_size)));
+                                instruction_bytes);
     record_atomic_site(*inst, flat_pointer_tracker, kernel,
                        kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
-                       text.subspan(offset, static_cast<size_t>(inst_size)));
-    update_flat_pointer_tracker(*inst, flat_pointer_tracker, arch,
-                                text.subspan(offset, static_cast<size_t>(inst_size)));
+                       instruction_bytes);
+    update_flat_pointer_tracker(*inst, flat_pointer_tracker, arch, instruction_bytes);
     previous_offset = offset;
     previous_size = static_cast<size_t>(inst_size);
     offset += previous_size;

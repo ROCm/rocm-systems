@@ -11,6 +11,52 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
+  constexpr auto direct_b32 = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordMubuf, {.offen = 1, .lds = 1, .vaddr = 3, .vdata = 0, .srsrc = 2});
+  constexpr auto direct_b128 = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordx4Mubuf, {.offen = 1, .lds = 1, .vaddr = 4, .vdata = 0, .srsrc = 4});
+  constexpr auto undocumented_nonzero_vdata = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordMubuf, {.offen = 1, .lds = 1, .vaddr = 6, .vdata = 9, .srsrc = 8});
+  constexpr auto undocumented_b64 = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordx2Mubuf, {.offen = 1, .lds = 1, .vaddr = 7, .vdata = 0, .srsrc = 10});
+  constexpr auto ordinary_load = cdna4::build_mubuf(
+      cdna4::kBufferLoadDwordMubuf, {.offen = 1, .lds = 0, .vaddr = 5, .vdata = 29, .srsrc = 6});
+  const std::array<uint32_t, 11> words = {direct_b32[0],
+                                          direct_b32[1],
+                                          direct_b128[0],
+                                          direct_b128[1],
+                                          undocumented_nonzero_vdata[0],
+                                          undocumented_nonzero_vdata[1],
+                                          undocumented_b64[0],
+                                          undocumented_b64[1],
+                                          ordinary_load[0],
+                                          ordinary_load[1],
+                                          build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(words, "direct_to_lds_inventory"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_write_count, 2u);
+  ASSERT_EQ(kernel.lds_sites.size(), 2u);
+  ASSERT_EQ(result.moi_candidates.size(), 2u);
+  EXPECT_EQ(kernel.lds_sites[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_TRUE(kernel.lds_sites[0].direct_to_lds);
+  EXPECT_EQ(kernel.lds_sites[0].width_bits, 32u);
+  EXPECT_FALSE(kernel.lds_sites[0].addr_vgpr.has_value());
+  EXPECT_EQ(kernel.lds_sites[1].width_bits, 128u);
+  EXPECT_FALSE(kernel.lds_sites[1].addr_vgpr.has_value());
+  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
+    EXPECT_TRUE(candidate.direct_to_lds);
+    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
+    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
+  }
+}
+
 TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   constexpr auto store = cdna5::build_vflat(cdna5::kFlatStoreB128Vflat, {.saddr = 124,
                                                                          .nv = 1,

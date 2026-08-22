@@ -2670,12 +2670,26 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   // A DS load may overwrite its own address VGPR. Snapshot that address before
   // executing the displaced instruction so sampled publication remains tied
   // to the guest access rather than to the loaded payload.
-  if (relocate_instruction && moi_load_clobbers_address(candidate) &&
+  if (relocate_instruction && (candidate.direct_to_lds || moi_load_clobbers_address(candidate)) &&
       !preserved_lds_byte_offset_vgpr) {
     const uint16_t saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
-                                        vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    if (candidate.direct_to_lds) {
+      if (!options.moi_exec_save_sgpr) {
+        errors.emplace_back(
+            "ConSan MOI sampled direct-to-LDS probe requires an EXEC-save SGPR pair");
+        return std::nullopt;
+      }
+      if (!append_materialize_direct_to_lds_address(words, candidate, saved_lds_byte_offset_vgpr,
+                                                    *options.moi_exec_save_sgpr, arch)) {
+        errors.emplace_back("ConSan MOI sampled probe could not materialize a direct-to-LDS "
+                            "destination");
+        return std::nullopt;
+      }
+    } else {
+      words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
+                                          vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
   }
   if (derived_owner_word)

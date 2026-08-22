@@ -140,6 +140,9 @@ enum class ConSanPatchPhase : uint8_t {
 struct ConSanLdsSite {
   ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
   bool supported_mvp = false;
+  /// A MUBUF load whose LDS modifier redirects the global payload to a
+  /// physical-lane slot at M0 rather than defining an ordinary VGPR result.
+  bool direct_to_lds = false;
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
@@ -331,6 +334,7 @@ struct ConSanMoiCandidate {
   std::optional<uint16_t> gfx1250_vgpr_msb_mode;
   ConSanMoiCandidateSource source = ConSanMoiCandidateSource::NativeLds;
   ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
+  bool direct_to_lds = false;
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;

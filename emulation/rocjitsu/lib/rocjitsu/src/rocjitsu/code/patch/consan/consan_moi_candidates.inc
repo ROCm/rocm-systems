@@ -314,7 +314,7 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
       !supported_atomic)
     return false;
-  return is_single_range_native_lds_mnemonic(site.mnemonic, arch) ||
+  return site.direct_to_lds || is_single_range_native_lds_mnemonic(site.mnemonic, arch) ||
          two_address_native_lds_offset_scale(site.mnemonic).has_value();
 }
 
@@ -427,6 +427,7 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.container_entry_text_offset = container_entry_text_offset;
   candidate.source = ConSanMoiCandidateSource::NativeLds;
   candidate.kind = site.kind;
+  candidate.direct_to_lds = site.direct_to_lds;
   candidate.text_offset = site.text_offset;
   candidate.file_offset = site.file_offset;
   candidate.size = site.size;
@@ -493,11 +494,12 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
     return ConSanSiteDispositionReason::InstructionOutOfBounds;
   if (candidate.width_bits == 0 || candidate.width_bits % 8u != 0)
     return ConSanSiteDispositionReason::InvalidAccessWidth;
-  if (!candidate.addr_vgpr)
+  if (!candidate.direct_to_lds && !candidate.addr_vgpr)
     return ConSanSiteDispositionReason::MissingAddressOperand;
 
   if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-    return is_single_range_native_lds_mnemonic(candidate.mnemonic, arch) ||
+    return candidate.direct_to_lds ||
+                   is_single_range_native_lds_mnemonic(candidate.mnemonic, arch) ||
                    two_address_native_lds_offset_scale(candidate.mnemonic).has_value()
                ? ConSanSiteDispositionReason::None
                : ConSanSiteDispositionReason::UnsupportedMnemonic;
@@ -637,17 +639,19 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 [[nodiscard]] bool moi_candidate_semantics_equal(const ConSanMoiCandidate &lhs,
                                                  const ConSanMoiCandidate &rhs) {
   return std::tie(lhs.in_kernel, lhs.container_entry_text_offset, lhs.gfx1250_vgpr_msb_mode,
-                  lhs.source, lhs.kind, lhs.flat_address_space_hint, lhs.text_offset,
-                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.dst_vgpr, lhs.addr_vgpr,
-                  lhs.data_vgpr, lhs.second_data_vgpr, lhs.uses_gfx1250_cluster_workgroup_id,
-                  lhs.raw_op, lhs.raw_saddr, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst,
-                  lhs.raw_ioffset, lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
+                  lhs.source, lhs.kind, lhs.direct_to_lds, lhs.flat_address_space_hint,
+                  lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits, lhs.dst_vgpr,
+                  lhs.addr_vgpr, lhs.data_vgpr, lhs.second_data_vgpr,
+                  lhs.uses_gfx1250_cluster_workgroup_id, lhs.raw_op, lhs.raw_saddr, lhs.raw_vaddr,
+                  lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset, lhs.raw_segment, lhs.raw_scope,
+                  lhs.raw_th, lhs.mnemonic) ==
          std::tie(rhs.in_kernel, rhs.container_entry_text_offset, rhs.gfx1250_vgpr_msb_mode,
-                  rhs.source, rhs.kind, rhs.flat_address_space_hint, rhs.text_offset,
-                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.dst_vgpr, rhs.addr_vgpr,
-                  rhs.data_vgpr, rhs.second_data_vgpr, rhs.uses_gfx1250_cluster_workgroup_id,
-                  rhs.raw_op, rhs.raw_saddr, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst,
-                  rhs.raw_ioffset, rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
+                  rhs.source, rhs.kind, rhs.direct_to_lds, rhs.flat_address_space_hint,
+                  rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits, rhs.dst_vgpr,
+                  rhs.addr_vgpr, rhs.data_vgpr, rhs.second_data_vgpr,
+                  rhs.uses_gfx1250_cluster_workgroup_id, rhs.raw_op, rhs.raw_saddr, rhs.raw_vaddr,
+                  rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset, rhs.raw_segment, rhs.raw_scope,
+                  rhs.raw_th, rhs.mnemonic);
 }
 
 [[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
@@ -747,6 +751,8 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
     return std::nullopt;
 
   if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
+    if (candidate.direct_to_lds)
+      return std::vector<ConSanMoiAccessRange>{{0u, *byte_count}};
     const std::optional<uint32_t> word0 = read_u32(bytes, candidate.file_offset);
     if (!word0)
       return std::nullopt;
