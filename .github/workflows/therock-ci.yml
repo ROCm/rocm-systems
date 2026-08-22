@@ -232,6 +232,19 @@ jobs:
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
 
+  # CPU-only RCCL host unit tests (no GPU, no TheRock build artifacts), so this
+  # runs in parallel with the GPU jobs rather than waiting on a package build.
+  # Gated on the same run_linux_rccl_ci signal as therock-rccl-ci-linux above,
+  # which is true exactly when projects/rccl/ changed -- see check_rccl_changes()
+  # in .github/scripts/therock_configure_ci.py.
+  rccl-host-unit-tests:
+    name: RCCL Host Unit Tests
+    needs: setup
+    if: ${{ needs.setup.outputs.run_linux_rccl_ci == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rccl-host-unit-tests.yml
+
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
@@ -262,6 +275,7 @@ jobs:
       - therock-ci-linux
       - therock-build-linux-mi455
       - therock-rccl-ci-linux
+      - rccl-host-unit-tests
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:

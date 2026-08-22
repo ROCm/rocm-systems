@@ -1,28 +1,24 @@
 name: RCCL host unit tests
 
-# Builds and runs RCCL's CPU-only host unit-test binary (rccl-HostUnitTests, added
-# in PR #9320) on every PR to develop touching projects/rccl/**. No GPU or network
-# hardware is required: the binary is compiled with `hipcc --offload-host-only` and
-# links no HIP/ROCm runtime. The workflow's own path is in the trigger so it
-# self-runs on the PR that introduces it. JIRA ID: AICOMRCCL-1711
+# Builds and runs RCCL's CPU-only host unit-test binaries (rccl-HostUnitTests plus
+# the host-only microtests). No GPU or network hardware is required: they are
+# compiled with `hipcc --offload-host-only` and link no HIP/ROCm runtime.
+# JIRA ID: AICOMRCCL-1711
 #
-# TODO(AICOMRCCL-1711): fold this into TheRock's packaged CI once the host-test
-# gate stabilizes
+# Invoked by TheRock CI (.github/workflows/therock-ci.yml), which gates this on
+# `run_linux_rccl_ci` -- i.e. only when projects/rccl/ changed. That workflow has
+# no `paths:` filter of its own, so its required `TheRock CI Summary` check always
+# reports; folding in here is what makes a host-test failure block a merge without
+# stalling PRs that never touch RCCL.
+#
+# Not triggered directly on `pull_request`: doing so alongside the TheRock CI call
+# would run the whole pipeline twice on every RCCL PR.
 
 on:
-  pull_request:
-    branches:
-      - develop
-    paths:
-      - 'projects/rccl/**'
-      - '.github/workflows/rccl-host-unit-tests.yml'
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
 
 jobs:
   rccl-host-unit-tests:
