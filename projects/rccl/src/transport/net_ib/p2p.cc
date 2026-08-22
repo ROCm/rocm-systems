@@ -114,11 +114,12 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   // Cumulative wr_id across requests; placed on the final signaled WR so
   // completion accounting matches ncclIbMultiSend.
   uint64_t wr_id = 0ULL;
-  for (int r = 0; r < nreqs; r++) wr_id += (uint64_t)(slot & 0xff) << (r*8);
+  for (int r = 0; r < nreqs; r++) wr_id += (uint64_t)(slot & 0xff) << (r * 8);
 
   uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
   bool needSizesWr = (nreqs > 1);
-  bool arExtra = (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold);
+  bool arExtra =
+    (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold);
   bool extraImmWr = needSizesWr || arExtra;   // dedicated final WR carries the imm
 
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
@@ -146,13 +147,14 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 
     // Selective retransmission: skip already-delivered QPs, keeping offsets synced.
     if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
-      for (int r = 0; r < nreqs; r++) sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
+      for (int r = 0; r < nreqs; r++)
+        sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
       continue;
     }
 
     int w = 0;
     for (int r = 0; r < nreqs; r++) {
-      uint64_t localBase  = (uintptr_t) reqs[r]->send.data;
+      uint64_t localBase = (uintptr_t)reqs[r]->send.data;
       uint64_t remoteBase = slots[r].addr;
       struct ncclIbMrHandle* mh = reqs[r]->send.mh;
 
@@ -162,12 +164,18 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       uint64_t localReqOff = 0;
       if (mh && mh->nSegments > 1) {
         nLocal = mh->nSegments;
-        for (int s = 0; s < nLocal; s++) { lVA[s] = mh->segStart[s]; lOff[s] = mh->segStart[s] - mh->segStart[0]; }
+        for (int s = 0; s < nLocal; s++) {
+          lVA[s] = mh->segStart[s];
+          lOff[s] = mh->segStart[s] - mh->segStart[0];
+        }
         lOff[nLocal] = lOff[nLocal - 1] + mh->segLen[nLocal - 1];
         if (localBase < mh->segStart[0]) return ncclInternalError;
         localReqOff = localBase - mh->segStart[0];
       } else {
-        nLocal = 1; lVA[0] = localBase; lOff[0] = 0; lOff[1] = reqs[r]->send.size;
+        nLocal = 1;
+        lVA[0] = localBase;
+        lOff[0] = 0;
+        lOff[1] = reqs[r]->send.size;
       }
       // Remote segment tables published by the receiver in the CTS FIFO.
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
@@ -189,7 +197,10 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
         rOff[nRemote] = remoteReqEnd;
       } else {
-        nRemote = 1; rVA[0] = remoteBase; rOff[0] = 0; rOff[1] = slots[r].size;
+        nRemote = 1;
+        rVA[0] = remoteBase;
+        rOff[0] = 0;
+        rOff[1] = slots[r].size;
       }
 
       if (chunkLen[r] == 0) {
@@ -210,16 +221,19 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         w++;
       } else {
         struct ncclIbSegSlice slices[2 * NCCL_IB_MAX_SEGMENTS];
-        int ns = ncclIbSplitTransferAtOffsets(
-            nLocal, lVA, lOff, nRemote, rVA, rOff,
-            localReqOff + sendOffsets[r], remoteReqOff + sendOffsets[r],
-            chunkLen[r], slices, 2 * NCCL_IB_MAX_SEGMENTS);
+        int ns =
+          ncclIbSplitTransferAtOffsets(nLocal, lVA, lOff, nRemote, rVA, rOff, localReqOff + sendOffsets[r],
+                                       remoteReqOff + sendOffsets[r], chunkLen[r], slices, 2 * NCCL_IB_MAX_SEGMENTS);
         if (ns <= 0) {
-          WARN("NET/IB: multi-segment send split failed (data=%p off=%u len=%u)", reqs[r]->send.data, sendOffsets[r], chunkLen[r]);
+          WARN("NET/IB: multi-segment send split failed (data=%p off=%u len=%u)", reqs[r]->send.data, sendOffsets[r],
+               chunkLen[r]);
           return ncclInternalError;
         }
         for (int k = 0; k < ns; k++) {
-          if (w >= NCCL_IB_MAX_WRS_PER_SEND) { WARN("NET/IB: multi-segment send exceeded WR pool (%d)", NCCL_IB_MAX_WRS_PER_SEND); return ncclInternalError; }
+          if (w >= NCCL_IB_MAX_WRS_PER_SEND) {
+            WARN("NET/IB: multi-segment send exceeded WR pool (%d)", NCCL_IB_MAX_WRS_PER_SEND);
+            return ncclInternalError;
+          }
           struct ibv_send_wr* wr = comm->wrs + w;
           struct ibv_sge* sge = comm->sges + w;
           memset(wr, 0, sizeof(struct ibv_send_wr));
@@ -227,10 +241,12 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           wr->send_flags = 0;
           wr->wr_id = wr_id;
           wr->wr.rdma.remote_addr = slices[k].remoteAddr;
-          wr->wr.rdma.rkey = slots[r].nSegments > 1 ? slots[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
+          wr->wr.rdma.rkey =
+            slots[r].nSegments > 1 ? slots[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
           sge->addr = slices[k].localAddr;
           sge->length = slices[k].len;
-          sge->lkey = (mh && mh->nSegments > 1) ? mh->segMrs[slices[k].localSeg][devIndex]->lkey : reqs[r]->send.lkeys[devIndex];
+          sge->lkey =
+            (mh && mh->nSegments > 1) ? mh->segMrs[slices[k].localSeg][devIndex]->lkey : reqs[r]->send.lkeys[devIndex];
           wr->sg_list = sge;
           wr->num_sge = 1;
           w++;
@@ -242,14 +258,17 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
     // mirroring ncclIbMultiSend's lastWr handling.
     struct ibv_send_wr* lastWr;
     if (extraImmWr) {
-      if (w >= NCCL_IB_MAX_WRS_PER_SEND + 1) { WARN("NET/IB: multi-segment send exceeded WR pool"); return ncclInternalError; }
+      if (w >= NCCL_IB_MAX_WRS_PER_SEND + 1) {
+        WARN("NET/IB: multi-segment send exceeded WR pool");
+        return ncclInternalError;
+      }
       lastWr = comm->wrs + w;
       memset(lastWr, 0, sizeof(struct ibv_send_wr));
       if (needSizesWr) {
-        lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot*sizeof(struct ncclIbRequestCompletionRecord);
+        lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
         lastWr->sg_list = &(comm->devs[devIndex].sge);
         lastWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
-        lastWr->sg_list[0].length = nreqs*sizeof(int);
+        lastWr->sg_list[0].length = nreqs * sizeof(int);
         lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
         lastWr->num_sge = 1;
       } else {
@@ -793,7 +812,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].nSegments = mhandleWrapper->nSegments;
     if (mhandleWrapper->nSegments > 1) {
       for (int s = 0; s < mhandleWrapper->nSegments; s++) {
-        localElem[i].segStart[s] = (uint64_t) mhandleWrapper->segStart[s];
+        localElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
         for (int j = 0; j < comm->base.vProps.ndevs; j++) {
           localElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
         }
@@ -890,7 +909,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       struct ibv_mr* flushMr = ncclIbMrForRange(mhandle, (uintptr_t)data[last], sizeof(int), i);
       if (flushMr == NULL) {
         WARN("NET/IB: flush buffer %p crosses a segment boundary (multi-segment registration)", data[last]);
-        ret = ncclInternalError; goto iflushFail;
+        ret = ncclInternalError;
+        goto iflushFail;
       }
       wr.wr.rdma.rkey = flushMr->rkey;
     }
