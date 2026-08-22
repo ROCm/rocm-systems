@@ -20,7 +20,10 @@ function(_rj_configure_object_library name)
             ${name}
             PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
         )
-        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+        if(
+            CMAKE_CXX_COMPILER_ID MATCHES "GNU"
+            AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+        )
             target_compile_options(
                 ${name}
                 PRIVATE -Wno-error=maybe-uninitialized

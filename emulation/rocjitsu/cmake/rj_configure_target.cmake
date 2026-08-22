@@ -82,7 +82,10 @@ function(rj_configure_target target)
                 ${target}
                 PRIVATE -Wall -Wextra -Wpedantic -Werror
             )
-            if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+            if(
+                CMAKE_CXX_COMPILER_ID MATCHES "GNU"
+                AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+            )
                 target_compile_options(
                     ${target}
                     PRIVATE -Wno-error=maybe-uninitialized
