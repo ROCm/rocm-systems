@@ -47,26 +47,32 @@ choices. The working-loop rules below are binding preparation requirements and
 feed the exit criteria; they are not merely suggested ways of organizing
 prototype fixes.
 
-### Acknowledged directives and working contract
+### Explicit acknowledgement of the current direction
 
-This checklist explicitly acknowledges every element of the 2026-08-22
-preparation direction. Every row is a binding requirement for section 1, with
-the following concrete interpretation. The ordering is deliberate: select the
-engine column first, then the lowest status color within that column across
-both architecture ledgers, and only then use architecture balance and expected
-iteration latency to choose among otherwise eligible cells. Latency can change
-the next tactical choice, but it cannot erase a deferred cell.
+This is the requested plan-only understanding checkpoint. No merge,
+implementation repair, or new validation run is part of this checkpoint; the
+next execution action, once work resumes, is to resolve the freshly fetched
+`origin/develop` against `HEAD` as described below. I understand and accept
+every row in this checklist as a binding requirement for section 1, rather
+than as optional guidance.
+
+The scheduling rule is lexicographic and global across both architecture
+ledgers: select the engine column first, then the lowest status color within
+that column, and only then use the CDNA4/gfx1250 balance and expected iteration
+latency to choose among otherwise eligible cells. Latency can change the next
+tactical choice, but it cannot erase a deferred cell.
 
 | Directive | Plan commitment |
 | --- | --- |
-| Integrate the freshly fetched base | Keep the branch integrated with `origin/develop` through a merge commit whenever it advances; repair all resulting build and test breakage, and regression-test every behavioral integration defect. At this checkpoint `550548c58ae9` is already an ancestor of `HEAD`, so there is no new merge to manufacture. |
+| Integrate the freshly fetched base before resuming validation | Re-resolve `origin/develop` against `HEAD` as the first execution action. Keep the branch integrated through a merge commit whenever that ref advances; repair all resulting build and test breakage before proceeding, and regression-test every behavioral integration defect. At this plan-only checkpoint `550548c58ae9` is already an ancestor of `HEAD`, so there is no new merge to manufacture. |
 | Make tests the main deliverable | Treat comprehensive, implementation-independent host-unit and checked-in device tests as the durable output of preparation and the automatic oracle for the section 2 rewrite. Prototype fixes and status promotions are supporting work because section 2 will replace the implementation. |
 | Grow both test tiers | Expand conventional host units and checked-in device tests together, choosing one or both according to the behavioral boundary under test. |
 | Work both architecture ledgers | Advance both [STATUS_CDNA4.md](STATUS_CDNA4.md) and [STATUS_GFX1250.md](STATUS_GFX1250.md), and update the affected ledger whenever its evidence changes. Preserve the standing CDNA4 catch-up bias without starving gfx1250. |
 | Apply the engine priority globally | Across both ledgers, work Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow. A lower-priority engine does not jump the queue merely because its cell has a worse color. |
-| Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Once every applicable cell is green, revalidate all greens together on one reviewed revision. |
+| Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Do not mistake an old green result for final qualification. |
+| Revalidate every green at the end | Only after every applicable cell is green, make another global pass over all greens on one reviewed revision. |
 | Be tactical about latency | When a test is abnormally slow, investigate the slowness if that can produce useful understanding; otherwise record and defer it instead of repeatedly waiting. Deferral changes scheduling, not the exit criteria. |
-| Harvest every end-to-end investigation | Treat E2E study as test discovery, whether the cell initially passes or fails. Turn each useful idiom into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. |
+| Harvest every end-to-end investigation | Treat E2E study as test discovery, whether the cell initially passes or fails. Turn each useful idiom into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. The tests, rather than the soon-to-be-replaced prototype repair, are the main deliverable. |
 | Audit and transport existing tests too | Make a deliberate suite-wide pass over all existing host and device contracts, not just new additions. For every behavioral idea, explicitly consider all five targets--CDNA3/4/5 and RDNA3/4--even when the target-native device code must differ. Historical `gfx950`-to-`gfx942` ports are examples, not a boundary; cross-CDNA and CDNA/RDNA transports are expected wherever the idea has a native equivalent. |
 | Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, explicitly accepting that a physical-only regression may remain undetected briefly, but never disable it, treat an omitted run as passing, or let the omission become permanent. Run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
 
