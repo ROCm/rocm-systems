@@ -999,6 +999,15 @@ void CommandProcessor::stop_doorbell_monitor_if_idle() {
 
 uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
   uint64_t val = 0;
+  // Ring pointers and signal values are 64-bit locations the host publishes with a
+  // single atomic store, so read them with a single atomic load where the mapping
+  // allows it. The byte walk below can observe a half-updated value, and it also
+  // leaves this CP with no ordering edge to the writer -- which is why the packets a
+  // new write index publishes were being read unsynchronized as well.
+  if (memory_->try_read_u64_atomic(va, &val, vmid))
+    return val;
+  // Fall back for a split, unaligned or page-crossing range: those cannot be read
+  // atomically, and the byte walk resolves each byte's mapping independently.
   auto *dst = reinterpret_cast<uint8_t *>(&val);
   for (uint32_t i = 0; i < sizeof(val); ++i)
     dst[i] = memory_->read8(va + i, vmid);
