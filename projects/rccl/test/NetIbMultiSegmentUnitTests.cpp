@@ -75,6 +75,45 @@ TEST(NetIbMultiSeg, AddressLengthOverflowRejected) {
     EXPECT_EQ(SegOf(L, kBase + 16, SIZE_MAX), -1);
 }
 
+TEST(NetIbMultiSeg, OverlappingRangeWholeBufferTouchesEverySegment) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    int out[8];
+    int n = ncclIbSegmentsOverlappingRange(L.n(), L.start.data(), L.len.data(),
+                                           kBase, 4 * kSeg, out, 8);
+    ASSERT_EQ(n, 4);
+    EXPECT_EQ(out[0], 0);
+    EXPECT_EQ(out[1], 1);
+    EXPECT_EQ(out[2], 2);
+    EXPECT_EQ(out[3], 3);
+}
+
+TEST(NetIbMultiSeg, OverlappingRangeSingleSegment) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    int out[8];
+    int n = ncclIbSegmentsOverlappingRange(L.n(), L.start.data(), L.len.data(),
+                                           kBase + 2 * kSeg + 64, 128, out, 8);
+    ASSERT_EQ(n, 1);
+    EXPECT_EQ(out[0], 2);
+}
+
+TEST(NetIbMultiSeg, OverlappingRangeCrossesOneBoundary) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    int out[8];
+    int n = ncclIbSegmentsOverlappingRange(L.n(), L.start.data(), L.len.data(),
+                                           kBase + kSeg - 64, 128, out, 8);
+    ASSERT_EQ(n, 2);
+    EXPECT_EQ(out[0], 0);
+    EXPECT_EQ(out[1], 1);
+}
+
+TEST(NetIbMultiSeg, OverlappingRangeZeroLengthIsEmpty) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    int out[8];
+    EXPECT_EQ(ncclIbSegmentsOverlappingRange(L.n(), L.start.data(), L.len.data(),
+                                             kBase, 0, out, 8),
+              0);
+}
+
 TEST(NetIbMultiSeg, UniformLayoutAccepted) {
     std::vector<size_t> len(4, kSeg);
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
