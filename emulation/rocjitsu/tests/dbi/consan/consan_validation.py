@@ -233,6 +233,7 @@ class Workload:
     ] = ()
     tensile_expected_numeric_rows_per_shard: tuple[int, ...] = ()
     tensile_shard_parallelism: int = 1
+    tensile_fault_shard_index: int | None = None
     tensile_streamk_fixed_grid: int | None = None
     tensile_streamk_mode: int | None = None
     tensile_minimum_timed_ms: float = EMPIRICAL_MINIMUM_TIMED_MS
@@ -1145,7 +1146,11 @@ def _validate_tensile_sharding(workload: Workload) -> None:
     shards = workload.tensile_exact_problem_size_shards
     expected_rows = workload.tensile_expected_numeric_rows_per_shard
     if not shards:
-        if expected_rows or workload.tensile_shard_parallelism != 1:
+        if (
+            expected_rows
+            or workload.tensile_shard_parallelism != 1
+            or workload.tensile_fault_shard_index is not None
+        ):
             raise RuntimeError(
                 f"{workload.id} declares Tensile shard policy without shards"
             )
@@ -1163,6 +1168,14 @@ def _validate_tensile_sharding(workload: Workload) -> None:
     if not 1 <= workload.tensile_shard_parallelism <= min(4, len(shards)):
         raise RuntimeError(
             f"{workload.id} Tensile shard parallelism must be between one and four"
+        )
+    fault_shard_index = workload.tensile_fault_shard_index
+    if fault_shard_index is not None and (
+        type(fault_shard_index) is not int
+        or not 0 <= fault_shard_index < len(shards)
+    ):
+        raise RuntimeError(
+            f"{workload.id} Tensile fault shard index is out of range"
         )
     sizes = []
     for shard in shards:
@@ -1622,6 +1635,10 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             ),
             "tensile_expected_numeric_rows_per_shard": (16, 16, 16, 16, 16, 16),
             "tensile_shard_parallelism": 4,
+            # Inventory and contained mutation need one exact numerical oracle,
+            # not a second unbounded traversal of the complete 96-row corpus.
+            # The clean and overhead phases still qualify every shard.
+            "tensile_fault_shard_index": 0,
         },
     },
 }
@@ -2791,6 +2808,30 @@ def _workload_commands(
             strict=True,
         )
     ]
+
+
+def _fault_workload_command(
+    workspace: Path,
+    target: str,
+    workload: Workload,
+    output: Path,
+) -> list[str]:
+    """Build one bounded command for inventory and exact-one fault execution."""
+    workload = _resolved_workload(target, workload)
+    index = workload.tensile_fault_shard_index
+    if index is None:
+        return _workload_command(workspace, target, workload, "fault", output)
+    return _workload_command(
+        workspace,
+        target,
+        workload,
+        "fault",
+        output,
+        tensile_exact_problem_sizes=workload.tensile_exact_problem_size_shards[index],
+        tensile_expected_numeric_rows=(
+            workload.tensile_expected_numeric_rows_per_shard[index]
+        ),
+    )
 
 
 def _write_provenance(
@@ -6571,8 +6612,8 @@ def _inventory(args: argparse.Namespace) -> int:
         workspace, target, workload, root, args.launcher
     )
     hook = _hook_path(workspace)
-    command = _workload_command(
-        workspace, target, workload, "fault", root / "unused.json"
+    command = _fault_workload_command(
+        workspace, target, workload, root / "unused.json"
     )
     command = _with_launcher(args.launcher, command)
     family_runs = []
@@ -6910,11 +6951,10 @@ def _fault_audit(
     source: str,
 ) -> dict:
     hook = _hook_path(workspace)
-    command = _workload_command(
+    command = _fault_workload_command(
         workspace,
         target,
         workload,
-        "fault",
         Path("$ARTIFACT_ROOT") / workload.id / "fault" / "unused.json",
     )
     if workload.kind == "sharktank":
@@ -7578,8 +7618,8 @@ def _fault(args: argparse.Namespace) -> int:
                 raise ValidationError(
                     f"trial {profile}/{index} enables {len(enabled_mutations)} mutations"
                 )
-            command = _workload_command(
-                workspace, target, workload, "fault", root / "unused.json"
+            command = _fault_workload_command(
+                workspace, target, workload, root / "unused.json"
             )
             if workload.kind == "sharktank":
                 command.append("--allow-oracle-failure")

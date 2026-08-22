@@ -812,6 +812,16 @@ This evidence promotes the cell from orange to yellow. Green still requires a
 current paired baseline/overhead measurement plus reviewed fault, containment,
 health, and cleanup evidence at the same accepted revision.
 
+A follow-up harness audit found that inventory and contained fault execution
+still bypassed the exact-size shard policy and would have retraced the obsolete
+monolithic 96-row command. They now use an explicit manifest-selected
+representative shard with its complete 16-row numerical oracle; clean and
+paired-overhead qualification continue to require all six shards and all 96
+rows. Host regressions prove that both inventory and fault use the bounded
+command and that missing or out-of-range shard policies fail closed. This
+removes the fault-readiness blocker but does not itself promote the cell; fresh
+reviewed inventory and contained-fault evidence remain required.
+
 ## PyTorch expansion
 
 This is the staging ledger for broadening validation with the gfx1250 PyTorch

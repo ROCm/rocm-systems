@@ -273,6 +273,12 @@ sizes before writing any filtered configuration, so a corpus addition,
 deletion, reorder, duplicate, or non-Exact problem form fails closed instead
 of silently narrowing the 96-row denominator.
 
+Fault inventory and contained exact-one mutation use the manifest-selected
+first shard and retain its complete 16-row numerical oracle. This keeps the
+fault gate bounded while the clean and paired-overhead gates continue to cover
+all six sizes and all 96 rows. The representative fault shard is explicit in
+the executable manifest; a missing or out-of-range selection fails closed.
+
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
 provenance, not for building PyTorch.  Point the runner at that interpreter:

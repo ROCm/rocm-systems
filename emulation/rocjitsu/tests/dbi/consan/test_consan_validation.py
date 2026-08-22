@@ -2240,6 +2240,10 @@ class ConSanValidationTest(unittest.TestCase):
             4,
         )
         self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-tdm"]["tensile_fault_shard_index"],
+            0,
+        )
+        self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),
         )
@@ -4755,6 +4759,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.run_timeout_seconds, 1260)
         self.assertEqual(workload.tensile_inner_timeout_seconds, 1200)
         self.assertEqual(workload.tensile_shard_parallelism, 4)
+        self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 6)
         for index, command in enumerate(commands):
             self.assertEqual(
@@ -4777,6 +4782,40 @@ class ConSanValidationTest(unittest.TestCase):
                     ]
                 ),
                 expected_sizes,
+            )
+
+        fault_command = validation._fault_workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            Path("/artifacts/fault.json"),
+        )
+        self.assertEqual(
+            json.loads(
+                fault_command[
+                    fault_command.index("--exact-problem-sizes-json") + 1
+                ]
+            ),
+            [expected_sizes[0]],
+        )
+        self.assertEqual(
+            fault_command[fault_command.index("--expect-numeric-rows") + 1],
+            "16",
+        )
+
+    def test_tensile_fault_shard_requires_a_valid_declared_shard(self) -> None:
+        ordinary = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        with self.assertRaisesRegex(RuntimeError, "policy without shards"):
+            validation._validate_tensile_sharding(
+                replace(ordinary, tensile_fault_shard_index=0)
+            )
+
+        sharded = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-mxf4gemm-tdm"]
+        )
+        with self.assertRaisesRegex(RuntimeError, "index is out of range"):
+            validation._validate_tensile_sharding(
+                replace(sharded, tensile_fault_shard_index=6)
             )
 
     def test_bounded_tensile_smoke_resolves_therock_workspace_layout(self) -> None:
@@ -6262,7 +6301,7 @@ class ConSanValidationTest(unittest.TestCase):
                     return_value=root / "provenance.json",
                 ) as write_provenance,
                 mock.patch.object(
-                    validation, "_workload_command", return_value=["payload"]
+                    validation, "_fault_workload_command", return_value=["payload"]
                 ),
                 mock.patch.object(
                     validation,
@@ -6389,7 +6428,9 @@ class ConSanValidationTest(unittest.TestCase):
                         return_value=root / "provenance.json",
                     ) as write_provenance,
                     mock.patch.object(
-                        validation, "_workload_command", return_value=["payload"]
+                        validation,
+                        "_fault_workload_command",
+                        return_value=["payload"],
                     ),
                     mock.patch.object(
                         validation, "_health_smoke_command", return_value=["smoke"]
