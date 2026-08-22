@@ -381,6 +381,47 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// FLUSH: a receive that covers the whole multi-segment window must fence every
+// physical segment (not only data[0]). iflush must accept the full-range size
+// without a boundary error and still complete.
+TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) SETUP_OR_SKIP();
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    const size_t total = lastBuf_->totalSize;
+    const int    tag   = 601;
+    const int    rank  = MPIEnvironment::world_rank;
+
+    if (rank == 0) {
+        void* rbuf = lastBuf_->ptr;
+        void* req  = nullptr;
+        PostSingleRecv(pair.recvComm, rbuf, total, tag, mh, &req);
+        int sz = 0;
+        EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+
+        void* fbufs[1]  = {rbuf};
+        int   fsizes[1] = {static_cast<int>(total)};
+        void* fhs[1]    = {mh};
+        void* freq      = nullptr;
+        EXPECT_EQ(FlushRecv(pair.recvComm, 1, fbufs, fsizes, fhs, &freq), ncclSuccess)
+            << "iflush must fence every segment of a whole-buffer receive";
+        if (freq != nullptr) {
+            int fsz = 0;
+            EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
+                << "whole-buffer flush RDMA read did not complete";
+        }
+    } else {
+        void* sbuf = lastBuf_->ptr;
+        FillDevice(sbuf, total, 0xA5);
+        void* req = nullptr;
+        PostSendWithRetry(pair.sendComm, sbuf, total, tag, mh, &req);
+        int sz = 0;
+        EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // REGRESSION (pointer types): the segment-aware changes only affect nSegments>1
 // handles; single-region host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers
 // must still register and transfer through the unchanged nSegments==1 fast path
