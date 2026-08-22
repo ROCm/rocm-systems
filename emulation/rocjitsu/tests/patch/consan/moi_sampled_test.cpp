@@ -6931,6 +6931,64 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
       << "the empty-wave continuation must be the direct return, after every per-lane save";
 }
 
+TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kTextWords = 200'000u;
+  constexpr size_t kEarlyAccessWord = 7u;
+  constexpr size_t kLateAccessWord = 160'000u;
+  constexpr size_t kScalarUseWord = 190'000u;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
+  std::vector<uint32_t> text_words(kTextWords, filler);
+  std::copy(guest->begin(), guest->end(), text_words.begin() + kEarlyAccessWord);
+  std::copy(guest->begin(), guest->end(), text_words.begin() + kLateAccessWord);
+  size_t cursor = kScalarUseWord;
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words[cursor] = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "sampled_branch_only_earliest_reservoir_frontier",
+                                 kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            2u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count_if(
+                result.patches,
+                [](const ConSanPatchInfo &patch) {
+                  return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
+                         patch.branch_only_continuation;
+                }),
+            2u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
+}
+
 TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchClobber) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
   constexpr auto guest = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0u, .data0 = 1u});

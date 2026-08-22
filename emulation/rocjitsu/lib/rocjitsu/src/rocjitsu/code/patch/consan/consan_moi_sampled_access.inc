@@ -503,13 +503,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
-  const size_t branch_only_candidate_count =
-      std::ranges::count_if(candidates, [&](const ConSanMoiCandidate *candidate) {
-        const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
-        return plan != nullptr && !plan->owner_descriptor_file_offsets.empty() &&
-               moi_transient_sgpr_assignment_is_branch_only(options,
-                                                            plan->owner_descriptor_file_offsets);
-      });
+  size_t branch_only_candidate_count = 0u;
+  uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
+  for (const ConSanMoiCandidate *candidate : candidates) {
+    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
+    if (plan == nullptr || plan->owner_descriptor_file_offsets.empty() ||
+        !moi_transient_sgpr_assignment_is_branch_only(options,
+                                                      plan->owner_descriptor_file_offsets)) {
+      continue;
+    }
+    ++branch_only_candidate_count;
+    route_frontier_source = std::min(route_frontier_source, candidate->text_offset);
+  }
   if (branch_only_candidate_count != 0u && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
     protected_ranges.reserve(candidates.size() + result.kernels.size() + result.functions.size() +
@@ -548,12 +553,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (block)
         reservoir_blocks.push_back(block.get());
     }
-    const uint64_t latest_source =
-        std::ranges::max(candidates, {}, &ConSanMoiCandidate::text_offset)->text_offset;
-    const uint64_t route_midpoint = latest_source + (indirect_body_begin - latest_source) / 2u;
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_midpoint,
+            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
             2u * branch_only_candidate_count, branch_only_placement_planner,
             direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {

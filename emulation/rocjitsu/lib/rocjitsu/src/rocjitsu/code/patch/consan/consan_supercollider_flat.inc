@@ -946,17 +946,30 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                       patch.trampoline_offset + patch.trampoline_size);
       }
     }
-    const auto latest_candidate =
-        std::ranges::max_element(branch_only_appended_candidates, {},
-                                 [](const auto &candidate) { return candidate.site->text_offset; });
-    const uint64_t latest_source = latest_candidate->site->text_offset;
-    const uint64_t route_midpoint =
-        latest_source + (placement_planner.appended_end() - latest_source) / 2u;
+    std::vector<const FlatCheckTrapCandidate *> pending_candidates;
+    pending_candidates.reserve(branch_only_appended_candidates.size());
+    for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates) {
+      const bool already_selected =
+          std::ranges::any_of(selected_candidates, [&](const FlatCheckTrapCandidate &selected) {
+            return selected.site->text_offset == candidate.site->text_offset;
+          });
+      if (!already_selected)
+        pending_candidates.push_back(&candidate);
+    }
+    if (pending_candidates.empty())
+      return true;
+    const uint64_t route_frontier_source =
+        std::ranges::min(pending_candidates, {}, [](const FlatCheckTrapCandidate *candidate) {
+          return candidate->site->text_offset;
+        })->site->text_offset;
+    const size_t remaining_selection_count = max_patches - selected_candidates.size();
+    const size_t reservoir_demand_count =
+        std::min(remaining_selection_count, pending_candidates.size());
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
-            block_ptrs, pristine_text, protected_ranges, arch, route_midpoint,
-            2u * (max_patches - selected_candidates.size()), placement_planner,
-            direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
+            block_ptrs, pristine_text, protected_ranges, arch, route_frontier_source,
+            2u * reservoir_demand_count, placement_planner, direct_branch_reservoirs, &relay_error,
+            &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
       return false;

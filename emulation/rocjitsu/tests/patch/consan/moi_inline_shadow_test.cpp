@@ -3699,6 +3699,52 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
   EXPECT_GT(inventory.used_appended_bytes, 0u);
 }
 
+TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
+  constexpr size_t kTextWords = 100'000u;
+  constexpr size_t kEarlyAccessWord = 7u;
+  constexpr size_t kLateAccessWord = 70'000u;
+  constexpr size_t kScalarUseWord = 90'000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> text_words(kTextWords, filler);
+  const auto write_access = [&](size_t word) {
+    text_words[word] = 0xD8340000u;
+    text_words[word + 1u] = 0x00000000u; // ds_store_b32 v0, v0
+  };
+  write_access(kEarlyAccessWord);
+  write_access(kLateAccessWord);
+  size_t cursor = kScalarUseWord;
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words[cursor] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_branch_only_earliest_reservoir_frontier",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiExactShadowStore &&
+                                           patch.branch_only_continuation;
+                                  }),
+            2u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
+}
+
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir) {
   // s_delay_alu is intentionally excluded from donor discovery, leaving no
   // instruction run that the router may safely relocate.

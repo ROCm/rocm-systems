@@ -176,30 +176,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options.moi_exec_save_sgpr.has_value() &&
       (options.moi_runtime_sample_stride > 1u || candidates.size() > 8u ||
        has_unreachable_function_candidate || has_spill_backed_scalar_assignment);
-  uint64_t reserved_barrier_island_count = 0u;
-  if (use_indirect_appended && options.moi_track_barriers) {
-    // The later persistent-epoch pass excludes split-barrier signals and
-    // runtime kernels. Reserve the same candidate set here; counting the full
-    // inventory leaves a large unused prefix before every access relay.
-    const auto completion_count = [](const auto &container) {
-      return std::ranges::count_if(container.barrier_sites, [](const ConSanBarrierSite &site) {
-        return site.operation != ConSanBarrierSite::Operation::Signal;
-      });
-    };
-    for (const ConSanKernelInfo &kernel : result.kernels) {
-      if (!kernel.name.starts_with("__amd_rocclr_"))
-        reserved_barrier_island_count += completion_count(kernel);
-    }
-    for (const ConSanFunctionInfo &function : result.functions)
-      reserved_barrier_island_count += completion_count(function);
-    reserved_barrier_island_count =
-        std::min<uint64_t>(reserved_barrier_island_count, options.max_patches);
-  }
+  // The later persistent-epoch pass excludes split-barrier signals and
+  // runtime kernels. Reserve the same candidate set here; counting the full
+  // inventory leaves a large unused prefix before every access relay.
+  const uint64_t reserved_barrier_island_count =
+      use_indirect_appended && options.moi_track_barriers
+          ? moi_reserved_barrier_island_count(result, options)
+          : 0u;
+  const uint64_t reserved_barrier_slot_words = has_branch_only_scalar_assignment
+                                                   ? kMoiRecordReplayBarrierRelaySlotWords
+                                                   : kIndirectIslandWords;
   const uint64_t indirect_body_begin =
-      original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
+      original_text_size +
+      reserved_barrier_island_count * reserved_barrier_slot_words * sizeof(uint32_t) +
       candidates.size() * access_slot_words * sizeof(uint32_t);
-  const uint64_t access_island_begin =
-      original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t);
+  const uint64_t access_island_begin = original_text_size + reserved_barrier_island_count *
+                                                                reserved_barrier_slot_words *
+                                                                sizeof(uint32_t);
   uint64_t indirect_body_cursor = indirect_body_begin;
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   std::span<const uint8_t> original_text;
@@ -438,7 +431,28 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   BranchOnlyRelayRouter branch_router;
   std::vector<uint64_t> generated_branch_relay_offers;
+  std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
   if (use_indirect_appended && access_slot_words > access_relay_words) {
+    generated_branch_relay_offers.reserve(2u * static_cast<size_t>(reserved_barrier_island_count) +
+                                          2u * candidates.size());
+    generated_branch_relay_ranges.reserve(static_cast<size_t>(reserved_barrier_island_count) +
+                                          candidates.size());
+    // The barrier prefix can itself be longer than one SOPP hop. Keep two
+    // words per slot outside the seven-word barrier island so branch-only
+    // reservoir discovery and final access routing have a continuous first
+    // foothold without consuming storage owned by the later barrier pass.
+    if (reserved_barrier_slot_words > kIndirectIslandWords) {
+      for (uint64_t index = 0u; index < reserved_barrier_island_count; ++index) {
+        const uint64_t begin =
+            original_text_size +
+            (index * reserved_barrier_slot_words + kIndirectIslandWords) * sizeof(uint32_t);
+        const uint64_t end =
+            original_text_size + (index + 1u) * reserved_barrier_slot_words * sizeof(uint32_t);
+        generated_branch_relay_ranges.emplace_back(begin, end);
+        for (uint64_t relay = begin; relay < end; relay += sizeof(uint32_t))
+          generated_branch_relay_offers.push_back(relay);
+      }
+    }
     std::map<uint64_t, size_t> dense_candidate_counts;
     for (const auto &[candidate, dispatcher] : dense_dispatchers) {
       (void)candidate;
@@ -462,13 +476,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint64_t cursor = access_island_begin;
     const uint64_t end =
         access_island_begin + candidates.size() * access_slot_words * sizeof(uint32_t);
+    const auto append_generated_range = [&](uint64_t begin, uint64_t range_end) {
+      if (begin >= range_end)
+        return;
+      generated_branch_relay_ranges.emplace_back(begin, range_end);
+      for (uint64_t relay = begin; relay < range_end; relay += sizeof(uint32_t))
+        generated_branch_relay_offers.push_back(relay);
+    };
     for (const auto &[begin, range_end] : occupied_access_relay_ranges) {
-      for (; cursor < begin; cursor += sizeof(uint32_t))
-        generated_branch_relay_offers.push_back(cursor);
+      append_generated_range(cursor, begin);
       cursor = std::max(cursor, range_end);
     }
-    for (; cursor < end; cursor += sizeof(uint32_t))
-      generated_branch_relay_offers.push_back(cursor);
+    append_generated_range(cursor, end);
   }
   // Seed the immutable appended relay bank before reservoir discovery. A
   // reservoir that cannot reach its displaced body directly may use this bank
@@ -493,7 +512,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   };
   const size_t branch_only_candidate_count =
       std::ranges::count_if(candidates, uses_branch_only_scalar_spill);
-  if (branch_only_candidate_count != 0u && use_indirect_appended && !original_text.empty()) {
+  const auto resource_plan_uses_branch_only_scalar_spill = [&](const auto &plan) {
+    return !plan.owner_descriptor_file_offsets.empty() &&
+           moi_transient_sgpr_assignment_is_branch_only(options,
+                                                        plan.owner_descriptor_file_offsets);
+  };
+  const size_t branch_only_barrier_count =
+      std::ranges::count_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Barrier &&
+               resource_plan_uses_branch_only_scalar_spill(plan);
+      });
+  const size_t branch_only_routing_demand_count =
+      saturated_add(branch_only_candidate_count, branch_only_barrier_count);
+  if (branch_only_routing_demand_count != 0u && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
     protected_ranges.reserve(candidates.size() + result.kernels.size() + result.functions.size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
@@ -536,6 +567,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (uses_branch_only_scalar_spill(candidate))
         route_frontier_source = std::min(route_frontier_source, candidate->text_offset);
     }
+    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      if (plan.site_kind == ConSanResourceSiteKind::Barrier &&
+          resource_plan_uses_branch_only_scalar_spill(plan)) {
+        route_frontier_source = std::min(route_frontier_source, plan.text_offset);
+      }
+    }
     if (route_frontier_source == std::numeric_limits<uint64_t>::max()) {
       result.errors.emplace_back(
           "ConSan MOI first-light probe lost its branch-only routing frontier");
@@ -544,7 +581,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
             reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
-            2u * branch_only_candidate_count, branch_only_placement_planner,
+            saturated_multiply(2u, branch_only_routing_demand_count), branch_only_placement_planner,
             direct_branch_reservoirs, &relay_error, &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
       result.errors.emplace_back("ConSan MOI first-light probe " + relay_error);
@@ -1041,27 +1078,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   if (!branch_only_patch_indices.empty()) {
     for (uint64_t relay : pristine_branch_relay_offers)
       (void)branch_router.offer(relay, BranchOnlyRelayProvenance::PristineNop);
-    for (uint64_t relay : generated_branch_relay_offers)
-      (void)branch_router.offer(relay, BranchOnlyRelayProvenance::GeneratedBank);
+    // The generated bank was seeded before direct-reservoir discovery.
+    // Retain that router state: re-offering its full source inventory here
+    // would resurrect relays already consumed by routed reservoirs and allow
+    // two emitted continuations to overwrite the same capacity-one word.
     for (uint64_t relay : selected_record_replay_anchor_relay_offsets)
       (void)branch_router.offer(relay, BranchOnlyRelayProvenance::OwnedAnchor);
     branch_relay_offer_count = branch_router.available_count();
   }
-  BranchOnlyRelaySearchLimits relay_limits;
   // A very large simultaneous exact solve is not useful for this monotonic
   // corridor. Fall through promptly to the pair-atomic greedy tier, but size
   // its one-time ordered inventory budget to the actual offered domain.
-  relay_limits.batch.feasibility_search = {1u, 0u};
-  relay_limits.pair.feasibility_search = 1u;
-  relay_limits.pair.feasibility_scan = {1u, 0u};
-  const size_t relay_index_levels = std::max<size_t>(std::bit_width(branch_relay_offer_count), 1u);
-  relay_limits.batch.fallback_setup =
-      branch_relay_offer_count > std::numeric_limits<size_t>::max() / relay_index_levels
-          ? std::numeric_limits<size_t>::max()
-          : branch_relay_offer_count * relay_index_levels;
-  relay_limits.pair.greedy = branch_relay_offer_count > std::numeric_limits<size_t>::max() / 2u
-                                 ? std::numeric_limits<size_t>::max()
-                                 : std::max<size_t>(2u * branch_relay_offer_count, 1u);
+  const BranchOnlyRelaySearchLimits relay_limits =
+      branch_only_relay_greedy_pair_limits(branch_relay_offer_count);
   for (size_t batch_begin = 0; batch_begin < branch_only_patch_indices.size();) {
     const size_t batch_end = branch_only_patch_indices.size();
     std::vector<BranchOnlyRelayPairRequest> requests;
@@ -1123,6 +1152,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         "ConSan MOI first-light branch-only scalar-spill body is out of routed reach");
     return true;
   });
+
+  // Reservoir discovery is intentionally performed before final access
+  // selection so a branch-only candidate can establish a complete-text
+  // routing frontier even when that candidate is later omitted.  The barrier
+  // pass is an independent downstream consumer of that frontier.  Preserve
+  // every planned reservoir when barriers are enabled; otherwise an access
+  // batch that happens not to claim one leaves the later barrier batch with
+  // only its appended bank and no original-text foothold.
+  if (options.moi_track_barriers && moi_reserved_barrier_island_count(result, options) != 0u) {
+    for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
+      reservoir.used = true;
+  }
 
   std::unordered_map<uint64_t, size_t> record_replay_anchor_relay_donors;
   for (size_t index = 0; index < planned_patches.size(); ++index) {
@@ -1821,6 +1862,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     result.elf_bytes = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
+    if (reserved_barrier_island_count != 0u) {
+      result.moi_reserved_barrier_island_begin = original_text_size;
+      result.moi_reserved_barrier_island_slot_words =
+          static_cast<uint32_t>(reserved_barrier_slot_words);
+      result.moi_reserved_barrier_island_count = reserved_barrier_island_count;
+    }
+    result.moi_generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
     result.modified = true;
     return;
   }

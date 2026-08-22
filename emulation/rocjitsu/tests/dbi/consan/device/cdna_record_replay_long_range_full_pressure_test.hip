@@ -112,6 +112,24 @@ __global__ __launch_bounds__(
   state->control[tid] = 0xc6000000u | tid;
 }
 
+// Keep a dormant user kernel in the same code object whose barrier inventory
+// reserves more than one SOPP hop of seven-word Record/Replay islands. The
+// behavioral pair below never launches it: its contract is that an unrelated
+// E2E-shaped synchronization inventory must not make the exercised long-range
+// access uninstrumentable or corrupt its result. This remains independent of
+// the implementation used to bridge the generated layout. Defining it after
+// the exercised kernel also keeps its canonical barrier representative near
+// the generated relay bank, so both synchronization sites remain valid static
+// coverage obligations.
+__global__ void cdna_record_replay_long_barrier_inventory_for_consan() {
+  asm volatile(".rept 4682\n\t"
+               "s_barrier\n\t"
+               ".endr\n\t"
+               :
+               :
+               : "memory");
+}
+
 void run_cdna_record_replay_long_range_full_pressure(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;

@@ -1475,6 +1475,22 @@ size_t branch_only_relay_conservative_work_limit(const BranchOnlyRelaySearchLimi
   return total;
 }
 
+BranchOnlyRelaySearchLimits branch_only_relay_greedy_pair_limits(size_t relay_count) {
+  BranchOnlyRelaySearchLimits limits;
+  limits.batch.feasibility_search = {1u, 0u};
+  limits.batch.feasibility_scan = {1u, 0u};
+  limits.pair.feasibility_search = 1u;
+  limits.pair.feasibility_scan = {1u, 0u};
+  const size_t relay_index_levels = std::max<size_t>(std::bit_width(relay_count), 1u);
+  limits.batch.fallback_setup = saturated_multiply(relay_count, relay_index_levels);
+  // Entry and return may each claim the complete inventory. Every ordered-map
+  // query/removal is charged at the current index depth, so a relay-count-only
+  // allowance can reject a small sparse corridor before making one hop.
+  limits.pair.greedy = std::max<size_t>(
+      saturated_multiply(2u, saturated_multiply(relay_count, relay_index_levels)), 1u);
+  return limits;
+}
+
 void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
                                    const BranchOnlyRelayPlanOutcome &outcome,
                                    std::span<const BranchOnlyRelayPlanStrategy> pair_strategies) {
@@ -2141,8 +2157,9 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
 
   const size_t text_words =
       saturated_add(pristine_text.size(), sizeof(uint32_t) - 1u) / sizeof(uint32_t);
-  const size_t raw_input_count =
-      saturated_add(saturated_add(text_words, protected_ranges.size()), blocks.size());
+  const size_t raw_input_count = saturated_add(
+      saturated_add(saturated_add(text_words, protected_ranges.size()), blocks.size()),
+      relays_.size());
   const size_t complexity_units =
       saturated_multiply(raw_input_count, std::max<size_t>(std::bit_width(raw_input_count), 1u));
   MeteredPlanningWork discovery_work(
@@ -2308,6 +2325,23 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
   DbiPatchPlacementPlanner planned_planner = placement_planner;
   BranchOnlyDirectRelayReservoirSet planned_reservoirs = reservoirs;
 
+  // Only generated banks and already materialized reservoirs may relocate a
+  // speculative donor. Pristine NOPs and selected anchor tails remain reserved
+  // for the eventual device route, so they must not pull the recursive donor
+  // frontier away from appended storage.
+  uint64_t recursive_frontier = planned_planner.appended_end();
+  for (const auto &[offset, offer] : planned_router.relays_) {
+    if (!charge_discovery()) {
+      report_exhaustion();
+      return false;
+    }
+    if (offer.provenance == BranchOnlyRelayProvenance::GeneratedBank ||
+        offer.provenance == BranchOnlyRelayProvenance::OwnedReservoir) {
+      recursive_frontier = offset;
+      break;
+    }
+  }
+
   std::vector<bool> adopted_candidates(candidates.size(), false);
   bool stage_active = false;
   uint64_t stage_search_offset = 0u;
@@ -2317,8 +2351,7 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
   bool stage_uses_hard_lower_bound = false;
   for (;;) {
     if (!stage_active) {
-      stage_upper_bound = planned_router.relays_.empty() ? planned_planner.appended_end()
-                                                         : planned_router.relays_.begin()->first;
+      stage_upper_bound = recursive_frontier;
       stage_hard_lower_bound = stage_upper_bound > kSoppBranchMaximumForwardReachBytes
                                    ? stage_upper_bound - kSoppBranchMaximumForwardReachBytes
                                    : 0u;
@@ -2352,8 +2385,6 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
       if (first_existing != planned_router.relays_.end() && first_existing->first < candidate_end)
         continue;
 
-      BranchOnlyRelayRouter candidate_router = planned_router;
-      DbiPatchPlacementPlanner candidate_planner = planned_planner;
       DbiPatchPlacementRequest request;
       request.anchor_offset = candidate.offset;
       request.original_size = static_cast<uint32_t>(candidate_bytes);
@@ -2361,16 +2392,19 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
       request.inline_capacity = 0u;
       request.allow_appended_cave = true;
       std::string placement_error;
-      std::optional<DbiPatchPlacement> placement =
-          candidate_planner.plan(request, &placement_error);
+      // The whole function already owns a private router/planner transaction.
+      // A failed direct request does not mutate that planner, while a
+      // successful direct request is unconditionally adopted below. Avoid
+      // cloning either ordered inventory for every candidate.
+      std::optional<DbiPatchPlacement> placement = planned_planner.plan(request, &placement_error);
+      std::optional<DbiPatchPlacementPlanner> routed_planner;
       std::optional<BranchOnlyRelayRoute> route;
-      if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave) {
-        candidate_router = planned_router;
-        candidate_planner = planned_planner;
+      if (!placement) {
+        routed_planner.emplace(planned_planner);
         placement_error.clear();
         if (candidate_bytes > std::numeric_limits<uint64_t>::max() - sizeof(uint32_t))
           continue;
-        placement = candidate_planner.plan_indirect_appended(
+        placement = routed_planner->plan_indirect_appended(
             candidate.offset, static_cast<uint32_t>(candidate_bytes),
             candidate_bytes + sizeof(uint32_t), &placement_error);
         if (!placement)
@@ -2380,9 +2414,10 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
 
         BranchOnlyRelayPlanOutcome route_outcome;
         std::string route_error;
-        route = candidate_router.plan_pair(candidate_planner, candidate.offset,
-                                           placement->body_offset, placement->return_branch_offset,
-                                           candidate_end, &route_error, &route_outcome);
+        route = planned_router.plan_pair(
+            *routed_planner, candidate.offset, placement->body_offset,
+            placement->return_branch_offset, candidate_end, &route_error, &route_outcome,
+            branch_only_relay_greedy_pair_limits(planned_router.available_count()));
         if (!route)
           continue;
         // A speculative reservoir must not consume pristine NOPs or selected
@@ -2394,8 +2429,11 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
               return claim.provenance == BranchOnlyRelayProvenance::GeneratedBank ||
                      claim.provenance == BranchOnlyRelayProvenance::OwnedReservoir;
             });
-        if (!owns_every_dependency || !candidate_router.commit(*route, &route_error))
+        if (!owns_every_dependency || !planned_router.commit(*route, &route_error))
           continue;
+      } else if (placement->kind != DbiPatchPlacementKind::AppendedCave) {
+        report(error_out, "branch-only router direct reservoir received an invalid placement");
+        return false;
       }
 
       BranchOnlyDirectRelayReservoir reservoir{
@@ -2409,7 +2447,7 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
       adopted_relays.reserve(candidate.words.size() - 1u);
       for (uint64_t word = 1u; word < candidate.words.size(); ++word) {
         const uint64_t relay = candidate.offset + word * sizeof(uint32_t);
-        const bool offered = candidate_router.offer_materialized_owner(
+        const bool offered = planned_router.offer_materialized_owner(
             relay, BranchOnlyRelayProvenance::OwnedReservoir,
             BranchOnlyRelayOwnerIdentity::direct_reservoir(candidate.offset));
         const bool indexed =
@@ -2422,8 +2460,9 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
       }
       stage_offered_relay_count += adopted_relays.size();
       planned_reservoirs.reservoirs.push_back(std::move(reservoir));
-      planned_router = std::move(candidate_router);
-      planned_planner = std::move(candidate_planner);
+      if (routed_planner)
+        planned_planner = std::move(*routed_planner);
+      recursive_frontier = std::min(recursive_frontier, candidate.offset + sizeof(uint32_t));
       adopted_candidates[candidate_index] = true;
       stage_search_offset = candidate_end;
       adopted_candidate = true;

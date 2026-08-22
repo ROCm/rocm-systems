@@ -2922,6 +2922,45 @@ TEST(ConSanBranchOnlyRelayRouter, PlansOnlyMinimumWidthRunsAndChunksLongRuns) {
             last.anchor_offset);
 }
 
+TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningScalesWithLargeRelayInventory) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kDonorWordCount = 4096u;
+  // TopK exposed the same path with roughly 376k relays. Keep enough checked-in
+  // inventory to cross the exact solver's practical scaling frontier while
+  // remaining a quick host regression.
+  constexpr size_t kExistingRelayCount = 393'216u;
+  constexpr size_t kTargetRelayCount = 2048u;
+  std::vector<uint32_t> words(kDonorWordCount, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  RelayTestDecoder decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  const uint64_t original_text_size = relay_test_text(object).size();
+
+  BranchOnlyRelayRouter router;
+  for (size_t relay_index = 0u; relay_index < kExistingRelayCount; ++relay_index) {
+    ASSERT_TRUE(router.offer(original_text_size + relay_index * sizeof(uint32_t),
+                             BranchOnlyRelayProvenance::GeneratedBank));
+  }
+  DbiPatchPlacementPlanner planner(kArch, original_text_size);
+  std::string error;
+  ASSERT_TRUE(planner.reserve_appended_prefix(kExistingRelayCount * sizeof(uint32_t), &error))
+      << error;
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  ConSanPlanningWorkTelemetry telemetry;
+
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                            /*route_frontier_source=*/0u, kTargetRelayCount,
+                                            planner, reservoirs, &error, &telemetry))
+      << error;
+  EXPECT_GE(reservoirs.reservoir_by_relay.size(), kTargetRelayCount);
+  EXPECT_TRUE(std::ranges::any_of(
+      reservoirs.reservoirs, [](const auto &reservoir) { return reservoir.route.has_value(); }));
+  EXPECT_GT(telemetry.direct_reservoir_work_count, 0u);
+  EXPECT_EQ(telemetry.direct_reservoir_exhaustion_count, 0u);
+}
+
 TEST(ConSanBranchOnlyRelayRouter, SplitsReservoirRunsAtProtectedAndClauseRanges) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   {
@@ -3274,6 +3313,46 @@ TEST(ConSanBranchOnlyRelayRouter, RoutedReservoirDoesNotConsumePristineNopCapaci
   EXPECT_TRUE(reservoirs.reservoirs.empty());
   EXPECT_TRUE(reservoirs.reservoir_by_relay.empty());
   EXPECT_EQ(router.available_count(), available_before);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, RecursiveReservoirFrontierIgnoresPristineNopInventory) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kExcluded = 0x3000u;
+  constexpr size_t kTextWords = 100'000u;
+  constexpr size_t kDonorWord = 70'000u;
+  constexpr size_t kDonorWordCount = 16u;
+  constexpr std::array<uint64_t, 2> kPristineRelays = {100'000u, 100'004u};
+
+  std::vector<uint32_t> words(kTextWords, kExcluded);
+  std::fill_n(words.begin() + kDonorWord, kDonorWordCount, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  class ExcludedRelayTestDecoder : public RelayTestDecoder {
+  public:
+    DecodeResult decode(const rj_code_binary_inst_t *word,
+                        const DecodeErrorEmitter &emit_error) override {
+      if (*word == kExcluded)
+        return std::make_unique<RelayTestInstruction>("ds_read_b32", 4, 0u, std::nullopt, word);
+      return RelayTestDecoder::decode(word, emit_error);
+    }
+  } decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : kPristineRelays)
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::PristineNop));
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  std::string error;
+
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                            /*route_frontier_source=*/0u, kDonorWordCount - 1u,
+                                            planner, reservoirs, &error))
+      << error;
+  ASSERT_EQ(reservoirs.reservoirs.size(), 1u);
+  EXPECT_EQ(reservoirs.reservoirs.front().anchor_offset, kDonorWord * sizeof(uint32_t));
+  EXPECT_FALSE(reservoirs.reservoirs.front().route.has_value());
+  EXPECT_EQ(router.available_count(), kPristineRelays.size() + kDonorWordCount - 1u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, DirectReservoirFailureRollsBackTheWholeCall) {

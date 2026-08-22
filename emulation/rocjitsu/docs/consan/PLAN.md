@@ -35,14 +35,15 @@ This phase is preparation for the production replacement, not an attempt to
 perfect the prototype indefinitely. **Its primary deliverable is comprehensive
 host-unit and checked-in device test suites, not the fixes made to the prototype
 along the way.** New regressions distilled from end-to-end investigations and
-the systematic expansion or transport of existing tests are equally part of
-that deliverable. This behavioral safety net is the durable asset that will
-make the section 2 replacement automatically iterable. It must preserve
-behavior that matters to users, expose current target limitations precisely,
-and distinguish a safe new abstraction from a regression without depending on
-the prototype's layout or implementation choices. The working-loop rules below
-are binding preparation requirements and feed the exit criteria; they are not
-merely suggested ways of organizing prototype fixes.
+the systematic audit, expansion, and cross-architecture transport of existing
+tests are equally part of that deliverable. This behavioral safety net is the
+durable asset that will make the section 2 implementation replacement
+automatically iterable. It must preserve behavior that matters to users, expose
+current target limitations precisely, and distinguish a safe new abstraction
+from a regression without depending on the prototype's layout or implementation
+choices. The working-loop rules below are binding preparation requirements and
+feed the exit criteria; they are not merely suggested ways of organizing
+prototype fixes.
 
 ### Acknowledged working contract
 
@@ -114,6 +115,40 @@ validation loop.
    dominates latency, but run it at regular checkpoints, after relevant native
    changes, and for final qualification. Periodically run every host, emulated
    device, and physical-device test even when the usual inner loop is narrower.
+
+### Per-investigation loop
+
+Apply the contract above in this order for each useful iteration:
+
+1. Select the next cell across both live ledgers using the engine order
+   Record/Replay, Sampled, SuperCollider, then Inline Shadow, and within that
+   ordering lift the floor from red through orange and yellow to green. Preserve
+   the standing CDNA4 catch-up bias while continuing to advance gfx1250.
+2. Reproduce enough of the end-to-end behavior to identify the relevant
+   semantic idiom. If the reproducer is abnormally slow, investigate whether
+   the latency is itself a defect; otherwise record the evidence, defer the
+   expensive run, and use a smaller reproducer or another useful cell.
+3. Distill the finding into the durable deliverable before considering the
+   investigation complete: a focused host-unit regression, a checked-in
+   correct/incorrect device pair, or both. The contract must test observable
+   behavior rather than the current prototype's layout or implementation.
+4. Ask whether that new contract, and the existing neighboring contracts,
+   apply to every CDNA3/4/5 and RDNA3/4 target. Adapt target-native code where
+   necessary and add every meaningful transport; document genuine capability
+   exclusions.
+5. Make the minimum prototype repair needed to satisfy the contract, run the
+   targeted fast host and RocJitsu tests, and update the affected status ledger
+   in the same change. A fix without its regression is incomplete.
+6. Continue the tight loop without requiring serialized physical gfx950 on
+   every edit. At regular checkpoints, after native-sensitive changes, and at
+   final qualification, run the complete host, emulated-device, and physical
+   matrix. After all cells first become green, revalidate every green cell on
+   one reviewed revision.
+
+This loop is also the mechanism for building the automatic oracle needed by
+section 2: preparation success is measured primarily by the breadth and
+precision of durable behavioral contracts, not by the number of prototype
+cells repaired.
 
 ### Remaining work
 

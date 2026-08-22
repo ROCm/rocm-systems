@@ -25,7 +25,43 @@ struct MoiLocalNopIsland {
 
 constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+// A branch-only Record/Replay access layout retains a two-word relay pair
+// after every reserved barrier island. The seven-word island remains
+// available to the later barrier pass, while the dedicated pair forms a
+// capacity-accounted spine from pristine text into a generated access bank
+// that may otherwise begin beyond one SOPP hop. Adjacent words also let a
+// later barrier pass use the same inventory for a register-free round trip.
+constexpr uint32_t kMoiRecordReplayBarrierRelayWords = 2u;
+constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
+    kMoiRecordReplayIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
 constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
+
+[[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanResult &result,
+                                                         const ConSanOptions &options) {
+  const auto count_all = [](const auto &container) {
+    return static_cast<uint64_t>(container.barrier_sites.size());
+  };
+  const auto count_record_replay = [](const auto &container) {
+    return static_cast<uint64_t>(
+        std::ranges::count_if(container.barrier_sites, [](const ConSanBarrierSite &site) {
+          return site.operation != ConSanBarrierSite::Operation::Signal;
+        }));
+  };
+  uint64_t count = 0u;
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        kernel.name.starts_with("__amd_rocclr_")) {
+      continue;
+    }
+    count += options.moi_engine == ConSanMoiEngine::RecordReplay ? count_record_replay(kernel)
+                                                                 : count_all(kernel);
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    count += options.moi_engine == ConSanMoiEngine::RecordReplay ? count_record_replay(function)
+                                                                 : count_all(function);
+  }
+  return std::min<uint64_t>(count, options.max_patches);
+}
 
 [[nodiscard]] constexpr uint32_t
 moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {

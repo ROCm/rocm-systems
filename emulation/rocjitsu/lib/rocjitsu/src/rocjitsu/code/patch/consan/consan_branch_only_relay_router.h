@@ -192,6 +192,12 @@ struct BranchOnlyRelaySearchLimits {
   BranchOnlyRelayPairWorkLimits pair;
 };
 
+/// Configures a bounded plan to skip exponential exact routing and use the
+/// pair-atomic greedy tier after one ordered-inventory construction. This is
+/// appropriate for large monotonic corridors where feasibility, rather than
+/// owner-group optimization, is the caller's contract.
+[[nodiscard]] BranchOnlyRelaySearchLimits branch_only_relay_greedy_pair_limits(size_t relay_count);
+
 static_assert(sizeof(BranchOnlyRelayQualificationWorkLimits) == 3u * sizeof(size_t));
 static_assert(sizeof(BranchOnlyRelayBatchWorkLimits) == 9u * sizeof(size_t));
 static_assert(sizeof(BranchOnlyRelayPairWorkLimits) == 8u * sizeof(size_t));

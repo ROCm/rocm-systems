@@ -231,18 +231,20 @@ static_assert(kConSanBranchOnlyRoutingTelemetryFields.size() == 24u);
 static_assert(sizeof(ConSanBranchOnlyRoutingTelemetry) ==
                   kConSanBranchOnlyRoutingTelemetryFields.size() * sizeof(size_t),
               "add every routing counter to the typed telemetry field table");
-static_assert([] {
-  for (size_t lhs = 0u; lhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++lhs) {
-    for (size_t rhs = lhs + 1u; rhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++rhs) {
-      if (kConSanBranchOnlyRoutingTelemetryFields[lhs].member ==
-              kConSanBranchOnlyRoutingTelemetryFields[rhs].member ||
-          kConSanBranchOnlyRoutingTelemetryFields[lhs].log_name ==
-              kConSanBranchOnlyRoutingTelemetryFields[rhs].log_name)
-        return false;
-    }
-  }
-  return true;
-}(), "routing telemetry field table must name every counter exactly once");
+static_assert(
+    [] {
+      for (size_t lhs = 0u; lhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++lhs) {
+        for (size_t rhs = lhs + 1u; rhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++rhs) {
+          if (kConSanBranchOnlyRoutingTelemetryFields[lhs].member ==
+                  kConSanBranchOnlyRoutingTelemetryFields[rhs].member ||
+              kConSanBranchOnlyRoutingTelemetryFields[lhs].log_name ==
+                  kConSanBranchOnlyRoutingTelemetryFields[rhs].log_name)
+            return false;
+        }
+      }
+      return true;
+    }(),
+    "routing telemetry field table must name every counter exactly once");
 
 [[nodiscard]] inline std::string
 format_consan_branch_only_routing_telemetry(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
@@ -407,6 +409,18 @@ struct ConSanResult {
   /// rejected transform retains no output image, so this remains zero; any
   /// attempted-plan inventory must use separate telemetry.
   ConSanBranchOnlyReservoirTelemetry moi_branch_only_reservoir_telemetry;
+  /// Exact generated reservation retained by the access pass for a later
+  /// barrier-composition pass. Branch-only Record/Replay layouts may use a
+  /// strided slot whose final word is a claimed relay, so rediscovering this
+  /// region solely from access-island patch records is not sound.
+  std::optional<uint64_t> moi_reserved_barrier_island_begin;
+  uint32_t moi_reserved_barrier_island_slot_words = 0u;
+  uint64_t moi_reserved_barrier_island_count = 0u;
+  /// Half-open ranges dedicated to generated branch-only relay storage by the
+  /// access layout. Later composition passes may offer only words that remain
+  /// pristine, preserving the capacity-one ownership of already emitted
+  /// routes without reconstructing dense access-island packing heuristically.
+  std::vector<std::pair<uint64_t, uint64_t>> moi_generated_branch_relay_ranges;
   ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;
   /// Reservoir footprint retained by all successfully emitted LDS relay
   /// consumers, including branch-only and legacy indirect routing. A rejected

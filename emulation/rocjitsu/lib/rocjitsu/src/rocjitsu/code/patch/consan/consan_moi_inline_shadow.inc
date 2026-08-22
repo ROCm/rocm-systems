@@ -473,6 +473,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
     }
   }
+  const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
+    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
+    if (plan == nullptr || plan->owner_descriptor_file_offsets.empty())
+      return false;
+    return std::ranges::all_of(
+        plan->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+          const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
+          return assignment != nullptr && assignment->branch_only_scalar_spill;
+        });
+  };
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   if (has_branch_only_scalar_assignment && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges = synchronization_ranges;
@@ -493,9 +503,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       protected_ranges.emplace_back(
           host.host_offset, host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
     }
-    const uint64_t latest_source =
-        std::ranges::max(candidates, {}, &ConSanMoiCandidate::text_offset)->text_offset;
-    const uint64_t route_midpoint = latest_source + (indirect_body_begin - latest_source) / 2u;
+    uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
+    for (const ConSanMoiCandidate *candidate : candidates) {
+      if (uses_branch_only_scalar_spill(candidate))
+        route_frontier_source = std::min(route_frontier_source, candidate->text_offset);
+    }
+    if (route_frontier_source == std::numeric_limits<uint64_t>::max()) {
+      result.errors.emplace_back(
+          "ConSan MOI inline-shadow probe lost its branch-only routing frontier");
+      return;
+    }
     std::vector<BasicBlock *> reservoir_blocks;
     reservoir_blocks.reserve(dense_host_blocks.size());
     for (const std::unique_ptr<BasicBlock> &block : dense_host_blocks) {
@@ -504,7 +521,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_midpoint,
+            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
             2u * candidates.size(), placement_planner, direct_branch_reservoirs, &relay_error,
             &result.planning_work_telemetry,
             {.discovery = options.direct_reservoir_planning_work_limit})) {
@@ -528,16 +545,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       if (selected_inline_anchor_relay_offsets.insert(offset).second)
         (void)branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
     }
-  };
-  const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
-    if (plan == nullptr || plan->owner_descriptor_file_offsets.empty())
-      return false;
-    return std::ranges::all_of(
-        plan->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-          const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
-          return assignment != nullptr && assignment->branch_only_scalar_spill;
-        });
   };
   std::vector<const ConSanMoiCandidate *> planning_candidates = candidates;
   if (has_branch_only_scalar_assignment && options.max_patches >= candidates.size()) {

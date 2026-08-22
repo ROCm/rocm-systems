@@ -266,11 +266,20 @@ TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
   };
-  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+  const uint32_t ineligible_reservoir_word =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     first_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
-  // One reservoir pair cannot bridge both directions across this text size.
-  first_kernel_words.resize(
-      100'000u, build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
+    first_kernel_words.push_back(ineligible_reservoir_word);
+  }
+  // Recursive planning has exactly one legal donor close enough to appended
+  // storage. Its relay tail remains more than one SOPP hop from the access, so
+  // the retry must lose and publish its discarded routing/inventory evidence.
+  first_kernel_words.resize(100'000u, ineligible_reservoir_word);
+  constexpr size_t kOnlyDonorWord = 70'000u;
+  constexpr size_t kOnlyDonorWords = 64u;
+  std::fill_n(first_kernel_words.begin() + kOnlyDonorWord, kOnlyDonorWords,
+              build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
   first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::array<uint32_t, 1> second_kernel_words = {
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),

@@ -656,11 +656,118 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   return words;
 }
 
-[[nodiscard]] std::optional<uint64_t>
+struct MoiReservedBarrierIslandLayout {
+  uint64_t begin = 0u;
+  uint32_t slot_words = kMoiRecordReplayIndirectIslandWords;
+  uint64_t reserved_slot_count = 0u;
+};
+
+// Access planning may materialize a conservative direct-reservoir frontier
+// for the later Record/Replay barrier pass. Once barrier routes have been
+// emitted, restore every unclaimed reservoir and its recursive route while
+// retaining its appended slot as NOP padding. Repeating to a fixed point
+// removes dependency-only reservoirs whose sole consumer was itself pruned.
+// This preserves stable planned offsets without leaving dead guest-code
+// relocations in the final image.
+[[nodiscard]] bool prune_unused_record_replay_direct_reservoirs(std::vector<uint8_t> &text,
+                                                                rj_code_arch_t arch,
+                                                                ConSanResult &result,
+                                                                std::vector<std::string> &errors) {
+  const uint32_t nop = build_s_nop(0u, arch);
+  const auto is_direct_reservoir = [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+           patch.original_size >= 2u * sizeof(uint32_t) &&
+           patch.trampoline_size == patch.original_size + sizeof(uint32_t);
+  };
+  bool pruned_any = false;
+  for (;;) {
+    const auto unused = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      if (!is_direct_reservoir(patch) || patch.anchor_offset > text.size() ||
+          patch.original_size > text.size() - patch.anchor_offset) {
+        return false;
+      }
+      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
+           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t)) {
+        uint32_t word = 0u;
+        std::memcpy(&word, text.data() + offset, sizeof(word));
+        if (word != nop)
+          return false;
+      }
+      return true;
+    });
+    if (unused == result.patches.end())
+      break;
+
+    const ConSanPatchInfo reservoir = *unused;
+    if (reservoir.trampoline_offset > text.size() ||
+        reservoir.trampoline_size > text.size() - reservoir.trampoline_offset ||
+        reservoir.original_size > text.size() - reservoir.trampoline_offset) {
+      errors.emplace_back("ConSan MOI barrier pass found an invalid provisional reservoir");
+      return false;
+    }
+    std::memcpy(text.data() + reservoir.anchor_offset, text.data() + reservoir.trampoline_offset,
+                reservoir.original_size);
+    for (uint64_t offset = reservoir.trampoline_offset;
+         offset < reservoir.trampoline_offset + reservoir.trampoline_size;
+         offset += sizeof(uint32_t)) {
+      if (!write_word_bytes(text, offset, nop)) {
+        errors.emplace_back("ConSan MOI barrier pass could not clear a provisional reservoir");
+        return false;
+      }
+    }
+
+    std::unordered_set<uint64_t> route_relays(reservoir.branch_only_entry_relay_offsets.begin(),
+                                              reservoir.branch_only_entry_relay_offsets.end());
+    route_relays.insert(reservoir.branch_only_return_relay_offsets.begin(),
+                        reservoir.branch_only_return_relay_offsets.end());
+    for (uint64_t relay : route_relays) {
+      if (!write_word_bytes(text, relay, nop)) {
+        errors.emplace_back("ConSan MOI barrier pass could not restore a provisional relay");
+        return false;
+      }
+    }
+
+    std::erase_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      if (is_direct_reservoir(patch) && patch.anchor_offset == reservoir.anchor_offset &&
+          patch.trampoline_offset == reservoir.trampoline_offset)
+        return true;
+      const bool is_route_relay =
+          patch.kind == ConSanPatchKind::TrampolineNopBranchRelay ||
+          (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+           patch.original_size == 0u && patch.trampoline_size == sizeof(uint32_t));
+      return is_route_relay && route_relays.contains(patch.trampoline_offset);
+    });
+    pruned_any = true;
+  }
+
+  if (pruned_any) {
+    size_t used_count = 0u;
+    size_t used_bytes = 0u;
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (!is_direct_reservoir(patch))
+        continue;
+      ++used_count;
+      used_bytes = saturated_add(used_bytes, patch.trampoline_size);
+    }
+    ConSanBranchOnlyReservoirTelemetry &telemetry = result.moi_branch_only_reservoir_telemetry;
+    telemetry.used_reservoir_count = used_count;
+    telemetry.used_appended_bytes = used_bytes;
+    telemetry.unused_reservoir_count = telemetry.planned_reservoir_count > used_count
+                                           ? telemetry.planned_reservoir_count - used_count
+                                           : 0u;
+    telemetry.unused_appended_bytes = telemetry.planned_appended_bytes > used_bytes
+                                          ? telemetry.planned_appended_bytes - used_bytes
+                                          : 0u;
+  }
+  return pruned_any;
+}
+
+[[nodiscard]] std::optional<MoiReservedBarrierIslandLayout>
 find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
                                                  const ConSanResult &result, rj_code_arch_t arch,
-                                                 size_t barrier_count) {
-  if (barrier_count == 0u)
+                                                 size_t barrier_count,
+                                                 uint64_t reserved_barrier_count) {
+  if (barrier_count == 0u || reserved_barrier_count < barrier_count)
     return std::nullopt;
 
   std::unordered_set<uint64_t> access_anchors;
@@ -688,13 +795,54 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     access_island_end = std::max(
         access_island_end, patch.trampoline_offset + static_cast<uint64_t>(patch.trampoline_size));
   }
+  if (result.moi_reserved_barrier_island_begin &&
+      result.moi_reserved_barrier_island_count == reserved_barrier_count &&
+      (result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayIndirectIslandWords ||
+       result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayBarrierRelaySlotWords) &&
+      reserved_barrier_count <=
+          std::numeric_limits<uint64_t>::max() /
+              (result.moi_reserved_barrier_island_slot_words * sizeof(uint32_t))) {
+    const uint64_t reservation_bytes =
+        reserved_barrier_count * result.moi_reserved_barrier_island_slot_words * sizeof(uint32_t);
+    if (*result.moi_reserved_barrier_island_begin <=
+        std::numeric_limits<uint64_t>::max() - reservation_bytes) {
+      access_island_begin = *result.moi_reserved_barrier_island_begin + reservation_bytes;
+    }
+  }
 
-  const uint64_t required_island_bytes =
-      barrier_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
-  const auto is_reserved_nop_range = [&](uint64_t candidate_begin) {
-    bool all_reserved_nops = candidate_begin + required_island_bytes <= text.size();
+  std::unordered_set<uint64_t> generated_branch_relays;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+        patch.original_size == 0u && patch.trampoline_size == sizeof(uint32_t)) {
+      generated_branch_relays.insert(patch.trampoline_offset);
+    }
+  }
+  const auto checked_reserved_bytes = [&](uint32_t slot_words) -> std::optional<uint64_t> {
+    constexpr uint64_t kWordBytes = sizeof(uint32_t);
+    if (reserved_barrier_count > std::numeric_limits<uint64_t>::max() / (slot_words * kWordBytes)) {
+      return std::nullopt;
+    }
+    return reserved_barrier_count * slot_words * kWordBytes;
+  };
+  const auto word_is_nop = [&](uint64_t offset) {
+    if (offset > text.size() || sizeof(uint32_t) > text.size() - offset)
+      return false;
+    uint32_t word = 0u;
+    std::memcpy(&word, text.data() + offset, sizeof(word));
+    return word == build_s_nop(0, arch);
+  };
+  const auto word_is_branch = [&](uint64_t offset) {
+    if (offset > text.size() || sizeof(uint32_t) > text.size() - offset)
+      return false;
+    uint32_t word = 0u;
+    std::memcpy(&word, text.data() + offset, sizeof(word));
+    return (word & 0xffff0000u) == (build_s_branch(0, arch) & 0xffff0000u);
+  };
+  const auto is_reserved_nop_range = [&](uint64_t candidate_begin, uint64_t required_bytes) {
+    bool all_reserved_nops =
+        candidate_begin <= text.size() && required_bytes <= text.size() - candidate_begin;
     for (uint64_t offset = candidate_begin;
-         all_reserved_nops && offset < candidate_begin + required_island_bytes;
+         all_reserved_nops && offset < candidate_begin + required_bytes;
          offset += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, text.data() + offset, sizeof(word));
@@ -703,24 +851,84 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     return all_reserved_nops;
   };
 
+  // A branch-only Record/Replay access pass may retain a dedicated relay pair
+  // after each seven-word barrier island. Claimed spine words already
+  // contain emitted branches, so recognize them through their patch
+  // provenance while requiring every barrier-owned word to remain pristine.
+  const auto find_spined_prefix = [&]() -> std::optional<MoiReservedBarrierIslandLayout> {
+    const std::optional<uint64_t> required_bytes =
+        checked_reserved_bytes(kMoiRecordReplayBarrierRelaySlotWords);
+    if (!required_bytes || access_island_begin == std::numeric_limits<uint64_t>::max() ||
+        access_island_begin < *required_bytes) {
+      return std::nullopt;
+    }
+    const uint64_t candidate_begin = access_island_begin - *required_bytes;
+    const bool has_explicit_spined_layout =
+        result.moi_reserved_barrier_island_begin == candidate_begin &&
+        result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayBarrierRelaySlotWords &&
+        result.moi_reserved_barrier_island_count == reserved_barrier_count;
+    bool has_claimed_spine_word = false;
+    for (uint64_t slot = 0u; slot < reserved_barrier_count; ++slot) {
+      const uint64_t slot_begin =
+          candidate_begin + slot * kMoiRecordReplayBarrierRelaySlotWords * sizeof(uint32_t);
+      for (uint32_t word = 0u; word < kMoiRecordReplayIndirectIslandWords; ++word) {
+        if (!word_is_nop(slot_begin + word * sizeof(uint32_t)))
+          return std::nullopt;
+      }
+      for (uint32_t word = kMoiRecordReplayIndirectIslandWords;
+           word < kMoiRecordReplayBarrierRelaySlotWords; ++word) {
+        const uint64_t spine_offset = slot_begin + word * sizeof(uint32_t);
+        const bool claimed = generated_branch_relays.contains(spine_offset) ||
+                             (has_explicit_spined_layout && word_is_branch(spine_offset));
+        if (!claimed && !word_is_nop(spine_offset))
+          return std::nullopt;
+        has_claimed_spine_word = has_claimed_spine_word || claimed;
+      }
+    }
+    if (!has_claimed_spine_word && !has_explicit_spined_layout)
+      return std::nullopt;
+    return MoiReservedBarrierIslandLayout{
+        .begin = candidate_begin,
+        .slot_words = kMoiRecordReplayBarrierRelaySlotWords,
+        .reserved_slot_count = reserved_barrier_count,
+    };
+  };
+  if (const auto spined = find_spined_prefix())
+    return spined;
+
+  const std::optional<uint64_t> required_island_bytes =
+      checked_reserved_bytes(kMoiRecordReplayIndirectIslandWords);
+  if (!required_island_bytes)
+    return std::nullopt;
+
   // Current access placement puts barrier islands first: early
   // synchronization sites are more likely to reach the start of a large
   // generated object, while sorted access relays follow them.
   if (access_island_begin != std::numeric_limits<uint64_t>::max() &&
-      access_island_begin >= required_island_bytes) {
-    const uint64_t candidate_begin = access_island_begin - required_island_bytes;
-    if (is_reserved_nop_range(candidate_begin))
-      return candidate_begin;
+      access_island_begin >= *required_island_bytes) {
+    const uint64_t candidate_begin = access_island_begin - *required_island_bytes;
+    if (is_reserved_nop_range(candidate_begin, *required_island_bytes)) {
+      return MoiReservedBarrierIslandLayout{
+          .begin = candidate_begin,
+          .slot_words = kMoiRecordReplayIndirectIslandWords,
+          .reserved_slot_count = reserved_barrier_count,
+      };
+    }
   }
 
   // Accept the older trailing reservation layout as well so independently
   // composed exact-shadow producers remain compatible.
   if (first_access_body != std::numeric_limits<uint64_t>::max() &&
-      first_access_body >= required_island_bytes &&
-      first_access_body - required_island_bytes >= access_island_end) {
-    const uint64_t candidate_begin = first_access_body - required_island_bytes;
-    if (is_reserved_nop_range(candidate_begin))
-      return candidate_begin;
+      first_access_body >= *required_island_bytes &&
+      first_access_body - *required_island_bytes >= access_island_end) {
+    const uint64_t candidate_begin = first_access_body - *required_island_bytes;
+    if (is_reserved_nop_range(candidate_begin, *required_island_bytes)) {
+      return MoiReservedBarrierIslandLayout{
+          .begin = candidate_begin,
+          .slot_words = kMoiRecordReplayIndirectIslandWords,
+          .reserved_slot_count = reserved_barrier_count,
+      };
+    }
   }
   return std::nullopt;
 }
@@ -829,6 +1037,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   };
   std::vector<PlannedInlineEpochBarrier> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
+  MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
   MoiSpillManagers visible_evidence_spill_managers;
   MoiDescriptorVgprRequirements visible_evidence_vgpr_requirements;
   MoiDescriptorSgprRequirements visible_evidence_sgpr_requirements;
@@ -974,15 +1183,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           .required_private_bytes = required_private_bytes,
       });
     }
-    if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                             private_requirements, result.errors))
-      return;
   }
   if (options.automatic_moi_persistent_sgprs) {
     // The owner-kernel entry prologue grows each descriptor for this scalar
     // tuple after all emitted patch ownership is known.
   } else if (options.automatic_moi_persistent_vgprs) {
-    MoiDescriptorVgprRequirements requirements;
     for (const BarrierRecordCandidate &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
@@ -994,22 +1199,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       for (uint64_t descriptor_offset : plan->owner_descriptor_file_offsets) {
         const auto *assignment = find_moi_persistent_vgpr_assignment(options, descriptor_offset);
         if (assignment)
-          requirements[descriptor_offset] = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
+          persistent_epoch_vgpr_requirements[descriptor_offset] =
+              static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
       }
     }
-    if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result, requirements,
-                                       arch, result.errors)) {
-      return;
-    }
   } else if (!options.automatic_moi_private_epoch) {
-    MoiDescriptorVgprRequirements requirements;
     for (const ConSanKernelInfo &kernel : result.kernels) {
-      requirements.emplace(kernel.descriptor_file_offset,
-                           static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u);
-    }
-    if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result, requirements,
-                                       arch, result.errors)) {
-      return;
+      persistent_epoch_vgpr_requirements.emplace(
+          kernel.descriptor_file_offset, static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u);
     }
   }
   for (const BarrierRecordCandidate &candidate : selected_candidates) {
@@ -1112,15 +1309,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline-shadow barrier epoch patch found no compatible persistent state");
     return;
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     visible_evidence_vgpr_requirements, arch, result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           visible_evidence_private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object,
-                                          visible_evidence_sgpr_requirements, result.errors)) {
-    return;
-  }
-
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator local_indirect_allocator(old_text, result, arch,
@@ -1129,14 +1317,20 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   patches.reserve(planned_candidates.size() * 2u);
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   const uint64_t indirect_island_bytes = kIndirectIslandWords * sizeof(uint32_t);
-  const std::optional<uint64_t> barrier_island_begin =
+  const std::optional<MoiReservedBarrierIslandLayout> barrier_island_layout =
       options.moi_exec_save_sgpr ? find_record_replay_reserved_barrier_island_begin(
-                                       old_text, result, arch, planned_candidates.size())
+                                       old_text, result, arch, planned_candidates.size(),
+                                       moi_reserved_barrier_island_count(result, options))
                                  : std::nullopt;
-  if (barrier_island_begin) {
-    local_indirect_allocator.reserve(
-        *barrier_island_begin,
-        static_cast<uint32_t>(planned_candidates.size() * kIndirectIslandWords));
+  if (barrier_island_layout) {
+    const uint64_t reserved_words =
+        barrier_island_layout->reserved_slot_count * barrier_island_layout->slot_words;
+    if (reserved_words > std::numeric_limits<uint32_t>::max()) {
+      result.errors.emplace_back("ConSan MOI reserved barrier-island layout is too large");
+      return;
+    }
+    local_indirect_allocator.reserve(barrier_island_layout->begin,
+                                     static_cast<uint32_t>(reserved_words));
   }
   std::vector<size_t> dense_fallback_indices;
   const ConSanMoiReportBufferLayout record_layout = resolve_record_replay_report_layout(
@@ -1289,8 +1483,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return;
 
     std::optional<uint64_t> island_offset =
-        barrier_island_begin
-            ? std::optional<uint64_t>(*barrier_island_begin + planned_index * indirect_island_bytes)
+        barrier_island_layout
+            ? std::optional<uint64_t>(barrier_island_layout->begin +
+                                      planned_index * barrier_island_layout->slot_words *
+                                          sizeof(uint32_t))
             : std::nullopt;
     if (island_offset && !compute_sopp_branch_simm16(site.text_offset, *island_offset))
       island_offset.reset();
@@ -2110,7 +2306,46 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
   }
 
-  if (!replace_consan_text(patcher, new_text, options, "MOI inline-shadow barrier epoch patch",
+  if (patches.empty()) {
+    result.warnings.emplace_back(
+        "ConSan MOI inline-shadow barrier epoch patch found no patchable barriers");
+    return;
+  }
+
+  std::unordered_set<uint64_t> emitted_owner_descriptors;
+  bool has_unscoped_emitted_patch = false;
+  for (const ConSanPatchInfo &patch : patches) {
+    has_unscoped_emitted_patch |= patch.owner_descriptor_file_offsets.empty();
+    emitted_owner_descriptors.insert(patch.owner_descriptor_file_offsets.begin(),
+                                     patch.owner_descriptor_file_offsets.end());
+  }
+  const auto merge_maximum_requirements = [](auto &destination, const auto &source) {
+    for (const auto &[descriptor_offset, required] : source) {
+      auto [it, inserted] = destination.emplace(descriptor_offset, required);
+      if (!inserted)
+        it->second = std::max(it->second, required);
+    }
+  };
+  merge_maximum_requirements(visible_evidence_vgpr_requirements,
+                             persistent_epoch_vgpr_requirements);
+  merge_maximum_requirements(visible_evidence_private_requirements, private_requirements);
+  const auto retain_emitted_owners = [&](auto &requirements) {
+    if (has_unscoped_emitted_patch)
+      return;
+    std::erase_if(requirements, [&](const auto &entry) {
+      return !emitted_owner_descriptors.contains(entry.first);
+    });
+  };
+  retain_emitted_owners(visible_evidence_vgpr_requirements);
+  retain_emitted_owners(visible_evidence_private_requirements);
+  retain_emitted_owners(visible_evidence_sgpr_requirements);
+  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                     visible_evidence_vgpr_requirements, arch, result.errors) ||
+      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                           visible_evidence_private_requirements, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object,
+                                          visible_evidence_sgpr_requirements, result.errors) ||
+      !replace_consan_text(patcher, new_text, options, "MOI inline-shadow barrier epoch patch",
                            result)) {
     return;
   }
@@ -2341,7 +2576,6 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
-      note_spill_descriptor_requirements(private_requirements, *resources, *spill);
     }
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
@@ -2351,23 +2585,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
-      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, scalar_spill->total_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, scalar_spill->total_private_bytes);
-      }
     }
-    if (private_layout) {
-      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, private_layout->ephemeral_base);
-        if (!inserted)
-          it->second = std::max(it->second, private_layout->ephemeral_base);
-      }
-    }
-    note_descriptor_requirements(descriptor_requirements, *resources);
-    note_moi_sgpr_requirements(scalar_requirements, *resources, candidate_options, arch);
     selected_candidates.push_back({std::move(planned_candidate), *resources, std::move(spill),
                                    std::move(scalar_spill), private_owner, private_layout});
   }
@@ -2376,33 +2594,116 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     return;
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, arch, result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                          result.errors)) {
-    return;
-  }
-
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   if (options.moi_exec_save_sgpr) {
-    const auto reserved_barrier_island_begin = find_record_replay_reserved_barrier_island_begin(
-        old_text, result, arch, selected_candidates.size());
-    if (reserved_barrier_island_begin) {
-      indirect_allocator.reserve(
-          *reserved_barrier_island_begin,
-          static_cast<uint32_t>(selected_candidates.size() * kMoiRecordReplayIndirectIslandWords));
+    const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
+        old_text, result, arch, selected_candidates.size(),
+        moi_reserved_barrier_island_count(result, options));
+    if (reserved_barrier_island_layout) {
+      const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
+                                      reserved_barrier_island_layout->slot_words;
+      if (reserved_words > std::numeric_limits<uint32_t>::max()) {
+        result.errors.emplace_back("ConSan MOI reserved barrier-island layout is too large");
+        return;
+      }
+      indirect_allocator.reserve(reserved_barrier_island_layout->begin,
+                                 static_cast<uint32_t>(reserved_words));
     }
   }
-  std::vector<ConSanPatchInfo> patches;
+  BranchOnlyRelayRouter barrier_branch_router;
+  const uint32_t pristine_nop = build_s_nop(0u, arch);
+  for (const auto &[begin, end] : result.moi_generated_branch_relay_ranges) {
+    if (begin > end || begin % sizeof(uint32_t) != 0u || end % sizeof(uint32_t) != 0u ||
+        begin > old_text.size() || end > old_text.size()) {
+      result.errors.emplace_back("ConSan MOI generated barrier-relay range is invalid");
+      return;
+    }
+    for (uint64_t offset = begin; offset < end; offset += sizeof(uint32_t)) {
+      uint32_t word = 0u;
+      std::memcpy(&word, old_text.data() + offset, sizeof(word));
+      if (word == pristine_nop)
+        (void)barrier_branch_router.offer(offset, BranchOnlyRelayProvenance::GeneratedBank);
+    }
+  }
+  // A selected multiword access unconditionally branches away from every
+  // recorded tail word in its replaced anchor. The access pass publishes
+  // those exact ownership offsets in its patch record; import only tails that
+  // remain NOPs after access routing. This gives the later barrier batch a
+  // dense, already-paid original-text frontier without rediscovering guest
+  // code or weakening capacity-one relay ownership.
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
+      continue;
+    for (uint64_t offset : patch.branch_relay_offsets) {
+      const bool is_owned_tail = offset >= patch.anchor_offset + sizeof(uint32_t) &&
+                                 offset < patch.anchor_offset + patch.original_size;
+      if (!is_owned_tail || offset > old_text.size() ||
+          sizeof(uint32_t) > old_text.size() - offset) {
+        result.errors.emplace_back("ConSan MOI access-owned barrier relay is invalid");
+        return;
+      }
+      uint32_t word = 0u;
+      std::memcpy(&word, old_text.data() + offset, sizeof(word));
+      if (word == pristine_nop)
+        (void)barrier_branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
+    }
+  }
+  // The access pass may have relocated ordinary instruction runs to create
+  // direct reservoirs in pristine text.  Its committed routes consume some
+  // tail words, but every tail word that remains a NOP is still capacity-one
+  // storage owned by the materialized reservoir.  Recover that storage from
+  // the durable patch record instead of rediscovering or relocating the
+  // original instructions a second time.  These footholds are essential when
+  // an original barrier cannot directly reach the appended generated bank.
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir ||
+        patch.original_size < 2u * sizeof(uint32_t)) {
+      continue;
+    }
+    const uint64_t end = patch.anchor_offset + patch.original_size;
+    if (end < patch.anchor_offset || end > old_text.size()) {
+      result.errors.emplace_back("ConSan MOI materialized barrier-relay reservoir is invalid");
+      return;
+    }
+    for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t); offset < end;
+         offset += sizeof(uint32_t)) {
+      uint32_t word = 0u;
+      std::memcpy(&word, old_text.data() + offset, sizeof(word));
+      if (word == pristine_nop) {
+        (void)barrier_branch_router.offer_materialized_owner(
+            offset, BranchOnlyRelayProvenance::OwnedReservoir,
+            BranchOnlyRelayOwnerIdentity::direct_reservoir(patch.anchor_offset));
+      }
+    }
+  }
+  const size_t barrier_relay_offer_count = barrier_branch_router.available_count();
+  const BranchOnlyRelaySearchLimits barrier_relay_limits =
+      branch_only_relay_greedy_pair_limits(barrier_relay_offer_count);
+
+  struct StagedBarrierRecord {
+    const PlannedBarrierRecord *planned = nullptr;
+    ConSanOptions candidate_options;
+    uint32_t original_barrier_word = 0u;
+    uint64_t cave_text_offset = 0u;
+    uint64_t return_text_offset = 0u;
+    bool branch_only_scalar_spill = false;
+    DbiPatchPlacement placement;
+    std::vector<uint32_t> cave_words;
+    std::optional<BranchOnlyRelayRoute> branch_only_route;
+  };
+  std::vector<StagedBarrierRecord> staged_barriers;
+  staged_barriers.reserve(selected_candidates.size());
+  std::vector<BranchOnlyRelayPairRequest> branch_only_requests;
+  std::vector<size_t> branch_only_staged_indices;
+  branch_only_requests.reserve(selected_candidates.size());
+  branch_only_staged_indices.reserve(selected_candidates.size());
   for (const PlannedBarrierRecord &planned : selected_candidates) {
     const BarrierRecordCandidate &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
-    uint32_t original_barrier_word = 0;
+    uint32_t original_barrier_word = 0u;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
 
@@ -2428,27 +2729,10 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         options, planned.resources.owner_descriptor_file_offsets);
-    const bool direct_entry =
-        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
-    uint64_t entry_island = 0;
-    bool has_entry_island = false;
-    if (branch_only_scalar_spill || !direct_entry) {
-      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
-      if (!claimed_island) {
-        result.warnings.emplace_back(
-            branch_only_scalar_spill
-                ? "ConSan MOI barrier record patch found no reachable register-free round-trip "
-                  "island in " +
-                      candidate.container_name
-                : "ConSan MOI barrier record patch found no reachable indirect entry island in " +
-                      candidate.container_name);
-        continue;
-      }
-      entry_island = *claimed_island;
-      has_entry_island = true;
-    }
+    // A routed branch-only body replaces this harmless placeholder after all
+    // body coordinates and the shared relay plan are fixed.
     const uint64_t cave_return_target =
-        branch_only_scalar_spill ? entry_island + sizeof(uint32_t) : return_text_offset;
+        branch_only_scalar_spill ? cave_text_offset : return_text_offset;
     auto cave_words = build_barrier_record_cave_words(
         active_bytes, candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
@@ -2461,33 +2745,127 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         result.errors);
     if (!cave_words)
       return;
-    if (branch_only_scalar_spill) {
-      const uint64_t return_branch_offset =
-          cave_text_offset + (cave_words->size() - 1u) * sizeof(uint32_t);
-      const auto direct_return =
-          compute_sopp_branch_simm16(return_branch_offset, cave_return_target);
-      if (!compute_sopp_branch_simm16(entry_island, cave_text_offset) || !direct_return ||
-          cave_words->back() != build_s_branch(*direct_return, arch)) {
-        result.warnings.emplace_back(
-            "ConSan MOI barrier record patch could not route a register-free round trip in " +
-            candidate.container_name);
-        continue;
-      }
-    }
     std::string placement_error;
-    const auto placement = placement_planner.plan_indirect_appended(
+    auto placement = placement_planner.plan_indirect_appended(
         site.text_offset, site.size, cave_words->size() * sizeof(uint32_t), &placement_error);
-    if (!placement) {
+    if (!placement || placement->body_offset != cave_text_offset) {
       result.errors.emplace_back("ConSan MOI barrier record placement failed: " + placement_error);
       return;
     }
-    if (placement->body_offset != cave_text_offset || new_text.size() != placement->body_offset) {
+    const size_t staged_index = staged_barriers.size();
+    staged_barriers.push_back({
+        .planned = &planned,
+        .candidate_options = std::move(candidate_options),
+        .original_barrier_word = original_barrier_word,
+        .cave_text_offset = cave_text_offset,
+        .return_text_offset = return_text_offset,
+        .branch_only_scalar_spill = branch_only_scalar_spill,
+        .placement = *placement,
+        .cave_words = std::move(*cave_words),
+        .branch_only_route = std::nullopt,
+    });
+    if (branch_only_scalar_spill) {
+      const StagedBarrierRecord &staged = staged_barriers.back();
+      branch_only_requests.push_back({
+          .entry_source = site.text_offset,
+          .entry_target = staged.cave_text_offset,
+          .return_source =
+              staged.cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t),
+          .return_target = return_text_offset,
+      });
+      branch_only_staged_indices.push_back(staged_index);
+    }
+  }
+
+  if (!branch_only_requests.empty()) {
+    DbiPatchPlacementPlanner tentative_planner = placement_planner;
+    BranchOnlyRelayRouter tentative_router = barrier_branch_router;
+    std::string relay_error;
+    BranchOnlyRelayBatchPlan route_plan = tentative_router.plan_pairs(
+        tentative_planner, branch_only_requests, &relay_error, barrier_relay_limits);
+    record_branch_only_relay_plan(result.moi_branch_only_routing_telemetry,
+                                  route_plan.plan_outcome(), route_plan.pair_strategies);
+    if (!route_plan.complete() || route_plan.routes.size() != branch_only_requests.size() ||
+        !tentative_router.commit(route_plan.routes, &relay_error)) {
+      for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
+        record_branch_only_relay_rejection(result.moi_branch_only_routing_telemetry, rejection);
+      if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation || route_plan.complete())
+        record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
+                                         BranchOnlyRelayPlanFailure::Reservation);
+      result.moi_branch_only_placement_failure_count += branch_only_requests.size();
+      result.warnings.emplace_back(
+          "ConSan MOI barrier record patch found no complete routed register-free batch for " +
+          std::to_string(branch_only_requests.size()) + " barrier(s)" +
+          (relay_error.empty() ? std::string{} : ": " + relay_error));
+    } else {
+      placement_planner = std::move(tentative_planner);
+      barrier_branch_router = std::move(tentative_router);
+      for (size_t route_index = 0u; route_index < route_plan.routes.size(); ++route_index) {
+        StagedBarrierRecord &staged = staged_barriers[branch_only_staged_indices[route_index]];
+        staged.branch_only_route = std::move(route_plan.routes[route_index]);
+        const uint64_t return_branch_offset =
+            staged.cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t);
+        const uint64_t return_hop_target =
+            staged.branch_only_route->return_relay_offsets.empty()
+                ? staged.return_text_offset
+                : staged.branch_only_route->return_relay_offsets.front();
+        const auto return_delta =
+            compute_sopp_branch_simm16(return_branch_offset, return_hop_target);
+        if (!return_delta) {
+          result.errors.emplace_back("ConSan MOI barrier record routed return lost its first hop");
+          return;
+        }
+        staged.cave_words.back() = build_s_branch(*return_delta, arch);
+      }
+    }
+  }
+
+  std::vector<ConSanPatchInfo> patches;
+  for (StagedBarrierRecord &staged : staged_barriers) {
+    const PlannedBarrierRecord &planned = *staged.planned;
+    const BarrierRecordCandidate &candidate = planned.candidate;
+    const ConSanBarrierSite &site = candidate.site;
+    ConSanOptions &candidate_options = staged.candidate_options;
+    const uint64_t cave_text_offset = staged.cave_text_offset;
+    const uint64_t return_text_offset = staged.return_text_offset;
+    const bool branch_only_scalar_spill = staged.branch_only_scalar_spill;
+    std::optional<BranchOnlyRelayRoute> &branch_only_route = staged.branch_only_route;
+    while (new_text.size() < staged.placement.body_offset)
+      append_word_bytes(new_text, build_s_nop(0u, arch));
+    if (new_text.size() != staged.placement.body_offset) {
       result.errors.emplace_back("ConSan MOI barrier record patch has a stale cave mapping");
       return;
     }
+    if (branch_only_scalar_spill && !branch_only_route) {
+      for (size_t word = 0u; word < staged.cave_words.size(); ++word)
+        append_word_bytes(new_text, build_s_nop(0u, arch));
+      continue;
+    }
 
-    const uint64_t entry_target = has_entry_island ? entry_island : placement->body_offset;
-    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, entry_target);
+    const bool direct_entry =
+        compute_sopp_branch_simm16(site.text_offset, cave_text_offset).has_value();
+    uint64_t entry_island = 0;
+    bool has_entry_island = false;
+    if (!branch_only_scalar_spill && !direct_entry) {
+      const auto claimed_island = indirect_allocator.claim_reachable(site.text_offset);
+      if (!claimed_island) {
+        result.warnings.emplace_back(
+            "ConSan MOI barrier record patch found no reachable indirect entry island in " +
+            candidate.container_name);
+        for (size_t word = 0u; word < staged.cave_words.size(); ++word)
+          append_word_bytes(new_text, build_s_nop(0u, arch));
+        continue;
+      }
+      entry_island = *claimed_island;
+      has_entry_island = true;
+    }
+    std::string placement_error;
+
+    const uint64_t entry_target =
+        branch_only_route && !branch_only_route->entry_relay_offsets.empty()
+            ? branch_only_route->entry_relay_offsets.front()
+            : (has_entry_island ? entry_island : staged.placement.body_offset);
+    const auto fwd = compute_sopp_branch_simm16(staged.placement.anchor_offset, entry_target);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI barrier record forward branch is out of range");
       return;
@@ -2497,36 +2875,42 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       return;
     }
     if (has_entry_island) {
-      const bool emitted =
-          branch_only_scalar_spill
-              ? emit_moi_local_direct_round_trip_island(
-                    new_text, entry_island, placement->body_offset, return_text_offset,
-                    site.text_offset, planned.resources.owner_descriptor_file_offsets, arch,
-                    patches, result.errors, "ConSan MOI barrier record patch")
-              : emit_moi_local_indirect_entry_island(
-                    new_text, entry_island, placement->body_offset, site.text_offset,
-                    candidate_options, planned.resources.owner_descriptor_file_offsets, arch,
-                    patches, result.errors, "ConSan MOI barrier record patch");
+      const bool emitted = emit_moi_local_indirect_entry_island(
+          new_text, entry_island, staged.placement.body_offset, site.text_offset, candidate_options,
+          planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+          "ConSan MOI barrier record patch");
       if (!emitted)
         return;
     }
-    append_words_bytes(new_text, *cave_words);
+    append_words_bytes(new_text, staged.cave_words);
+    if (branch_only_route && !BranchOnlyRelayRouter::emit_and_record(
+                                 new_text, *branch_only_route, staged.placement.body_offset,
+                                 return_text_offset, arch, patches, &placement_error)) {
+      result.errors.emplace_back("ConSan MOI barrier record patch " + placement_error);
+      return;
+    }
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::TrampolineMoiBarrierRecord;
     info.anchor_offset = site.text_offset;
     info.trampoline_offset = cave_text_offset;
     info.original_size = site.size;
-    info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-    const auto guest =
-        std::ranges::find(cave_words->rbegin(), cave_words->rend(), original_barrier_word);
-    if (guest != cave_words->rend()) {
+    info.trampoline_size = static_cast<uint32_t>(staged.cave_words.size() * sizeof(uint32_t));
+    const auto guest = std::ranges::find(staged.cave_words.rbegin(), staged.cave_words.rend(),
+                                         staged.original_barrier_word);
+    if (guest != staged.cave_words.rend()) {
       info.relocated_guest_instruction_offset =
           cave_text_offset +
-          static_cast<uint64_t>(std::distance(guest, cave_words->rend()) - 1u) * sizeof(uint32_t);
+          static_cast<uint64_t>(std::distance(guest, staged.cave_words.rend()) - 1u) *
+              sizeof(uint32_t);
     }
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    if (branch_only_route) {
+      info.branch_only_continuation = true;
+      info.branch_only_entry_relay_offsets = branch_only_route->entry_relay_offsets;
+      info.branch_only_return_relay_offsets = branch_only_route->return_relay_offsets;
+    }
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
@@ -2545,11 +2929,49 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       info.required_private_segment_size =
           std::max(info.required_private_segment_size, planned.scalar_spill->total_private_bytes);
     }
+    // Descriptor mutations belong to emitted patches, not merely to
+    // resource-admitted candidates.  Accumulating them here keeps a later
+    // reachability rejection from changing an uninstrumented owner.
+    note_descriptor_requirements(descriptor_requirements, planned.resources);
+    note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
+    if (planned.spill)
+      note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
+    const uint32_t required_private_bytes =
+        std::max(planned.scalar_spill ? planned.scalar_spill->total_private_bytes : 0u,
+                 planned.private_layout ? planned.private_layout->ephemeral_base : 0u);
+    if (required_private_bytes != 0u) {
+      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, required_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, required_private_bytes);
+      }
+    }
     patches.push_back(info);
   }
 
+  const bool pruned_provisional_reservoirs =
+      prune_unused_record_replay_direct_reservoirs(new_text, arch, result, result.errors);
+  if (!result.errors.empty())
+    return;
   if (patches.empty()) {
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
+    if (pruned_provisional_reservoirs) {
+      if (!replace_consan_text(patcher, new_text, options, "MOI barrier reservoir cleanup",
+                               result)) {
+        return;
+      }
+      result.elf_bytes = std::move(patcher).emit();
+      result.modified = true;
+    }
+    return;
+  }
+  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                     descriptor_requirements, arch, result.errors) ||
+      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                           private_requirements, result.errors) ||
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+                                          result.errors)) {
     return;
   }
   if (!replace_consan_text(patcher, new_text, options, "MOI barrier record patch", result)) {

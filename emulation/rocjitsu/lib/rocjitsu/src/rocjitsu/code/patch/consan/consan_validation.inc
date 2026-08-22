@@ -703,7 +703,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
                                patch.original_size == 3u * sizeof(uint32_t));
     const bool is_moi_body = (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
                               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
-                              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
+                              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
+                              patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord) &&
                              patch.original_size >= sizeof(uint32_t) &&
                              patch.original_size % sizeof(uint32_t) == 0u;
     const bool is_routed_reservoir =
