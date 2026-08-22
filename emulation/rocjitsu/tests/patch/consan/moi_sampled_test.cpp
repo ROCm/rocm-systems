@@ -6806,6 +6806,150 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSave) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+
+  // Keep every allocated ordinary SGPR live across the access. Sampled must
+  // therefore reach its appended body using only scalar branches. An empty
+  // wave cannot execute the per-lane private save used by that body, so its
+  // first instruction must bypass the complete probe and land on the direct
+  // return without touching any borrowed guest scalar.
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  size_t cursor = 1u + guest->size();
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_empty_exec_branch_only_scalar_spill", kCdna4Wave64AllVgprsGranulated);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1u);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
+  ASSERT_TRUE(access->branch_only_continuation);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  ASSERT_FALSE(body.empty());
+  const int16_t guard_distance = static_cast<int16_t>(body.front() & 0xffffu);
+  ASSERT_GE(guard_distance, 0);
+  const size_t continuation_word = static_cast<size_t>(guard_distance) + 1u;
+  ASSERT_LT(continuation_word, body.size());
+  const auto guard = instrumentation::build_s_cbranch_execz(guard_distance, kArch);
+  ASSERT_TRUE(guard);
+  EXPECT_EQ(body.front(), *guard);
+
+  const uint64_t return_target = access->branch_only_return_relay_offsets.empty()
+                                     ? access->anchor_offset + access->original_size
+                                     : access->branch_only_return_relay_offsets.front();
+  const uint64_t return_source = access->trampoline_offset + continuation_word * sizeof(uint32_t);
+  const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
+  ASSERT_TRUE(return_delta);
+  EXPECT_EQ(body[continuation_word], build_s_branch(*return_delta, kArch));
+  EXPECT_EQ(continuation_word + 1u, body.size())
+      << "the empty-wave continuation must be the direct return, after every per-lane save";
+}
+
+TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchClobber) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr auto guest = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0u, .data0 = 1u});
+
+  // Model the full scalar pressure from the checked-in device reduction. The
+  // private-state prologue must save the raw entry workitem ID before it uses
+  // its scratch VGPR to transfer the borrowed scalar window.
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  std::copy(guest.begin(), guest.end(), text_words.begin() + 1u);
+  size_t cursor = 1u + guest.size();
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes =
+      make_rdna3_lds_code_object(text_words, "sampled_private_owner_before_scalar_spill",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
+  ASSERT_TRUE(prologue->scratch_vgpr);
+  ASSERT_TRUE(prologue->persistent_owner_private_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  std::vector<uint32_t> owner_capture = {build_v_mov_b32_e32(
+      *prologue->scratch_vgpr, vector_source_vgpr(/*workitem_id_x=*/0u), kArch)};
+  const auto owner_store = instrumentation::build_private_store_b32(
+      *prologue->scratch_vgpr, *prologue->persistent_owner_private_offset, kArch);
+  ASSERT_TRUE(owner_store);
+  owner_capture.insert(owner_capture.end(), owner_store->begin(), owner_store->end());
+  const auto capture =
+      std::search(words.begin(), words.end(), owner_capture.begin(), owner_capture.end());
+  ASSERT_NE(capture, words.end());
+
+  const uint32_t first_scalar_transfer =
+      build_v_mov_b32_e32(*prologue->scratch_vgpr, assignment.exec_save_sgpr, kArch);
+  const auto scalar_clobber = std::ranges::find(words, first_scalar_transfer);
+  ASSERT_NE(scalar_clobber, words.end());
+  EXPECT_LT(std::distance(words.begin(), capture), std::distance(words.begin(), scalar_clobber));
+}
+
 TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kBarrierCount = 9u;

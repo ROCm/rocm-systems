@@ -1604,7 +1604,7 @@ function(rj_add_consan_common_sim_cases)
     )
 endfunction()
 
-function(rj_add_consan_inline_scalar_spill_exec_cases)
+function(rj_add_consan_scalar_spill_exec_cases)
     set(_options PHYSICAL)
     set(
         _one_value_args
@@ -1621,7 +1621,7 @@ function(rj_add_consan_inline_scalar_spill_exec_cases)
     if(_spill_UNPARSED_ARGUMENTS)
         message(
             FATAL_ERROR
-            "unknown ConSan Inline scalar-spill arguments: ${_spill_UNPARSED_ARGUMENTS}"
+            "unknown ConSan scalar-spill arguments: ${_spill_UNPARSED_ARGUMENTS}"
         )
     endif()
     foreach(
@@ -1632,7 +1632,7 @@ function(rj_add_consan_inline_scalar_spill_exec_cases)
         if(NOT _spill_${_required})
             message(
                 FATAL_ERROR
-                "ConSan Inline scalar-spill cases require ${_required}"
+                "ConSan scalar-spill cases require ${_required}"
             )
         endif()
     endforeach()
@@ -1724,6 +1724,57 @@ function(rj_add_consan_inline_scalar_spill_exec_cases)
             consan consan-device inline-shadow scalar-spill
             "${_spill_ARCH_LABEL}" "${_execution_label}" incorrect racy
     )
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.MoiSampledScalarSpillExec.Correct"
+        TARGET ${_spill_TARGET}
+        FILTER "${_spill_CORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=sampled"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=8"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+        LABELS
+            consan consan-device sampled scalar-spill
+            "${_spill_ARCH_LABEL}" "${_execution_label}" correct
+    )
+    rj_add_consan_hip_case(
+        NAME "${_spill_PREFIX}.MoiSampledScalarSpillExec.Incorrect"
+        TARGET ${_spill_TARGET}
+        FILTER "${_spill_INCORRECT_TEST}"
+        ${_config_args}
+        ${_resource_args}
+        TIMEOUT 60
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=sampled"
+            "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=8"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+        LABELS
+            consan consan-device sampled scalar-spill
+            "${_spill_ARCH_LABEL}" "${_execution_label}" incorrect racy
+    )
 endfunction()
 
 function(rj_add_consan_cdna_sim_cases)
@@ -1762,7 +1813,7 @@ function(rj_add_consan_cdna_sim_cases)
         "${RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST}"
         "${_sim_CONFIG}"
     )
-    rj_add_consan_inline_scalar_spill_exec_cases(
+    rj_add_consan_scalar_spill_exec_cases(
         PREFIX "${_sim_PREFIX}"
         TARGET ${_sim_MOI_TARGET}
         CONFIG "${_sim_CONFIG}"
@@ -1987,7 +2038,7 @@ function(rj_add_consan_gfx1250_sim_cases)
         "${RJ_CONSAN_MOI_ADDRESS_GROUP_TEST}"
         "${_sim_CONFIG}"
     )
-    rj_add_consan_inline_scalar_spill_exec_cases(
+    rj_add_consan_scalar_spill_exec_cases(
         PREFIX "${_sim_PREFIX}"
         TARGET ${_sim_MOI_TARGET}
         CONFIG "${_sim_CONFIG}"
@@ -2241,7 +2292,7 @@ function(rj_add_consan_rdna3_compact_sim_cases)
     # coverage stays in the host suite; this slice proves that native gfx11
     # objects execute all four engines and attribute a real conflict.
 
-    rj_add_consan_inline_scalar_spill_exec_cases(
+    rj_add_consan_scalar_spill_exec_cases(
         PREFIX "${_sim_PREFIX}"
         TARGET ${_sim_MOI_TARGET}
         CONFIG "${_sim_CONFIG}"
@@ -2514,7 +2565,7 @@ function(rj_add_consan_hip_tests)
                 TARGET gfx950
                 PHYSICAL
             )
-            rj_add_consan_inline_scalar_spill_exec_cases(
+            rj_add_consan_scalar_spill_exec_cases(
                 PREFIX "ConSanGfx950Physical"
                 TARGET hip_consan_moi_gfx950_test
                 ARCH_LABEL gfx950
@@ -2932,7 +2983,7 @@ function(rj_add_consan_hip_tests)
             EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
     )
     add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
-    rj_add_consan_inline_scalar_spill_exec_cases(
+    rj_add_consan_scalar_spill_exec_cases(
         PREFIX "ConSanGfx1201Sim"
         TARGET hip_consan_moi_test
         CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"

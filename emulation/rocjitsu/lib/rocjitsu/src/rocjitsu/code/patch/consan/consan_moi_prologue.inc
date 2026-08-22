@@ -1288,6 +1288,13 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     return std::nullopt;
   }
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
+  if (owner_store) {
+    // The entry scalar-spill sequence below uses scratch_vgpr to transfer
+    // guest SGPRs into private memory. Capture the raw entry workitem ID first;
+    // after that sequence scratch_vgpr no longer contains the ABI v0 value.
+    words.push_back(build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kRdna4WorkitemIdX), arch));
+    words.insert(words.end(), owner_store->begin(), owner_store->end());
+  }
   if (entry_scalar_spill) {
     words.insert(words.end(), entry_scalar_spill->save_words.begin(),
                  entry_scalar_spill->save_words.end());
@@ -1312,10 +1319,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
           words, *workgroup_shadow, scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 1u),
           /*has_quad_zero_tuple=*/false, return_pc_sgpr, arch, errors)) {
     return std::nullopt;
-  }
-  if (owner_store) {
-    words.push_back(build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kRdna4WorkitemIdX), arch));
-    words.insert(words.end(), owner_store->begin(), owner_store->end());
   }
   if (workgroup_key_store) {
     if (!workgroup_sources || !return_pc_sgpr) {
