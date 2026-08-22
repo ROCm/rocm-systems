@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
@@ -27,6 +28,7 @@ import signal
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
@@ -226,6 +228,11 @@ class Workload:
     coverage_output_contract: CoverageOutputContract | None = None
     tensile_inner_timeout_seconds: int | None = None
     tensile_expected_numeric_rows: int | None = None
+    tensile_exact_problem_size_shards: tuple[
+        tuple[tuple[int, ...], ...], ...
+    ] = ()
+    tensile_expected_numeric_rows_per_shard: tuple[int, ...] = ()
+    tensile_shard_parallelism: int = 1
     tensile_streamk_fixed_grid: int | None = None
     tensile_streamk_mode: int | None = None
     tensile_minimum_timed_ms: float = EMPIRICAL_MINIMUM_TIMED_MS
@@ -1134,9 +1141,49 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
         )
 
 
+def _validate_tensile_sharding(workload: Workload) -> None:
+    shards = workload.tensile_exact_problem_size_shards
+    expected_rows = workload.tensile_expected_numeric_rows_per_shard
+    if not shards:
+        if expected_rows or workload.tensile_shard_parallelism != 1:
+            raise RuntimeError(
+                f"{workload.id} declares Tensile shard policy without shards"
+            )
+        return
+    if workload.kind != "tensile":
+        raise RuntimeError(f"{workload.id} uses Tensile sharding for a non-Tensile row")
+    if workload.tensile_expected_numeric_rows is not None:
+        raise RuntimeError(
+            f"{workload.id} must declare per-shard rather than aggregate numeric rows"
+        )
+    if len(expected_rows) != len(shards) or any(rows <= 0 for rows in expected_rows):
+        raise RuntimeError(
+            f"{workload.id} must declare one positive numeric-row count per shard"
+        )
+    if not 1 <= workload.tensile_shard_parallelism <= min(4, len(shards)):
+        raise RuntimeError(
+            f"{workload.id} Tensile shard parallelism must be between one and four"
+        )
+    sizes = []
+    for shard in shards:
+        if not shard:
+            raise RuntimeError(f"{workload.id} has an empty Tensile problem-size shard")
+        for size in shard:
+            if not size or any(
+                type(dimension) is not int or dimension <= 0 for dimension in size
+            ):
+                raise RuntimeError(
+                    f"{workload.id} has a malformed Tensile Exact problem size"
+                )
+            sizes.append(size)
+    if len(set(sizes)) != len(sizes):
+        raise RuntimeError(f"{workload.id} repeats a Tensile Exact problem size")
+
+
 def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
+        _validate_tensile_sharding(workload)
         if workload.device_timing_calibration_iterations is not None:
             if workload.device_timing_calibration_iterations <= 0:
                 raise RuntimeError(
@@ -1556,13 +1603,25 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,
         },
-        # The complete 75-row configuration needs substantially longer than
-        # the Tensile helper's generic 55-second default under emulation.  A
-        # 600-second diagnostic reaches only 33 rows under Record/Replay, so
-        # keep the subprocess and its enclosing full row explicitly bounded.
+        # Preserve all six exact problems and all 16 generated solutions per
+        # problem, but give each exact size an independent numeric oracle,
+        # teardown verdict, and coverage gate. Four RocJITsu-backed shards fit
+        # the executable manifest's concurrency contract and keep the complete
+        # 96-row Record/Replay corpus bounded without accepting a partial
+        # monolithic timeout transcript.
         "tensile-sk-mxf4gemm-tdm": {
-            "tensile_inner_timeout_seconds": 1800,
-            "run_timeout_seconds": 1860,
+            "tensile_inner_timeout_seconds": 1200,
+            "run_timeout_seconds": 1260,
+            "tensile_exact_problem_size_shards": (
+                ((120, 120, 1, 1024),),
+                ((128, 128, 1, 1024),),
+                ((136, 136, 1, 1024),),
+                ((120, 120, 1, 1056),),
+                ((128, 128, 1, 1056),),
+                ((136, 136, 1, 1056),),
+            ),
+            "tensile_expected_numeric_rows_per_shard": (16, 16, 16, 16, 16, 16),
+            "tensile_shard_parallelism": 4,
         },
     },
 }
@@ -1580,7 +1639,9 @@ def _resolved_workload(target: str, workload: Workload) -> Workload:
                     f"{target} gtest workload has no target-specific registry entry: {workload.id}"
                 )
             override.update(native_override)
-    return replace(workload, **override) if override else workload
+    resolved = replace(workload, **override) if override else workload
+    _validate_tensile_sharding(resolved)
+    return resolved
 
 
 def resolved_workload_relative_path(target: str, workload_id: str) -> str:
@@ -2510,6 +2571,9 @@ def _workload_command(
     phase: str,
     output: Path,
     inner_repetitions_override: int | None = None,
+    *,
+    tensile_exact_problem_sizes: tuple[tuple[int, ...], ...] | None = None,
+    tensile_expected_numeric_rows: int | None = None,
 ) -> list[str]:
     workload = _resolved_workload(target, workload)
     overhead = phase == "overhead"
@@ -2584,11 +2648,35 @@ def _workload_command(
                     str(workload.tensile_inner_timeout_seconds),
                 )
             )
-        if workload.tensile_expected_numeric_rows is not None:
+        expected_numeric_rows = (
+            tensile_expected_numeric_rows
+            if tensile_expected_numeric_rows is not None
+            else workload.tensile_expected_numeric_rows
+        )
+        if expected_numeric_rows is not None:
             command.extend(
                 (
                     "--expect-numeric-rows",
-                    str(workload.tensile_expected_numeric_rows),
+                    str(expected_numeric_rows),
+                )
+            )
+        if tensile_exact_problem_sizes is not None:
+            source_problem_sizes = tuple(
+                size
+                for shard in workload.tensile_exact_problem_size_shards
+                for size in shard
+            )
+            if not source_problem_sizes:
+                raise ValidationError(
+                    f"{workload.id} command selected a problem-size shard "
+                    "without a source inventory"
+                )
+            command.extend(
+                (
+                    "--exact-problem-sizes-json",
+                    json.dumps(tensile_exact_problem_sizes, separators=(",", ":")),
+                    "--expect-source-exact-problem-sizes-json",
+                    json.dumps(source_problem_sizes, separators=(",", ":")),
                 )
             )
         if workload.tensile_streamk_fixed_grid is not None:
@@ -2663,6 +2751,46 @@ def _workload_command(
         else workload.overhead_filter if overhead else workload.clean_filter
     )
     return [str(executable), f"--gtest_filter={selected_filter}"]
+
+
+def _workload_commands(
+    workspace: Path,
+    target: str,
+    workload: Workload,
+    phase: str,
+    output: Path,
+    inner_repetitions_override: int | None = None,
+) -> list[list[str]]:
+    workload = _resolved_workload(target, workload)
+    shards = workload.tensile_exact_problem_size_shards
+    if not shards:
+        return [
+            _workload_command(
+                workspace,
+                target,
+                workload,
+                phase,
+                output,
+                inner_repetitions_override,
+            )
+        ]
+    return [
+        _workload_command(
+            workspace,
+            target,
+            workload,
+            phase,
+            output,
+            inner_repetitions_override,
+            tensile_exact_problem_sizes=shard,
+            tensile_expected_numeric_rows=expected_rows,
+        )
+        for shard, expected_rows in zip(
+            shards,
+            workload.tensile_expected_numeric_rows_per_shard,
+            strict=True,
+        )
+    ]
 
 
 def _write_provenance(
@@ -4653,7 +4781,12 @@ def _run_process(
     environment: dict[str, str],
     log_path: Path,
     timeout: int,
+    *,
+    active_processes: set[subprocess.Popen[str]] | None = None,
+    active_processes_lock: threading.Lock | None = None,
 ) -> tuple[int, float, str]:
+    if (active_processes is None) != (active_processes_lock is None):
+        raise ValidationError("active process registry and lock must be paired")
     start = time.monotonic()
     process = subprocess.Popen(
         command,
@@ -4663,29 +4796,92 @@ def _run_process(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+    if active_processes is not None:
+        assert active_processes_lock is not None
+        with active_processes_lock:
+            active_processes.add(process)
     try:
-        output, _ = process.communicate(timeout=timeout)
-        returncode = process.returncode
-    except subprocess.TimeoutExpired:
-        returncode = 124
-        _stop_process_group(process, signal.SIGTERM)
         try:
-            output, _ = process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired as error:
-            _stop_process_group(process, signal.SIGKILL)
-            output = _bounded_process_output(process, error.output)
-        output = (output or "") + f"\nvalidation timeout after {timeout}s\n"
-    except BaseException:
-        _stop_process_group(process, signal.SIGTERM)
-        try:
-            process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired as error:
-            _stop_process_group(process, signal.SIGKILL)
-            _bounded_process_output(process, error.output)
-        raise
-    elapsed = time.monotonic() - start
-    log_path.write_text(output, encoding="utf-8")
-    return returncode, elapsed, output
+            output, _ = process.communicate(timeout=timeout)
+            returncode = process.returncode
+        except subprocess.TimeoutExpired:
+            returncode = 124
+            _stop_process_group(process, signal.SIGTERM)
+            try:
+                output, _ = process.communicate(
+                    timeout=PROCESS_TERMINATION_GRACE_SECONDS
+                )
+            except subprocess.TimeoutExpired as error:
+                _stop_process_group(process, signal.SIGKILL)
+                output = _bounded_process_output(process, error.output)
+            output = (output or "") + f"\nvalidation timeout after {timeout}s\n"
+        except BaseException:
+            _stop_process_group(process, signal.SIGTERM)
+            try:
+                process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
+            except subprocess.TimeoutExpired as error:
+                _stop_process_group(process, signal.SIGKILL)
+                _bounded_process_output(process, error.output)
+            raise
+        elapsed = time.monotonic() - start
+        log_path.write_text(output, encoding="utf-8")
+        return returncode, elapsed, output
+    finally:
+        if active_processes is not None:
+            assert active_processes_lock is not None
+            with active_processes_lock:
+                active_processes.discard(process)
+
+
+def _run_process_batch(
+    runs: list[tuple[list[str], dict[str, str], Path, int]],
+    max_parallelism: int,
+) -> list[tuple[int, float, str]]:
+    if not runs:
+        return []
+    if max_parallelism < 1 or max_parallelism > len(runs):
+        raise ValidationError(
+            "process-batch parallelism must be positive and no larger than its "
+            "run count"
+        )
+    if max_parallelism == 1:
+        return [_run_process(*run) for run in runs]
+    active_processes: set[subprocess.Popen[str]] = set()
+    active_processes_lock = threading.Lock()
+    previous_handlers: dict[int, signal.Handlers] = {}
+
+    def terminate_active_processes(signum: int, _frame: object) -> None:
+        with active_processes_lock:
+            processes = tuple(active_processes)
+        for process in processes:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
+        raise SystemExit(128 + signum)
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous_handlers[signum] = signal.signal(signum, terminate_active_processes)
+    try:
+        with ThreadPoolExecutor(max_workers=max_parallelism) as executor:
+            # executor.map preserves declaration order even when a later shard
+            # finishes first, keeping commands, logs, coverage, and oracle evidence
+            # joined by one stable index in the retained result.
+            return list(
+                executor.map(
+                    lambda run: _run_process(
+                        *run,
+                        active_processes=active_processes,
+                        active_processes_lock=active_processes_lock,
+                    ),
+                    runs,
+                )
+            )
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 def _launcher_from_json(value: str | None) -> list[str]:
@@ -5487,9 +5683,15 @@ def _run_profile(
     returncodes = []
     elapsed_seconds = []
     qwen_json_paths = []
+    process_runs = []
+    resolved_workload = _resolved_workload(target, workload)
+    if resolved_workload.tensile_exact_problem_size_shards and repetitions != 1:
+        raise ValidationError(
+            "Tensile problem-size sharding requires one outer validation repetition"
+        )
     for index in range(repetitions):
         benchmark_path = row_dir / f"benchmark-{index}.json"
-        command = _workload_command(
+        row_commands = _workload_commands(
             workspace,
             target,
             workload,
@@ -5497,38 +5699,47 @@ def _run_profile(
             benchmark_path,
             inner_repetitions_override,
         )
-        command = _with_launcher(launcher or [], command)
-        log_path = row_dir / f"run-{index}.log"
-        environment = _run_environment(
-            profile, workload, hook, target, phase, workspace
-        )
-        if collect_gtest_device_timing:
-            environment[HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV] = str(
-                inner_repetitions_override or 1
+        for row_command in row_commands:
+            run_index = len(process_runs)
+            command = _with_launcher(launcher or [], row_command)
+            log_path = row_dir / f"run-{run_index}.log"
+            environment = _run_environment(
+                profile, workload, hook, target, phase, workspace
             )
-            environment[HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV] = str(
-                workload.device_timing_warmup_iterations
-            )
-        if profile is not None and (
-            result_phase == "coverage-output" or retain_code_objects
-        ):
-            dump_dir = row_dir / f"code-objects-{index}"
-            dump_dir.mkdir()
-            environment["RJ_CONSAN_DUMP_DIR"] = str(dump_dir.resolve())
-        returncode, elapsed, output = _run_process(
-            command, environment, log_path, timeout
-        )
-        commands.append(command)
-        recorded_environment = _controlled_environment(environment)
-        # The retained code-object inventory records relocatable per-run dump
-        # directories. Do not also publish the execution machine's absolute
-        # directory through the compatibility environment summary.
-        recorded_environment.pop("RJ_CONSAN_DUMP_DIR", None)
+            if collect_gtest_device_timing:
+                environment[HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV] = str(
+                    inner_repetitions_override or 1
+                )
+                environment[HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV] = str(
+                    workload.device_timing_warmup_iterations
+                )
+            if profile is not None and (
+                result_phase == "coverage-output" or retain_code_objects
+            ):
+                dump_dir = row_dir / f"code-objects-{run_index}"
+                dump_dir.mkdir()
+                environment["RJ_CONSAN_DUMP_DIR"] = str(dump_dir.resolve())
+            commands.append(command)
+            process_runs.append((command, environment, log_path, timeout))
+            recorded_environment = _controlled_environment(environment)
+            # The retained code-object inventory records relocatable per-run dump
+            # directories. Do not also publish the execution machine's absolute
+            # directory through the compatibility environment summary.
+            recorded_environment.pop("RJ_CONSAN_DUMP_DIR", None)
+        if workload.kind == "qwen" and phase == "overhead":
+            qwen_json_paths.append(benchmark_path)
+
+    parallelism = (
+        resolved_workload.tensile_shard_parallelism
+        if resolved_workload.tensile_exact_problem_size_shards
+        else 1
+    )
+    for returncode, elapsed, output in _run_process_batch(
+        process_runs, parallelism
+    ):
         returncodes.append(returncode)
         elapsed_seconds.append(elapsed)
         logs.append(output)
-        if workload.kind == "qwen" and phase == "overhead":
-            qwen_json_paths.append(benchmark_path)
 
     timing = None
     timing_samples = None
@@ -5658,6 +5869,17 @@ def _run_profile(
         "phase": result_phase,
         "target": target,
         "commands": commands,
+        "command_batch": {
+            "max_parallelism": parallelism,
+            "processes": len(commands),
+            "tensile_exact_problem_size_shards": [
+                [list(size) for size in shard]
+                for shard in resolved_workload.tensile_exact_problem_size_shards
+            ],
+            "tensile_expected_numeric_rows_per_shard": list(
+                resolved_workload.tensile_expected_numeric_rows_per_shard
+            ),
+        },
         "environment": recorded_environment,
         "returncodes": returncodes,
         "elapsed_seconds": elapsed_seconds,
@@ -5711,7 +5933,7 @@ def _run_profile(
         try:
             result["retained_artifacts"] = _coverage_output_artifact_payload(
                 row_dir,
-                [row_dir / f"run-{index}.log" for index in range(repetitions)],
+                [row_dir / f"run-{index}.log" for index in range(len(commands))],
                 provenance_path,
             )
         except (OSError, UnicodeError, ValidationError) as error:

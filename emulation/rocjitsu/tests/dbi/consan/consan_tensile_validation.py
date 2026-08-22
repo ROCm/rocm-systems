@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
@@ -15,6 +16,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import yaml
 
 from consan_tensile_support import (
     DEFAULT_TARGET,
@@ -399,6 +402,119 @@ def _gpu_target(value: str) -> str:
     return value
 
 
+def _problem_sizes_json(value: str) -> tuple[tuple[int, ...], ...]:
+    try:
+        document = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(
+            f"must be a JSON array of exact problem sizes: {error}"
+        ) from error
+    if (
+        not isinstance(document, list)
+        or not document
+        or any(
+            not isinstance(size, list)
+            or not size
+            or any(type(dimension) is not int or dimension <= 0 for dimension in size)
+            for size in document
+        )
+    ):
+        raise argparse.ArgumentTypeError(
+            "must be a nonempty JSON array of nonempty positive-integer arrays"
+        )
+    sizes = tuple(tuple(size) for size in document)
+    if len(set(sizes)) != len(sizes):
+        raise argparse.ArgumentTypeError("exact problem sizes must be unique")
+    return sizes
+
+
+def _exact_problem_size_blocks(document: object) -> list[list[object]]:
+    blocks = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == "ProblemSizes":
+                    if not isinstance(child, list):
+                        raise ValueError("ProblemSizes must be a list")
+                    blocks.append(child)
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(document)
+    return blocks
+
+
+def _exact_problem_size_inventory(document: object) -> tuple[tuple[int, ...], ...]:
+    blocks = _exact_problem_size_blocks(document)
+    if len(blocks) != 1:
+        raise ValueError(
+            "exact-size sharding requires exactly one ProblemSizes block, "
+            f"found {len(blocks)}"
+        )
+    sizes = []
+    for index, entry in enumerate(blocks[0]):
+        if not isinstance(entry, dict) or set(entry) != {"Exact"}:
+            raise ValueError(
+                "exact-size sharding requires every ProblemSizes entry to contain "
+                f"only Exact; entry {index} is unsupported"
+            )
+        size = entry["Exact"]
+        if (
+            not isinstance(size, list)
+            or not size
+            or any(type(dimension) is not int or dimension <= 0 for dimension in size)
+        ):
+            raise ValueError(f"ProblemSizes Exact entry {index} is malformed")
+        sizes.append(tuple(size))
+    if not sizes:
+        raise ValueError("ProblemSizes contains no Exact entries")
+    if len(set(sizes)) != len(sizes):
+        raise ValueError("ProblemSizes contains duplicate Exact entries")
+    return tuple(sizes)
+
+
+def _write_exact_problem_size_shard(
+    source: Path,
+    destination: Path,
+    selected: tuple[tuple[int, ...], ...],
+    expected_source: tuple[tuple[int, ...], ...],
+) -> tuple[tuple[int, ...], ...]:
+    try:
+        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise ValueError(f"cannot read Tensile YAML: {error}") from error
+    source_inventory = _exact_problem_size_inventory(document)
+    if source_inventory != expected_source:
+        raise ValueError(
+            "source Exact problem-size inventory changed: "
+            f"found={source_inventory}, expected={expected_source}"
+        )
+    if any(size not in source_inventory for size in selected):
+        missing = tuple(size for size in selected if size not in source_inventory)
+        raise ValueError(f"selected Exact problem sizes are absent: {missing}")
+
+    filtered = copy.deepcopy(document)
+    block = _exact_problem_size_blocks(filtered)[0]
+    selected_set = set(selected)
+    block[:] = [
+        entry for entry in block if tuple(entry["Exact"]) in selected_set
+    ]
+    filtered_inventory = _exact_problem_size_inventory(filtered)
+    if filtered_inventory != tuple(
+        size for size in source_inventory if size in selected_set
+    ):
+        raise ValueError("filtered Exact problem-size inventory is inconsistent")
+    destination.write_text(
+        yaml.safe_dump(filtered, sort_keys=False),
+        encoding="utf-8",
+    )
+    return source_inventory
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
@@ -420,7 +536,20 @@ def main() -> int:
         choices=range(1, 5),
     )
     parser.add_argument("--expect-numeric-rows", type=_positive_int)
+    parser.add_argument("--exact-problem-sizes-json", type=_problem_sizes_json)
+    parser.add_argument(
+        "--expect-source-exact-problem-sizes-json",
+        type=_problem_sizes_json,
+    )
     args = parser.parse_args()
+
+    if (args.exact_problem_sizes_json is None) != (
+        args.expect_source_exact_problem_sizes_json is None
+    ):
+        parser.error(
+            "--exact-problem-sizes-json and "
+            "--expect-source-exact-problem-sizes-json must be used together"
+        )
 
     workspace = args.workspace.resolve()
     try:
@@ -448,6 +577,26 @@ def main() -> int:
     transcript = work_dir / "validation.log"
     oracle_artifact = work_dir / "oracle.json"
 
+    execution_config = config
+    source_problem_sizes = None
+    if args.exact_problem_sizes_json is not None:
+        execution_config = work_dir / "selected-config.yaml"
+        try:
+            source_problem_sizes = _write_exact_problem_size_shard(
+                config,
+                execution_config,
+                args.exact_problem_sizes_json,
+                args.expect_source_exact_problem_sizes_json,
+            )
+        except ValueError as error:
+            detail = {"config": str(config), "reason": str(error)}
+            _write_oracle_result("fail", detail, retained_path=oracle_artifact)
+            print(
+                f"error: cannot select Tensile problem-size shard: {error}",
+                file=sys.stderr,
+            )
+            return 2
+
     environment = tensile_python_environment(paths)
     environment.update(
         {
@@ -465,7 +614,7 @@ def main() -> int:
         "-P",
         "-c",
         _TENSILE_DRIVER,
-        str(config),
+        str(execution_config),
         str(work_dir),
         "--gpu-targets",
         args.gpu_target,
@@ -532,6 +681,7 @@ def main() -> int:
     errors.extend(artifact_errors)
     detail = {
         "config": str(config),
+        "execution_config": str(execution_config),
         "elapsed_seconds": elapsed_seconds,
         "execution_elapsed_seconds": execution_elapsed_seconds,
         "expected_numeric_rows": args.expect_numeric_rows,
@@ -542,6 +692,16 @@ def main() -> int:
         "rocjitsu_executable": str(paths.rocjitsu),
         "required_streamk_mode": args.require_streamk_mode,
         "requested_streamk_fixed_grid": args.streamk_fixed_grid,
+        "selected_exact_problem_sizes": (
+            [list(size) for size in args.exact_problem_sizes_json]
+            if args.exact_problem_sizes_json is not None
+            else None
+        ),
+        "source_exact_problem_sizes": (
+            [list(size) for size in source_problem_sizes]
+            if source_problem_sizes is not None
+            else None
+        ),
         "target": args.gpu_target,
         "timed_aggregate_ms": timed_aggregate_ms,
         "timeout_seconds": args.timeout_seconds,

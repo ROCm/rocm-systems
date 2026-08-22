@@ -15,6 +15,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -373,6 +374,139 @@ class ConSanValidationTest(unittest.TestCase):
                     os.killpg(child_pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+    def test_run_process_batch_is_bounded_and_retains_declaration_order(self) -> None:
+        active = 0
+        maximum_active = 0
+        lock = threading.Lock()
+
+        def fake_run_process(
+            command: list[str],
+            _environment: dict[str, str],
+            _log_path: Path,
+            _timeout: int,
+            **_kwargs,
+        ) -> tuple[int, float, str]:
+            nonlocal active, maximum_active
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(0.03)
+            with lock:
+                active -= 1
+            value = int(command[0])
+            return value, float(value), command[0]
+
+        runs = [
+            ([str(index)], {}, Path(f"/run-{index}.log"), 1)
+            for index in range(6)
+        ]
+        with mock.patch.object(
+            validation, "_run_process", side_effect=fake_run_process
+        ):
+            results = validation._run_process_batch(runs, 3)
+        self.assertEqual([result[0] for result in results], list(range(6)))
+        self.assertEqual(maximum_active, 3)
+
+    def test_run_profile_requires_every_tensile_shard_and_coverage_gate(self) -> None:
+        workload = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-mxf4gemm-tdm"]
+        )
+        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+
+        def run_process(command, environment, log_path, timeout, **kwargs):
+            del command, environment, timeout, kwargs
+            log_path.write_text(log, encoding="utf-8")
+            return 0, 0.1, log
+
+        with temporary_root() as root:
+            artifact_root = root / "artifacts"
+            hook = root / "hook.so"
+            hook.write_bytes(b"hook")
+            with (
+                mock.patch.object(validation, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation, "_run_process", side_effect=run_process
+                ),
+                mock.patch.object(validation, "_source_identities", return_value=[]),
+            ):
+                result = validation._run_profile(
+                    root,
+                    "gfx1250",
+                    workload,
+                    "record-replay",
+                    "clean",
+                    artifact_root,
+                    workload.run_timeout_seconds,
+                )
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(len(result["commands"]), 6)
+        self.assertEqual(result["command_batch"]["max_parallelism"], 4)
+        self.assertEqual(result["returncodes"], [0] * 6)
+        self.assertEqual(len(result["coverage_runs"]), 6)
+        self.assertTrue(all(run["accepted"] for run in result["coverage_runs"]))
+
+    def test_run_process_batch_termination_contains_every_active_shard(self) -> None:
+        with temporary_root() as root:
+            pid_file = root / "pids"
+            child = (
+                "import os,pathlib,sys,time;"
+                "path=pathlib.Path(sys.argv[1]);"
+                "stream=path.open('a',encoding='utf-8');"
+                "stream.write(f'{os.getpid()}\\n');stream.close();"
+                "time.sleep(60)"
+            )
+            wrapper = (
+                "import os,pathlib,sys;import consan_validation as runner;"
+                "root=pathlib.Path(sys.argv[2]);"
+                f"command=[sys.executable,'-c',{child!r},sys.argv[1]];"
+                "runs=[(command,os.environ.copy(),root/'a.log',60),"
+                "(command,os.environ.copy(),root/'b.log',60)];"
+                "runner._run_process_batch(runs,2)"
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", wrapper, str(pid_file), str(root)],
+                cwd=Path(validation.__file__).parent,
+                start_new_session=True,
+            )
+            pids: tuple[int, ...] = ()
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if pid_file.is_file():
+                        values = pid_file.read_text(encoding="utf-8").split()
+                        if len(values) == 2:
+                            pids = tuple(int(value) for value in values)
+                            break
+                    time.sleep(0.02)
+                self.assertEqual(len(pids), 2)
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=10)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    live = [
+                        pid
+                        for pid in pids
+                        if Path(f"/proc/{pid}/stat").is_file()
+                        and Path(f"/proc/{pid}/stat")
+                        .read_text(encoding="utf-8")
+                        .split()[2]
+                        != "Z"
+                    ]
+                    if not live:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(live, [])
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_coverage_summary_rejects_static_analysis_incompleteness(self) -> None:
         counts = {name: 0 for name in _COVERAGE_COUNT_FIELDS}
@@ -2093,13 +2227,17 @@ class ConSanValidationTest(unittest.TestCase):
             256,
         )
         self.assertEqual(
-            workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1860
+            workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1260
         )
         self.assertEqual(
             workloads["tensile-sk-mxf4gemm-tdm"][
                 "tensile_inner_timeout_seconds"
             ],
-            1800,
+            1200,
+        )
+        self.assertEqual(
+            workloads["tensile-sk-mxf4gemm-tdm"]["tensile_shard_parallelism"],
+            4,
         )
         self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
@@ -2123,7 +2261,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),
                 ("gfx1250", "pytorch-torch-histc", 30),
-                ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1860),
+                ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1260),
             )
             for target, workload, expected_timeout in cases:
                 with self.subTest(target=target, workload=workload):
@@ -4595,20 +4733,51 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
         self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
 
-    def test_gfx1250_mxf4_tdm_uses_bounded_inner_timeout(self) -> None:
+    def test_gfx1250_mxf4_tdm_shards_every_exact_problem_size(self) -> None:
         workload = validation._effective_workload(
             "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-mxf4gemm-tdm"]
         )
-        command = validation._workload_command(
+        commands = validation._workload_commands(
             Path("/workspace"),
             "gfx1250",
             workload,
             "clean",
             Path("/artifacts/benchmark.json"),
         )
-        self.assertEqual(workload.run_timeout_seconds, 1860)
-        self.assertEqual(workload.tensile_inner_timeout_seconds, 1800)
-        self.assertEqual(command[command.index("--timeout-seconds") + 1], "1800")
+        expected_sizes = [
+            [120, 120, 1, 1024],
+            [128, 128, 1, 1024],
+            [136, 136, 1, 1024],
+            [120, 120, 1, 1056],
+            [128, 128, 1, 1056],
+            [136, 136, 1, 1056],
+        ]
+        self.assertEqual(workload.run_timeout_seconds, 1260)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 1200)
+        self.assertEqual(workload.tensile_shard_parallelism, 4)
+        self.assertEqual(len(commands), 6)
+        for index, command in enumerate(commands):
+            self.assertEqual(
+                command[command.index("--timeout-seconds") + 1], "1200"
+            )
+            self.assertEqual(
+                command[command.index("--expect-numeric-rows") + 1], "16"
+            )
+            self.assertEqual(
+                json.loads(
+                    command[command.index("--exact-problem-sizes-json") + 1]
+                ),
+                [expected_sizes[index]],
+            )
+            self.assertEqual(
+                json.loads(
+                    command[
+                        command.index("--expect-source-exact-problem-sizes-json")
+                        + 1
+                    ]
+                ),
+                expected_sizes,
+            )
 
     def test_bounded_tensile_smoke_resolves_therock_workspace_layout(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]

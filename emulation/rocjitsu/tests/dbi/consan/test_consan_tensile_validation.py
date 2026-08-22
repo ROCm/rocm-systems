@@ -208,6 +208,79 @@ class TensileValidationTest(unittest.TestCase):
             ):
                 tensile_validation._gpu_target(invalid)
 
+    def test_exact_problem_size_shard_preserves_declared_source_inventory(self) -> None:
+        source_document = {
+            "BenchmarkProblems": [
+                [
+                    {"OperationType": "GEMM"},
+                    {
+                        "BenchmarkFinalParameters": [
+                            {
+                                "ProblemSizes": [
+                                    {"Exact": [120, 120, 1, 1024]},
+                                    {"Exact": [128, 128, 1, 1024]},
+                                    {"Exact": [136, 136, 1, 1056]},
+                                ]
+                            }
+                        ]
+                    },
+                ]
+            ]
+        }
+        expected = (
+            (120, 120, 1, 1024),
+            (128, 128, 1, 1024),
+            (136, 136, 1, 1056),
+        )
+        with temporary_root() as root:
+            source = root / "source.yaml"
+            selected = root / "selected.yaml"
+            source.write_text(
+                yaml.safe_dump(source_document, sort_keys=False), encoding="utf-8"
+            )
+            inventory = tensile_validation._write_exact_problem_size_shard(
+                source,
+                selected,
+                ((128, 128, 1, 1024),),
+                expected,
+            )
+            filtered = yaml.safe_load(selected.read_text(encoding="utf-8"))
+        self.assertEqual(inventory, expected)
+        self.assertEqual(
+            tensile_validation._exact_problem_size_inventory(filtered),
+            ((128, 128, 1, 1024),),
+        )
+
+    def test_exact_problem_size_shard_fails_closed_on_corpus_change(self) -> None:
+        document = {"ProblemSizes": [{"Exact": [128, 128, 1, 1024]}]}
+        with temporary_root() as root:
+            source = root / "source.yaml"
+            source.write_text(yaml.safe_dump(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "inventory changed"):
+                tensile_validation._write_exact_problem_size_shard(
+                    source,
+                    root / "selected.yaml",
+                    ((128, 128, 1, 1024),),
+                    ((120, 120, 1, 1024),),
+                )
+
+    def test_exact_problem_size_sharding_rejects_non_exact_shapes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "only Exact"):
+            tensile_validation._exact_problem_size_inventory(
+                {"ProblemSizes": [{"Range": [[1], [2], [3]]}]}
+            )
+
+    def test_problem_size_json_parser_requires_unique_positive_shapes(self) -> None:
+        self.assertEqual(
+            tensile_validation._problem_sizes_json("[[120,120,1,1024]]"),
+            ((120, 120, 1, 1024),),
+        )
+        for invalid in ("[]", "[[1,0]]", "[[1],[1]]", "{}"):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                argparse.ArgumentTypeError
+            ):
+                tensile_validation._problem_sizes_json(invalid)
+
     def test_numeric_validation_requires_a_real_passed_row(self) -> None:
         passed = (
             "noise\n"

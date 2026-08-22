@@ -51,9 +51,9 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 1,536 simulator cases and 353 physical
-cases, for 1,889 total. One whole-matrix CTest qualification on the current
-reference host passes all rows in 118.75 seconds.
+current registered matrix contains 1,540 simulator cases and 353 physical
+cases, for 1,893 total. One whole-matrix CTest qualification on the current
+reference host passes all rows in 120.12 seconds.
 
 The initial target-capability disposition is:
 
@@ -258,11 +258,20 @@ can override individual components with
 `CONSAN_VALIDATION_TENSILE_CLIENT`, `CONSAN_VALIDATION_TENSILE_WRAPPER`,
 `CONSAN_VALIDATION_ROCJITSU_EXE`, `CONSAN_VALIDATION_ROCJITSU_CONFIG`, and
 `CONSAN_VALIDATION_LLVM_READELF`.
-Only the bounded checked-in smoke row has a 55-second inner Tensile execution
-budget; other Tensile rows retain their existing outer row budgets. The smoke
-also requires exactly one numeric row, verifies the selected Stream-K mode and
-every emitted gfx1250 object, and refuses the fixed-grid request if the
-resolved TensileLite checkout no longer exposes its runtime control.
+The bounded checked-in smoke row has a 55-second inner Tensile execution
+budget. It requires exactly one numeric row, verifies the selected Stream-K
+mode and every emitted gfx1250 object, and refuses the fixed-grid request if
+the resolved TensileLite checkout no longer exposes its runtime control.
+
+The complete `tensile-sk-mxf4gemm-tdm` row is deliberately sharded by its six
+declared Exact problem sizes. Every shard retains all 16 generated solutions,
+has an independent numeric oracle and ConSan teardown/coverage gate, and has a
+1,200-second inner and 1,260-second enclosing bound. Up to four shards execute
+concurrently through RocJitsu, matching the manifest's GPU-parallelism limit.
+The runner verifies the source YAML still contains exactly the six expected
+sizes before writing any filtered configuration, so a corpus addition,
+deletion, reorder, duplicate, or non-Exact problem form fails closed instead
+of silently narrowing the 96-row denominator.
 
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
