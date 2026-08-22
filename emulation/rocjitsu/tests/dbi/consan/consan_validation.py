@@ -40,6 +40,7 @@ from consan_tensile_support import (
 )
 from consan_validation_support import (
     FAULT_RESERVATION_QUALIFIED,
+    RESULT_SCHEMA_VERSION,
     SITE_KINDS,
     atomic_write_json,
     fault_reservation_qualification,
@@ -7832,6 +7833,73 @@ def _fault_admission_and_reach(
     return admitted, reached, witness_outcome, reasons
 
 
+def _load_resumable_fault_result(
+    result_path: Path,
+    *,
+    name: str,
+    command: list[str],
+    environment: dict[str, str],
+    identities: list[str],
+    workload: Workload,
+    profile: str,
+    fault: dict,
+) -> dict:
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot resume fault row {result_path}: {error}"
+        ) from error
+    mismatches = []
+    expected_scalars = {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "state": "complete",
+        "name": name,
+    }
+    mismatches.extend(
+        f"{key}={result.get(key)!r}, expected={expected!r}"
+        for key, expected in expected_scalars.items()
+        if result.get(key) != expected
+    )
+    if result.get("command") != command:
+        mismatches.append("payload command changed")
+    if result.get("site_identities") != identities:
+        mismatches.append("fault site identities changed")
+    expected_spec = {
+        "corpus": workload.corpus,
+        "workload": workload.id,
+        "flavor": PROFILES[profile].flavor,
+        "engine": PROFILES[profile].engine,
+        "fault_family": fault["family"],
+        "row_role": "fault",
+    }
+    actual_spec = result.get("spec")
+    if not isinstance(actual_spec, dict):
+        mismatches.append("fault row has no run specification")
+    else:
+        mismatches.extend(
+            f"spec.{key}={actual_spec.get(key)!r}, expected={expected!r}"
+            for key, expected in expected_spec.items()
+            if actual_spec.get(key) != expected
+        )
+    expected_environment = _controlled_environment(environment)
+    actual_environment = result.get("environment")
+    if not isinstance(actual_environment, dict):
+        mismatches.append("fault row has no controlled environment")
+    else:
+        actual_controlled = _controlled_environment(actual_environment)
+        # The runner owns this row-local output path rather than the campaign.
+        actual_controlled.pop("RJ_CONSAN_DUMP_DIR", None)
+        if actual_controlled != expected_environment:
+            mismatches.append("controlled environment changed")
+    if mismatches:
+        raise ValidationError(
+            f"fault row conflicts with resume request {result_path}: "
+            + "; ".join(mismatches)
+        )
+    return result
+
+
 def _fault(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
@@ -7848,12 +7916,12 @@ def _fault(args: argparse.Namespace) -> int:
     launcher = args.launcher
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
-    fault_root.mkdir(parents=True, exist_ok=False)
+    fault_root.mkdir(parents=True, exist_ok=args.resume)
     provenance = _write_provenance(
         workspace, target, workload, fault_root, launcher
     )
     root = fault_root / "rows"
-    root.mkdir()
+    root.mkdir(exist_ok=args.resume)
     smoke = _health_smoke_command(
         workspace, target, workload, root / "health-smoke.json"
     )
@@ -7988,9 +8056,30 @@ def _fault(args: argparse.Namespace) -> int:
                 None, workload, hook, target, workspace
             )
             child_environment["CTEST_PARALLEL_LEVEL"] = "1"
-            subprocess.run(invocation, env=child_environment, check=False)
             result_path = root / name / "result.json"
-            if not result_path.is_file():
+            if args.resume and result_path.is_file():
+                result = _load_resumable_fault_result(
+                    result_path,
+                    name=name,
+                    command=command,
+                    environment=environment,
+                    identities=identities,
+                    workload=workload,
+                    profile=profile,
+                    fault=fault,
+                )
+            else:
+                if args.resume and result_path.parent.exists():
+                    raise ValidationError(
+                        "cannot resume incomplete fault row; use a new artifact "
+                        f"root instead of overwriting {result_path.parent}"
+                    )
+                subprocess.run(invocation, env=child_environment, check=False)
+                if result_path.is_file():
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                else:
+                    result = None
+            if result is None:
                 row = {
                     "profile": profile,
                     "trial": index,
@@ -8004,7 +8093,6 @@ def _fault(args: argparse.Namespace) -> int:
                 summaries.append(row)
                 profile_rows.append(row)
                 continue
-            result = json.loads(result_path.read_text(encoding="utf-8"))
             accepted, reasons = _fault_acceptance(result, policy)
             admitted, reached, reach_outcome, reach_reasons = (
                 _fault_admission_and_reach(result, fault.get("reach_witness"))
@@ -9025,6 +9113,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="deadline in seconds for each retained discovery and smoke probe",
     )
     fault.add_argument("--allow-destructive", action="store_true")
+    fault.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse only complete fault rows whose execution contract still matches",
+    )
     fault.add_argument(
         "--launcher-json",
         dest="launcher",

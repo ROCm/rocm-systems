@@ -6766,6 +6766,151 @@ class ConSanValidationTest(unittest.TestCase):
                 ]
             )
 
+    def test_fault_resume_reuses_only_a_complete_matching_row(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        fault = {
+            "id": "barrier-drop",
+            "family": "barrier-drop",
+            "environment": {
+                "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+                "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
+            },
+            "profiles": {
+                "supercollider": {"detector": "detected", "oracle": "any"}
+            },
+        }
+        trial_environment = {
+            "HIP_TARGET": "gfx1250",
+            "HSA_TOOLS_LIB": "/hook.so",
+            "PATH": "/bin",
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
+            "RJ_CONSAN_MODE": "supercollider",
+        }
+        name = "barrier-drop-supercollider-0"
+        with temporary_root() as root:
+            spec = root / "fault.json"
+            spec.write_text("{}", encoding="utf-8")
+            artifact_root = root / "artifacts"
+            fault_root = artifact_root / workload.id / "faults" / fault["id"]
+            result_path = fault_root / "rows" / name / "result.json"
+            result_path.parent.mkdir(parents=True)
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": validation.RESULT_SCHEMA_VERSION,
+                        "state": "complete",
+                        "name": name,
+                        "command": ["payload"],
+                        "site_identities": ["site-a"],
+                        "environment": trial_environment,
+                        "spec": {
+                            "corpus": workload.corpus,
+                            "workload": workload.id,
+                            "flavor": validation.PROFILES["supercollider"].flavor,
+                            "engine": validation.PROFILES["supercollider"].engine,
+                            "fault_family": fault["family"],
+                            "row_role": "fault",
+                        },
+                        "mutation": {
+                            "accounting_schema_version": 2,
+                            "requested": 1,
+                            "planned": 1,
+                            "applied": 1,
+                            "discarded_applied": 0,
+                            "installation_evidence_complete": True,
+                            "reservation": fault_reservation_evidence(),
+                        },
+                        "sanitizer": {
+                            "outcome": "detected",
+                            "supercollider_diagnostics": 1,
+                        },
+                        "oracle": {"outcome": "fail"},
+                        "execution": {
+                            "outcome": "failed",
+                            "command_ran": True,
+                            "completed": True,
+                            "timed_out": False,
+                            "health_before": {"healthy": True},
+                            "health_after": {"healthy": True},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = validation._parse_args(
+                [
+                    "--target",
+                    "gfx1250",
+                    "fault",
+                    "--workload",
+                    workload.id,
+                    "--profile",
+                    "supercollider",
+                    "--spec",
+                    str(spec),
+                    "--fault",
+                    fault["id"],
+                    "--artifact-root",
+                    str(artifact_root),
+                    "--allow-destructive",
+                    "--resume",
+                ]
+            )
+            with (
+                mock.patch.object(
+                    validation, "_workspace_from_environment", return_value=root
+                ),
+                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
+                mock.patch.object(validation, "_load_fault", return_value=fault),
+                mock.patch.object(
+                    validation, "_hook_path", return_value=Path("/hook.so")
+                ),
+                mock.patch.object(
+                    validation,
+                    "_write_provenance",
+                    return_value=fault_root / "provenance.json",
+                ),
+                mock.patch.object(
+                    validation, "_fault_workload_command", return_value=["payload"]
+                ),
+                mock.patch.object(
+                    validation, "_health_smoke_command", return_value=["smoke"]
+                ),
+                mock.patch.object(
+                    validation,
+                    "_fault_trial_environment",
+                    return_value=trial_environment,
+                ),
+                mock.patch.object(validation.shutil, "which", return_value="rocminfo"),
+                mock.patch.object(validation.subprocess, "run") as run,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(validation._fault(args), 0)
+            run.assert_not_called()
+            summary = json.loads(
+                (fault_root / "summary.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(summary["accepted"])
+
+            stale = json.loads(result_path.read_text(encoding="utf-8"))
+            stale["command"] = ["stale-payload"]
+            result_path.write_text(json.dumps(stale), encoding="utf-8")
+            with self.assertRaisesRegex(
+                validation.ValidationError, "payload command changed"
+            ):
+                validation._load_resumable_fault_result(
+                    result_path,
+                    name=name,
+                    command=["payload"],
+                    environment=trial_environment,
+                    identities=["site-a"],
+                    workload=workload,
+                    profile="supercollider",
+                    fault=fault,
+                )
+
     def test_fault_launcher_covers_payload_and_only_default_health_checks(self) -> None:
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]
         fault = {
