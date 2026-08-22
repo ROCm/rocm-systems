@@ -1950,6 +1950,84 @@ class ConSanValidationTest(unittest.TestCase):
                     ],
                 )
 
+    def test_gfx950_manifest_registers_exact_hip_streamk_rows(self) -> None:
+        workloads = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx950")["workloads"]
+        }
+        expected = {
+            "hip-streamk-simple-m256-n256-k256": (
+                "hip_streamk_simple",
+                (
+                    "-m",
+                    "256",
+                    "-n",
+                    "256",
+                    "-k",
+                    "256",
+                    "--grid",
+                    "4",
+                    "--num_runs",
+                    "1",
+                    "--validate",
+                ),
+                4,
+            ),
+            "hip-streamk-two-tile-m256-n256-k256": (
+                "hip_streamk_two_tile",
+                (
+                    "-m",
+                    "256",
+                    "-n",
+                    "256",
+                    "-k",
+                    "256",
+                    "--num_runs",
+                    "1",
+                    "--validate",
+                ),
+                32,
+            ),
+        }
+        for workload_id, (executable, arguments, stride) in expected.items():
+            with self.subTest(workload=workload_id):
+                row = workloads[workload_id]
+                self.assertEqual(
+                    row["relative_path"],
+                    (
+                        "rocjitsu-test-corpus-build/"
+                        "kernels-gfx950-streamk-current/cases/hip-stream-k/"
+                        f"{executable}"
+                    ),
+                )
+                self.assertEqual(row["command_arguments"], arguments)
+                self.assertEqual(row["fault_families"], ("barrier-drop",))
+                self.assertEqual(row["record_replay_runtime_sample_stride"], stride)
+                self.assertEqual(row["run_timeout_seconds"], 120)
+
+                workload = validation.WORKLOAD_BY_ID[workload_id]
+                expected_command = [
+                    str(Path("/workspace") / workload.relative_path),
+                    *arguments,
+                ]
+                for phase in ("clean", "overhead", "fault"):
+                    self.assertEqual(
+                        validation._workload_command(
+                            Path("/workspace"),
+                            "gfx950",
+                            workload,
+                            phase,
+                            Path("/workspace/unused.json"),
+                        ),
+                        expected_command,
+                    )
+
+        gfx942_ids = {
+            workload["id"]
+            for workload in validation._manifest("gfx942")["workloads"]
+        }
+        self.assertTrue(expected.keys().isdisjoint(gfx942_ids))
+
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
