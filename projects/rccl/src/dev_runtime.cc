@@ -386,8 +386,7 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
   uintptr_t addr = base + r * devr->bigSize + bigOffset;
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
-    bool reuseLocal =
-      (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
     if (r != devr->lsaSelf && reuseLocal) {
       INFO(NCCL_REG, "Symmetric window reusing system-memory handle rank %d segment %d", r, segment);
     }
