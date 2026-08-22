@@ -45,10 +45,11 @@ choices. The working-loop rules below are binding preparation requirements and
 feed the exit criteria; they are not merely suggested ways of organizing
 prototype fixes.
 
-### Directive checklist and working contract
+### Acknowledged directives and working contract
 
-Every preparation directive is accepted as a requirement, with the following
-concrete interpretation:
+This checklist explicitly acknowledges every element of the 2026-08-22
+preparation direction. Every row is a binding requirement for section 1, with
+the following concrete interpretation:
 
 | Directive | Plan commitment |
 | --- | --- |
@@ -59,7 +60,7 @@ concrete interpretation:
 | Apply the engine priority globally | Across both ledgers, work Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow. A lower-priority engine does not jump the queue merely because its cell has a worse color. |
 | Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Once every applicable cell is green, revalidate all greens together on one reviewed revision. |
 | Be tactical about latency | When a test is abnormally slow, investigate the slowness if that can produce useful understanding; otherwise record and defer it instead of repeatedly waiting. Deferral changes scheduling, not the exit criteria. |
-| Harvest every end-to-end investigation | Turn each useful E2E finding into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. |
+| Harvest every end-to-end investigation | Turn each useful E2E finding into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. |
 | Audit and transport existing tests too | Make a suite-wide pass over existing host and device contracts, not just new additions. Generalize behavioral ideas across CDNA3/4/5 and RDNA3/4 wherever equivalent target-native idioms exist; historical `gfx950`-to-`gfx942` ports are examples, not a boundary. |
 | Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, accepting the bounded short-term risk, but run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
 
@@ -67,6 +68,13 @@ Tactical deferral can change the order in which useful evidence is gathered,
 but it never lowers the exit bar. Likewise, the CDNA4 catch-up bias guides time
 allocation without changing the engine-first, severity-second priority or
 allowing gfx1250 to starve.
+
+For avoidance of doubt, preparation is not complete merely because the
+prototype passes the two E2E ledgers. It is complete only when the knowledge
+gained while making those ledgers green has been converted into comprehensive,
+quick, implementation-independent host and device contracts, transported to
+all semantically applicable targets, and then qualified with the full periodic
+and final test cadence.
 
 The following rules jointly define the preparation loop and its priorities.
 None is optional merely because another rule currently offers faster visible
