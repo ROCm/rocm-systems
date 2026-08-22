@@ -5,9 +5,6 @@
 
 import re
 
-import common
-import pytest
-
 from utils import mem_chart_gfx1250
 from utils.mem_chart_common import strip_ansi
 

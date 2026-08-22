@@ -13,11 +13,11 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
-from utils.mem_chart_common import format_mem_chart_heading
 from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
+from utils.mem_chart_common import format_mem_chart_heading
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
