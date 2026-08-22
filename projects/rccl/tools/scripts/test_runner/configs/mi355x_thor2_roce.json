@@ -268,6 +268,32 @@
         }
       ]
     },
+    "fault_inject_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring cleanly",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data on a second one",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -4341,6 +4367,12 @@
       "name": "NET IB - CAST Multithread (4)",
       "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
       "config": "cast_multithread",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "Per-communicator fault injection across concurrent workers, including cross-worker isolation",
+      "config": "fault_inject_multithread",
       "enabled": true
     },
     {
