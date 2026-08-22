@@ -43,10 +43,16 @@ __global__ __launch_bounds__(128) void double_buffered_pipeline_for_consan(Devic
                                 0x8000u + 19u * lane);
     asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
   }
-  // The incorrect member removes only this stage-publication edge. Both
-  // stages retain the same vector traffic, lane shuffle, and control shape.
-  if (state->synchronize)
+  // The correct member deliberately retains two adjacent publication
+  // barriers, as seen in double-buffered attention kernels. Either barrier is
+  // sufficient by itself; keeping the redundant pair checks that ConSan
+  // preserves both without inventing a conflict. The incorrect member removes
+  // the complete publication edge. Both members retain the same vector
+  // traffic, lane shuffle, and control shape.
+  if (state->synchronize) {
     __syncthreads();
+    __syncthreads();
+  }
 
   if (wave == 1u) {
     const uint4 value = tiles[1][lane];
