@@ -67,9 +67,10 @@
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
  * - 1.16 - hsa_amd_signal_create_v2, hsa_amd_signal_create_desc_t
+ * - 1.17 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 16
+#define HSA_AMD_INTERFACE_VERSION_MINOR 17
 
 #ifdef __cplusplus
 extern "C" {
@@ -706,7 +707,31 @@ typedef enum hsa_amd_agent_info_s {
    * Queries the driver for clock counters of the agent.
    * The type of this attribute is hsa_amd_clock_counters_t.
    */
-  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118
+  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118,
+  /**
+   * Can this agent be named as the single consumer of a signal created with
+   * ::hsa_amd_signal_create_v2 and
+   * ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD?  True iff the agent is a GPU
+   * that exposes a device local memory region a signal's ABI block can be
+   * placed in.  This is the same test the allocator performs, so a true answer
+   * here and a failure to allocate cannot disagree.  The caller side conditions
+   * (exactly one consumer, no IPC) are not properties of the agent and are not
+   * reflected here.  The type of this attribute is bool.
+   *
+   * A runtime that predates the feature answers this query with
+   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is a usable negative -- but only
+   * while this numeric value remains unallocated.  A bit in an existing
+   * properties word would not have that property, which is why this is a new
+   * enumerant.
+   *
+   * THE NUMERIC VALUE IS PROVISIONAL AND MUST BE REALLOCATED BEFORE MERGE, and
+   * re-verified immediately before merge rather than once: this range is
+   * allocated continuously, and a caller probing a value some runtime has
+   * already spent on another bool attribute receives that attribute's answer
+   * with HSA_STATUS_SUCCESS and cannot tell the difference.  The value must be
+   * identical on every branch, because a caller passes the enumerant.
+   */
+  HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED = 0xA125,
 } hsa_amd_agent_info_t;
 
 /**
