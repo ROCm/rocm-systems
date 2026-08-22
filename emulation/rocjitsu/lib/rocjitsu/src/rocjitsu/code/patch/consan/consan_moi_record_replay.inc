@@ -683,11 +683,29 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
       continue;
     }
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe found no common transient SGPR assignment");
+      continue;
+    }
+    // Persistent placement can deliberately mix private state for a fixed-
+    // stack component with an owner-local VGPR tuple for a disconnected
+    // dynamic-stack component. Resolve that choice before building private
+    // offsets; the code-object-wide marker alone does not describe this site.
+    if (!apply_moi_persistent_vgpr_assignment(candidate_options,
+                                              resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe found no common persistent assignment");
+      continue;
+    }
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<uint16_t> private_owner_shift;
-    if (options.automatic_moi_private_epoch) {
+    if (candidate_options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
-          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+          candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
         auto [cached, inserted] =
@@ -715,17 +733,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (private_layout->owner_offset && !private_owner_shift)
         continue;
     }
-    ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = resources->base;
     if (private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe found no common transient SGPR assignment");
-      continue;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         options, resources->owner_descriptor_file_offsets);

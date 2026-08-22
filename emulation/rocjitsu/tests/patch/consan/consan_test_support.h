@@ -1202,7 +1202,8 @@ std::vector<uint8_t> make_cdna4_code_object_with_local_function(
 /// dynamic stack.
 std::vector<uint8_t> make_cdna4_mixed_accvgpr_persistence_code_object(
     bool full_sampled_pressure = false, bool dynamic_flat_group_load = false,
-    bool dynamic_has_accvgpr_bank = false, bool second_fixed_stack_full_scalar_pressure = false) {
+    bool dynamic_has_accvgpr_bank = false, bool second_fixed_stack_full_scalar_pressure = false,
+    bool dynamic_ordered_atomic = false, bool record_replay_recovery_pressure = false) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto store = build_cdna4_ds_store_b32(
       /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
@@ -1257,6 +1258,37 @@ std::vector<uint8_t> make_cdna4_mixed_accvgpr_persistence_code_object(
         continue;
       dynamic_words[word++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), kArch);
     }
+  }
+  if (record_replay_recovery_pressure) {
+    // The provisional private Record/Replay ABI needs ten consecutive
+    // scratch VGPRs, while the owner-local persistent-register ABI needs six.
+    // Leave exactly v4:v9 unused so persistent placement must retain this
+    // initially resource-failed owner and rebuild its plan at the smaller ABI.
+    size_t word = 40u;
+    for (uint16_t vgpr = 0u; vgpr < 126u; ++vgpr) {
+      if (vgpr >= 4u && vgpr <= 9u)
+        continue;
+      dynamic_words[word++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), kArch);
+    }
+  }
+  if (dynamic_ordered_atomic) {
+    const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+    const auto acquire = cdna4::build_mubuf(cdna4::kBufferInvMubuf, {.sc1 = 1});
+    const auto atomic = build_cdna4_flat_atomic_add_u32(
+        /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
+        /*scope=*/2u, kArch);
+    const auto wait = build_cdna4_s_wait_flat0(kArch);
+    EXPECT_TRUE(atomic && wait);
+    if (!atomic || !wait)
+      return {};
+    size_t word = 600u;
+    std::ranges::copy(release, dynamic_words.begin() + word);
+    word += release.size();
+    dynamic_words[word++] = *wait;
+    std::ranges::copy(*atomic, dynamic_words.begin() + word);
+    word += atomic->size();
+    dynamic_words[word++] = *wait;
+    std::ranges::copy(acquire, dynamic_words.begin() + word);
   }
   dynamic_words.back() = build_s_endpgm(kArch);
 

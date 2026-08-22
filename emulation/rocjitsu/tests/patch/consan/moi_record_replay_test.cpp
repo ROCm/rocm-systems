@@ -7786,6 +7786,324 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
   })) << testing::PrintToString(colliding.warnings);
 }
 
+TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStackState) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const uint8_t agpr_count : {0u, 1u}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(agpr_count);
+      const auto store = arch == ROCJITSU_CODE_ARCH_CDNA3
+                             ? build_cdna3_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                        /*byte_offset=*/0u, arch)
+                             : build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u,
+                                                        /*byte_offset=*/0u, arch);
+      const auto barrier = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_barrier(arch)
+                                                            : build_cdna4_s_barrier(arch);
+      ASSERT_TRUE(store && barrier);
+
+      constexpr std::string_view kKernelName = "record_replay_dynamic_stack_empty_accumulator";
+      std::vector<uint32_t> text_words(1200u, build_s_nop(0u, arch));
+      text_words[0] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(125u), arch);
+      std::ranges::copy(*store, text_words.begin() + 1u);
+      text_words[3] = *barrier;
+      size_t cursor = 4u;
+      // Leave no persistent pair below the encoded ordinary-VGPR boundary.
+      for (uint16_t vgpr = 0u; vgpr < 126u; ++vgpr)
+        text_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), arch);
+      // The only scalar holes are the explicitly reserved transient dispatch
+      // and EXEC-save windows. They cannot also carry state that survives guest
+      // code between entry and every Record/Replay probe.
+      for (uint16_t sgpr = 0u; sgpr < 104u; ++sgpr) {
+        if ((sgpr >= 88u && sgpr < 90u) || (sgpr >= 92u && sgpr < 97u))
+          continue;
+        text_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, arch);
+      }
+      text_words.back() = build_s_endpgm(arch);
+      std::vector<uint8_t> bytes =
+          arch == ROCJITSU_CODE_ARCH_CDNA3
+              ? make_cdna3_lds_code_object(text_words, kKernelName,
+                                           /*vgpr_granulated=*/agpr_count == 0u ? 15u : 16u,
+                                           /*uses_dynamic_stack=*/true,
+                                           /*workgroup_id_dimension_mask=*/7u,
+                                           /*group_segment_fixed_size=*/4u)
+              : make_cdna4_lds_code_object(text_words, kKernelName,
+                                           /*vgpr_granulated=*/agpr_count == 0u ? 15u : 16u,
+                                           /*uses_dynamic_stack=*/true,
+                                           /*workgroup_id_dimension_mask=*/7u,
+                                           /*group_segment_fixed_size=*/4u);
+      mutate_first_kernel_descriptor(bytes, [agpr_count](KD &descriptor) {
+        // The guest reaches v125 in a 128-VGPR allocation. ACCUM_OFFSET names
+        // v128, but trusted metadata proves that no accumulator is allocated.
+        // Record/Replay's owner/epoch/exact-workgroup tuple must move that empty
+        // boundary rather than rejecting a dynamic-stack owner.
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        31u);
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                        agpr_count == 0u ? 15u : 16u);
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+      });
+      append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/true,
+                                  /*sgpr_count=*/104u, /*private_segment_fixed_size=*/48u,
+                                  /*required_workgroup_size=*/std::nullopt,
+                                  /*has_dynamic_lds=*/false,
+                                  /*additional_kernel_names=*/{}, agpr_count,
+                                  /*vgpr_count=*/126u);
+
+      ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+      options.moi_track_barriers = true;
+      options.moi_track_atomics = false;
+      options.moi_init_owner_epoch = true;
+      options.moi_dispatch_id_sgpr = 88u;
+      options.moi_exec_save_sgpr = 92u;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      if (agpr_count != 0u) {
+        EXPECT_FALSE(result.modified);
+        EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+        EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+          return warning.find("connected CDNA AccVGPR boundary") != std::string::npos;
+        })) << testing::PrintToString(result.warnings);
+        continue;
+      }
+
+      ASSERT_TRUE(consan_patch_succeeded(result))
+          << "warnings=" << testing::PrintToString(result.warnings)
+          << " errors=" << testing::PrintToString(result.errors)
+          << " plans=" << testing::PrintToString(result.resource_plans);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_TRUE(result.final_validation_passed);
+      EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+      EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+      EXPECT_FALSE(result.moi_private_epoch_automatic);
+      ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+      const ConSanMoiPersistentVgprAssignment &assignment =
+          result.resolved_moi_persistent_vgpr_assignments.front();
+      EXPECT_EQ(assignment.owner_vgpr, 126u);
+      EXPECT_EQ(assignment.epoch_vgpr, 127u);
+      ASSERT_TRUE(assignment.record_replay_workgroup_vgprs.complete());
+      EXPECT_EQ(*assignment.record_replay_workgroup_vgprs.x, 128u);
+      EXPECT_EQ(*assignment.record_replay_workgroup_vgprs.y, 129u);
+      EXPECT_EQ(*assignment.record_replay_workgroup_vgprs.z, 130u);
+
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      KD descriptor{};
+      std::memcpy(&descriptor,
+                  result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                  sizeof(descriptor));
+      EXPECT_GT(
+          AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+          31u);
+      EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                      [](const auto &site) {
+                                        return site.disposition ==
+                                                   ConSanSiteDisposition::Supported &&
+                                               site.lowering_outcome ==
+                                                   ConSanSiteLoweringOutcome::Patched;
+                                      }),
+                2u);
+    }
+  }
+}
+
+TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwner) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object();
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.max_patches = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 2);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+
+  const auto fixed = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
+  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(fixed, result.kernels.end());
+  ASSERT_NE(dynamic, result.kernels.end());
+  ASSERT_TRUE(fixed->uses_dynamic_stack);
+  ASSERT_TRUE(dynamic->uses_dynamic_stack);
+  EXPECT_FALSE(*fixed->uses_dynamic_stack);
+  EXPECT_TRUE(*dynamic->uses_dynamic_stack);
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &dynamic_assignment =
+      result.resolved_moi_persistent_vgpr_assignments.front();
+  EXPECT_EQ(dynamic_assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
+  EXPECT_TRUE(dynamic_assignment.record_replay_workgroup_vgprs.complete());
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
+        << "site=" << static_cast<uint32_t>(plan.site_kind) << " offset=" << plan.text_offset
+        << " reason=" << consan_register_plan_reason_name(plan.reason)
+        << " owners=" << testing::PrintToString(plan.owner_descriptor_file_offsets);
+  }
+
+  const auto private_prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
+  const auto register_prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(private_prologue, result.patches.end());
+  ASSERT_NE(register_prologue, result.patches.end())
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " patches=" << testing::PrintToString(result.patches)
+      << " dispositions=" << testing::PrintToString(result.site_dispositions);
+  EXPECT_EQ(private_prologue->owner_descriptor_file_offsets,
+            std::vector<uint64_t>{fixed->descriptor_file_offset});
+  EXPECT_EQ(register_prologue->owner_descriptor_file_offsets,
+            std::vector<uint64_t>{dynamic->descriptor_file_offset});
+  EXPECT_TRUE(private_prologue->persistent_record_replay_workgroup_private_offsets.complete());
+  ASSERT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
+                               &ConSanSiteDispositionRecord::disposition),
+            4u);
+  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
+    if (site.disposition != ConSanSiteDisposition::Supported)
+      continue;
+    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
+        << "kind=" << static_cast<uint32_t>(site.site_kind) << " container=" << site.container_name
+        << " offset=" << site.text_offset << " mnemonic=" << site.mnemonic
+        << " outcome=" << consan_site_lowering_outcome_name(site.lowering_outcome)
+        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
+        << " warnings=" << testing::PrintToString(result.warnings)
+        << " plans=" << testing::PrintToString(result.resource_plans);
+  }
+}
+
+TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFailure) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object(
+      /*full_sampled_pressure=*/false, /*dynamic_flat_group_load=*/false,
+      /*dynamic_has_accvgpr_bank=*/false,
+      /*second_fixed_stack_full_scalar_pressure=*/false,
+      /*dynamic_ordered_atomic=*/false,
+      /*record_replay_recovery_pressure=*/true);
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_init_owner_epoch = true;
+  options.max_patches = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 2);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+
+  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(dynamic, result.kernels.end());
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
+            dynamic->descriptor_file_offset);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("deferred dynamic-stack Record/Replay state") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+
+  ASSERT_EQ(result.resource_plans.size(), 4u);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
+        << "site=" << static_cast<uint32_t>(plan.site_kind) << " offset=" << plan.text_offset
+        << " reason=" << consan_register_plan_reason_name(plan.reason)
+        << " scratch_count=" << plan.scratch_vgpr_count
+        << " owners=" << testing::PrintToString(plan.owner_descriptor_file_offsets);
+  }
+  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
+    ASSERT_EQ(site.disposition, ConSanSiteDisposition::Supported);
+    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
+        << "kind=" << static_cast<uint32_t>(site.site_kind) << " container=" << site.container_name
+        << " offset=" << site.text_offset << " mnemonic=" << site.mnemonic
+        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
+        << " warnings=" << testing::PrintToString(result.warnings);
+  }
+}
+
+TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFenceRecords) {
+  const std::vector<uint8_t> bytes = make_cdna4_mixed_accvgpr_persistence_code_object(
+      /*full_sampled_pressure=*/false, /*dynamic_flat_group_load=*/false,
+      /*dynamic_has_accvgpr_bank=*/false,
+      /*second_fixed_stack_full_scalar_pressure=*/false,
+      /*dynamic_ordered_atomic=*/true);
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_dynamic_access_records = true;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_init_owner_epoch = true;
+  options.max_patches = 8u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+
+  const auto fixed = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
+  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(fixed, result.kernels.end());
+  ASSERT_NE(dynamic, result.kernels.end());
+  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
+  EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
+            dynamic->descriptor_file_offset);
+
+  for (const ConSanPatchKind kind :
+       {ConSanPatchKind::TrampolineMoiAtomicRecord, ConSanPatchKind::TrampolineMoiFenceRecord}) {
+    SCOPED_TRACE(testing::PrintToString(kind));
+    const auto patch = std::ranges::find(result.patches, kind, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+    EXPECT_EQ(patch->owner_descriptor_file_offsets,
+              std::vector<uint64_t>{dynamic->descriptor_file_offset});
+    EXPECT_FALSE(patch->persistent_epoch_private_offset);
+    EXPECT_FALSE(patch->persistent_owner_private_offset);
+    EXPECT_FALSE(patch->persistent_record_replay_workgroup_private_offsets.complete());
+  }
+  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
+    if (site.site_kind != ConSanResourceSiteKind::Atomic &&
+        site.site_kind != ConSanResourceSiteKind::Fence)
+      continue;
+    ASSERT_EQ(site.disposition, ConSanSiteDisposition::Supported)
+        << "container=" << site.container_name << " offset=" << site.text_offset
+        << " mnemonic=" << site.mnemonic;
+    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
+        << "container=" << site.container_name << " offset=" << site.text_offset
+        << " mnemonic=" << site.mnemonic
+        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
+        << " warnings=" << testing::PrintToString(result.warnings);
+  }
+}
+
 TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto guest =

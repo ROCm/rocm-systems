@@ -2076,16 +2076,19 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
     return false;
   if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       (options.moi_engine != ConSanMoiEngine::InlineShadow &&
-       options.moi_engine != ConSanMoiEngine::Sampled)) {
+       options.moi_engine != ConSanMoiEngine::Sampled &&
+       options.moi_engine != ConSanMoiEngine::RecordReplay)) {
     return false;
   }
   // Persistent placement and resource planning form a fixed point for the
-  // CDNA3/4 Inline and Sampled ABIs. A smaller owner-local persistent tuple
-  // can recover an automatic plan that initially had no legal window, while
-  // a component-local transient assignment can recover an automatic window
-  // rejected against the provisional code-object-wide scalar state. Explicit
-  // scratch conflicts and structural failures cannot be repaired here and
-  // must not make an unrelated owner appear admitted.
+  // CDNA3/4 stateful ABIs. An owner-local persistent assignment or a
+  // component-local transient assignment can recover an automatic window that
+  // was rejected against provisional code-object-wide state. Record/Replay's
+  // first-light scratch ABI remains unchanged by persistent placement; the
+  // fixed point is useful because the conflicts against persistent and
+  // transient state become owner-local. Explicit scratch conflicts and
+  // structural failures cannot be repaired here and must not make an unrelated
+  // owner appear admitted.
   return !plan.owner_descriptor_file_offsets.empty() &&
          (plan.reason == ConSanRegisterPlanReason::NoLegalWindow ||
           (plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap && !options.scratch_vgpr));
@@ -6099,11 +6102,15 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
             "CDNA AccVGPR boundary");
         return true;
       }
-      result.outcome = ConSanTransformOutcome::Unsupported;
+      // A dynamic stack makes fixed private offsets non-persistent, but it
+      // does not make the encoded ordinary-VGPR boundary immutable. Continue
+      // into the component planner: trusted metadata can prove an empty
+      // accumulator bank and move that boundary for an owner-local VGPR
+      // tuple. A component with real accumulators still fails closed against
+      // its hard limit below.
       result.warnings.emplace_back(
-          "ConSan MOI cannot place persistent scalar Record/Replay state below a CDNA "
-          "AccVGPR boundary for a dynamic-stack owner");
-      return false;
+          "ConSan MOI deferred dynamic-stack Record/Replay state below a CDNA AccVGPR "
+          "boundary to owner-local persistent VGPR placement");
     }
 
     std::vector<std::vector<uint64_t>> components;
@@ -6306,6 +6313,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         const bool supports_private_component =
             !has_dynamic_stack_owner &&
             (options.moi_engine == ConSanMoiEngine::InlineShadow ||
+             options.moi_engine == ConSanMoiEngine::RecordReplay ||
              (options.moi_engine == ConSanMoiEngine::Sampled &&
               options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId));
         if (supports_private_component) {
@@ -6314,7 +6322,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           result.moi_private_epoch_automatic = true;
           assigned_private_component = true;
           result.warnings.emplace_back(
-              "ConSan MOI selected component-local entry-snapshotted private owner/epoch state "
+              "ConSan MOI selected component-local entry-snapshotted private persistent state "
               "below a full CDNA ordinary VGPR bank after scalar placement " +
               (scalar_persistence_failure.empty() ? std::string("was not requested")
                                                   : scalar_persistence_failure));

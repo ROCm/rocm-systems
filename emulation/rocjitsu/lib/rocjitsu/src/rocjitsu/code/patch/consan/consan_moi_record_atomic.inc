@@ -162,10 +162,23 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
+    if (!apply_moi_transient_sgpr_assignment(candidate_options,
+                                             resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no common transient SGPR assignment");
+      continue;
+    }
+    if (!apply_moi_persistent_vgpr_assignment(candidate_options,
+                                              resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no common persistent assignment");
+      continue;
+    }
     std::optional<MoiPrivateEpochLayout> private_layout;
-    if (options.automatic_moi_private_epoch) {
+    if (candidate_options.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                      /*include_owner=*/options.moi_owner_source ==
+                                                      /*include_owner=*/
+                                                      candidate_options.moi_owner_source ==
                                                           ConSanMoiOwnerSource::WorkitemId,
                                                       /*include_workgroup_key=*/false,
                                                       /*include_record_replay_workgroup=*/true);
@@ -173,12 +186,6 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI atomic record patch found no common transient SGPR assignment");
-      continue;
     }
     if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
                                                         resources->owner_descriptor_file_offsets)) {
