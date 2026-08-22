@@ -1661,17 +1661,21 @@ private:
         }
         required_shadow_entries = std::max(required_shadow_entries, record_end);
       }
-      const uint64_t kMaxAutoReplayShadowEntries = 1u << 20u;
+      constexpr uint64_t kMaxAutoReplayShadowEntries = 1u << 20u;
+      const uint64_t auto_replay_shadow_entries =
+          std::max<uint64_t>(std::min(required_shadow_entries, kMaxAutoReplayShadowEntries), 1u);
       if (required_shadow_entries > kMaxAutoReplayShadowEntries) {
         log_message(kLogInfo,
-                    "ConSan MOI auto replay reader=%llu generation=%llu code_object=%s skipped "
-                    "required_shadow_entries=%llu limit=%llu",
+                    "ConSan MOI replay shadow bounded reader=%llu generation=%llu code_object=%s "
+                    "required_shadow_entries=%llu limit=%llu shadow_entries=%llu",
                     static_cast<unsigned long long>(entry.reader),
                     static_cast<unsigned long long>(header->generation),
                     entry.input_fingerprint.empty() ? "missing" : entry.input_fingerprint.c_str(),
                     static_cast<unsigned long long>(required_shadow_entries),
-                    static_cast<unsigned long long>(kMaxAutoReplayShadowEntries));
-      } else {
+                    static_cast<unsigned long long>(kMaxAutoReplayShadowEntries),
+                    static_cast<unsigned long long>(auto_replay_shadow_entries));
+      }
+      {
         rocjitsu::ConSanMoiReportHeader replay_header = *header;
         replay_header.access_record_count = static_cast<uint32_t>(replay_access_records.size());
         replay_header.access_record_capacity = replay_header.access_record_count;
@@ -1680,8 +1684,7 @@ private:
             std::min(header->diagnostic_capacity, replay_header.access_record_count);
         std::vector<rocjitsu::ConSanMoiDiagnosticRecord> diagnostics(
             replay_header.diagnostic_capacity);
-        std::vector<uint64_t> exact_shadow_entries(
-            static_cast<size_t>(std::max<uint64_t>(required_shadow_entries, 1u)));
+        std::vector<uint64_t> exact_shadow_entries(static_cast<size_t>(auto_replay_shadow_entries));
         const rocjitsu::ConSanMoiRecordReplayResult replay =
             rocjitsu::consan_moi_record_replay_access_records(
                 replay_header, replay_access_records,

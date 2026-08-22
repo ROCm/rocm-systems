@@ -507,6 +507,7 @@ bool g_seed_auto_replay_report_on_load = false;
 bool g_seed_auto_replay_report_succeeded = false;
 bool g_seed_auto_replay_invalid_site_token = false;
 bool g_seed_auto_replay_sparse_capacity = false;
+bool g_seed_auto_replay_overlimit_range = false;
 bool g_seed_auto_sampled_report_on_load = false;
 bool g_seed_auto_sampled_report_succeeded = false;
 bool g_seed_auto_sampled_pending_release_scale = false;
@@ -1129,6 +1130,11 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     if (g_seed_auto_replay_invalid_site_token) {
       records[0].site_token = layout.record_replay_logical_access_range_count;
       records[second_record_index].site_token = layout.record_replay_logical_access_range_count;
+    }
+    if (g_seed_auto_replay_overlimit_range) {
+      constexpr uint32_t kOverlimitCell = (1u << 20u) + 1u;
+      records[second_record_index].lds_byte_offset = kOverlimitCell * sizeof(uint64_t);
+      records[second_record_index].start_cell = kOverlimitCell;
     }
     g_seed_auto_replay_report_succeeded = true;
   }
@@ -1767,6 +1773,7 @@ void reset_code_object_observations() {
   g_seed_auto_replay_report_succeeded = false;
   g_seed_auto_replay_invalid_site_token = false;
   g_seed_auto_replay_sparse_capacity = false;
+  g_seed_auto_replay_overlimit_range = false;
   g_seed_auto_sampled_report_on_load = false;
   g_seed_auto_sampled_report_succeeded = false;
   g_seed_auto_sampled_pending_release_scale = false;
@@ -6204,6 +6211,51 @@ TEST(HsaHooksUnitTest, AutoReplayCompactsSparseFixedCapacityBeforeReplay) {
   for (std::string_view field :
        {"committed_records=2", "replay_input_access=2", "published_access=2", "processed_access=2",
         "dropped_access=0", "diagnostics=1", "conflict=true"}) {
+    EXPECT_NE(log.find(field), std::string::npos) << field << '\n' << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, AutoReplayBoundsSparseShadowAndFailsClosedForOverlimitRange) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_seed_auto_replay_report_on_load = true;
+  g_seed_auto_replay_overlimit_range = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    EXPECT_TRUE(hook.installed()) << hook.error();
+    if (hook.installed()) {
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
+  EXPECT_EQ(g_core_memory_free_calls, 1);
+  EXPECT_EQ(log.find(" skipped "), std::string::npos) << log;
+  for (std::string_view field :
+       {"ConSan MOI replay shadow bounded reader=101", "required_shadow_entries=1048578",
+        "limit=1048576", "shadow_entries=1048576", "replay_input_access=2", "processed_access=2",
+        "diagnostics=1", "conflict=true", "metadata_full=true", "dynamic_complete=false"}) {
     EXPECT_NE(log.find(field), std::string::npos) << field << '\n' << log;
   }
 }
