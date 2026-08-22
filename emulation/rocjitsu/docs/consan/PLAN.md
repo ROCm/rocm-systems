@@ -12,15 +12,18 @@ structure.
 
 ## 1. Preparation work
 
-**Status: the device tier is operational; the current-base merge, residual
-coverage, and end-to-end qualification work remain**
+**Status: the current base and device tier are qualified; residual coverage
+and end-to-end qualification work remain**
 
-The immediate starting action for this phase is to merge the already-fetched
-`origin/develop` into the current branch with a merge commit. Repair every
-resulting build or test failure, and protect each behavioral integration defect
-with a focused host-unit or device regression. Keep that current-base property
-true at later qualification checkpoints; a develop merge is not complete until
-its integration breakage is repaired and regression-tested.
+The branch contains the freshly fetched `origin/develop` (`550548c58ae9`)
+through merge commit `cf1df8ec82`; that ref is already an ancestor of the
+current branch, so this checkpoint has no additional merge commit or resulting
+breakage. The current host and complete simulator/physical device suites pass
+on that base. Keep that current-base property true at later qualification
+checkpoints. A future develop integration must use a merge commit and is not
+complete until every resulting build or test failure is repaired and each
+behavioral integration defect is protected by a focused host-unit or device
+regression.
 
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
@@ -40,41 +43,47 @@ or implementation choices.
 
 ### Working loop and priority rules
 
-1. Start from a current base: merge the already-fetched `origin/develop` now
-   with a merge commit, then repair and regression-test any integration
-   breakage before treating later validation evidence as current. Repeat this
-   current-base check at qualification checkpoints.
+1. Keep a current base. At each qualification checkpoint, resolve the freshly
+   fetched `origin/develop`. If it is newer, merge it with a merge commit, then
+   repair and regression-test any integration breakage before treating later
+   validation evidence as current. If it is already an ancestor, record the
+   checkpoint as current rather than manufacturing an empty merge.
 2. Keep both [STATUS_CDNA4.md](STATUS_CDNA4.md) and
    [STATUS_GFX1250.md](STATUS_GFX1250.md) live. Update the relevant ledger in
    the same change whenever an investigation changes what is known about a
    cell; the documents must describe the state at every revision, not merely
    the intended end state.
-3. Allocate effort by engine importance: Record/Replay first, then Sampled,
-   then SuperCollider, then Inline Shadow. Within the active engine priority,
-   lift the floor by addressing red before orange, orange before yellow, and
-   yellow before revalidating green. Apply that ordering across both ledgers:
-   keep CDNA4 and gfx1250 moving rather than completing one architecture before
-   returning to the other. After all applicable cells are green, re-run every
-   green cell on one reviewed revision.
+3. Use a lexicographic priority across both ledgers: engine first
+   (Record/Replay, Sampled, SuperCollider, Inline Shadow), then severity within
+   the active engine (red, orange, yellow, green). Keep CDNA4 and gfx1250 moving
+   under that ordering rather than completing one architecture before returning
+   to the other. Tactical latency may change which equally useful cell is taken
+   next, but it does not remove deferred higher-priority cells. After all
+   applicable cells are green, re-run every green cell on one reviewed
+   revision.
 4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
    slowness when that is actionable; otherwise record and defer a slow cell and
    move to the next useful target. A tactically slow higher-priority cell must
    not prevent progress on other cells, but it remains an explicit exit item.
 5. For every defect or useful end-to-end idiom encountered, make the durable
    result a focused host-unit test, checked-in device test, or both. Studying an
-   end-to-end workload is not finished when its prototype fix works: reduce its
-   relevant compiler, ISA, resource-pressure, control-flow, memory, or
-   synchronization behavior into a quick checked-in contract. Use a host unit
-   for isolated analysis, policy, ABI, or runtime semantics; use adjacent
-   correct/incorrect device workloads when transformed device behavior is at
-   issue; use both when the defect crosses that boundary. The prototype fix and
-   a status-cell promotion support that deliverable; neither replaces it. If an
-   investigation genuinely cannot yield a focused checked-in regression,
-   record the concrete reason instead of silently losing the evidence.
+   end-to-end workload is not finished when its prototype fix works or its
+   ledger cell changes color: reduce its relevant compiler, ISA,
+   resource-pressure, control-flow, memory, or synchronization behavior into a
+   quick checked-in contract. Use a host unit for isolated analysis, policy,
+   ABI, or runtime semantics; use adjacent correct/incorrect device workloads
+   when transformed device behavior is at issue; use both when the defect
+   crosses that boundary. The prototype fix and a status-cell promotion support
+   that deliverable; neither replaces it. If an investigation genuinely cannot
+   yield a focused checked-in regression, record the concrete reason instead of
+   silently losing the evidence. Coverage expansion is also a deliverable when
+   it exposes no new prototype defect and changes no ledger color.
 6. Generalize every new and existing test by behavior rather than by its source
    architecture. Translate target-native device code as necessary and cover
    every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
-   `gfx950`-to-`gfx942` transport is only one example, not the boundary.
+   `gfx950`-to-`gfx942` transport is only one example, not the boundary. Treat
+   the suite-wide audit of already-existing tests as explicit preparation work,
+   not only as a rule applied to tests added from now on.
 7. Use fast host tests and parallel RocJitsu targets for the tight loop. It is
    acceptable to omit serialized physical `gfx950` temporarily when it
    dominates latency, but run it at regular checkpoints, after relevant native
@@ -83,12 +92,12 @@ or implementation choices.
 
 ### Remaining work
 
-1. First merge the already-fetched `origin/develop` into this branch with a
-   merge commit. Repair every resulting build or test failure and add a focused
-   host-unit or device regression for each behavioral defect exposed by the
-   integration before accepting the merge. At later qualification checkpoints,
-   fetch and merge any newer `origin/develop` and apply the same standard before
-   treating the checkpoint as current.
+1. At later qualification checkpoints, fetch and merge any newer
+   `origin/develop` with a merge commit. Repair every resulting build or test
+   failure and add a focused host-unit or device regression for each behavioral
+   defect exposed by the integration before accepting the merge. The freshly
+   fetched `550548c58ae9` checkpoint is already incorporated; do not create an
+   empty merge solely to restate it.
 2. Continue making both the conventional host-unit suite and the checked-in
    device suite comprehensive. Close meaningful gaps identified by the
    capability audit, [VALIDATION.md](VALIDATION.md), or Aorta. Device scenarios
@@ -136,9 +145,11 @@ or implementation choices.
 8. Run the complete checked-in device matrix periodically in one CTest
    invocation and keep it fully green on RocJitsu `gfx942`, `gfx950`,
    `gfx1250`, `gfx1100`, and `gfx1201`, plus physical `gfx950`. Refresh the
-   whole-suite timing after the latest tranche and keep it within the documented
-   5--20-minute heuristic on the reference host at that host's configured
-   parallelism.
+   whole-suite timing after the latest tranche and interpret it against the
+   documented 5--20-minute heuristic on the reference host at that host's
+   configured parallelism. The current 118.75-second run is below the lower
+   review threshold, so the residual coverage audit remains active; do not add
+   artificial work merely to consume time.
 9. Produce a `gfx950` counterpart to
    [GFX1201_EMPIRICAL_STUDY.md](GFX1201_EMPIRICAL_STUDY.md), based on fresh
    correctness, coverage, fault-detection, overhead, containment, and
@@ -160,10 +171,10 @@ or implementation choices.
 - Every applicable cell in both the CDNA4 and gfx1250 ledgers is green under the
   stated Record/Replay-first and lift-the-floor strategy, followed by a fresh
   global revalidation of all green cells at one reviewed revision.
-- One reviewed revision passes the entire checked-in simulator/physical device
-  matrix. Faster simulator-focused iteration is permitted, but the physical
-  `gfx950` tier and post-run health checks pass at regular milestones and at
-  final qualification.
+- One reviewed revision passes the entire conventional host-unit suite and the
+  checked-in simulator/physical device matrix. Faster simulator-focused
+  iteration is permitted, but the physical `gfx950` tier and post-run health
+  checks pass at regular milestones and at final qualification.
 - The checked-in `gfx950` empirical study records the behavior and tradeoffs the
   production implementation must preserve.
 
