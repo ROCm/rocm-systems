@@ -2301,8 +2301,8 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
             regRecord->netHandleHead = netHandle;
             outHandle[p] = handle;
             *outRegBufFlag = 1;
-            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld", comm->rank, userbuff, handle,
-                 buffSize);
+            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld numSegments %d", comm->rank,
+                 userbuff, handle, buffSize, numSegments);
           } else {
             goto fail;
           }
