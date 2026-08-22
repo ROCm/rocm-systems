@@ -59,7 +59,47 @@ scratch before promotion.
 | **P4 hip-moi MFMA attention** | 🟩 Current candidate-tree physical run passes both exact oracles in 0.23 seconds with complete 58/58 access coverage; CDNA4 B16 store readback is now covered by a focused host regression; prior paired and reviewed-fault evidence retained | 🟩 Current clean-source physical bundle passes the exact paired oracles with complete 58/58 access and 14/14 barrier coverage, zero diagnostics, and complete static, analysis, and dynamic verdicts; the paired slowdown is 4.22x. A prospectively reviewed exact-one score-publication barrier drop is reached and accepted as a qualified miss with a passing oracle, complete surviving coverage, cleanup, and healthy pre/post probes | 🟩 Current exact oracle, complete 58/58 access plus 12/12 applicable-barrier coverage, zero diagnostics, and 2.57x paired slowdown; a prospectively reviewed exact-one first score-publication barrier drop leaves its adjacent publication barrier intact and is reached and accepted as a qualified miss with complete surviving coverage, bounded memory, cleanup, containment, health, hook hashing, and exact provenance | 🟨 Current physical paired row passes the exact oracle with complete 58/58 access and 14/14 barrier coverage, 8,704 visible exact-shadow cells, zero forbidden diagnostics or incomplete state, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 80 and 68 ms versus 246 ms for Inline Shadow (3.32x); reviewed-fault and clean-provenance acceptance remain |
 | **P4 hip-moi Stream-K arrival** | 🟩 current accepted bundle: exact clean, 4/4 coverage, paired 143.70x, reviewed exact-one CDNA4 atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 34.8x paired slowdown, and a reviewed exact-one release-order fault with pass/qualified-miss outcome, containment, health, cleanup, and clean provenance | 🟩 Current clean-revision accepted bundle: exact clean and paired oracles, complete 32/32 access plus 4/4 applicable-barrier and 1/1 atomic coverage, 7.57x paired slowdown, and a precommitted stride-1 exact-one release-order fault that preserves the oracle and produces four Sampled conflicts; containment, health, cleanup, hook hashing, and clean provenance pass | 🟩 Current clean-revision accepted bundle: exact clean and paired oracles, complete 32/32 access plus 6/6 barrier and 1/1 atomic coverage, 7.34x paired slowdown, and a precommitted exact-one release-order fault that preserves the oracle and produces 256 Inline Shadow diagnostics; containment, health, cleanup, hook hashing, and clean provenance pass |
 | **P4 hip-moi tree atomic-OR** | 🟩 current accepted bundle: both exact clean tests, 4/4 coverage, paired 185.5x, reviewed exact-one producer-release atomic-order fault, containment, health, and clean provenance | 🟩 frozen accepted bundle: exact clean and paired oracles, complete 4/4 accesses plus 4/4 barriers, 10/10 atomics, and 16/16 fences, zero diagnostics, 47.08x paired slowdown, and a reviewed exact-one producer-release atomic-order fault with pass/no-diagnosis outcome, containment, health, and clean provenance | 🟩 Current exact MFMA-partials oracle, complete 48/48 access plus 4/4 barrier and 3/3 atomic coverage, zero clean diagnostics, and 15.89x paired slowdown; a prospectively selected exact-one weakening of the producer release at audited stride one preserves the oracle and produces 12 Sampled conflicts with complete surviving coverage, bounded memory, cleanup, containment, health, hook hashing, and exact provenance | 🟨 Current physical paired row passes the exact MFMA-partials oracle with complete 48/48 access, 6/6 barrier, and 3/3 atomic coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 60 and 98 ms versus 1,165 ms for Inline Shadow (14.75x); reviewed-fault and clean-provenance acceptance remain |
-| **P4 hip-moi Jakub attention** | 🟨 Current physical clean row passes all four exact oracles in 0.34 seconds with complete 338/338 access coverage; paired overhead and reviewed-fault acceptance remain | 🟩 Current clean-source physical bundle passes all four exact oracles with complete 338/338 access and 35/35 barrier coverage, zero diagnostics, and complete static, analysis, and dynamic verdicts. The paired bracketing baselines take 92 and 96 ms versus 411 ms for Record/Replay (4.37x). A distinct prospectively reviewed exact-one pipelined publication-barrier drop is reached and accepted under its schedule-masked qualified-miss policy, with 338/338 access and 34/34 surviving-barrier coverage, bounded memory, cleanup, and healthy pre/post probes | 🟨 Current physical paired row passes all four exact oracles with complete 338/338 access and 35/35 applicable-barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 104 and 118 ms versus 274 ms for Sampled (2.47x); reviewed-fault and clean-provenance acceptance remain | 🟨 Current physical paired row passes all four exact oracles with complete 338/338 access and 35/35 barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 68 and 120 ms versus 299 ms for Inline Shadow (3.18x); reviewed-fault and clean-provenance acceptance remain |
+| **P4 hip-moi Jakub attention** | 🟨 Current physical clean row passes all four exact oracles in 0.34 seconds with complete 338/338 access coverage; paired overhead and reviewed-fault acceptance remain | 🟩 Current clean-source physical bundle passes all four exact oracles with complete 338/338 access and 35/35 barrier coverage, zero diagnostics, and complete static, analysis, and dynamic verdicts. The paired bracketing baselines take 92 and 96 ms versus 411 ms for Record/Replay (4.37x). A distinct prospectively reviewed exact-one pipelined publication-barrier drop is reached and accepted under its schedule-masked qualified-miss policy, with 338/338 access and 34/34 surviving-barrier coverage, bounded memory, cleanup, and healthy pre/post probes | 🟩 Current exact four-oracle bundle, complete 338/338 access plus 35/35 applicable-barrier coverage, zero diagnostics, and 2.95x paired slowdown; a prospectively reviewed distinct pipelined publication-barrier drop is reached and accepted as a qualified miss with complete 338/338 access plus 34/34 surviving-barrier coverage, bounded memory, cleanup, containment, health, hook hashing, and exact provenance; the separate stride-1 producer-skew hypothesis remains rejected without relabeling | 🟨 Current physical paired row passes all four exact oracles with complete 338/338 access and 35/35 barrier coverage, zero forbidden diagnostics, and complete static, analysis, and dynamic verdicts; the bracketing baselines take 68 and 120 ms versus 299 ms for Inline Shadow (3.18x); reviewed-fault and clean-provenance acceptance remain |
+
+### 2026-08-22 Jakub-attention Sampled publication qualification
+
+Current paired artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-jakub-sampled-producer-skew-v1`
+passes all four exact host-reference oracles with complete 338/338 access and
+35/35 applicable-barrier coverage, zero diagnostics, and complete static,
+analysis, and dynamic verdicts. Baseline-before and baseline-after take 88 and
+96 ms while Sampled takes 271 ms, for a 92 ms paired baseline and 2.95x
+slowdown. The exact hook SHA-256 is
+`6072161a2b5a01c28b26b59d5b6f14dacd60fbd10a4a0f0e3d34fceb9050aab7`;
+the recorded source head is `cd6786f9a8fe4c478c8a4ba5f5941d4bb370c492`.
+The source is marked dirty only by the preserved user-owned modified header
+and two core-dump paths, not by a ConSan implementation change.
+
+The first fault prospectively selected the ProducerSkewProd16x8 kernel's
+unconditional initial publication barrier at PC `0x1808`, predeclared stride
+one, and froze `detected/fail`: the last producer wave deliberately sleeps
+before publishing its B fragment. The exact-one mutation is reached and
+applied with complete evidence, but physical scheduling still preserves every
+oracle and Sampled emits no diagnosis. This trial is rejected and retained at
+the paired artifact above; neither expectation was revised.
+
+A distinct prospectively reviewed trial at
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-jakub-sampled-pipelined-miss-v2`
+selects the PipelinedProd16x8 kernel's unconditional initial publication
+barrier at PC `0x8e4`. That kernel has no intentional producer delay, so its
+frozen policy was the schedule-masked qualified miss `not_detected/pass`. The
+mutation is requested, planned, reserved, installed, and applied exactly once
+and reaches under reviewed final-ISA evidence. It preserves all four exact
+oracles and complete 338/338 access plus 34/34 surviving-barrier coverage,
+with complete analysis and no overflow. The command completes in 0.418
+seconds, peaks at 735,640 live report bytes, releases all report memory without
+allocation, capacity, or cleanup failure, and passes both pre/post physical-GPU
+health probes.
+
+The architecture-general `DoubleBufferedPipeline` pair owns the observable
+publication contract on all five simulator targets and physical gfx950, while
+`CdnaMfmaPipeline` adds native MFMA/AccVGPR pressure on CDNA3/CDNA4. Their
+combined 90-row baseline/all-engine gate is green. The Sampled cell is green.
 
 ### 2026-08-22 tree atomic-OR Sampled producer-release qualification
 
