@@ -356,7 +356,6 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-
 // NCCL_IB_MAX_SEGMENTS (cap on physical segments per registered buffer) is
 // defined in multiseg.h so the wire-protocol structs above and the pure helpers
 // can both reference it.
@@ -372,16 +371,15 @@ struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
   int nSegments;                                             // 1 = legacy single MR
   uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];                  // VA start of each segment
-  size_t    segLen[NCCL_IB_MAX_SEGMENTS];                    // bytes per segment
-  ibv_mr*   segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+  size_t segLen[NCCL_IB_MAX_SEGMENTS];                    // bytes per segment
+  ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
 // Select the MR covering [addr, addr+len) for device devIndex.
 // - Single-segment handles return the legacy mrs[devIndex].
 // - Multi-segment handles return the containing segment's MR, or NULL if the
 //   range is not fully contained in one physical segment.
-static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h,
-                                       uintptr_t addr, size_t len, int devIndex) {
+static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h, uintptr_t addr, size_t len, int devIndex) {
   if (h == NULL) return NULL;
   if (h->nSegments <= 1) return h->mrs[devIndex];
   int s = ncclIbSegmentIndexForRange(h->nSegments, h->segStart, h->segLen, addr, len);
@@ -670,8 +668,8 @@ ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, ui
 // Register a multi-segment cuMem/VMM buffer as one dma-buf MR per physical
 // segment (per device), returning a composite ncclIbMrHandle (AIRUNTIME-2351
 // classic-path follow-up). The caller exports one dma-buf fd per segment.
-ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens,
-                                       uint64_t* segOffsets, int* segFds, int type, void** mhandle);
+ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
+                                       int* segFds, int type, void** mhandle);
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle);
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request);
