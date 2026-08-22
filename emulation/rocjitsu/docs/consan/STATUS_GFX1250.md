@@ -1032,7 +1032,7 @@ have since advanced name their newer committed revision and retained evidence.
 | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | `torch.mode` | 🟩 At `23236d897d`: strict exact oracle; 28,195/28,195 ordinary accesses; paired 116.51x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `96ecd9024a`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 8,892/8,892 barrier members; paired 120.09x; reviewed exact-one qualified miss and both health gates accepted | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
-| `torch.histc` | 🟩 At `502b286cfc`: strict exact oracle; 133/133 ordinary accesses; paired 85.67x; reviewed exact-one causal barrier mutation and both health gates accepted | 🟩 Current RocJitsu clean refresh passes the exact oracle with 175/175 accesses and 168/168 split-barrier members; prior paired/fault bundle retained | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
+| `torch.histc` | 🟩 Current dual-precision exact oracle; 133/133 ordinary accesses; paired 33.54x; reviewed causal fault bundle retained | 🟩 Current dual-precision exact oracle; 175/175 accesses and 168/168 split-barrier members; paired 28.53x; reviewed causal fault bundle retained | 🟩 Current dual-precision exact oracle; 175/175 accesses and 168/168 barriers; paired 24.82x | 🟩 Current dual-precision exact oracle; 175/175 accesses and 84/84 barriers; paired 81.25x. Current-pass dispatcher/body overlap fixed and unit-tested |
 | `001_sk_mxf8f4gemm_tdm` | 🟩 Exact oracle; 768/768 accesses | 🟩 Exact oracle; 768/768 accesses, 204/204 barriers, and 24/24 fences | 🟩 Exact oracle; 768/768 accesses and 180/180 barriers | 🟩 Exact oracle; 768/768 accesses and 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted |
 | `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟩 At `82a0a1dd8b`: exact oracle; 8,162/8,162 accesses, 292/292 barriers, and 80/80 fences; paired 2.02x; reviewed exact-one fault and both health gates accepted | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
 
@@ -1049,10 +1049,42 @@ that workaround consistently.
 | P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟨 The retained exact FP64/BF16 run passes in 75.02 seconds with dynamic completeness and zero diagnostics. Current admission work eliminates all 16,856 resource failures, but a bounded diagnostic still omits 1,777/113,020 accesses and 2,340/10,782 barriers at branch placement and times out at 240 seconds after growing the large replacement from 281 MB to 322 MB; a compact complete route and fresh exact verdict remain | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟨 Current exact FP64/BF16 oracles pass in 89.29 seconds with dynamic completeness and zero diagnostics; static coverage remains resource-incomplete at 113,760/161,244 accesses and 9,148/11,423 barriers. The smaller BF16 object is complete at 48,224/48,224 accesses and 6,032/6,032 barriers | The InlineShadow architectural-SGPR exclusion fixes the all-zero BF16 result. Artifact `rebase-20260821-gfx1250-pytorch-topk-inline-architectural-sgprs` supersedes the red frontiers retained in `rebase-20260821-gfx1250-pytorch-topk-inline-branch-only-fix` and `rebase-20260821-gfx1250-pytorch-topk-inline-composite-Y7nTVO`. Record/Replay now has placement and execution-scaling debt rather than a resource-admission gap; Sampled and InlineShadow remain resource-incomplete. |
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
-| P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Current RocJitsu clean refresh passes exact counts in 3.41 seconds with 175/175 accesses and 168/168 split-barrier members; prior paired 72.00x and causal fault bundle retained | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
+| P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact FP32/FP64 counts; 133/133 supported accesses; current paired 33.54x | 🟩 Exact FP32/FP64 counts in 6.33 seconds with 175/175 accesses and 168/168 split-barrier members; current paired 28.53x; prior causal fault bundle retained | 🟩 Exact FP32/FP64 counts in 3.29 seconds with 175/175 accesses and 168/168 applicable barriers; current paired 24.82x | 🟩 Exact FP32/FP64 counts in 3.69 seconds with 175/175 accesses and 84/84 barriers; current paired 81.25x after repairing same-pass dispatcher/body overlap | All four profiles remain green on the expanded workload. Artifacts `prep-20260822-gfx1250-pytorch-histc-dual-precision-all-v3` and `prep-20260822-gfx1250-pytorch-histc-dual-precision-inline-fix-v1` record the refresh; the earlier reviewed causal fault evidence remains applicable. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 211.06x; reviewed exact-one fault and health accepted | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay uses owner-local zero-generation records where full-pressure kernels cannot preserve the global dispatch-ID pair; all profiles have accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
+
+### 2026-08-22 dual-precision `torch.histc` refresh
+
+Artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-pytorch-histc-dual-precision-all-v3`
+runs the expanded FP32 and FP64 exact-bin-count oracles through RocJitsu's
+checked-in B0 `gfx1250_mi455x.json` configuration. Baseline, SuperCollider,
+Record/Replay, and Sampled accept both precision rows. SuperCollider patches
+133/133 supported accesses; Record/Replay and Sampled each patch 175/175
+accesses plus 168/168 split-barrier members. Their maximum paired device
+slowdowns are 33.54x, 28.53x, and 24.82x respectively, and all clean rows have
+complete static, analysis, and dynamic verdicts.
+
+The first Inline Shadow row rejected the object before execution. Final
+validation showed that its reused access dispatcher had grown from
+`.text+196516` across a 24-byte local barrier body already emitted at
+`.text+196828` in the same incremental pass. The reuse search considered only
+the globally committed patch inventory, so it missed the nearer current-pass
+boundary and overwrote both code and patch ownership. Dispatcher growth now
+uses the nearest nonempty trampoline from both inventories and falls back to
+the independent barrier router when necessary. A focused host regression pins
+that two-inventory boundary, and the neighboring dense-reuse/fallback/router
+tests remain green.
+
+Artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-pytorch-histc-dual-precision-inline-fix-v1`
+accepts the repaired Inline Shadow row in 3.69 seconds with exact FP32 and FP64
+counts, complete 175/175 access plus 84/84 barrier coverage, complete
+static/analysis/dynamic evidence, and an 81.25x maximum paired device
+slowdown. The cell therefore remains green on the expanded current workload;
+the previously accepted causal fault bundle is retained rather than rerun or
+reinterpreted.
 
 ### 2026-08-21 `torch.topk` Record/Replay simulator fix
 

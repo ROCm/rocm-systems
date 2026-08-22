@@ -14,6 +14,32 @@ namespace {
 
 namespace ib = instrumentation;
 
+TEST(ConSanMoi, ReusedDispatcherBoundaryIncludesBodiesEmittedEarlierInCurrentPass) {
+  ConSanPatchInfo dispatcher;
+  dispatcher.trampoline_offset = 100u;
+  dispatcher.trampoline_size = 20u;
+  ConSanPatchInfo later_committed;
+  later_committed.trampoline_offset = 200u;
+  later_committed.trampoline_size = 16u;
+  ConSanPatchInfo earlier_current_pass;
+  earlier_current_pass.trampoline_offset = 150u;
+  earlier_current_pass.trampoline_size = 24u;
+  ConSanPatchInfo empty_current_pass;
+  empty_current_pass.trampoline_offset = 125u;
+  empty_current_pass.trampoline_size = 0u;
+
+  const std::array committed = {dispatcher, later_committed};
+  const std::array current_pass = {empty_current_pass, earlier_current_pass};
+  EXPECT_EQ(consan_detail::next_moi_trampoline_boundary(dispatcher.trampoline_offset, committed,
+                                                        current_pass),
+            150u);
+  EXPECT_EQ(consan_detail::next_moi_trampoline_boundary(earlier_current_pass.trampoline_offset,
+                                                        committed, current_pass),
+            200u);
+  EXPECT_FALSE(consan_detail::next_moi_trampoline_boundary(later_committed.trampoline_offset,
+                                                           committed, current_pass));
+}
+
 TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);

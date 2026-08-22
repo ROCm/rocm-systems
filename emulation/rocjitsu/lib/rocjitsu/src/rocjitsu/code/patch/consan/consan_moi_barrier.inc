@@ -1694,16 +1694,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       size_t dispatcher_patch_index = 0;
       uint64_t reservation_end = 0;
     };
-    std::vector<uint64_t> access_relay_boundaries;
-    access_relay_boundaries.reserve(result.patches.size());
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.trampoline_size != 0u)
-        access_relay_boundaries.push_back(patch.trampoline_offset);
-    }
-    std::ranges::sort(access_relay_boundaries);
-    const auto unique_boundary_end = std::ranges::unique(access_relay_boundaries);
-    access_relay_boundaries.erase(unique_boundary_end.begin(), unique_boundary_end.end());
-
     std::map<std::vector<uint64_t>, std::vector<ReusableDenseAccessRelay>> reusable_access_relays;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       for (size_t patch_index = 0; patch_index < result.patches.size(); ++patch_index) {
@@ -1713,10 +1703,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             dispatcher.owner_descriptor_file_offsets.empty()) {
           continue;
         }
-        const auto boundary =
-            std::ranges::upper_bound(access_relay_boundaries, dispatcher.trampoline_offset);
-        if (boundary == access_relay_boundaries.end() ||
-            dispatcher.trampoline_offset + dispatcher.trampoline_size > *boundary) {
+        // Local barrier bodies selected earlier in this pass are not in
+        // result.patches until the pass commits. They still bound a reused
+        // access dispatcher; growing through one would overwrite an emitted
+        // body and make both inventories describe the same bytes.
+        const auto boundary = consan_detail::next_moi_trampoline_boundary(
+            dispatcher.trampoline_offset, result.patches, patches);
+        if (!boundary || dispatcher.trampoline_offset + dispatcher.trampoline_size > *boundary) {
           continue;
         }
         reusable_access_relays[dispatcher.owner_descriptor_file_offsets].push_back(

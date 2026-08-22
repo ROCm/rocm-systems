@@ -110,6 +110,23 @@ bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
   return true;
 }
 
+std::optional<uint64_t>
+consan_detail::next_moi_trampoline_boundary(uint64_t offset,
+                                            std::span<const ConSanPatchInfo> committed,
+                                            std::span<const ConSanPatchInfo> current_pass) {
+  uint64_t boundary = std::numeric_limits<uint64_t>::max();
+  const auto inspect = [&](std::span<const ConSanPatchInfo> patches) {
+    for (const ConSanPatchInfo &patch : patches) {
+      if (patch.trampoline_size != 0u && patch.trampoline_offset > offset)
+        boundary = std::min(boundary, patch.trampoline_offset);
+    }
+  };
+  inspect(committed);
+  inspect(current_pass);
+  return boundary == std::numeric_limits<uint64_t>::max() ? std::nullopt
+                                                          : std::optional<uint64_t>(boundary);
+}
+
 std::optional<consan_detail::ScalarOwnerContextResolution>
 consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
                                              std::span<const ScalarOwnerContextSummary> contexts,

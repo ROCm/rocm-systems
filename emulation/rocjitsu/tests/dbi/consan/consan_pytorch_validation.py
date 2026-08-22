@@ -520,11 +520,11 @@ def _run_scatter_reduce(repetitions: int) -> dict[str, object]:
     }
 
 
-def _run_histc(repetitions: int) -> dict[str, object]:
+def _run_histc_case(repetitions: int, dtype: torch.dtype) -> dict[str, object]:
     bins = 64
     repeats = 16
-    host_input = torch.arange(bins, dtype=torch.float32).repeat_interleave(repeats)
-    expected = torch.full((bins,), repeats, dtype=torch.float32)
+    host_input = torch.arange(bins, dtype=dtype).repeat_interleave(repeats)
+    expected = torch.full((bins,), repeats, dtype=dtype)
     input_tensor = host_input.to(device="cuda")
     elapsed_ms = []
     device_elapsed_ms = []
@@ -546,8 +546,16 @@ def _run_histc(repetitions: int) -> dict[str, object]:
         "repetitions": repetitions,
         "oracle": "exact-bin-counts",
         "oracle_passed": True,
+        "dtype": str(dtype),
         "bins": bins,
         "elements": bins * repeats,
+    }
+
+
+def _run_histc(repetitions: int) -> dict[str, object]:
+    return {
+        "fp32-shared-bin-count": _run_histc_case(repetitions, torch.float32),
+        "fp64-shared-bin-count": _run_histc_case(repetitions, torch.float64),
     }
 
 
@@ -732,7 +740,7 @@ WORKLOAD_RUNNERS: dict[str, Callable[[int], dict[str, object]]] = {
     "torch-topk": _run_topk,
     "torch-sort": lambda repetitions: {"segmented-rows": _run_sort(repetitions)},
     "scatter-reduce": _run_scatter_reduce,
-    "torch-histc": lambda repetitions: {"shared-bin-count": _run_histc(repetitions)},
+    "torch-histc": _run_histc,
     "norm-softmax": _run_norm_softmax_workload,
     "vector-norm": lambda repetitions: {
         "vector-norm": _run_norm_softmax(repetitions, run_softmax=False)

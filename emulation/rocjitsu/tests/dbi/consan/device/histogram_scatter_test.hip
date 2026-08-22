@@ -14,22 +14,27 @@ struct DeviceState {
   uint32_t wave_size;
   uint32_t published_wave_total;
   uint32_t histogram[kBinCount];
+  float fp32_histogram[kBinCount];
   uint32_t scatter[kBinCount];
   uint32_t control[128];
 };
 
 __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState *state) {
   __shared__ uint32_t bins[kBinCount];
+  __shared__ float fp32_bins[kBinCount];
   __shared__ uint32_t wave_total;
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid % warpSize;
   const uint32_t wave = tid / warpSize;
-  if (tid < kBinCount)
+  if (tid < kBinCount) {
     bins[tid] = 0u;
+    fp32_bins[tid] = 0.0f;
+  }
   __syncthreads();
 
   const uint32_t bin = (5u * tid + 3u) & (kBinCount - 1u);
   atomicAdd(&bins[bin], 1u);
+  atomicAdd(&fp32_bins[bin], 1.0f);
   (void)__hip_atomic_fetch_add(&state->scatter[bin], tid + 1u, __ATOMIC_RELAXED,
                                __HIP_MEMORY_SCOPE_AGENT);
   state->control[tid] = 0x79000000u | tid;
@@ -56,6 +61,7 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   }
   if (tid < kBinCount) {
     state->histogram[tid] = bins[tid];
+    state->fp32_histogram[tid] = fp32_bins[tid];
     asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
   }
 }
@@ -88,8 +94,11 @@ void run_histogram_scatter(bool synchronize) {
     EXPECT_EQ(state.published_wave_total, wave_size);
   for (uint32_t bin = 0; bin < kBinCount; ++bin) {
     EXPECT_EQ(state.scatter[bin], expected_scatter[bin]) << "bin=" << bin;
-    if (synchronize)
+    if (synchronize) {
       EXPECT_EQ(state.histogram[bin], expected_histogram[bin]) << "bin=" << bin;
+      EXPECT_EQ(state.fp32_histogram[bin], static_cast<float>(expected_histogram[bin]))
+          << "bin=" << bin;
+    }
   }
 }
 

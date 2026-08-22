@@ -244,7 +244,20 @@ cells repaired.
    owns observable behavior. Resume the E2E row after a more general
    owner-local gateway, shared-dispatch, or equivalent design changes that
    capacity equation; meanwhile continue to the next useful Record/Replay
-   floor item.
+   floor item. The subsequent CDNA4 `torch.histc` investigation has now
+   promoted Record/Replay from yellow to green without revising either earlier
+   rejected FP32 fault contract: the E2E oracle now covers distinct FP32 and
+   FP64 shared-histogram specializations, a new prospectively reviewed FP64
+   publication fault is reached and diagnosed, and the architecture-general
+   checked-in `HistogramScatter` pair now adds an exact FP32 LDS-atomic payload
+   beside its original integer and global-scatter paths on all five RocJitsu
+   targets plus physical gfx950. Refreshing the shared expanded workload on
+   RocJitsu-gfx1250 then exposed and repaired an Inline Shadow incremental-
+   placement defect: a reused access dispatcher could grow across a local
+   barrier body emitted earlier in the same pass because only committed
+   patches bounded it. A focused host unit now requires both inventories, the
+   exact dual-precision gfx1250 row passes under all four engines, and both
+   architecture ledgers record the result.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in

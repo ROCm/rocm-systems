@@ -213,5 +213,14 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
                                                  uint16_t address_vgpr, uint16_t slot_vgpr,
                                                  rj_code_arch_t arch);
 
+/// Return the nearest emitted trampoline body strictly after `offset` across
+/// both already committed and current-pass patch inventories. Empty bodies do
+/// not reserve bytes. Incremental lowering must use both inventories when it
+/// grows a shared dispatcher, or it can overwrite a body emitted earlier in
+/// the current pass.
+[[nodiscard]] std::optional<uint64_t>
+next_moi_trampoline_boundary(uint64_t offset, std::span<const ConSanPatchInfo> committed,
+                             std::span<const ConSanPatchInfo> current_pass);
+
 } // namespace consan_detail
 } // namespace rocjitsu
