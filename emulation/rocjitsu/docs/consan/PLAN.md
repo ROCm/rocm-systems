@@ -12,18 +12,16 @@ structure.
 
 ## 1. Preparation work
 
-**Status: the current base and device tier are qualified; residual coverage
-and end-to-end qualification work remain**
+**Status: active; test-suite expansion and end-to-end qualification remain**
 
-The branch contains the freshly fetched `origin/develop` (`550548c58ae9`)
-through merge commit `cf1df8ec82`; that ref is already an ancestor of the
-current branch, so this checkpoint has no additional merge commit or resulting
-breakage. The current host and complete simulator/physical device suites pass
-on that base. Keep that current-base property true at later qualification
-checkpoints. A future develop integration must use a merge commit and is not
-complete until every resulting build or test failure is repaired and each
-behavioral integration defect is protected by a focused host-unit or device
-regression.
+At the 2026-08-22 checkpoint, the freshly fetched `origin/develop` still
+resolves to `550548c58ae9`. It is already an ancestor of the current branch
+through merge commit `cf1df8ec82`, so there is no newer change to merge and no
+empty merge should be manufactured. Before further qualification, recheck this
+relationship; if `origin/develop` has advanced, integrate it with a merge
+commit. That integration is not complete until every resulting build or test
+failure is repaired and each behavioral integration defect is protected by a
+focused host-unit or device regression.
 
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
@@ -33,17 +31,26 @@ The end-to-end procedure and acceptance rules are defined in
 [STATUS_GFX1250.md](STATUS_GFX1250.md).
 
 This phase is preparation for the production replacement, not an attempt to
-perfect the prototype indefinitely. **Its primary deliverable is the test
-suites, not the fixes made to the prototype along the way.** The host-unit and
-checked-in device suites are the durable asset that will make the section 2
-replacement automatically iterable. They must preserve behavior that matters
-to users, expose current target limitations precisely, and distinguish a safe
-new abstraction from a regression without depending on the prototype's layout
-or implementation choices. The working-loop rules below are binding preparation
-requirements and feed the exit criteria; they are not merely suggested ways of
-organizing prototype fixes.
+perfect the prototype indefinitely. **Its primary deliverable is comprehensive
+host-unit and checked-in device test suites, not the fixes made to the prototype
+along the way.** New regressions distilled from end-to-end investigations and
+the systematic expansion or transport of existing tests are equally part of
+that deliverable. This behavioral safety net is the durable asset that will
+make the section 2 replacement automatically iterable. It must preserve
+behavior that matters to users, expose current target limitations precisely,
+and distinguish a safe new abstraction from a regression without depending on
+the prototype's layout or implementation choices. The working-loop rules below
+are binding preparation requirements and feed the exit criteria; they are not
+merely suggested ways of organizing prototype fixes.
 
-### Working loop and priority rules
+### Acknowledged working contract
+
+The following rules jointly define the preparation loop and its priorities.
+None is optional merely because another rule currently offers faster visible
+progress. After this plan-only checkpoint, the first execution step is to
+resolve and, if necessary, merge the freshly fetched `origin/develop`, then
+repair and regression-test any integration breakage before resuming the
+validation loop.
 
 1. Keep a current base. At each qualification checkpoint, resolve the freshly
    fetched `origin/develop`. If it is newer, merge it with a merge commit, then
@@ -57,15 +64,17 @@ organizing prototype fixes.
    the same change whenever an investigation changes what is known about a
    cell; the documents must describe the state at every revision, not merely
    the intended end state.
-3. Use one global lexicographic priority across both ledgers: engine first
-   (Record/Replay, Sampled, SuperCollider, Inline Shadow), then severity within
-   the active engine (red, orange, yellow, green). In particular, do not use a
-   lower-priority engine's red cells to bypass unfinished higher-priority-engine
-   cells merely because red looks worse than orange. Keep CDNA4 and gfx1250
-   moving under that ordering rather than completing one architecture before
-   returning to the other. Tactical latency may change which currently useful
-   cell is taken next, but it does not remove deferred higher-priority cells.
-   After all applicable cells are green, re-run every green cell on one reviewed
+3. Use one global lexicographic priority across both ledgers. Between engine
+   columns, work Record/Replay first, then Sampled, then SuperCollider, then
+   Inline Shadow. Within the active column, lift the floor horizontally: tackle
+   red cells before orange, orange before yellow, and yellow before relying on
+   or revalidating green. In particular, do not use a lower-priority engine's
+   red cells to bypass unfinished higher-priority-engine cells merely because
+   red looks worse than orange. Keep CDNA4 and gfx1250 moving under that
+   ordering rather than completing one architecture before returning to the
+   other. Tactical latency may change which currently useful cell is taken
+   next, but it does not remove deferred higher-priority cells. After all
+   applicable cells are green, re-run every green cell on one reviewed
    revision.
 4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
    slowness when that is actionable; otherwise record and defer a slow cell and
@@ -74,19 +83,21 @@ organizing prototype fixes.
 5. For every defect or useful end-to-end idiom encountered, make the durable
    result a focused host-unit test, checked-in device test, or both. Studying an
    end-to-end workload is not finished when its prototype fix works or its
-   ledger cell changes color: reduce its relevant compiler, ISA,
-   resource-pressure, control-flow, memory, or synchronization behavior into a
-   quick checked-in contract. Use a host unit for isolated analysis, policy,
-   ABI, or runtime semantics; use adjacent correct/incorrect device workloads
-   when transformed device behavior is at issue; use both when the defect
-   crosses that boundary. The prototype fix and a status-cell promotion support
-   that deliverable; neither replaces it. If an investigation genuinely cannot
-   yield a focused checked-in regression, record the concrete reason instead of
-   silently losing the evidence. Coverage expansion is also a deliverable when
-   it exposes no new prototype defect and changes no ledger color.
+   ledger cell changes color: actively look for and reduce its relevant
+   compiler, ISA, resource-pressure, control-flow, memory, or synchronization
+   behavior into a quick checked-in contract. Use a host unit for isolated
+   analysis, policy, ABI, or runtime semantics; use adjacent correct/incorrect
+   device workloads when transformed device behavior is at issue; use both when
+   the defect crosses that boundary. The prototype fix and a status-cell
+   promotion support that deliverable; neither replaces it. If an investigation
+   genuinely cannot yield a focused checked-in regression, record the concrete
+   reason instead of silently losing the evidence. Coverage expansion is also a
+   deliverable when it exposes no new prototype defect and changes no ledger
+   color.
 6. Generalize every new and existing test by behavior rather than by its source
-   architecture. Translate target-native device code as necessary and cover
-   every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
+   architecture. Translate target-native device code as necessary--the device
+   code need not be textually identical--and cover every semantically
+   applicable CDNA3/4/5 and RDNA3/4 target. Historical
    `gfx950`-to-`gfx942` transport is only one example, not the boundary. The
    portable asset is the behavioral idea, not identical ISA bytes: transport
    across generations and between CDNA and RDNA wherever an equivalent native
