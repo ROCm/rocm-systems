@@ -28,35 +28,43 @@ rules live in [VALIDATION.md](VALIDATION.md); current evidence lives in
 [STATUS_GFX1250.md](STATUS_GFX1250.md). The Aorta workloads are another source
 of user-relevant behavior that the checked-in suites must cover.
 
-The freshly fetched `origin/develop` currently resolves to `550548c58ae9` and
-is already an ancestor of this branch, so there is no new merge to perform at
-this checkpoint and no empty merge should be manufactured. Recheck the ref
-before work resumes and at every qualification checkpoint. Whenever it has
-advanced, integrate it with a merge commit, repair all resulting build and test
-failures, and protect every behavioral integration fix with a focused host-unit
-or device regression before accepting new validation evidence.
+The immediate first action is to integrate the newly fetched `origin/develop`
+and establish a green post-integration baseline. At this checkpoint the ref is
+`550548c58ae9` and is already an ancestor of the branch, so the requested merge
+is expected to be a no-op rather than an artificial empty merge. Recheck this
+fact when execution resumes and at every qualification checkpoint. Whenever
+the ref has advanced, integrate it with a merge commit, repair all resulting
+build and test failures, and protect every behavioral integration fix with a
+focused host-unit or device regression before accepting new validation
+evidence.
 
 ### Working contract
 
 1. **Grow tests as the main product.** Expand the conventional host-unit suite
-   and the checked-in device suite together. Every behavioral fix is incomplete
-   until it has an appropriate host regression, device regression, or both.
-   Device tests use adjacent correct/incorrect workloads: the correct workload
-   must produce exact correct results and no diagnostic, while the incorrect
-   workload must produce the expected diagnostic. Tests must assert observable
-   behavior rather than the prototype's current structure.
-2. **Use E2E validation as a test-discovery loop.** Work both the CDNA4 physical
-   `gfx950` and RocJitsu-emulated `gfx1250` ledgers. Every investigation should
-   identify the relevant compiler, ISA, resource-pressure, control-flow,
-   memory, or synchronization idiom and distill it into a quick checked-in host
-   or device contract, even when the E2E workload already passes and no
-   prototype bug is found. If a faithful reduction is impossible, record the
-   concrete reason in the relevant plan or status ledger. Keep each status file
-   current in the same change that alters its evidence.
+   and the checked-in device suite together. The principal measure of progress
+   in this phase is durable behavioral coverage, not the number of prototype
+   patches or promoted E2E cells. Every behavioral fix is incomplete until it
+   has an appropriate host regression, device regression, or both. Device tests
+   use adjacent correct/incorrect workloads: the correct workload must produce
+   exact correct results and no diagnostic, while the incorrect workload must
+   produce the expected diagnostic. Tests must assert observable behavior
+   rather than the prototype's current structure so that they remain useful
+   while section 2 replaces that implementation.
+2. **Use E2E validation as a test-discovery loop.** Work both
+   [STATUS_CDNA4.md](STATUS_CDNA4.md), using physical `gfx950`, and
+   [STATUS_GFX1250.md](STATUS_GFX1250.md), using RocJitsu emulation. Every
+   investigation should identify the relevant compiler, ISA,
+   resource-pressure, control-flow, memory, or synchronization idiom and
+   distill it into a quick checked-in host or device contract, even when the
+   E2E workload already passes and no prototype bug is found. If a faithful
+   reduction is impossible, record the concrete reason in the relevant plan or
+   status ledger. Keep each status file current in the same change that alters
+   its evidence.
 3. **Apply one global priority order.** Across both ledgers, select the engine
    column first: Record/Replay, then Sampled, then SuperCollider, then Inline
    Shadow. Within the active column, lift the floor: red before orange, orange
-   before yellow, and yellow before green. Keep both architectures moving; use
+   before yellow, and yellow before green. This is the default selection order,
+   not permission to ignore either ledger. Keep both architectures moving; use
    the standing approximate 75% CDNA4 / 25% gfx1250 catch-up bias while CDNA4
    remains behind, without starving gfx1250. Once every applicable cell is
    green, make a fresh global pass over every green cell on one reviewed
@@ -65,24 +73,27 @@ or device regression before accepting new validation evidence.
    merely waiting for an abnormally slow reproducer. Investigate the slowness
    when it may itself reveal a defect or produce a smaller reproducer;
    otherwise record the evidence, defer the cell, and move to another useful
-   item. Deferral changes scheduling but never removes the cell from the exit
-   criteria.
-5. **Generalize behavioral ideas across architectures.** Audit both new and
-   already-existing ConSan tests. For every contract, consider all five
-   supported targets: CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`),
-   RDNA3 (`gfx1100`), and RDNA4 (`gfx1201`). Port the behavior wherever it is
-   semantically applicable, adapting target-native device code and ISA details
-   as necessary. Historical `gfx950`-to-`gfx942` ports are examples, not a
-   boundary; cross-generation and CDNA/RDNA transports are expected for
-   cross-cutting behavior. Record a capability-based reason wherever a port is
-   genuinely not applicable.
+   item. Prefer fixing everything that can be learned from a slow cell before
+   rotating away. Deferral changes scheduling but never removes the cell from
+   the exit criteria.
+5. **Generalize behavioral ideas across architectures.** Make a deliberate,
+   suite-wide pass over both new and already-existing ConSan host and device
+   tests. For every contract, consider all five supported targets: CDNA3
+   (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
+   RDNA4 (`gfx1201`). Port the behavioral idea wherever it is semantically
+   applicable, adapting target-native device code and ISA details as necessary.
+   Historical `gfx950`-to-`gfx942` ports are examples, not a boundary;
+   cross-generation and CDNA/RDNA transports are expected for cross-cutting
+   behavior. Record a capability-based reason wherever a port is genuinely not
+   applicable.
 6. **Use a two-speed test cadence.** In the inner loop, favor targeted host
    tests and all parallel RocJitsu-emulated configurations. It is acceptable to
-   omit the serialized physical `gfx950` tier temporarily when it dominates
-   latency, accepting the short-lived risk of a physical-only regression. Do
-   not disable that tier or treat an omitted run as passing. Run physical
-   `gfx950`, every emulator target, and the complete host suite periodically,
-   after relevant native-sensitive changes, and at final qualification.
+   omit the serialized physical `gfx950` tier temporarily when it accounts for
+   most of the device-suite latency, explicitly accepting the short-lived risk
+   of a physical-only regression in exchange for faster iteration. Do not
+   disable that tier or treat an omitted run as passing. Run physical `gfx950`,
+   every emulator target, and the complete host suite periodically, after
+   relevant native-sensitive changes, and at final qualification.
 
 ### Per-investigation loop
 
@@ -102,8 +113,10 @@ or device regression before accepting new validation evidence.
 
 ### Remaining work
 
-1. Keep the branch integrated with the latest fetched `origin/develop`. At the
-   current checkpoint it is already integrated. For every future advance,
+1. As the next execution step, run the requested integration of the freshly
+   fetched `origin/develop` and establish that the post-integration build, host
+   tests, emulated-device tests, and physical-device tests are green. The
+   current ancestry check predicts a no-op. For every future ref advance,
    create a merge commit, repair all resulting breakage, and add focused
    regressions for behavioral integration defects.
 2. Continue the global E2E loop over both
