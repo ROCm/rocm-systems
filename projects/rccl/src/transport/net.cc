@@ -2422,15 +2422,18 @@ fail:
 // declines registration, so the collective falls back to staging buffers
 // instead of the fatal QP path.
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
-static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* netComm, void* buffer,
-                                       size_t totalSize, int numSegments, ncclTopoGdrMode useGdr, void** handle) {
+static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* netComm, void* buffer, size_t totalSize,
+                                       int numSegments, ncclTopoGdrMode useGdr, void** handle) {
   ncclResult_t ret = ncclSuccess;
-  void** segAddrs = NULL; size_t* segLens = NULL; uint64_t* segOffsets = NULL; int* segFds = NULL;
+  void** segAddrs = NULL;
+  size_t* segLens = NULL;
+  uint64_t* segOffsets = NULL;
+  int* segFds = NULL;
   int nSeg = 0;
   size_t remaining = totalSize;
 
   if (proxyState->ncclNet != &ncclNetIb) {
-    INFO(NCCL_NET|NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
+    INFO(NCCL_NET | NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
     return ncclInvalidUsage;
   }
   NCCLCHECKGOTO(ncclCalloc(&segAddrs, numSegments), ret, fail);
@@ -2442,16 +2445,24 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   {
     uintptr_t segPtr = (uintptr_t)buffer;
     for (int s = 0; s < numSegments && remaining > 0; s++) {
-      CUdeviceptr segBase = 0; size_t segSize = 0;
+      CUdeviceptr segBase = 0;
+      size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
       size_t inSeg = segSize - (segPtr - (uintptr_t)segBase);
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int fd = -1;
       // Export this segment alone: one physical allocation, so its fd is complete.
       CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&fd, (CUdeviceptr)segPtr, thisLen,
-                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(useGdr)), ret, fail);
-      segAddrs[s] = (void*)segPtr; segLens[s] = thisLen; segOffsets[s] = 0ULL; segFds[s] = fd;
-      segPtr += thisLen; remaining -= thisLen; nSeg++;
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(useGdr)),
+                  ret, fail);
+      segAddrs[s] = (void*)segPtr;
+      segLens[s] = thisLen;
+      segOffsets[s] = 0ULL;
+      segFds[s] = fd;
+      segPtr += thisLen;
+      remaining -= thisLen;
+      nSeg++;
     }
   }
 
@@ -2459,8 +2470,8 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   // the CTS path would otherwise advertise addresses beyond the final MR with
   // that MR's rkey, causing IBV_WC_REM_ACCESS_ERR on the remote write.
   if (remaining != 0 || nSeg != numSegments) {
-    WARN("NET/IB: enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered",
-         nSeg, numSegments, buffer, remaining, totalSize);
+    WARN("NET/IB: enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered", nSeg, numSegments,
+         buffer, remaining, totalSize);
     ret = ncclInvalidUsage;
     goto fail;
   }
@@ -2468,20 +2479,30 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   // Uniform-segment guard: interior segments must be equal; the trailing segment
   // may be smaller. Otherwise boundaries are irregular and a step could straddle
   // (matches ncclIbSegmentsUniform in net_ib/multiseg.h). Non-uniform layouts
-  // decline registration and fall back to staging buffers.
+  // such as DeepEP [GPU][CPU] (unequal sizes) decline here so the collective
+  // falls back to staging; GIN/RMA is the path that registers those windows.
   for (int s = 1; s < nSeg; s++) {
     bool last = (s == nSeg - 1);
     if ((!last && segLens[s] != segLens[0]) || (last && segLens[s] > segLens[0])) {
-      INFO(NCCL_NET|NCCL_REG, "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)", buffer, totalSize);
-      ret = ncclInvalidUsage; goto fail;
+      INFO(NCCL_NET | NCCL_REG,
+           "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
+           buffer, totalSize);
+      ret = ncclInvalidUsage;
+      goto fail;
     }
   }
 
-  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle), ret, fail);
+  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle),
+                ret, fail);
 
 fail:
-  if (segFds) for (int s = 0; s < numSegments; s++) if (segFds[s] != -1) (void)close(segFds[s]);
-  free(segAddrs); free(segLens); free(segOffsets); free(segFds);
+  if (segFds)
+    for (int s = 0; s < numSegments; s++)
+      if (segFds[s] != -1) (void)close(segFds[s]);
+  free(segAddrs);
+  free(segLens);
+  free(segOffsets);
+  free(segFds);
   return ret;
 }
 #endif
@@ -2507,7 +2528,8 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
       // Multi-segment cuMem/VMM buffer: register one MR per physical segment.
       // On failure the buffer is left unregistered (needReg stays true) and the
       // caller declines, falling back to staging buffers.
-      if (netIbRegMrMultiSeg(proxyState, resources->netSendComm, (void*)info->buffer, info->size, numSegments, resources->useGdr, &handle) == ncclSuccess) {
+      if (netIbRegMrMultiSeg(proxyState, resources->netSendComm, (void*)info->buffer, info->size, numSegments,
+                             resources->useGdr, &handle) == ncclSuccess) {
         needReg = false;
       }
     } else {
@@ -2588,15 +2610,18 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   if (resources->useDmaBuf && ncclCuMemEnable()) {
     if (numSegments > 1) {
       // Multi-segment cuMem/VMM buffer: register one MR per physical segment.
-      if (netIbRegMrMultiSeg(proxyState, resources->netRecvComm, (void*)info->buffer, info->size, numSegments, resources->useGdr, &handle) == ncclSuccess) {
+      if (netIbRegMrMultiSeg(proxyState, resources->netRecvComm, (void*)info->buffer, info->size, numSegments,
+                             resources->useGdr, &handle) == ncclSuccess) {
         needReg = false;
       }
     } else {
       CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
-                                              CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
-                                              getHandleForAddressRangeFlags(resources->useGdr)),
-                ret, peermem);
-      NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(resources->useGdr)),
+                  ret, peermem);
+      NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size,
+                                                     NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle),
+                    ret, peermem);
       (void)close(dmabuf_fd);
       dmabuf_fd = -1;
       needReg = false;
