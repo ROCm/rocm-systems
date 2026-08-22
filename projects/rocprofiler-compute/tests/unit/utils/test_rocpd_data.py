@@ -11,6 +11,7 @@ import pandas as pd
 
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
+    KERNEL_SYMBOLS_QUERY,
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
 )
@@ -45,6 +46,15 @@ MARKER_ROWS = [
         4000,
     ),
     ("roctx", "torch.mm:#1@test.py:15", 100, 200, 1002, GUID, 5000, 6000),
+]
+
+# (display_name, truncated_kernel_name), as the kernel_symbols view exposes
+# them. A symbol repeats per process, and rocclr symbols keep their .kd.
+KERNEL_SYMBOL_ROWS = [
+    ("kernel_gemm(float*, float*)", "kernel_gemm"),
+    ("kernel_mm(float*)", "kernel_mm"),
+    ("kernel_gemm(float*, float*)", "kernel_gemm"),
+    ("__amd_rocclr_copyBuffer", "__amd_rocclr_copyBuffer.kd"),
 ]
 
 COUNTER_ROWS = [
@@ -132,13 +142,27 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
+def test_kernel_symbols_query_reads_the_kernel_symbols_view():
+    """The short name is read at its own grain: one row per kernel symbol."""
+    assert "FROM kernel_symbols" in KERNEL_SYMBOLS_QUERY
+    assert "display_name as Kernel_Name" in KERNEL_SYMBOLS_QUERY
+    assert "truncated_kernel_name as Kernel_Short_Name" in KERNEL_SYMBOLS_QUERY
+
+
+def test_counters_query_carries_no_short_name():
+    """The counter query streams row by row, so it stays at counter grain."""
+    assert "Kernel_Short_Name" not in COUNTERS_COLLECTION_QUERY
+    assert "truncated_kernel_name" not in COUNTERS_COLLECTION_QUERY
+
+
 # ---- Test 2: convert_dbs_to_csv populates Correlation_Id from stack_id ----
 
 
 def create_rocpd_test_db(workload_dir):
     """
-    Build a minimal rocpd-style SQLite database with counters_collection
-    and regions tables whose schemas match the production queries.
+    Build a minimal rocpd-style SQLite database with counters_collection,
+    regions, and kernel_symbols tables whose schemas match the production
+    queries.
     """
     db_path = str(Path(workload_dir) / "test.db")
     conn = sqlite3.connect(db_path)
@@ -170,9 +194,32 @@ def create_rocpd_test_db(workload_dir):
         "INSERT INTO regions VALUES (?,?,?,?,?,?,?,?)",
         region_rows,
     )
+    conn.execute(
+        """CREATE TABLE kernel_symbols (
+            display_name TEXT, truncated_kernel_name TEXT
+        )"""
+    )
+    conn.executemany(
+        "INSERT INTO kernel_symbols VALUES (?,?)",
+        KERNEL_SYMBOL_ROWS,
+    )
     conn.commit()
     conn.close()
     return db_path
+
+
+def convert_test_db(workload_dir):
+    """Run the conversion over one test db, returning the three output paths."""
+    output_paths = tuple(
+        str(Path(workload_dir) / name)
+        for name in (
+            "counter_collection.csv.gz",
+            "marker_api_trace.csv.gz",
+            "kernel_symbols.csv.gz",
+        )
+    )
+    convert_dbs_to_csv([create_rocpd_test_db(workload_dir)], *output_paths)
+    return output_paths
 
 
 def test_counter_csv_has_correlation_id_from_stack_id():
@@ -180,11 +227,7 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
-
-    db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    counter_csv, _, _ = convert_test_db(workload_dir)
 
     df = pd.read_csv(counter_csv)
     assert "Correlation_Id" in df.columns
@@ -200,17 +243,29 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
-
-    db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    _, marker_csv, _ = convert_test_db(workload_dir)
 
     df = pd.read_csv(marker_csv)
     assert "Correlation_Id" in df.columns
 
     expected_ids = sorted(row[4] for row in MARKER_ROWS)
     assert sorted(df["Correlation_Id"].tolist()) == expected_ids
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_kernel_symbols_csv_pairs_each_kernel_name_with_its_short_name():
+    """The conversion writes a third file, at one row per kernel symbol."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    _, _, kernel_symbols_csv = convert_test_db(workload_dir)
+
+    df = pd.read_csv(kernel_symbols_csv)
+    assert list(df.columns) == ["Kernel_Name", "Kernel_Short_Name"]
+    assert list(zip(df["Kernel_Name"], df["Kernel_Short_Name"])) == [
+        (display_name, short_name) for display_name, short_name in KERNEL_SYMBOL_ROWS
+    ]
 
     common.clean_output_dir(True, workload_dir)
 

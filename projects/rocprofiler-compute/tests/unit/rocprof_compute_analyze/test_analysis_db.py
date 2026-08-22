@@ -1044,12 +1044,14 @@ def make_pc_sampling_tool_data():
                 "code_object_id": 5,
                 "kernel_name": "_Z7vecCopyv.kd",
                 "formatted_kernel_name": "vecCopy",
+                "truncated_kernel_name": "vecCopy",
             },
             {
                 "kernel_id": 101,
                 "code_object_id": 5,
                 "kernel_name": "vecAdd.kd",
                 "formatted_kernel_name": "vecAdd",
+                "truncated_kernel_name": "vecAdd",
             },
         ],
         "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
@@ -2643,14 +2645,17 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
     return analyzer, result_path
 
 
-def read_per_kernel_isa_file(result_path, kernel_uuid, code_object_id=5, pid=42):
-    """Return one exported ISA file as its header and its rows."""
+def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
+    """Return one exported ISA file as its header and its rows.
+
+    *kernel_row* is the kernel's own ``kernel.csv`` row, which names its folder.
+    """
     export_path = (
         result_path
         / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
         / ISA_WORKLOAD_NAME
         / ISA_WORKLOAD_SUB_NAME
-        / f"kernel_{kernel_uuid}"
+        / f"{kernel_row['short_name']}_{kernel_row['kernel_uuid']}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
     with export_path.open(newline="", encoding="utf-8") as export_file:
@@ -2704,13 +2709,10 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
     run_source_export_analysis(analyzer)
 
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
     assert per_kernel_isa_paths(result_path) == sorted(
-        f"vector_copy/run/kernel_{kernel_uuid}"
+        f"vector_copy/run/{kernel_row.short_name}_{kernel_row.kernel_uuid}"
         f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
-        for kernel_uuid in kernel_uuids.values()
+        for kernel_row in kernel_frame.itertuples()
         for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
     )
 
@@ -2731,11 +2733,8 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
     )
     run_source_export_analysis(analyzer)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuids["vecCopy"])
+    kernel_frame = pd.read_csv(result_path / "kernel.csv").set_index("kernel_name")
+    header, rows = read_per_kernel_isa_file(result_path, kernel_frame.loc["vecCopy"])
 
     assert header == [
         "Instruction line number",
@@ -2793,8 +2792,8 @@ def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == ["Stall SLEEP_WAIT", "Stall WAITCNT"]
     sleep_index, waitcnt_index = (
@@ -2828,8 +2827,8 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
@@ -2871,7 +2870,8 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     # The second code object held only the kernel the filter dropped.
     assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -2893,7 +2893,8 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 

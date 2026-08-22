@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.2.0"
+SCHEMA_VERSION = "2.3.0"
 
 
 Base = declarative_base()
@@ -155,6 +155,9 @@ class Kernel(Base):
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     kernel_name = Column(String)
+    # The demangled identifier rocprofiler-sdk truncates the signature down to.
+    # Deliberately not unique: overloads and template instantiations share one.
+    short_name = Column(String, nullable=True)
 
     # Kernel can have one workload
     workload = relationship("Workload", back_populates="kernels")
@@ -832,6 +835,7 @@ class Database:
                 Workload.name.label("workload_name"),
                 Workload.sub_name.label("workload_sub_name"),
                 Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.short_name.label("kernel_short_name"),
                 CodeObjectStore.code_object_id.label("code_object_id"),
                 CodeObjectStore.pid.label("pid"),
                 InstructionLine.code_object_offset.label("offset"),
@@ -948,6 +952,7 @@ class Database:
                 Kernel.workload_id.label("workload_id"),
                 Workload.name.label("workload_name"),
                 Kernel.kernel_name,
+                Kernel.short_name,
                 func.count(Dispatch.dispatch_id).label("dispatch_count"),
                 func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                     "duration_ns_sum"
@@ -975,6 +980,7 @@ class Database:
                 Kernel.workload_id,
                 Workload.name,
                 Kernel.kernel_name,
+                Kernel.short_name,
             ),
             "kernel_metric": select(
                 Workload.workload_id.label("workload_id"),

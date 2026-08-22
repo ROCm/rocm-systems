@@ -39,6 +39,7 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
+    load_kernel_short_names,
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
 )
@@ -330,6 +331,10 @@ class db_analysis(OmniAnalyze_Base):
 
             # Add kernel
             kernel_objs: dict[KernelKey, orm.Kernel] = {}
+            kernel_short_names = load_kernel_short_names(
+                workload_path,
+                self._pc_sampling_tool_data_per_workload.get(workload_path, []),
+            )
 
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -339,6 +344,7 @@ class db_analysis(OmniAnalyze_Base):
                 if kernel_key not in kernel_objs:
                     kernel_objs[kernel_key] = orm.Kernel(
                         kernel_name=dispatch.kernel_name,
+                        short_name=kernel_short_names.get(dispatch.kernel_name),
                         workload=workload_obj,
                     )
                     Database.get_session().add(kernel_objs[kernel_key])
