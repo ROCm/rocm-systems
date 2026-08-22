@@ -115,6 +115,8 @@ struct MoiAppendedBodyOptions {
   std::span<const uint32_t> scalar_save_words = {};
   std::span<const uint32_t> scalar_restore_words = {};
   std::optional<uint16_t> gfx1250_vgpr_msb_mode = std::nullopt;
+  std::optional<uint16_t> gfx1250_high_bank_address_source = std::nullopt;
+  std::optional<uint16_t> gfx1250_high_bank_address_destination = std::nullopt;
   size_t trailing_guest_word_count = 0u;
   std::span<const uint32_t> entry_prefix_words = {};
   std::optional<uint32_t> probe_guest_instruction_offset = std::nullopt;
@@ -193,14 +195,50 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
                         " has a VGPR-MSB mode on a non-gfx1250 body");
     return std::nullopt;
   }
+  if (options.gfx1250_high_bank_address_source.has_value() !=
+      options.gfx1250_high_bank_address_destination.has_value()) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has an incomplete gfx1250 high-bank address capture");
+    return std::nullopt;
+  }
   const bool select_low_vgpr_bank =
       moi_appended_body_uses_gfx1250_vgpr_msb(options.arch, options.gfx1250_vgpr_msb_mode);
+  const bool capture_high_bank_address = options.gfx1250_high_bank_address_source.has_value();
+  const uint8_t incoming_vgpr_msb_mode =
+      static_cast<uint8_t>(options.gfx1250_vgpr_msb_mode.value_or(0u));
+  const uint8_t address_capture_mode = static_cast<uint8_t>(incoming_vgpr_msb_mode & 0x3u);
+  if (capture_high_bank_address && (!select_low_vgpr_bank || address_capture_mode == 0u ||
+                                    *options.gfx1250_high_bank_address_source > 255u ||
+                                    *options.gfx1250_high_bank_address_destination > 255u)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has an invalid gfx1250 high-bank address capture");
+    return std::nullopt;
+  }
   const size_t probe_prefix_words = probe_words.size() - options.trailing_guest_word_count;
   body.insert(body.end(), options.entry_prefix_words.begin(), options.entry_prefix_words.end());
-  if (select_low_vgpr_bank)
-    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*options.gfx1250_vgpr_msb_mode), 0u, options.arch));
-  if (planned_patch.spill)
+  uint8_t current_vgpr_msb_mode = incoming_vgpr_msb_mode;
+  const bool save_spill_before_high_bank_capture = capture_high_bank_address && planned_patch.spill;
+  if (save_spill_before_high_bank_capture) {
+    body.push_back(
+        *instrumentation::build_s_set_vgpr_msb_transition(current_vgpr_msb_mode, 0u, options.arch));
+    body.insert(body.end(), planned_patch.spill->save_words.begin(),
+                planned_patch.spill->save_words.end());
+    current_vgpr_msb_mode = 0u;
+  }
+  if (capture_high_bank_address) {
+    if (current_vgpr_msb_mode != address_capture_mode) {
+      body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          current_vgpr_msb_mode, address_capture_mode, options.arch));
+      current_vgpr_msb_mode = address_capture_mode;
+    }
+    body.push_back(build_v_mov_b32_e32(
+        *options.gfx1250_high_bank_address_destination,
+        vector_source_vgpr(*options.gfx1250_high_bank_address_source), options.arch));
+  }
+  if (select_low_vgpr_bank && current_vgpr_msb_mode != 0u)
+    body.push_back(
+        *instrumentation::build_s_set_vgpr_msb_transition(current_vgpr_msb_mode, 0u, options.arch));
+  if (planned_patch.spill && !save_spill_before_high_bank_capture)
     body.insert(body.end(), planned_patch.spill->save_words.begin(),
                 planned_patch.spill->save_words.end());
   body.insert(body.end(), options.scalar_save_words.begin(), options.scalar_save_words.end());

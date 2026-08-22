@@ -773,13 +773,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                              scalar_spill->restore_words.size()) *
                            sizeof(uint32_t)
                      : 0u;
-    const bool wrap_embedded_guest_vgpr_bank =
-        use_indirect_appended && options.moi_dynamic_access_records &&
-        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
-    const uint64_t vgpr_msb_bytes = moi_appended_body_vgpr_msb_transition_word_count(
-                                        arch, candidate.gfx1250_vgpr_msb_mode, spill.has_value(),
-                                        wrap_embedded_guest_vgpr_bank) *
-                                    sizeof(uint32_t);
+    const bool wrap_embedded_guest_vgpr_bank = options.moi_dynamic_access_records &&
+                                               arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                               candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+    const bool capture_high_bank_address =
+        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+    const uint64_t vgpr_msb_bytes =
+        moi_appended_body_vgpr_msb_transition_word_count(arch, candidate.gfx1250_vgpr_msb_mode,
+                                                         spill.has_value(),
+                                                         wrap_embedded_guest_vgpr_bank) *
+            sizeof(uint32_t) +
+        (capture_high_bank_address ? sizeof(uint32_t) : 0u) +
+        (capture_high_bank_address
+             ? (spill                                                          ? 2u
+                : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                               : 0u) *
+                   sizeof(uint32_t)
+             : 0u);
     std::vector<uint32_t> displaced_tail_words;
     uint32_t displaced_original_size = candidate.size;
     bool entry_island_at_anchor = false;
@@ -921,7 +931,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       placement_request.anchor_offset = candidate.text_offset;
       placement_request.original_size = candidate.size;
       placement_request.body_size = patch_bytes;
-      placement_request.inline_capacity = spill || private_layout ? 0u : available_bytes;
+      placement_request.inline_capacity =
+          spill || private_layout || capture_high_bank_address ? 0u : available_bytes;
       std::string placement_error;
       placement = placement_planner.plan(placement_request, &placement_error);
       if (!placement) {
@@ -929,6 +940,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                      placement_error);
         continue;
       }
+    }
+    if (capture_high_bank_address && placement->kind != DbiPatchPlacementKind::AppendedCave) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe skipped a gfx1250 high-bank LDS address without an "
+          "appended capture body");
+      continue;
     }
 
     PlannedAccessRecordPatch planned;
@@ -1627,6 +1644,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                 ? planned_patch.scalar_spill->restore_words
                                                 : std::span<const uint32_t>{};
         body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
+        if (moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) {
+          const uint16_t base_scratch_count =
+              record_replay_uses_automatic_banked_capture(
+                  candidate_options, layout.record_replay_dispatch_token_capacity)
+                  ? 10u
+                  : 6u;
+          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_destination =
+              static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
+        }
         body_options.entry_prefix_words = dense_gate_words;
         body_options.trailing_guest_word_count =
             options.moi_dynamic_access_records ? 0u : planned_patch.guest_instruction_word_count;

@@ -1068,6 +1068,19 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
                         candidate_payload_vgpr_count(candidate));
 }
 
+[[nodiscard]] bool
+moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &candidate,
+                                                      rj_code_arch_t arch) {
+  // gfx1250 DS encodings carry only the low eight bits of each VGPR operand.
+  // The current s_set_vgpr_msb mode supplies the high bank independently for
+  // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
+  // SRC0 bank must be copied while that bank is still selected. The appended
+  // probe subsequently selects bank zero for its own scratch registers.
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+         candidate.source == ConSanMoiCandidateSource::NativeLds && candidate.addr_vgpr &&
+         (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
+}
+
 // A Sampled store executes its displaced guest instruction before the probe
 // uses ordinary scratch VGPRs. That ordering permits a spill-backed scratch
 // window to overlap the store's address or payload: the spill save preserves
@@ -1676,8 +1689,10 @@ struct MoiOwnerRegisterReferenceSummary {
     return static_cast<uint16_t>(
         (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
         (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
-         : moi_load_clobbers_address(candidate)                            ? 1u
-                                                                           : 0u) +
+         : moi_load_clobbers_address(candidate) ||
+                 moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
+             ? 1u
+             : 0u) +
         (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                  two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
              ? 1u

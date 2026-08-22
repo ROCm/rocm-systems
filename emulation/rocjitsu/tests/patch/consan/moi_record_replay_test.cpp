@@ -9628,6 +9628,156 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   EXPECT_EQ(checked, kAccessCount);
 }
 
+TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScratchBank) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kGuestVgprMsbMode = 0x01u;
+  constexpr uint16_t kEncodedAddressVgpr = 30u;
+  std::vector<uint32_t> text_words = {
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
+      0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
+  };
+  // Even when an inline body would fit in nearby padding, capturing an
+  // address from a high SRC0 bank requires an appended body that can copy the
+  // encoded operand before selecting the low scratch bank.
+  text_words.insert(text_words.end(), 512u, build_s_nop(0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_dynamic_access_records = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_record_replay_high_bank_address"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 7u);
+  const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
+  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  ASSERT_TRUE(patch.scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  const uint16_t captured_address_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 6u);
+  const uint32_t capture =
+      build_v_mov_b32_e32(captured_address_vgpr, vector_source_vgpr(kEncodedAddressVgpr), kArch);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, kArch);
+  ASSERT_GE(cave.size(), 6u);
+  EXPECT_EQ(cave[0], capture);
+  EXPECT_EQ(cave[1], select_low);
+  EXPECT_EQ(cave[2], restore_guest);
+  EXPECT_EQ(cave[3], text_words[1]);
+  EXPECT_EQ(cave[4], text_words[2]);
+  EXPECT_EQ(cave[5], select_low);
+
+  const uint16_t value_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 5u);
+  const auto start_cell = build_v_lshrrev_b32_e32(
+      value_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      captured_address_vgpr, kArch);
+  ASSERT_TRUE(start_cell);
+  EXPECT_NE(std::ranges::find(cave, *start_cell), cave.end());
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCapture) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kGuestVgprMsbMode = 0x41u;
+  constexpr uint8_t kAddressCaptureMode = 0x01u;
+  constexpr uint16_t kEncodedAddressVgpr = 30u;
+  const std::vector<uint32_t> text_words = {
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+      0xDBFC0000u,
+      0x0000001Eu, // ds_load_b128 v[0:3] /* v[256:259] */, v30 /* v286 */
+      build_s_endpgm(kArch),
+  };
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_exec_save_sgpr = 30u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_dynamic_access_records = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.force_vgpr_spill = true;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_record_replay_composite_high_bank_address"),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
+  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  ASSERT_TRUE(patch.scratch_vgpr);
+  ASSERT_EQ(patch.spilled_vgpr_count, 7u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  const uint16_t captured_address_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 6u);
+  const uint32_t select_low_for_spill =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const uint32_t select_address_for_capture =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kAddressCaptureMode, kArch);
+  const uint32_t capture =
+      build_v_mov_b32_e32(captured_address_vgpr, vector_source_vgpr(kEncodedAddressVgpr), kArch);
+  const uint32_t clear_address_after_capture =
+      *build_gfx1250_s_set_vgpr_msb_transition(kAddressCaptureMode, 0u, kArch);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, kArch);
+  const uint32_t clear_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const std::vector<uint32_t> save =
+      expected_vgpr_spill_words(*patch.scratch_vgpr, 7u, /*restore=*/false, /*slot_base=*/0u);
+  const std::vector<uint32_t> restore =
+      expected_vgpr_spill_words(*patch.scratch_vgpr, 7u, /*restore=*/true, /*slot_base=*/0u);
+  ASSERT_FALSE(save.empty());
+  ASSERT_FALSE(restore.empty());
+  ASSERT_GE(cave.size(), save.size() + 4u);
+  EXPECT_EQ(cave.front(), select_low_for_spill);
+  EXPECT_TRUE(std::equal(save.begin(), save.end(), cave.begin() + 1u));
+  const size_t capture_begin = 1u + save.size();
+  EXPECT_EQ(cave[capture_begin], select_address_for_capture);
+  EXPECT_EQ(cave[capture_begin + 1u], capture);
+  EXPECT_EQ(cave[capture_begin + 2u], clear_address_after_capture);
+
+  const std::array<uint32_t, 2> guest_words = {text_words[1], text_words[2]};
+  const auto guest = std::ranges::search(cave, guest_words).begin();
+  const auto restored_spill = std::ranges::search(cave, restore).begin();
+  ASSERT_NE(guest, cave.end());
+  ASSERT_NE(restored_spill, cave.end());
+  ASSERT_NE(guest, cave.begin());
+  ASSERT_LT(guest + guest_words.size(), cave.end());
+  EXPECT_EQ(*(guest - 1u), restore_guest);
+  EXPECT_EQ(*(guest + guest_words.size()), clear_guest);
+  EXPECT_LT(guest, restored_spill);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Gfx1250DenseAccessesIgnorePreviousGuestVgprMsbMode) {
   constexpr uint16_t kPreviousOnlyTransition = 0x4400u;
   std::vector<uint32_t> text_words(

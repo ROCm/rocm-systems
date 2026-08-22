@@ -459,6 +459,7 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250MultiCluster|gfx1250_cluster|ConSanDeviceGfx1250MultiClusterTest"
             "Gfx1250TdmWait|gfx1250_cluster|ConSanDeviceGfx1250TdmWaitTest"
             "Gfx1250ClusterMulticast|gfx1250_cluster|ConSanDeviceGfx1250ClusterMulticastTest"
+            "Gfx1250HighBankLdsAddress|gfx1250_high_bank_lds_address|ConSanDeviceGfx1250HighBankLdsAddressTest|record-replay-only"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1201")
@@ -540,6 +541,12 @@ function(rj_add_consan_device_conformance_cases)
                 )
                     continue()
                 endif()
+                if(
+                    _workload_feature STREQUAL "record-replay-only"
+                    AND NOT _mode_value STREQUAL "record-replay"
+                )
+                    continue()
+                endif()
             endif()
 
             set(_common_environment
@@ -598,6 +605,7 @@ function(rj_add_consan_device_conformance_cases)
                 (
                     _workload_name STREQUAL "Gfx950LargeLdsPipeline"
                     OR _workload_name STREQUAL "CdnaStreamkTwoTile"
+                    OR _workload_name STREQUAL "Gfx1250HighBankLdsAddress"
                 )
                 AND _mode_value STREQUAL "record-replay"
             )
@@ -856,6 +864,7 @@ function(rj_add_consan_device_fixture_targets target)
         list(
             APPEND _device_workload_sources
             "gfx1250_topk_prefix|gfx1250_topk_prefix_test.hip"
+            "gfx1250_high_bank_lds_address|gfx1250_high_bank_lds_address_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1201")

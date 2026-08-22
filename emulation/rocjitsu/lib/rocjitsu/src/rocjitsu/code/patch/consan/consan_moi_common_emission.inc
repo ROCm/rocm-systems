@@ -884,7 +884,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
-  const bool save_clobbered_address = moi_load_clobbers_address(candidate);
+  const bool load_clobbers_address = moi_load_clobbers_address(candidate);
+  const bool capture_high_bank_address =
+      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+  const bool save_clobbered_address = load_clobbers_address || capture_high_bank_address;
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
@@ -957,6 +960,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
   if (materialize_flat_offset && access_ranges->size() != 1u) {
     errors.emplace_back("ConSan MOI flat-offset probe requires one normalized access range");
+    return std::nullopt;
+  }
+  if (capture_high_bank_address && load_clobbers_address &&
+      two_address_native_lds_offset_scale(candidate.mnemonic)) {
+    errors.emplace_back("ConSan MOI first-light probe cannot yet preserve a clobbered high-bank "
+                        "gfx1250 two-address LDS operand");
     return std::nullopt;
   }
   std::optional<uint16_t> derived_owner_vgpr;
@@ -1038,8 +1047,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   } else if (save_clobbered_address) {
     const uint16_t saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
-                                        vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    if (!capture_high_bank_address) {
+      words.push_back(build_v_mov_b32_e32(saved_lds_byte_offset_vgpr,
+                                          vector_source_vgpr(*lds_byte_offset_vgpr), arch));
+    }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
   }
   if (options.moi_dynamic_access_records)
@@ -1047,8 +1058,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const auto append_guest_access = [&] {
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    const uint16_t guest_address_vgpr =
+        capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
-        bytes, candidate, arch, *lds_byte_offset_vgpr,
+        bytes, candidate, arch, guest_address_vgpr,
         reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
                                                  *options.scratch_vgpr + scratch_count - 1u))
                                            : std::nullopt,
