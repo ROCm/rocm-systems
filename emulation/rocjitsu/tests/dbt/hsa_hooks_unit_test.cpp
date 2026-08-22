@@ -510,6 +510,9 @@ bool g_seed_auto_replay_sparse_capacity = false;
 bool g_seed_auto_sampled_report_on_load = false;
 bool g_seed_auto_sampled_report_succeeded = false;
 bool g_seed_auto_sampled_pending_release_scale = false;
+bool g_seed_auto_sampled_conflict_pair = false;
+bool g_seed_auto_sampled_distinct_dispatches = false;
+bool g_seed_auto_sampled_distinct_clusters = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
 std::vector<hsa_amd_memory_pool_t> g_fake_allocation_pools;
 std::vector<size_t> g_fake_allocation_sizes;
@@ -1137,7 +1140,8 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     }
     const rocjitsu::ConSanMoiReportLayoutOverride &layout =
         *g_transform_override_report_layouts.back();
-    const uint32_t visible_sampled_count = g_seed_auto_sampled_pending_release_scale ? 2u : 1u;
+    const uint32_t visible_sampled_count =
+        g_seed_auto_sampled_pending_release_scale || g_seed_auto_sampled_conflict_pair ? 2u : 1u;
     if (layout.sampled_watchpoint_capacity < visible_sampled_count ||
         layout.sampled_causal_window_capacity < visible_sampled_count) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1153,7 +1157,8 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     for (uint32_t index = 0; index < visible_sampled_count; ++index) {
       windows[index] = {
           .generation = header->generation,
-          .dispatch_id = 0x1122334455667788ull,
+          .dispatch_id =
+              0x1122334455667788ull + (g_seed_auto_sampled_distinct_dispatches ? index : 0u),
           .workgroup_x = 3u,
           .workgroup_y = 4u,
           .workgroup_z = 5u,
@@ -1162,9 +1167,11 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
           .entry_count = 1u,
           .publication_state =
               static_cast<uint32_t>(rocjitsu::ConSanMoiSampledCausalPublicationState::Ready),
+          .cluster_workgroup_id = g_seed_auto_sampled_distinct_clusters ? index : 0u,
       };
       watchpoints[index] = rocjitsu::pack_consan_moi_sampled_watchpoint_entry(
-          rocjitsu::ConSanMoiShadowAccessKind::Write, /*owner_id=*/7u, /*epoch=*/2u,
+          rocjitsu::ConSanMoiShadowAccessKind::Write,
+          /*owner_id=*/7u + (g_seed_auto_sampled_conflict_pair ? index : 0u), /*epoch=*/2u,
           static_cast<uint32_t>(header->generation), /*start_cell=*/9u, /*cell_count=*/2u);
     }
     if (g_seed_auto_sampled_pending_release_scale) {
@@ -1763,6 +1770,9 @@ void reset_code_object_observations() {
   g_seed_auto_sampled_report_on_load = false;
   g_seed_auto_sampled_report_succeeded = false;
   g_seed_auto_sampled_pending_release_scale = false;
+  g_seed_auto_sampled_conflict_pair = false;
+  g_seed_auto_sampled_distinct_dispatches = false;
+  g_seed_auto_sampled_distinct_clusters = false;
   g_transform_override_result = {};
 }
 
@@ -5195,18 +5205,36 @@ rocjitsu::ConSanResult auto_report_replay_transform_result() {
   return result;
 }
 
-rocjitsu::ConSanResult auto_report_sampled_transform_result(bool malformed_mapping = false) {
+enum class AutoSampledOwnerScope {
+  SinglePatch,
+  SharedOwnerPair,
+  DisjointOwnerPair,
+  UnknownOwnerPair,
+};
+
+rocjitsu::ConSanResult auto_report_sampled_transform_result(
+    bool malformed_mapping = false,
+    AutoSampledOwnerScope owner_scope = AutoSampledOwnerScope::SinglePatch) {
   rocjitsu::ConSanResult result = auto_report_replay_transform_result();
-  rocjitsu::ConSanPatchInfo patch;
-  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-  patch.anchor_offset = 0x120u;
-  patch.trampoline_offset = 0x440u;
-  patch.sampled_first_slot = malformed_mapping ? std::numeric_limits<uint32_t>::max() : 0u;
-  patch.sampled_window_bank_count = 1u;
-  patch.sampled_access_range_count = 1u;
-  patch.relocated_guest_instruction_offset = 0x448u;
-  patch.scratch_vgpr = 12u;
-  result.patches.push_back(std::move(patch));
+  const auto append_patch = [&](uint32_t slot, uint64_t owner) {
+    rocjitsu::ConSanPatchInfo patch;
+    patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+    patch.anchor_offset = 0x120u + slot * 0x20u;
+    patch.trampoline_offset = 0x440u + slot * 0x20u;
+    patch.sampled_first_slot = malformed_mapping ? std::numeric_limits<uint32_t>::max() : slot;
+    patch.sampled_window_bank_count = 1u;
+    patch.sampled_access_range_count = 1u;
+    patch.relocated_guest_instruction_offset = 0x448u + slot * 0x20u;
+    patch.scratch_vgpr = 12u;
+    patch.owner_descriptor_file_offsets = {owner};
+    result.patches.push_back(std::move(patch));
+  };
+  append_patch(0u, 0x100u);
+  if (owner_scope != AutoSampledOwnerScope::SinglePatch) {
+    append_patch(1u, owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+    if (owner_scope == AutoSampledOwnerScope::UnknownOwnerPair)
+      result.patches.back().owner_descriptor_file_offsets.clear();
+  }
   return result;
 }
 
@@ -6365,6 +6393,68 @@ TEST(HsaHooksUnitTest, AutoSampledPendingReleaseScansEachRelevantOwnerBankOnce) 
             std::string::npos)
       << "report teardown must scan the relevant bank once, not once per visible access\n"
       << log;
+}
+
+TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOwnerScope) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  struct Case {
+    std::string_view name;
+    AutoSampledOwnerScope owner_scope;
+    bool distinct_dispatches = false;
+    bool distinct_clusters = false;
+    uint32_t expected_conflicts = 0;
+  };
+  constexpr std::array cases = {
+      Case{"same dispatch, cluster, and owner", AutoSampledOwnerScope::SharedOwnerPair, false,
+           false, 1u},
+      Case{"disjoint kernel owners", AutoSampledOwnerScope::DisjointOwnerPair, false, false, 0u},
+      Case{"missing kernel-owner provenance remains conservative",
+           AutoSampledOwnerScope::UnknownOwnerPair, false, false, 1u},
+      Case{"different dispatches", AutoSampledOwnerScope::SharedOwnerPair, true, false, 0u},
+      Case{"different cluster workgroups", AutoSampledOwnerScope::SharedOwnerPair, false, true, 0u},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result =
+        auto_report_sampled_transform_result(/*malformed_mapping=*/false, test_case.owner_scope);
+    g_seed_auto_sampled_report_on_load = true;
+    g_seed_auto_sampled_conflict_pair = true;
+    g_seed_auto_sampled_distinct_dispatches = test_case.distinct_dispatches;
+    g_seed_auto_sampled_distinct_clusters = test_case.distinct_clusters;
+
+    testing::internal::CaptureStderr();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+    const std::string log = testing::internal::GetCapturedStderr();
+
+    EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
+    EXPECT_NE(log.find("visible_sampled=2"), std::string::npos) << log;
+    EXPECT_NE(log.find("sampled_conflicts=" + std::to_string(test_case.expected_conflicts)),
+              std::string::npos)
+        << log;
+  }
 }
 
 TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalformedPatchMapping) {
