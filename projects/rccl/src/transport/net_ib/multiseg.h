@@ -62,6 +62,29 @@ static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   return true;
 }
 
+// Write the indices of segments that overlap [addr, addr+len) into out[0..n).
+// Returns the count, 0 if len==0 or nothing overlaps, or -1 on overflow /
+// out-of-space. Used by classic IFlush to fence every GPUDirect segment the
+// receive actually touched, not only data[last].
+static inline int ncclIbSegmentsOverlappingRange(int nSegments, const uintptr_t* segStart, const size_t* segLen,
+                                                 uintptr_t addr, size_t len, int* out, int maxOut) {
+  if (nSegments < 1 || out == NULL || maxOut < 1) return -1;
+  if (len == 0) return 0;
+  uintptr_t end = addr + len;
+  if (end < addr) return -1; // address overflow
+  int n = 0;
+  for (int s = 0; s < nSegments; s++) {
+    uintptr_t b = segStart[s];
+    uintptr_t e = b + segLen[s];
+    if (e < b) continue;
+    if (addr < e && b < end) {
+      if (n >= maxOut) return -1;
+      out[n++] = s;
+    }
+  }
+  return n;
+}
+
 // ---------------------------------------------------------------------------
 // Wire-protocol segment splitting.
 //
