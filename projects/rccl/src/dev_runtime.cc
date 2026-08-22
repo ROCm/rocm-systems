@@ -427,6 +427,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                 ret, fail);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // TODO(ROCM-29810): Remove this workaround when the runtime preserves imported VMM location metadata.
   // HIP reports imported host VMM handles as device memory. For symmetric
   // layouts, propagate the owner's host classification so peer segments use
   // the system-memory handle-reuse path.
