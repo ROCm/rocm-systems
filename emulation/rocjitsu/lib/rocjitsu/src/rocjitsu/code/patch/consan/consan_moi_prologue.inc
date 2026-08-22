@@ -1746,7 +1746,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       return;
     }
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
-    bool has_kernarg_preload = false;
+    const bool has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
     if (dispatch_capture.present()) {
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
       if (!dispatch_plan->supported() ||
@@ -1756,12 +1756,22 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             dispatch_id_preload_rejection_reason(kernel.name, *dispatch_plan, dispatch_capture));
         return;
       }
-      has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
-      if (has_kernarg_preload && kernel.code_size <= kAmdhsaKernelEntryAlignment) {
+    }
+    // Kernarg-preload kernels can enter at descriptor entry + 256 even when
+    // this ConSan mode has no dispatch-ID consumer. Both firmware entries
+    // therefore need a prologue; tying the secondary-entry plan to dispatch
+    // capture leaves the +256 entry outside the replacement text in Sampled
+    // stride-one mode.
+    if (has_kernarg_preload && kernel.code_size <= kAmdhsaKernelEntryAlignment) {
+      if (dispatch_capture.present()) {
         rollback_moi_dispatch_id_as_unsupported(
             result, "kernarg-preload kernel has no valid secondary hardware entry");
-        return;
+      } else {
+        result.errors.emplace_back(
+            "ConSan MOI private-epoch kernarg-preload kernel has no valid secondary hardware "
+            "entry");
       }
+      return;
     }
     const bool has_private_owner = access_patch->persistent_owner_private_offset.has_value();
     const bool has_private_workgroup_key =
@@ -2551,27 +2561,24 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
 
     // Keep the hardware entry stable and displace its first instruction
     // through the same local-island mechanism used by ordinary long-range
-    // probes. Besides being required by dynamic-stack kernels, this avoids a
-    // gfx12 runtime failure observed when a large instrumented module redirects
-    // a descriptor entry across particular late .text placement boundaries.
+    // probes. Dynamic-stack kernels normally require this route, and it also
+    // avoids a gfx12 runtime failure observed when a large instrumented module
+    // redirects a descriptor entry across particular late .text placement
+    // boundaries.
     const bool requires_in_place_entry = kernel.uses_dynamic_stack.value_or(false);
     bool instrument_entry_in_place =
         requires_in_place_entry ||
         (options.moi_engine == ConSanMoiEngine::InlineShadow &&
          (options.automatic_moi_persistent_vgprs || options.automatic_moi_persistent_sgprs));
     if (instrument_entry_in_place && item.has_kernarg_preload) {
-      if (!requires_in_place_entry) {
-        // Automatic persistent state prefers an in-place entry only to avoid
-        // long descriptor redirects in large modules. A kernarg-preload
-        // descriptor exposes two hardware entries, so ordinary kernels use
-        // the paired descriptor-redirection path and initialize both entries.
-        instrument_entry_in_place = false;
-      } else {
-        result.errors.emplace_back(
-            "ConSan MOI dynamic-stack owner/epoch entry trampoline does not yet support a "
-            "secondary kernarg-preload entry");
-        return;
-      }
+      // A kernarg-preload descriptor exposes the ordinary firmware entry and
+      // a preloaded entry exactly 256 bytes later. Redirect the descriptor to
+      // the paired prologue layout below so both hardware routes initialize
+      // identical persistent state before returning to their corresponding
+      // guest entries. This is also safe for dynamic-stack kernels: the guest
+      // code and symbols remain at their original addresses, and only the
+      // hardware descriptor entry moves.
+      instrument_entry_in_place = false;
     }
     std::vector<uint32_t> displaced_entry_words;
     std::optional<uint64_t> entry_island_offset;

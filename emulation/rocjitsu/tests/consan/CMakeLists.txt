@@ -442,6 +442,7 @@ function(rj_add_consan_device_conformance_cases)
             "CdnaWave64LargeText|cdna_wave64_large_text|ConSanDeviceCdnaWave64LargeTextTest"
             "CdnaRecordReplayLongRangeFullPressure|cdna_record_replay_long_range_full_pressure|ConSanDeviceCdnaRecordReplayLongRangeFullPressureTest|record-replay-only"
             "CdnaMixedPersistentState|cdna_mixed_persistent_state|ConSanDeviceCdnaMixedPersistentStateTest"
+            "CdnaKernargPreloadPrivateState|cdna_kernarg_preload_private_state|ConSanDeviceCdnaMixedPersistentStateTest|sampled-only"
             "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
         )
     endif()
@@ -648,6 +649,36 @@ function(rj_add_consan_device_conformance_cases)
                 list(
                     APPEND _incorrect_environment
                     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                )
+            endif()
+
+            if(
+                _workload_name STREQUAL "CdnaKernargPreloadPrivateState"
+                AND _mode_value STREQUAL "sampled"
+            )
+                # Qwen's IREE kernels use AMDHSA's +256 kernarg-preload entry.
+                # Pin stride one so this contract has no incidental dispatch-ID
+                # consumer: the private-state prologue must mirror both entries
+                # on its own.
+                list(
+                    APPEND _correct_environment
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+                )
+                list(
+                    APPEND _incorrect_environment
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+                )
+                set(
+                    _private_preload_regex
+                    "automatic_private_epoch=true"
+                )
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "${_private_preload_regex}"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "${_private_preload_regex}"
                 )
             endif()
 
@@ -859,6 +890,7 @@ function(rj_add_consan_device_fixture_targets target)
             "cdna_wave64_large_text|cdna_wave64_large_text_test.hip"
             "cdna_record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
             "cdna_mixed_persistent_state|cdna_mixed_persistent_state_test.hip"
+            "cdna_kernarg_preload_private_state|cdna_mixed_persistent_state_test.hip"
             "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         )
     endif()
@@ -907,10 +939,21 @@ function(rj_add_consan_device_fixture_targets target)
         list(GET _workload_fields 1 _workload_source)
         set(_target "hip_consan_device_${_workload_name}_${target}_test")
         set(_workload_compile_definitions)
+        set(_workload_compile_options)
         if(_workload_name STREQUAL "fence_barrier_publication")
             list(
                 APPEND _workload_compile_definitions
                 RJ_CONSAN_DEVICE_FENCE_BARRIER_ONLY=1
+            )
+        endif()
+        if(_workload_name STREQUAL "cdna_kernarg_preload_private_state")
+            # Build the same behavioral pair through the compiler's real
+            # kernarg-preload ABI. One pointer argument is enough to select the
+            # secondary +256 hardware entry on a preloaded dispatch.
+            list(
+                APPEND _workload_compile_options
+                -mllvm
+                -amdgpu-kernarg-preload-count=1
             )
         endif()
         rj_add_hip_test(
@@ -918,6 +961,7 @@ function(rj_add_consan_device_fixture_targets target)
             ARCH ${target}
             SOURCE "dbi/consan/device/${_workload_source}"
             COMPILE_DEFINITIONS ${_workload_compile_definitions}
+            COMPILE_OPTIONS ${_workload_compile_options}
         )
         add_dependencies(${_target}_target rocjitsu_dbi_hooks)
     endforeach()

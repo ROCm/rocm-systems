@@ -3505,6 +3505,158 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
             2u);
 }
 
+TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
+  constexpr uint32_t kFirmwareEntryOffset = 256u;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_CDNA3 ? "gfx942" : "gfx950");
+    const auto guest = arch == ROCJITSU_CODE_ARCH_CDNA3
+                           ? build_cdna3_ds_store_b32(/*vaddr=*/10u, /*vdata=*/11u,
+                                                      /*byte_offset=*/0u, arch)
+                           : build_cdna4_ds_store_b32(/*vaddr=*/10u, /*vdata=*/11u,
+                                                      /*byte_offset=*/0u, arch);
+    ASSERT_TRUE(guest);
+
+    // Match the IREE kernarg-preload shape that exposed the bug: the ordinary
+    // firmware entry fills six kernarg SGPRs then branches to the body at
+    // +256, while a preloaded dispatch enters that body directly.
+    std::vector<uint32_t> text_words(320u, build_s_nop(0u, arch));
+    text_words[0] = build_s_branch(/*offset_dwords=*/63, arch);
+    std::ranges::copy(*guest, text_words.begin() + kFirmwareEntryOffset / sizeof(uint32_t));
+    text_words.back() = build_s_endpgm(arch);
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "sampled_private_kernarg_preload",
+                                         /*vgpr_granulated=*/3u,
+                                         /*uses_dynamic_stack=*/false,
+                                         /*workgroup_id_dimension_mask=*/1u)
+            : make_cdna4_lds_code_object(text_words, "sampled_private_kernarg_preload",
+                                         /*vgpr_granulated=*/3u,
+                                         /*uses_dynamic_stack=*/false,
+                                         /*workgroup_id_dimension_mask=*/1u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
+      AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 6u);
+      AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 0u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.force_private_epoch = true;
+    options.moi_runtime_sample_stride = 1u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = 2u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result))
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " errors=" << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.moi_private_epoch_automatic);
+    EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+    EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
+    const auto prologue =
+        std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                          &ConSanPatchInfo::kind);
+    ASSERT_NE(prologue, result.patches.end());
+    EXPECT_GT(prologue->trampoline_size, kFirmwareEntryOffset);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> prologue_words =
+        text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+    const size_t secondary_word = kFirmwareEntryOffset / sizeof(uint32_t);
+    ASSERT_GT(prologue_words.size(), secondary_word);
+    EXPECT_EQ(prologue_words[secondary_word], prologue_words.front())
+        << "the +256 hardware entry must begin a mirrored private-state prologue";
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
+TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
+  constexpr uint32_t kFirmwareEntryOffset = 256u;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_CDNA3 ? "gfx942" : "gfx950");
+    const auto guest = arch == ROCJITSU_CODE_ARCH_CDNA3
+                           ? build_cdna3_ds_store_b32(/*vaddr=*/10u, /*vdata=*/11u,
+                                                      /*byte_offset=*/0u, arch)
+                           : build_cdna4_ds_store_b32(/*vaddr=*/10u, /*vdata=*/11u,
+                                                      /*byte_offset=*/0u, arch);
+    ASSERT_TRUE(guest);
+
+    std::vector<uint32_t> text_words(320u, build_s_nop(0u, arch));
+    text_words[0] = build_s_branch(/*offset_dwords=*/63, arch);
+    std::ranges::copy(*guest, text_words.begin() + kFirmwareEntryOffset / sizeof(uint32_t));
+    text_words.back() = build_s_endpgm(arch);
+    constexpr std::string_view kKernelName = "sampled_dynamic_stack_kernarg_preload";
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, kKernelName, /*vgpr_granulated=*/3u,
+                                         /*uses_dynamic_stack=*/true,
+                                         /*workgroup_id_dimension_mask=*/1u)
+            : make_cdna4_lds_code_object(text_words, kKernelName, /*vgpr_granulated=*/3u,
+                                         /*uses_dynamic_stack=*/true,
+                                         /*workgroup_id_dimension_mask=*/1u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
+      AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 6u);
+      AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 0u);
+      descriptor.private_segment_fixed_size = 16u;
+    });
+
+    AmdGpuCodeObject original(bytes.data(), bytes.size());
+    ASSERT_TRUE(original.is_valid());
+    ASSERT_EQ(original.kernels().size(), 1u);
+    const uint64_t original_entry = original.kernels().front().entry_text_offset;
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.moi_runtime_sample_stride = 1u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(2u);
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = 2u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result))
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " errors=" << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_FALSE(result.moi_private_epoch_automatic);
+    EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+    EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+    EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
+    const auto prologue = std::ranges::find(
+        result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+    ASSERT_NE(prologue, result.patches.end());
+    EXPECT_EQ(prologue->anchor_offset, original_entry);
+    EXPECT_EQ(prologue->original_size, 0u);
+    EXPECT_GT(prologue->trampoline_size, kFirmwareEntryOffset);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.kernels().size(), 1u);
+    KD patched_descriptor{};
+    std::memcpy(&patched_descriptor,
+                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                sizeof(patched_descriptor));
+    const int64_t redirected_entry =
+        static_cast<int64_t>(patched.kernel_descriptor_offset(std::string(kKernelName))) +
+        patched_descriptor.kernel_code_entry_byte_offset;
+    const int64_t expected_entry = static_cast<int64_t>(patched.text_sections().front()->vaddr() +
+                                                        prologue->trampoline_offset);
+    EXPECT_EQ(redirected_entry, expected_entry);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
 TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);

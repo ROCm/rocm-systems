@@ -49,7 +49,7 @@ scratch before promotion.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 Current exact clean and paired rows are complete at 628/628 accesses; clean execution takes 182.176 seconds and paired slowdown is 1.34x. A prospectively reviewed exact-one drop of the final output-store convergence barrier is reached and accepted as `not_detected/pass`, with the exact expected output, zero diagnostics, bounded teardown, containment, health, hook hashing, and current provenance | 🟩 Current clean-source exact oracle, complete 658/658 access plus 46/46 barrier coverage, zero diagnostics, and 2.08x paired slowdown; a prospectively reviewed exact-one reader-retirement barrier drop fails the oracle and emits 120,034 Record/Replay diagnostics with bounded memory, cleanup, containment, health, and clean provenance | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 51/51 barrier members; clean execution takes 583.067 seconds and paired slowdown is 1.70x; current reviewed-fault and containment refresh pending | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero incomplete state; clean execution takes 2364.519 seconds and paired slowdown is 21.75x; current reviewed-fault and containment refresh pending |
+| **P0 Qwen3-0.6B prefill** | 🟩 Current exact clean and paired rows are complete at 628/628 accesses; clean execution takes 182.176 seconds and paired slowdown is 1.34x. A prospectively reviewed exact-one drop of the final output-store convergence barrier is reached and accepted as `not_detected/pass`, with the exact expected output, zero diagnostics, bounded teardown, containment, health, hook hashing, and current provenance | 🟩 Current clean-source exact oracle, complete 658/658 access plus 46/46 barrier coverage, zero diagnostics, and 2.08x paired slowdown; a prospectively reviewed exact-one reader-retirement barrier drop fails the oracle and emits 120,034 Record/Replay diagnostics with bounded memory, cleanup, containment, health, and clean provenance | 🟩 Current exact clean and paired rows are complete at 628/628 accesses plus 51/51 barrier members; clean execution takes 583.067 seconds and paired slowdown is 1.70x. Current-tip targeted revalidation covers the selected output matmul's 76/76 accesses and 4/4 barriers; a prospectively reviewed exact-one reader-retirement drop preserves the exact oracle, emits 32 Sampled conflicts with 76/76 access and 3/3 surviving-barrier coverage, and passes bounded cleanup, containment, health, hook hashing, and current provenance | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero incomplete state; clean execution takes 2364.519 seconds and paired slowdown is 21.75x; current reviewed-fault and containment refresh pending |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 3.62 seconds with complete 120/120 access coverage; prior accepted paired and reviewed-fault bundle retained | 🟩 Current clean-revision exact oracle in 171.29 seconds with complete 120/120 accesses plus 31/31 barriers, 9,216 visible events, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride; prior accepted paired and reviewed-fault bundle retained | 🟩 Current clean-revision exact oracle in 3.92 seconds with complete 120/120 accesses plus 24/24 applicable barriers, zero diagnostics, and a complete dynamic verdict | 🟩 Current clean-revision exact oracle in 16.77 seconds with complete 120/120 accesses plus 31/31 barriers and a complete dynamic verdict; prior accepted paired and reviewed-fault bundle retained |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Current clean-revision exact decode/combined oracles in 3.35 seconds with complete 240/240 access coverage; prior accepted paired and reviewed-fault bundle retained | 🟩 Current clean-revision exact oracles in 166.03 seconds with complete 240/240 accesses plus 62/62 barriers, 11,520 visible events, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride; prior accepted paired and reviewed-fault bundle retained | 🟩 Current clean-revision exact oracles in 4.44 seconds with complete 240/240 accesses plus 48/48 applicable barriers, zero diagnostics, and a complete dynamic verdict | 🟩 Current clean-revision exact oracles in 29.67 seconds with complete 240/240 accesses plus 62/62 barriers and a complete dynamic verdict; prior accepted paired and reviewed-fault bundle retained |
 | **P2 Sharktank TP2 family** | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 access coverage, reviewed exact-one attention publish/read barrier fault with one instability diagnosis, bounded execution, cleanup, health, and clean provenance | 🟩 current accepted bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 1.57x combined paired slowdown, reviewed exact-one DPP-phase qualified miss, bounded execution, cleanup, health, and clean provenance | 🟩 Current-source physical bundle passes all three exact prefill, decode, and combined oracles with complete 1524/1524 access plus 150/150 applicable-barrier coverage and a 1.69x maximum paired slowdown; a prospectively frozen exact-one DPP-phase barrier drop is reached and accepted as `not_detected/pass` with 149/149 surviving barriers, 240 sampled windows, bounded memory, cleanup, containment, health, hook hashing, and exact provenance | 🟩 current VCC-safe spill-backed bundle: all three exact clean and paired oracles, complete 936/936 accesses plus 168/168 barriers, 167.0x maximum slowdown, reviewed exact-one fail/no-diagnosis fault, containment, health, and clean provenance |
@@ -472,6 +472,49 @@ RocJitsu targets and physical gfx950. Its 60 baseline/all-engine rows pass.
 Validation host regressions additionally pin fault-only policy auditing,
 ASLR-independent loader-linkage provenance, and conservative reuse of only a
 completed exact-match fault row after interruption.
+
+### 2026-08-22 Qwen Sampled kernarg-preload qualification
+
+Qwen's selected final-output matmul exposed an AMDHSA entry-ABI defect that
+was hidden by the ordinary Sampled cadence. With stride one, Sampled has no
+dispatch-ID consumer; the private-epoch prologue therefore emitted only its
+primary entry even though the compiler's kernarg-preload descriptor permits
+firmware to enter at descriptor entry plus 256 bytes. The physical gfx950
+stopped on an illegal instruction at exactly that secondary entry. ConSan now
+plans the paired private-state entries from the descriptor independently of
+dispatch-ID capture. A focused clean run of
+`main$async_dispatch_562_batch_matmul_1x5x151936x1024_f32` passes the exact
+Qwen oracle with complete 76/76 access and 4/4 barrier coverage, zero
+diagnostics, and complete static, analysis, and dynamic verdicts.
+
+The new checked-in `CdnaKernargPreloadPrivateState` device pair compiles the
+existing mixed fixed/dynamic-owner workload with a real compiler-generated
+kernarg preload. Its first run exposed a second independent gap: the
+dynamic-stack owner/epoch path rejected the same secondary hardware entry.
+That path now uses the existing paired descriptor-redirection abstraction so
+both firmware entries initialize persistent state while the guest dynamic-stack
+code and symbols remain at their original addresses. Focused host tests cover
+both stride-one private-state and dynamic-stack owner paths on CDNA3 and
+CDNA4. The adjacent correct/incorrect pair contributes 12 green baseline and
+Sampled rows on gfx942/gfx950 simulation and physical gfx950; the correct
+member requires exact results and no diagnostic, while the incorrect member
+requires the publication conflict.
+
+Fresh contained artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-qwen-sampled-reader-retirement-v3`
+prospectively selects occurrence one of the output matmul's reader-retirement
+barrier at final-ISA PC `0xaa6c`, predeclares stride one, and limits fault-only
+instrumentation to that reviewed kernel. The mutation is requested, planned,
+reserved, installed, applied, and reached exactly once. The exact Qwen oracle
+still passes, while Sampled emits 32 detector-owned conflicts with complete
+76/76 access and 3/3 surviving-barrier coverage, 1,088 committed sampled
+windows, complete analysis, and no overflow. The contained command completes
+in 6.892 seconds, peaks at 177,528 live report bytes, releases all report
+memory without allocation, capacity, or cleanup failure, and passes both
+physical-GPU health probes. The hook SHA-256 is
+`0f1e554192be7f324cd54e201fff207aad9367f1534ec02adfd075b201bdbbb5`.
+The earlier v1/v2 illegal-instruction attempts remain rejected artifacts; no
+failed outcome or expectation was relabeled. The Sampled cell is green.
 
 ### 2026-08-22 Jakub-attention Record/Replay qualification
 

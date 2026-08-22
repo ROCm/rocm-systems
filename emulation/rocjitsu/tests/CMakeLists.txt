@@ -2632,7 +2632,7 @@ if(RJ_ENABLE_HIP_TESTS)
             ARG
             ""
             "ARCH;SOURCE"
-            "EXTRA_LIBS;EXTRA_DEPENDS;INCLUDE_DIRS;COMPILE_DEFINITIONS"
+            "EXTRA_LIBS;EXTRA_DEPENDS;INCLUDE_DIRS;COMPILE_DEFINITIONS;COMPILE_OPTIONS"
             ${ARGN}
         )
         if(NOT ARG_ARCH)
@@ -2671,6 +2671,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${_rj_hip_compiler_command} -x hip
                 --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
+                ${ARG_COMPILE_OPTIONS}
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_FLAGS}
                 ${HIP_DEFINITION_FLAGS} -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
