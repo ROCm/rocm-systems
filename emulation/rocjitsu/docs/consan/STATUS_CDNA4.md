@@ -2270,6 +2270,31 @@ and the missing-publication conflict. Inflating a device fixture until it needs
 23,176 prototype relay paths would freeze an incidental implementation layout,
 so the distinct cut-capacity rule belongs in the host planner suite.
 
+A subsequent owner-local-entry experiment halves the relay demand of an
+*eligible* fixed-stack site by relocating one single-entry instruction window,
+backing up its otherwise live PC/SCC tuple in a liveness-dead VGPR, jumping
+indirectly to the appended probe, and routing only the return. The router has a
+focused preplaced-entry contract, and access/barrier host tests pin emission,
+metadata, final validation, and rejection across a reconvergence leader or
+another synchronization site. This work also strengthened the existing
+TopK-derived `CdnaRecordReplayLongRangeFullPressure` device contract: it caught
+both the initial use of a live spill-window VGPR and an entry window that
+crossed a reconvergence target. The corrected pair passes on RocJitsu gfx942
+and gfx950 and on physical gfx950; the complete focused host suite passes
+848/848 tests and the five-target simulator device suite passes 1,658/1,658.
+
+The authoritative physical follow-up at
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-topk-rr-borrowed-single-entry-v1`
+uses hook SHA-256
+`5b3fdcf7a336642ac93467f23c5f7d042288bf0840067ada8ff8264fba1c1759`.
+It exits cleanly in 117.59 seconds, passes both exact BF16 and FP64 TopK
+value/index oracles, emits zero diagnostics, and reports complete dynamic
+replay. Its static frontier is nevertheless unchanged at 232,814/239,722
+accesses and 6,743/11,423 barriers: none of the limiting sites satisfies the
+complete relocation, single-entry CFG, protected-range, and dead-backup-VGPR
+proof. The optimization is therefore retained as a safely tested primitive,
+not represented as a TopK repair or color promotion.
+
 This is direct evidence for a deeper routing/code-layout ABI frontier rather
 than missing candidate discovery, cross-pass ownership, demand accounting, or
 search effort. A production repair must either reduce the number of independent

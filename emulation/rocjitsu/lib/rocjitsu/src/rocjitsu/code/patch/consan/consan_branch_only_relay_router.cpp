@@ -1260,10 +1260,14 @@ struct QualifiedRelayInventoryView {
     }
 
     const BranchOnlyRelayPairRequest &request = requests[request_index];
-    const std::array pair_demands = {
-        FixedRelayDemand{request_index, true, request.entry_source, request.entry_target},
-        FixedRelayDemand{request_index, false, request.return_source, request.return_target},
-    };
+    std::vector<FixedRelayDemand> pair_demands;
+    pair_demands.reserve(request.entry_preplaced ? 1u : 2u);
+    if (!request.entry_preplaced) {
+      pair_demands.push_back(
+          FixedRelayDemand{request_index, true, request.entry_source, request.entry_target});
+    }
+    pair_demands.push_back(
+        FixedRelayDemand{request_index, false, request.return_source, request.return_target});
     const bool has_later_valid_request = valid_request_at_or_after[request_index + 1u];
 
     BoundedPlanningWorkMeter pair_search_work(limits.pair.feasibility_search);
@@ -1310,9 +1314,13 @@ struct QualifiedRelayInventoryView {
       accumulate_saturated(batch.route_optimization_scan_work_consumed,
                            solve.optimization_scan_work);
       if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
-        const size_t reserved_relay_count = has_later_valid_request
-                                                ? solve.feasibility_relay_offsets.size()
-                                                : pair_routes[0].size() + pair_routes[1].size();
+        const size_t reserved_relay_count =
+            has_later_valid_request
+                ? solve.feasibility_relay_offsets.size()
+                : std::accumulate(pair_routes.begin(), pair_routes.end(), size_t{0u},
+                                  [](size_t count, const auto &route) {
+                                    return saturated_add(count, route.size());
+                                  });
         const size_t removal_work = saturated_multiply(
             reserved_relay_count, std::max<size_t>(std::bit_width(unused_relays.size()), 1u));
         if (!pair_scan_work.consume(removal_work)) {
@@ -1337,8 +1345,18 @@ struct QualifiedRelayInventoryView {
     accumulate_saturated(batch.feasibility_scan_work_consumed, pair_scan_work.consumed());
 
     if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
-      batch.routes[request_index].entry_relay_offsets = std::move(pair_routes[0]);
-      batch.routes[request_index].return_relay_offsets = std::move(pair_routes[1]);
+      assert(pair_routes.size() == pair_demands.size());
+      if (pair_routes.size() != pair_demands.size()) {
+        batch.routing_invariant_failed = true;
+        batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+        return "branch-only router received inconsistent exact fallback routes";
+      }
+      for (size_t demand_index = 0u; demand_index < pair_demands.size(); ++demand_index) {
+        std::vector<uint64_t> &route = pair_demands[demand_index].entry
+                                           ? batch.routes[request_index].entry_relay_offsets
+                                           : batch.routes[request_index].return_relay_offsets;
+        route = std::move(pair_routes[demand_index]);
+      }
       if (!has_later_valid_request) {
         for (uint64_t relay : batch.routes[request_index].entry_relay_offsets)
           unused_relays.erase(relay);
@@ -1359,11 +1377,17 @@ struct QualifiedRelayInventoryView {
       batch.routing_work_exhausted |=
           pair_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
       BoundedPlanningWorkMeter greedy_work(limits.pair.greedy);
-      GreedyFixedRelayRoute entry_route =
-          plan_greedy_fixed_relay_route(pair_demands[0], unused_relays, greedy_work);
+      GreedyFixedRelayRoute entry_route;
+      if (request.entry_preplaced) {
+        entry_route.status = GreedyFixedRelayRoute::Status::Solved;
+      } else {
+        entry_route =
+            plan_greedy_fixed_relay_route(pair_demands.front(), unused_relays, greedy_work);
+      }
       GreedyFixedRelayRoute return_route;
       if (entry_route.status == GreedyFixedRelayRoute::Status::Solved) {
-        return_route = plan_greedy_fixed_relay_route(pair_demands[1], unused_relays, greedy_work);
+        return_route =
+            plan_greedy_fixed_relay_route(pair_demands.back(), unused_relays, greedy_work);
       }
       accumulate_saturated(batch.feasibility_scan_work_consumed, greedy_work.consumed());
       if (entry_route.status == GreedyFixedRelayRoute::Status::InvariantFailure ||
@@ -1411,12 +1435,14 @@ struct QualifiedRelayInventoryView {
         result.status = GreedyFixedRelayRoute::Status::InvariantFailure;
       return result.status;
     };
-    const GreedyFixedRelayRoute::Status entry_status = probe(pair_demands[0]);
+    const GreedyFixedRelayRoute::Status entry_status = request.entry_preplaced
+                                                           ? GreedyFixedRelayRoute::Status::Solved
+                                                           : probe(pair_demands.front());
     const GreedyFixedRelayRoute::Status return_status =
         entry_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
                 entry_status == GreedyFixedRelayRoute::Status::InvariantFailure
             ? entry_status
-            : probe(pair_demands[1]);
+            : probe(pair_demands.back());
     accumulate_saturated(batch.feasibility_scan_work_consumed, classification_work.consumed());
     if (entry_status == GreedyFixedRelayRoute::Status::InvariantFailure ||
         return_status == GreedyFixedRelayRoute::Status::InvariantFailure) {
@@ -1694,10 +1720,11 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     const BranchOnlyRelayPairRequest &request = requests[request_index];
     const std::array entry_endpoints = {request.entry_source, request.entry_target};
     const std::array return_endpoints = {request.return_source, request.return_target};
-    invalid_entry[request_index] = request.entry_target <= request.entry_source ||
-                                   std::ranges::any_of(entry_endpoints, [](uint64_t offset) {
-                                     return offset % sizeof(uint32_t) != 0u;
-                                   });
+    invalid_entry[request_index] =
+        !request.entry_preplaced && (request.entry_target <= request.entry_source ||
+                                     std::ranges::any_of(entry_endpoints, [](uint64_t offset) {
+                                       return offset % sizeof(uint32_t) != 0u;
+                                     }));
     invalid_return[request_index] = request.return_target >= request.return_source ||
                                     std::ranges::any_of(return_endpoints, [](uint64_t offset) {
                                       return offset % sizeof(uint32_t) != 0u;
@@ -1711,10 +1738,12 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   std::map<uint64_t, size_t> return_coordinate_owner;
   const auto unregister_coordinates = [&](size_t request_index) {
     const BranchOnlyRelayPairRequest &request = requests[request_index];
-    for (uint64_t offset : {request.entry_source, request.entry_target}) {
-      const auto owner = entry_coordinate_owner.find(offset);
-      if (owner != entry_coordinate_owner.end() && owner->second == request_index)
-        entry_coordinate_owner.erase(owner);
+    if (!request.entry_preplaced) {
+      for (uint64_t offset : {request.entry_source, request.entry_target}) {
+        const auto owner = entry_coordinate_owner.find(offset);
+        if (owner != entry_coordinate_owner.end() && owner->second == request_index)
+          entry_coordinate_owner.erase(owner);
+      }
     }
     for (uint64_t offset : {request.return_source, request.return_target}) {
       const auto owner = return_coordinate_owner.find(offset);
@@ -1746,7 +1775,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       }
       return true;
     };
-    if (!register_coordinates(entry_endpoints, entry_coordinate_owner, invalid_entry))
+    if (!request.entry_preplaced &&
+        !register_coordinates(entry_endpoints, entry_coordinate_owner, invalid_entry))
       continue;
     (void)register_coordinates(return_endpoints, return_coordinate_owner, invalid_return);
   }
@@ -1767,15 +1797,18 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     if (!valid_request[request_index])
       continue;
     const BranchOnlyRelayPairRequest &request = requests[request_index];
-    for (uint64_t offset :
-         {request.entry_source, request.entry_target, request.return_source, request.return_target})
+    if (!request.entry_preplaced) {
+      pair_coordinates.insert(request.entry_source);
+      pair_coordinates.insert(request.entry_target);
+    }
+    for (uint64_t offset : {request.return_source, request.return_target})
       pair_coordinates.insert(offset);
   }
 
   std::vector<FixedRelayDemand> demands;
   demands.reserve(2u * requests.size());
   for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
-    if (!valid_request[request_index])
+    if (!valid_request[request_index] || requests[request_index].entry_preplaced)
       continue;
     demands.push_back({
         .pair_index = request_index,

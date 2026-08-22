@@ -414,10 +414,23 @@ struct ConSanPatchInfo {
   /// validation uses this exact provenance when proving routes.
   std::vector<uint64_t> branch_relay_offsets;
   /// Exact forward and return relay chains for a trampoline body whose
-  /// anchor and continuation use branch-only control flow.  These routes do
-  /// not borrow an indirect PC pair: the forward chain terminates at the
-  /// trampoline and the return chain terminates after the displaced anchor.
+  /// continuation uses branch-only control flow. Ordinarily the forward chain
+  /// also terminates at the trampoline. A borrowed indirect entry instead
+  /// preserves its owner-local PC/SCC tuple in a liveness-proven dead VGPR and leaves
+  /// the entry chain empty; the return chain still terminates after the
+  /// displaced anchor.
   bool branch_only_continuation = false;
+  bool branch_only_borrowed_indirect_entry = false;
+  /// A liveness-proven dead VGPR used only to carry the borrowed scalar tuple
+  /// from the expanded anchor into its appended body. This is intentionally
+  /// distinct from `scratch_vgpr`: spill-backed probe scratch may overlap live
+  /// guest values until the body saves them.
+  std::optional<uint16_t> branch_only_borrowed_backup_vgpr;
+  /// Target of the optional empty-EXEC bypass after a borrowed entry restores
+  /// its scalar tuple. Vector-memory probes use it to skip instrumentation and
+  /// resume at the relocated scalar continuation. Scalar barrier probes do not
+  /// need an EXEC bypass and leave it absent.
+  std::optional<uint64_t> branch_only_borrowed_continuation_offset;
   std::vector<uint64_t> branch_only_entry_relay_offsets;
   std::vector<uint64_t> branch_only_return_relay_offsets;
   /// Entry prologue that supersedes this patch's original anchor-to-body

@@ -393,6 +393,47 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   return true;
 }
 
+[[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry>
+build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t body_text_offset,
+                                       uint16_t backup_vgpr, const MoiIndirectJumpSgprs &jump_sgprs,
+                                       uint32_t island_word_count, rj_code_arch_t arch) {
+  if (jump_sgprs.scc_save_sgpr == jump_sgprs.pc_sgpr ||
+      jump_sgprs.scc_save_sgpr == static_cast<uint16_t>(jump_sgprs.pc_sgpr + 1u)) {
+    return std::nullopt;
+  }
+
+  MoiBorrowedRecordReplayEntry result;
+  result.backup_vgpr = backup_vgpr;
+  const std::array<uint16_t, 3> borrowed = {
+      jump_sgprs.pc_sgpr,
+      static_cast<uint16_t>(jump_sgprs.pc_sgpr + 1u),
+      jump_sgprs.scc_save_sgpr,
+  };
+  for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
+    const auto save =
+        instrumentation::build_v_writelane_b32(backup_vgpr, borrowed[lane], lane, arch);
+    const auto restore =
+        instrumentation::build_v_readlane_b32(borrowed[lane], backup_vgpr, lane, arch);
+    if (!save || !restore)
+      return std::nullopt;
+    result.island_words.insert(result.island_words.end(), save->begin(), save->end());
+    result.scalar_restore_words.insert(result.scalar_restore_words.end(), restore->begin(),
+                                       restore->end());
+  }
+  const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+  if (!restore_wait ||
+      !append_moi_scc_preserving_indirect_jump(result.island_words, island_text_offset,
+                                               body_text_offset, jump_sgprs.pc_sgpr,
+                                               jump_sgprs.scc_save_sgpr,
+                                               /*capture_scc=*/true, arch) ||
+      result.island_words.size() > island_word_count) {
+    return std::nullopt;
+  }
+  result.scalar_restore_words.push_back(*restore_wait);
+  result.island_words.resize(island_word_count, build_s_nop(0u, arch));
+  return result;
+}
+
 // Materialize an indirect target and restore SCC before a latency-sensitive
 // guest instruction. The caller can then emit that instruction followed only
 // by s_setpc, avoiding the ordinary return-address construction after the

@@ -123,8 +123,10 @@ bool brute_force_fixed_relay_batch(std::span<const BranchOnlyRelayPairRequest> r
   };
   std::vector<Demand> demands;
   demands.reserve(2u * requests.size());
-  for (const BranchOnlyRelayPairRequest &request : requests)
-    demands.push_back({request.entry_source, request.entry_target});
+  for (const BranchOnlyRelayPairRequest &request : requests) {
+    if (!request.entry_preplaced)
+      demands.push_back({request.entry_source, request.entry_target});
+  }
   for (const BranchOnlyRelayPairRequest &request : requests)
     demands.push_back({request.return_source, request.return_target});
 
@@ -180,7 +182,11 @@ void expect_valid_complete_batch(std::span<const BranchOnlyRelayPairRequest> req
       }
       EXPECT_TRUE(compute_sopp_branch_simm16(cursor, target).has_value());
     };
-    expect_route(route.entry_relay_offsets, request.entry_source, request.entry_target);
+    if (request.entry_preplaced) {
+      EXPECT_TRUE(route.entry_relay_offsets.empty());
+    } else {
+      expect_route(route.entry_relay_offsets, request.entry_source, request.entry_target);
+    }
     expect_route(route.return_relay_offsets, request.return_source, request.return_target);
     EXPECT_EQ(route.claims.size(),
               route.entry_relay_offsets.size() + route.return_relay_offsets.size());
@@ -409,6 +415,43 @@ TEST(ConSanBranchOnlyRelayRouter, ReportsUnavailablePristineRelayAsUnreachableEn
     EXPECT_EQ(outcome.failure, BranchOnlyRelayPlanFailure::EntryRoute);
     EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), occupied_before));
   }
+}
+
+TEST(ConSanBranchOnlyRelayRouter, PreplacedEntriesConsumeOnlyReturnRelayCapacity) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : {200'004u, 500'004u})
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir));
+  // The deliberately invalid and duplicated entry coordinates model an
+  // indirect entry already materialized by the caller. They must neither
+  // reject the batch nor become relay demands.
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{
+          .entry_source = 0u,
+          .entry_target = 0u,
+          .return_source = 300'004u,
+          .return_target = 100'004u,
+          .entry_preplaced = true,
+      },
+      BranchOnlyRelayPairRequest{
+          .entry_source = 0u,
+          .entry_target = 0u,
+          .return_source = 600'004u,
+          .return_target = 400'004u,
+          .entry_preplaced = true,
+      },
+  };
+  DbiPatchPlacementPlanner planner(kArch, 600'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  ASSERT_TRUE(plan.complete()) << error;
+  ASSERT_EQ(plan.routes.size(), requests.size());
+  EXPECT_TRUE(plan.routes[0].entry_relay_offsets.empty());
+  EXPECT_EQ(plan.routes[0].return_relay_offsets, (std::vector<uint64_t>{200'004u}));
+  EXPECT_TRUE(plan.routes[1].entry_relay_offsets.empty());
+  EXPECT_EQ(plan.routes[1].return_relay_offsets, (std::vector<uint64_t>{500'004u}));
 }
 
 TEST(ConSanBranchOnlyRelayRouter, RejectsCrossedDestinationAssignment) {

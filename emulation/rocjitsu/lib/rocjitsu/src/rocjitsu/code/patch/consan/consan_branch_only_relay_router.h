@@ -102,6 +102,10 @@ struct BranchOnlyRelayPairRequest {
   uint64_t entry_target = 0;
   uint64_t return_source = 0;
   uint64_t return_target = 0;
+  /// The caller has already materialized a non-SOPP entry at the anchor. The
+  /// router must preserve an empty entry route and spend capacity only on the
+  /// return demand. Entry coordinates are ignored in this form.
+  bool entry_preplaced = false;
 };
 
 enum class BranchOnlyRelayPlanFailure : uint8_t {

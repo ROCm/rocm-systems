@@ -49,12 +49,11 @@ prototype fixes.
 
 ### Explicit acknowledgement of the current direction
 
-This is the requested plan-only understanding checkpoint. No merge,
-implementation repair, or new validation run is part of this checkpoint; the
-next execution action, once work resumes, is to resolve the freshly fetched
-`origin/develop` against `HEAD` as described below. I understand and accept
-every row in this checklist as a binding requirement for section 1, rather
-than as optional guidance.
+Every row in this checklist is a binding requirement for section 1 rather
+than optional guidance. The requested understanding checkpoint is complete,
+and execution proceeds under this contract. The freshly fetched
+`origin/develop` was resolved against `HEAD` before validation resumed, as
+described below.
 
 The scheduling rule is lexicographic and global across both architecture
 ledgers: select the engine column first, then the lowest status color within
@@ -90,12 +89,12 @@ and final test cadence.
 
 The following rules jointly define the preparation loop and its priorities.
 None is optional merely because another rule currently offers faster visible
-progress. After this plan-only checkpoint, the first execution step is to
-resolve the freshly fetched `origin/develop` against `HEAD`. If it has advanced,
-merge it with a merge commit; if it is already an ancestor, record the no-op
-checkpoint instead of manufacturing an empty merge. Repair every resulting
-build or test failure, and add a focused regression for every behavioral defect
-exposed by the integration, before resuming the validation loop.
+progress. At each current-tip checkpoint, resolve the freshly fetched
+`origin/develop` against `HEAD`. If it has advanced, merge it with a merge
+commit; if it is already an ancestor, record the no-op checkpoint instead of
+manufacturing an empty merge. Repair every resulting build or test failure,
+and add a focused regression for every behavioral defect exposed by the
+integration, before resuming the validation loop.
 
 These rules are one combined queue, not independent aspirations: base
 integration gates trustworthy evidence; the engine and severity ordering picks
@@ -235,9 +234,14 @@ cells repaired.
    The current CDNA4 `torch.topk` Record/Replay orange is a deliberately
    retained routing-ABI design debt, not an invitation to repeat the same long
    run: its terminal branch-range cut supplies 13,688 relay words for 23,176
-   required entry/return paths. The paired host regression owns that
-   cross-cut-capacity invariant, while the existing TopK-derived device pair
-   owns observable correct/incorrect behavior. Resume the E2E row after an
+   required entry/return paths. A safely bounded one-way borrowed-entry
+   primitive now removes the entry path where a site has a single-entry
+   relocatable window and a liveness-dead backup VGPR; host regressions and the
+   existing TopK-derived correct/incorrect device pair caught live-backup and
+   reconvergence-entry mistakes. The final physical E2E rerun still admits none
+   of the limiting TopK sites and leaves the frontier unchanged. The paired
+   host regression owns the cross-cut-capacity invariant, while the device pair
+   owns observable behavior. Resume the E2E row after a more general
    owner-local gateway, shared-dispatch, or equivalent design changes that
    capacity equation; meanwhile continue to the next useful Record/Replay
    floor item.

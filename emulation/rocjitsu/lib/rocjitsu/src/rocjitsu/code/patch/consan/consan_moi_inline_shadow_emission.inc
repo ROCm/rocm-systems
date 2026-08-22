@@ -3248,6 +3248,17 @@
     std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
     uint16_t pc_sgpr, uint16_t saved_scc_sgpr, bool capture_scc, rj_code_arch_t arch);
 
+struct MoiBorrowedRecordReplayEntry {
+  uint16_t backup_vgpr = 0u;
+  std::vector<uint32_t> island_words;
+  std::vector<uint32_t> scalar_restore_words;
+};
+
+[[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry>
+build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t body_text_offset,
+                                       uint16_t backup_vgpr, const MoiIndirectJumpSgprs &jump_sgprs,
+                                       uint32_t island_word_count, rj_code_arch_t arch);
+
 // Emit a call-return comparison whose expected PC is rebuilt from a canonical
 // get-PC sequence. Revision translation can then relocate the expected caller
 // independently of the dispatcher and its in-kernel entry island.

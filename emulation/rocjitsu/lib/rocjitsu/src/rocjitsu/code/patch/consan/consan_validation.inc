@@ -681,11 +681,96 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
     const auto word = read_word(text, source);
     return delta && word && *word == build_s_branch(*delta, arch);
   };
+  const auto validate_borrowed_indirect_entry = [&](const ConSanPatchInfo &patch) {
+    if (!patch.branch_only_borrowed_indirect_entry ||
+        !patch.branch_only_entry_relay_offsets.empty() || !patch.branch_only_borrowed_backup_vgpr ||
+        !patch.indirect_pc_sgpr || !patch.indirect_saved_scc_sgpr ||
+        (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+         patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord) ||
+        patch.original_size == 0u || patch.original_size % sizeof(uint32_t) != 0u ||
+        *patch.indirect_pc_sgpr == *patch.indirect_saved_scc_sgpr ||
+        static_cast<uint16_t>(*patch.indirect_pc_sgpr + 1u) == *patch.indirect_saved_scc_sgpr) {
+      return false;
+    }
+
+    const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
+      const uint64_t size = words.size() * sizeof(uint32_t);
+      return offset <= text.size() && size <= text.size() - offset &&
+             std::memcmp(text.data() + offset, words.data(), size) == 0;
+    };
+    const std::array<uint16_t, 3> borrowed = {
+        *patch.indirect_pc_sgpr,
+        static_cast<uint16_t>(*patch.indirect_pc_sgpr + 1u),
+        *patch.indirect_saved_scc_sgpr,
+    };
+    std::vector<uint32_t> expected_entry;
+    std::vector<uint32_t> expected_restore;
+    for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
+      const auto save = instrumentation::build_v_writelane_b32(
+          *patch.branch_only_borrowed_backup_vgpr, borrowed[lane], lane, arch);
+      const auto restore = instrumentation::build_v_readlane_b32(
+          borrowed[lane], *patch.branch_only_borrowed_backup_vgpr, lane, arch);
+      if (!save || !restore)
+        return false;
+      expected_entry.insert(expected_entry.end(), save->begin(), save->end());
+      expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
+    }
+    const auto save_scc = instrumentation::build_s_cselect_b32(*patch.indirect_saved_scc_sgpr,
+                                                               scalar_positive_inline_u32(1),
+                                                               scalar_positive_inline_u32(0), arch);
+    const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (!save_scc || !restore_wait)
+      return false;
+    expected_entry.push_back(*save_scc);
+    const uint64_t getpc_offset = patch.anchor_offset + expected_entry.size() * sizeof(uint32_t);
+    expected_entry.push_back(build_s_getpc_b64(*patch.indirect_pc_sgpr, arch));
+    const uint64_t pc_after_getpc = getpc_offset + sizeof(uint32_t);
+    if (patch.trampoline_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        !append_pc_delta_builder(
+            expected_entry, arch, *patch.indirect_pc_sgpr,
+            static_cast<int64_t>(patch.trampoline_offset) - static_cast<int64_t>(pc_after_getpc),
+            /*minimum_words=*/3u, /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+      return false;
+    }
+    const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+        *patch.indirect_saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
+    if (!restore_scc)
+      return false;
+    expected_entry.push_back(*restore_scc);
+    expected_entry.push_back(build_s_setpc_b64(*patch.indirect_pc_sgpr, arch));
+    if (expected_entry.size() > patch.original_size / sizeof(uint32_t))
+      return false;
+    expected_entry.resize(patch.original_size / sizeof(uint32_t), build_s_nop(0u, arch));
+
+    expected_restore.push_back(*restore_wait);
+    if (!matches(patch.anchor_offset, expected_entry) ||
+        !matches(patch.trampoline_offset, expected_restore)) {
+      return false;
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord)
+      return !patch.branch_only_borrowed_continuation_offset;
+    if (!patch.branch_only_borrowed_continuation_offset)
+      return false;
+    const uint64_t guard_offset =
+        patch.trampoline_offset + expected_restore.size() * sizeof(uint32_t);
+    const uint64_t continuation_offset = *patch.branch_only_borrowed_continuation_offset;
+    const uint64_t return_source =
+        patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
+    const auto guard_delta = compute_sopp_branch_simm16(guard_offset, continuation_offset);
+    const auto guard =
+        guard_delta ? instrumentation::build_s_cbranch_execz(*guard_delta, arch) : std::nullopt;
+    return continuation_offset > guard_offset && continuation_offset <= return_source && guard &&
+           read_word(text, guard_offset) == *guard;
+  };
 
   for (const ConSanPatchInfo &patch : result.patches) {
     const bool has_route_metadata = !patch.branch_only_entry_relay_offsets.empty() ||
                                     !patch.branch_only_return_relay_offsets.empty() ||
-                                    patch.branch_only_entry_prologue_offset.has_value();
+                                    patch.branch_only_entry_prologue_offset.has_value() ||
+                                    patch.branch_only_borrowed_indirect_entry ||
+                                    patch.branch_only_borrowed_backup_vgpr.has_value() ||
+                                    patch.branch_only_borrowed_continuation_offset.has_value();
     if (!patch.branch_only_continuation) {
       if (has_route_metadata) {
         errors.emplace_back(
@@ -732,7 +817,10 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
     const uint64_t return_source =
         patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
     bool valid_entry_route = false;
-    if (patch.branch_only_entry_prologue_offset) {
+    if (patch.branch_only_borrowed_indirect_entry) {
+      valid_entry_route =
+          !patch.branch_only_entry_prologue_offset && validate_borrowed_indirect_entry(patch);
+    } else if (patch.branch_only_entry_prologue_offset) {
       const auto prologue =
           std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
             return candidate.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&

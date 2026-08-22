@@ -81,6 +81,14 @@ moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
 }
 
+// A full-pressure fixed-stack Record/Replay site can preserve a borrowed
+// PC/SCC tuple in lanes of its already-dead probe scratch VGPR. Relocating a
+// short owner-local continuation gives the anchor enough room for that backup,
+// an empty-EXEC bypass, and an indirect entry. Twenty words is deliberately a
+// layout contract rather than a body-size guess: both CDNA4 and gfx1250 fit
+// their longest literal target materialization inside this envelope.
+constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
+
 [[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
                                                               bool key_encodes_scc = false) {
   // Relocatable dense routers derive the dispatcher key at entry:
@@ -1520,6 +1528,18 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanOptions &options,
            const ConSanMoiTransientSgprAssignment *assignment =
                find_moi_transient_sgpr_assignment(options, descriptor_offset);
            return assignment != nullptr && assignment->branch_only_scalar_spill;
+         });
+}
+
+[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
+    const ConSanOptions &options, std::span<const uint64_t> owner_descriptor_offsets) {
+  return options.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
+         std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
+           const ConSanMoiTransientSgprAssignment *assignment =
+               find_moi_transient_sgpr_assignment(options, descriptor_offset);
+           return assignment != nullptr && assignment->branch_only_scalar_spill &&
+                  assignment->indirect_pc_sgpr && assignment->indirect_scc_sgpr &&
+                  !assignment->dispatch_key_sgpr && !assignment->call_return_sgpr;
          });
 }
 
@@ -3213,6 +3233,101 @@ struct ResolvedMoiScratchPlan {
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
 };
 
+/// A borrowed entry replaces a multi-instruction owner-local window with one
+/// synthetic entry island. Every original control-flow edge into that window
+/// must therefore enter at its first instruction. Staying within the anchor's
+/// original basic block is a conservative proof of that single-entry
+/// property: a branch target, reconvergence point, function entry, or other
+/// externally reachable leader necessarily starts another block.
+[[nodiscard]] bool moi_borrowed_entry_window_is_single_entry(MoiResourcePlanningState &state,
+                                                             uint64_t text_offset,
+                                                             uint64_t byte_count) {
+  if (byte_count == 0u || byte_count > std::numeric_limits<uint32_t>::max())
+    return false;
+  BasicBlock *block = block_for_offset(state.block_index, text_offset);
+  return block != nullptr && text_offset >= block->start_offset() &&
+         text_offset <= block->end_offset() && byte_count <= block->end_offset() - text_offset;
+}
+
+/// Finds one owner-common VGPR that is dead immediately before @p text_offset
+/// and is present in the post-planning descriptor allocation. Borrowed-entry
+/// code runs before a spill-backed probe has saved its scratch bank, so using
+/// that bank's base unconditionally would corrupt a live guest operand. A
+/// single dead register is a materially weaker requirement than the probe's
+/// contiguous scratch tuple and is proven against every owning kernel scope.
+[[nodiscard]] std::optional<uint16_t>
+find_moi_borrowed_entry_backup_vgpr(MoiResourcePlanningState &state,
+                                    std::span<const uint64_t> owners, uint64_t text_offset,
+                                    uint16_t allocated_vgpr_count, const ConSanOptions &options) {
+  if (owners.empty() || allocated_vgpr_count == 0u)
+    return std::nullopt;
+
+  RegisterSet forbidden;
+  const auto forbid = [&](std::optional<uint16_t> reg, uint8_t count = 1u) {
+    if (reg)
+      forbidden.expand({RegClass::VGPR, *reg, count});
+  };
+  forbid(options.moi_owner_vgpr);
+  forbid(options.moi_epoch_vgpr);
+  forbid(options.moi_workgroup_key_vgpr);
+  forbid(options.moi_dispatch_id_vgpr, 2u);
+  for (std::optional<uint16_t> reg :
+       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
+        options.moi_record_replay_workgroup_vgprs.z,
+        options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+    forbid(reg);
+  }
+
+  struct OwnerAnchor {
+    const MoiKernelResourceContext *context = nullptr;
+    const Instruction *instruction = nullptr;
+  };
+  std::vector<OwnerAnchor> anchors;
+  anchors.reserve(owners.size());
+  uint16_t common_limit = allocated_vgpr_count;
+  for (uint64_t owner : owners) {
+    const auto found = state.context_by_descriptor.find(owner);
+    if (found == state.context_by_descriptor.end() || found->second == nullptr ||
+        found->second->liveness == nullptr || found->second->has_indirect_vgpr_access ||
+        !found->second->descriptor_valid) {
+      return std::nullopt;
+    }
+    const MoiKernelResourceContext &context = *found->second;
+    BasicBlock *block = block_for_offset(state.block_index, text_offset);
+    const Instruction *instruction = instruction_at(block, text_offset);
+    if (block == nullptr || instruction == nullptr || !context.block_set.contains(block))
+      return std::nullopt;
+    anchors.push_back({&context, instruction});
+    common_limit = std::min(common_limit, context.ordinary_vgpr_limit);
+
+    const auto *assignment = find_moi_persistent_vgpr_assignment(options, owner);
+    if (!assignment)
+      continue;
+    forbid(assignment->owner_vgpr);
+    forbid(assignment->epoch_vgpr);
+    forbid(assignment->workgroup_key_vgpr);
+    forbid(assignment->dispatch_id_vgpr, 2u);
+    for (std::optional<uint16_t> reg :
+         {assignment->record_replay_workgroup_vgprs.x, assignment->record_replay_workgroup_vgprs.y,
+          assignment->record_replay_workgroup_vgprs.z,
+          assignment->record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+      forbid(reg);
+    }
+  }
+
+  for (uint16_t candidate = 0u; candidate < common_limit; ++candidate) {
+    if (forbidden.contains({RegClass::VGPR, candidate, 1u}))
+      continue;
+    const bool dead_for_every_owner = std::ranges::all_of(anchors, [&](const OwnerAnchor &anchor) {
+      return !anchor.context->liveness->live_before(*anchor.instruction)
+                  .contains({RegClass::VGPR, candidate, 1u});
+    });
+    if (dead_for_every_owner)
+      return candidate;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate &candidate) {
   if (result.moi_candidates.empty())
@@ -4350,12 +4465,21 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         }
         selected = candidate;
         branch_only_scalar_spill = true;
-        // A failed compact-router attempt may have found only a PC/SCC
-        // prefix. The branch-only ABI uses no indirect-router state; do not
-        // leak that abandoned partial tuple into the resolved assignment.
-        spill_pc.reset();
+        // Record/Replay can back up a borrowed entry-only PC/SCC tuple in the
+        // site scratch VGPR, then restore the complete guest window before its
+        // private scalar spill. Use slots already covered by that four-SGPR
+        // spill: +2:+3 are the entry PC pair and +0 is its SCC snapshot. The
+        // appended body returns through branch-only relays, so no key or call
+        // return survives the entry island. Other engines retain the fully
+        // branch-only ABI.
+        if (options.moi_engine == ConSanMoiEngine::RecordReplay && count >= 4u) {
+          spill_pc = static_cast<uint16_t>(*selected + 2u);
+          spill_scc = *selected;
+        } else {
+          spill_pc.reset();
+          spill_scc.reset();
+        }
         spill_call_return.reset();
-        spill_scc.reset();
         spill_key.reset();
         spill_visible.reset();
       }
