@@ -471,6 +471,13 @@ class GpuAgent : public GpuAgentInt {
   /// did not request a specific engine, rotating round-robin across all engines.
   uint32_t NextSdmaUserQueueEngineId();
 
+  /// @brief Can a signal's ABI block be placed in this agent's local memory?
+  /// The agent side of hsa_amd_signal_create_v2()'s gate, and the answer
+  /// HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED reports.  The caller side
+  /// clauses -- one named consumer, no IPC -- are not agent properties and are
+  /// checked at the entry point.
+  bool SupportsOrderingEdgeSignal() const { return OrderingEdgeSignalRegion() != nullptr; }
+
   /// @brief The device local memory region an ordering edge signal's ABI block
   /// is allocated from, or nullptr if this agent has none.
   ///
