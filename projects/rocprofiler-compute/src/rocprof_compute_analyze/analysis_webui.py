@@ -136,7 +136,6 @@ class webui_analysis(OmniAnalyze_Base):
                     self.dest_dir,
                     args.kernel_verbose,
                     args.verbose,
-                    self._profiling_config,
                 )
 
                 if self._profiling_config.get("iteration_multiplexing") is not None:
@@ -411,7 +410,6 @@ class webui_analysis(OmniAnalyze_Base):
             self.dest_dir,
             args.kernel_verbose,
             args.verbose,
-            self._profiling_config,
         )
 
         if self._profiling_config.get("iteration_multiplexing") is not None:

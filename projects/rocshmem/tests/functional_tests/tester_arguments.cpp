@@ -49,6 +49,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-s") {
       i++;
       max_msg_size = atoll(argv[i]);
+      max_msg_size_set = true;
     } else if (arg == "-a") {
       i++;
       std::string a_arg = argv[i];
@@ -193,6 +194,22 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case SdmaPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
+    case QpPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
     case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
@@ -336,6 +353,9 @@ void TesterArguments::get_arguments() {
     case TileAllgatherTestType:
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
       requires_two_pes = false;
       break;
     default:

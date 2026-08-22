@@ -8,10 +8,13 @@
 # `all` runs the whole pipeline end to end.
 #
 # Usage:
-#   run_host_tests.sh [rccl-configure|hipify|configure|build|run|all] [extra gtest args]
+#   run_host_tests.sh [deps|rccl-configure|hipify|configure|build|guards|run|all] [extra gtest args]
 #   (default phase: all)
 #
 # Phases:
+#   deps            install the host-test build/runtime dependencies via apt
+#                   (cmake, toolchain, gtest/fmt, moreutils, python3-venv). CI
+#                   runs this as its own step; not part of `all`.
 #   rccl-configure  configure the RCCL tree (root) -- pins GPU_TARGETS so CMake
 #                   never probes for a GPU; BUILD_TESTS=OFF (we only need hipify)
 #   hipify          build the hipify_all target -> stages build/hipify/src, the
@@ -49,6 +52,19 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 PHASE="${1:-all}"
 [ $# -gt 0 ] && shift || true   # remaining args ($@) are forwarded to the binary
 
+# Install everything the host-test pipeline needs that the base ROCm dev image
+# lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), and python3-venv
+# (the guards phase creates a venv + pip-installs pytest). Uses sudo when not
+# already root so it works both in the root CI container and locally.
+do_deps() {
+  echo "==> Install host-test dependencies (apt)"
+  local sudo=""
+  [ "$(id -u)" -eq 0 ] || sudo="sudo"
+  $sudo apt-get update
+  $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
+    moreutils libgtest-dev libgmock-dev libfmt-dev
+}
+
 do_rccl_configure() {
   echo "==> RCCL configure  (GPU_TARGETS=$GPU_TARGETS)"
   cmake -S "$RCCL_ROOT" -B "$RCCL_BUILD_DIR" \
@@ -71,7 +87,7 @@ do_build() {
   cmake --build "$BUILD_DIR" -j"$JOBS"
 }
 
-do_run() {
+do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
   # tee the full stdout+stderr to LOG_FILE, and preserve the test binary's exit
@@ -88,12 +104,38 @@ do_run() {
     --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
 }
 
+# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
+# the lean host-test image needs no system pytest. See that dir's README.
+do_guards() {
+  echo "==> Kernel-count guards (pytest: test/kernel-count)"
+  local gd="$RCCL_ROOT/test/kernel-count"
+  local venv="$gd/venv"
+  if [ ! -x "$venv/bin/pytest" ]; then
+    python3 -m venv "$venv"
+    "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
+  fi
+  "$venv/bin/python" -m pytest "$gd/tests" -v
+}
+
+# The `run` phase aggregates every check the host-test pipeline executes: the
+# gtest suite plus any CPU-only guards. The host-test workflow invokes `run`
+# (and `all` ends with it), so adding a future check here makes both CI and
+# local runs pick it up automatically -- no dispatch or workflow-YAML change.
+# do_host_tests runs first so the JUnit XML artifact is always produced before a
+# later guard can gate.
+do_run() {
+  do_host_tests "$@"
+  do_guards
+}
+
 case "$PHASE" in
+  deps)           do_deps ;;
   rccl-configure) do_rccl_configure ;;
   hipify)         do_hipify ;;
   configure)      do_configure ;;
   build)          do_build ;;
+  guards)         do_guards ;;
   run)            do_run "$@" ;;
   all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@" ;;
-  *) echo "usage: $0 [rccl-configure|hipify|configure|build|run|all] [extra gtest args]" >&2; exit 2 ;;
+  *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|all] [extra gtest args]" >&2; exit 2 ;;
 esac

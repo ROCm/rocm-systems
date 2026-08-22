@@ -27,6 +27,12 @@ using nccl_dda_detail::DdaFabricBarrierState;
 // Flat all-reduce kernel below this size; tree kernel at or above it.
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
+// Single source of the launch geometry: grid/block for `count` elements of
+// `typeSize` bytes, capped at the init-time block count.
+static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_t count, int typeSize) {
+  return meta::comms::getGridAndBlockDims(count, typeSize, comm->ddaFabricMaxBlocks);
+}
+
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                                 cudaStream_t stream) {
@@ -50,9 +56,8 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
          count, nRanks);
   }
 
-  // Use the block cap chosen at init (barrier flag buffer is sized for it).
-  const int nBlocksMax = comm->ddaFabricMaxBlocks;
-  auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  // Block cap chosen at init (barrier flag buffer is sized for it).
+  auto gridBlock = ddaAllReduceFabricGeom(comm, count, sizeof(T));
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -169,6 +174,11 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
     }
   }
   return true;
+}
+
+uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const auto grid = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

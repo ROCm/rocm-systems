@@ -7,13 +7,15 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna2 {
 
 VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cndmask_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cndmask_b32_dpp"
                : "v_cndmask_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -60,14 +62,41 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCndmaskB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_cndmask_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_cndmask_b32_dpp"
+          : "v_cndmask_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_cndmask_b32: reserved DPP control";
+  }
+  return std::make_unique<VCndmaskB32Vop2>(opcode);
+}
+} // namespace detail
 
 VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -105,12 +134,33 @@ VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT2C_F32_F16 does not support SDWA", "");
 }
 
+namespace detail {
+DecodeResult decodeVDot2cF32F16Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_dot2c_f32_f16_dpp"
+          : "v_dot2c_f32_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_dot2c_f32_f16: reserved DPP control";
+  }
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT2C_F32_F16 does not support SDWA";
+  return std::make_unique<VDot2cF32F16Vop2>(opcode);
+}
+} // namespace detail
+
 VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_f32_dpp"
                : "v_add_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -155,16 +205,42 @@ VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVAddF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_add_f32_dpp"
+          : "v_add_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_add_f32: reserved DPP control";
+  }
+  return std::make_unique<VAddF32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_f32_dpp"
                : "v_sub_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -209,16 +285,43 @@ VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVSubF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_sub_f32_dpp"
+          : "v_sub_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_sub_f32: reserved DPP control";
+  }
+  return std::make_unique<VSubF32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_subrev_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_subrev_f32_dpp"
                : "v_subrev_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -263,13 +366,39 @@ VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVSubrevF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_subrev_f32_dpp"
+          : "v_subrev_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_subrev_f32: reserved DPP control";
+  }
+  return std::make_unique<VSubrevF32Vop2>(opcode);
+}
+} // namespace detail
 
 VFmacLegacyF32Vop2::VFmacLegacyF32Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -290,15 +419,32 @@ VFmacLegacyF32Vop2::VFmacLegacyF32Vop2(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMAC_LEGACY_F32 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAC_LEGACY_F32 does not support SDWA", "");
 }
 
+namespace detail {
+DecodeResult decodeVFmacLegacyF32Vop2(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmac_legacy_f32_dpp"
+          : "v_fmac_legacy_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_LEGACY_F32 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_LEGACY_F32 does not support SDWA";
+  return std::make_unique<VFmacLegacyF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_mul_legacy_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_legacy_f32_dpp"
                : "v_mul_legacy_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -343,16 +489,44 @@ VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMulLegacyF32Vop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_legacy_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_legacy_f32_dpp"
+          : "v_mul_legacy_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_legacy_f32: reserved DPP control";
+  }
+  return std::make_unique<VMulLegacyF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_f32_dpp"
                : "v_mul_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -397,16 +571,43 @@ VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMulF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_f32_dpp"
+          : "v_mul_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_f32: reserved DPP control";
+  }
+  return std::make_unique<VMulF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_mul_i32_i24_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_i32_i24_dpp"
                : "v_mul_i32_i24_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -451,16 +652,44 @@ VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMulI32I24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_i32_i24_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_i32_i24_dpp"
+          : "v_mul_i32_i24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_i32_i24: reserved DPP control";
+  }
+  return std::make_unique<VMulI32I24Vop2>(opcode);
+}
+} // namespace detail
+
 VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_mul_hi_i32_i24_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_hi_i32_i24_dpp"
                : "v_mul_hi_i32_i24_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -505,16 +734,45 @@ VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMulHiI32I24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_hi_i32_i24_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_hi_i32_i24_dpp"
+          : "v_mul_hi_i32_i24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_hi_i32_i24: reserved DPP control";
+  }
+  return std::make_unique<VMulHiI32I24Vop2>(opcode);
+}
+} // namespace detail
+
 VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_mul_u32_u24_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_u32_u24_dpp"
                : "v_mul_u32_u24_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -559,16 +817,44 @@ VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMulU32U24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_u32_u24_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_u32_u24_dpp"
+          : "v_mul_u32_u24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_u32_u24: reserved DPP control";
+  }
+  return std::make_unique<VMulU32U24Vop2>(opcode);
+}
+} // namespace detail
+
 VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_mul_hi_u32_u24_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_hi_u32_u24_dpp"
                : "v_mul_hi_u32_u24_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -613,13 +899,40 @@ VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVMulHiU32U24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_hi_u32_u24_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_hi_u32_u24_dpp"
+          : "v_mul_hi_u32_u24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_hi_u32_u24: reserved DPP control";
+  }
+  return std::make_unique<VMulHiU32U24Vop2>(opcode);
+}
+} // namespace detail
 
 VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -657,12 +970,33 @@ VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT4C_I32_I8 does not support SDWA", "");
 }
 
+namespace detail {
+DecodeResult decodeVDot4cI32I8Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_dot4c_i32_i8_dpp"
+          : "v_dot4c_i32_i8_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_dot4c_i32_i8: reserved DPP control";
+  }
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT4C_I32_I8 does not support SDWA";
+  return std::make_unique<VDot4cI32I8Vop2>(opcode);
+}
+} // namespace detail
+
 VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min_f32_dpp"
                : "v_min_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -707,16 +1041,42 @@ VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMinF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_min_f32_dpp"
+          : "v_min_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_min_f32: reserved DPP control";
+  }
+  return std::make_unique<VMinF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_f32_dpp"
                : "v_max_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -761,16 +1121,42 @@ VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMaxF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_max_f32_dpp"
+          : "v_max_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_max_f32: reserved DPP control";
+  }
+  return std::make_unique<VMaxF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_i32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min_i32_dpp"
                : "v_min_i32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -815,16 +1201,42 @@ VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMinI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_i32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_min_i32_dpp"
+          : "v_min_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_min_i32: reserved DPP control";
+  }
+  return std::make_unique<VMinI32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_i32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_i32_dpp"
                : "v_max_i32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -869,16 +1281,42 @@ VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMaxI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_i32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_max_i32_dpp"
+          : "v_max_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_max_i32: reserved DPP control";
+  }
+  return std::make_unique<VMaxI32Vop2>(opcode);
+}
+} // namespace detail
+
 VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min_u32_dpp"
                : "v_min_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -923,16 +1361,42 @@ VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMinU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_min_u32_dpp"
+          : "v_min_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_min_u32: reserved DPP control";
+  }
+  return std::make_unique<VMinU32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_u32_dpp"
                : "v_max_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -977,16 +1441,43 @@ VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVMaxU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_max_u32_dpp"
+          : "v_max_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_max_u32: reserved DPP control";
+  }
+  return std::make_unique<VMaxU32Vop2>(opcode);
+}
+} // namespace detail
+
 VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_lshrrev_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_lshrrev_b32_dpp"
                : "v_lshrrev_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1031,16 +1522,45 @@ VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVLshrrevB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshrrev_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_lshrrev_b32_dpp"
+          : "v_lshrrev_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_lshrrev_b32: reserved DPP control";
+  }
+  return std::make_unique<VLshrrevB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_ashrrev_i32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ashrrev_i32_dpp"
                : "v_ashrrev_i32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1085,16 +1605,45 @@ VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVAshrrevI32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_ashrrev_i32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_ashrrev_i32_dpp"
+          : "v_ashrrev_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_ashrrev_i32: reserved DPP control";
+  }
+  return std::make_unique<VAshrrevI32Vop2>(opcode);
+}
+} // namespace detail
+
 VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_lshlrev_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_lshlrev_b32_dpp"
                : "v_lshlrev_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1139,16 +1688,44 @@ VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVLshlrevB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshlrev_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_lshlrev_b32_dpp"
+          : "v_lshlrev_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_lshlrev_b32: reserved DPP control";
+  }
+  return std::make_unique<VLshlrevB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_and_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_and_b32_dpp"
                : "v_and_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1193,16 +1770,42 @@ VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVAndB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_and_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_and_b32_dpp"
+          : "v_and_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_and_b32: reserved DPP control";
+  }
+  return std::make_unique<VAndB32Vop2>(opcode);
+}
+} // namespace detail
+
 VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_or_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_or_b32_dpp"
                : "v_or_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1247,16 +1850,42 @@ VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVOrB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_or_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_or_b32_dpp"
+          : "v_or_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_or_b32: reserved DPP control";
+  }
+  return std::make_unique<VOrB32Vop2>(opcode);
+}
+} // namespace detail
+
 VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xor_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_xor_b32_dpp"
                : "v_xor_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1301,16 +1930,42 @@ VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVXorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xor_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_xor_b32_dpp"
+          : "v_xor_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_xor_b32: reserved DPP control";
+  }
+  return std::make_unique<VXorB32Vop2>(opcode);
+}
+} // namespace detail
+
 VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xnor_b32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_xnor_b32_dpp"
                : "v_xnor_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1355,16 +2010,43 @@ VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVXnorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xnor_b32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_xnor_b32_dpp"
+          : "v_xnor_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_xnor_b32: reserved DPP control";
+  }
+  return std::make_unique<VXnorB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAddNcU32Vop2::VAddNcU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_add_nc_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_nc_u32_dpp"
                : "v_add_nc_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1409,16 +2091,44 @@ VAddNcU32Vop2::VAddNcU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVAddNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_add_nc_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_add_nc_u32_dpp"
+          : "v_add_nc_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_add_nc_u32: reserved DPP control";
+  }
+  return std::make_unique<VAddNcU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_sub_nc_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_nc_u32_dpp"
                : "v_sub_nc_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1463,16 +2173,44 @@ VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVSubNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_sub_nc_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_sub_nc_u32_dpp"
+          : "v_sub_nc_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_sub_nc_u32: reserved DPP control";
+  }
+  return std::make_unique<VSubNcU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_subrev_nc_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_subrev_nc_u32_dpp"
                : "v_subrev_nc_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1517,16 +2255,45 @@ VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVSubrevNcU32Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_nc_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_subrev_nc_u32_dpp"
+          : "v_subrev_nc_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_subrev_nc_u32: reserved DPP control";
+  }
+  return std::make_unique<VSubrevNcU32Vop2>(opcode);
+}
+} // namespace detail
+
 VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_add_co_ci_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_co_ci_u32_dpp"
                : "v_add_co_ci_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1575,9 +2342,14 @@ VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1585,8 +2357,32 @@ VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)
   vcc_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVAddCoCiU32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_add_co_ci_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_add_co_ci_u32_dpp"
+          : "v_add_co_ci_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_add_co_ci_u32: reserved DPP control";
+  }
+  return std::make_unique<VAddCoCiU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_sub_co_ci_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_co_ci_u32_dpp"
                : "v_sub_co_ci_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1635,9 +2431,14 @@ VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1645,8 +2446,32 @@ VSubCoCiU32Vop2::VSubCoCiU32Vop2(const MachineInst *inst)
   vcc_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVSubCoCiU32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_sub_co_ci_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_sub_co_ci_u32_dpp"
+          : "v_sub_co_ci_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_sub_co_ci_u32: reserved DPP control";
+  }
+  return std::make_unique<VSubCoCiU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_subrev_co_ci_u32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_subrev_co_ci_u32_dpp"
                : "v_subrev_co_ci_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1695,15 +2520,42 @@ VSubrevCoCiU32Vop2::VSubrevCoCiU32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   vcc.apply_fieldless_caps(false, false, false);
   vcc_in.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVSubrevCoCiU32Vop2(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_co_ci_u32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_subrev_co_ci_u32_dpp"
+          : "v_subrev_co_ci_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_subrev_co_ci_u32: reserved DPP control";
+  }
+  return std::make_unique<VSubrevCoCiU32Vop2>(opcode);
+}
+} // namespace detail
 
 VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1741,9 +2593,28 @@ VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAC_F32 does not support SDWA", "");
 }
+
+namespace detail {
+DecodeResult decodeVFmacF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmac_f32_dpp"
+          : "v_fmac_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_fmac_f32: reserved DPP control";
+  }
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_F32 does not support SDWA";
+  return std::make_unique<VFmacF32Vop2>(opcode);
+}
+} // namespace detail
 
 VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1768,13 +2639,27 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMAMK_F32 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAMK_F32 does not support SDWA", "");
   simm32.apply_fieldless_caps(true, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVFmamkF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmamk_f32_dpp"
+          : "v_fmamk_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F32 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F32 does not support SDWA";
+  return std::make_unique<VFmamkF32Vop2>(opcode);
+}
+} // namespace detail
 
 VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1799,16 +2684,32 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMAAK_F32 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAAK_F32 does not support SDWA", "");
   simm32.apply_fieldless_caps(true, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVFmaakF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmaak_f32_dpp"
+          : "v_fmaak_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F32 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F32 does not support SDWA";
+  return std::make_unique<VFmaakF32Vop2>(opcode);
+}
+} // namespace detail
+
 VCvtPkrtzF16F32Vop2::VCvtPkrtzF16F32Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cvt_pkrtz_f16_f32_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pkrtz_f16_f32_dpp"
                : "v_cvt_pkrtz_f16_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1853,16 +2754,44 @@ VCvtPkrtzF16F32Vop2::VCvtPkrtzF16F32Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
 
+namespace detail {
+DecodeResult decodeVCvtPkrtzF16F32Vop2(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_cvt_pkrtz_f16_f32_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pkrtz_f16_f32_dpp"
+          : "v_cvt_pkrtz_f16_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_cvt_pkrtz_f16_f32: reserved DPP control";
+  }
+  return std::make_unique<VCvtPkrtzF16F32Vop2>(opcode);
+}
+} // namespace detail
+
 VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_f16_dpp"
                : "v_add_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1908,13 +2837,38 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVAddF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_add_f16_dpp"
+          : "v_add_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_add_f16: reserved DPP control";
+  }
+  return std::make_unique<VAddF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1923,7 +2877,8 @@ void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_f16_dpp"
                : "v_sub_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -1969,13 +2924,38 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVSubF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_sub_f16_dpp"
+          : "v_sub_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_sub_f16: reserved DPP control";
+  }
+  return std::make_unique<VSubF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1984,7 +2964,9 @@ void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_subrev_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_subrev_f16_dpp"
                : "v_subrev_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -2030,13 +3012,39 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVSubrevF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_subrev_f16_dpp"
+          : "v_subrev_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_subrev_f16: reserved DPP control";
+  }
+  return std::make_unique<VSubrevF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2045,7 +3053,8 @@ void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_f16_dpp"
                : "v_mul_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -2091,13 +3100,38 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVMulF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_mul_f16_dpp"
+          : "v_mul_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_mul_f16: reserved DPP control";
+  }
+  return std::make_unique<VMulF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMulF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2142,9 +3176,28 @@ VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAC_F16 does not support SDWA", "");
 }
+
+namespace detail {
+DecodeResult decodeVFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmac_f16_dpp"
+          : "v_fmac_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_fmac_f16: reserved DPP control";
+  }
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_F16 does not support SDWA";
+  return std::make_unique<VFmacF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VFmacF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2177,13 +3230,27 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMAMK_F16 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAMK_F16 does not support SDWA", "");
   simm32.apply_fieldless_caps(true, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVFmamkF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmamk_f16_dpp"
+          : "v_fmamk_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F16 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F16 does not support SDWA";
+  return std::make_unique<VFmamkF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VFmamkF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2216,13 +3283,27 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FMAAK_F16 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAAK_F16 does not support SDWA", "");
   simm32.apply_fieldless_caps(true, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVFmaakF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_fmaak_f16_dpp"
+          : "v_fmaak_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F16 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F16 does not support SDWA";
+  return std::make_unique<VFmaakF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VFmaakF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2231,7 +3312,8 @@ void VFmaakF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_f16_dpp"
                : "v_max_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -2277,13 +3359,38 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVMaxF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_max_f16_dpp"
+          : "v_max_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_max_f16: reserved DPP control";
+  }
+  return std::make_unique<VMaxF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMaxF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2292,7 +3399,8 @@ void VMaxF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min_f16_dpp"
                : "v_min_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -2338,13 +3446,38 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVMinF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_min_f16_dpp"
+          : "v_min_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_min_f16: reserved DPP control";
+  }
+  return std::make_unique<VMinF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMinF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2353,7 +3486,8 @@ void VMinF16Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
-    : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+    : Vop2(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ldexp_f16_sdwa"
+           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ldexp_f16_dpp"
                : "v_ldexp_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
@@ -2399,13 +3533,39 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
+    sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+DecodeResult decodeVLdexpF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_ldexp_f16_sdwa"
+      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_ldexp_f16_dpp"
+          : "v_ldexp_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_ldexp_f16: reserved DPP control";
+  }
+  return std::make_unique<VLdexpF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VLdexpF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2449,9 +3609,28 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_PK_FMAC_F16 does not support SDWA", "");
 }
+
+namespace detail {
+DecodeResult decodeVPkFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0)
+          ? "v_pk_fmac_f16_dpp"
+          : "v_pk_fmac_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+      return emit_error.emit() << "v_pk_fmac_f16: reserved DPP control";
+  }
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMAC_F16 does not support SDWA";
+  return std::make_unique<VPkFmacF16Vop2>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna2
 } // namespace rocjitsu

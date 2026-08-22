@@ -14,6 +14,9 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// Reserved value used when an instruction lane has no valid LDS address.
+constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
+
 /// @brief Local Data Share (LDS) memory backing for a dispatch placement.
 ///
 /// @details CU-mode workgroups use the backing owned by one ComputeUnitCore.
@@ -44,7 +47,7 @@ public:
 
   /// @brief Read 16 bits (little-endian) from LDS. OOB returns 0.
   uint16_t read16(uint32_t addr) const {
-    if (addr + 1 >= data_.size())
+    if (!contains(addr, 2))
       return 0;
     uint16_t val;
     std::memcpy(&val, &data_[addr], 2);
@@ -53,14 +56,14 @@ public:
 
   /// @brief Write 16 bits (little-endian) to LDS. OOB writes are dropped.
   void write16(uint32_t addr, uint16_t val) {
-    if (addr + 1 >= data_.size())
+    if (!contains(addr, 2))
       return;
     std::memcpy(&data_[addr], &val, 2);
   }
 
   /// @brief Read 32 bits (little-endian) from LDS. OOB returns 0.
   uint32_t read32(uint32_t addr) const {
-    if (addr + 3 >= data_.size())
+    if (!contains(addr, 4))
       return 0;
     uint32_t val;
     std::memcpy(&val, &data_[addr], 4);
@@ -69,14 +72,14 @@ public:
 
   /// @brief Write 32 bits (little-endian) to LDS. OOB writes are dropped.
   void write32(uint32_t addr, uint32_t val) {
-    if (addr + 3 >= data_.size())
+    if (!contains(addr, 4))
       return;
     std::memcpy(&data_[addr], &val, 4);
   }
 
   /// @brief Read 64 bits (little-endian) from LDS. OOB returns 0.
   uint64_t read64(uint32_t addr) const {
-    if (addr + 7 >= data_.size())
+    if (!contains(addr, 8))
       return 0;
     uint64_t val;
     std::memcpy(&val, &data_[addr], 8);
@@ -85,14 +88,14 @@ public:
 
   /// @brief Write 64 bits (little-endian) to LDS. OOB writes are dropped.
   void write64(uint32_t addr, uint64_t val) {
-    if (addr + 7 >= data_.size())
+    if (!contains(addr, 8))
       return;
     std::memcpy(&data_[addr], &val, 8);
   }
 
   /// @brief Bulk read of arbitrary size from LDS. OOB returns 0.
   void read(uint32_t addr, uint8_t *dst, uint32_t size) const {
-    if (addr + size > data_.size()) {
+    if (!contains(addr, size)) {
       std::memset(dst, 0, size);
       return;
     }
@@ -101,7 +104,7 @@ public:
 
   /// @brief Bulk write of arbitrary size to LDS. OOB writes are dropped.
   void write(uint32_t addr, const uint8_t *src, uint32_t size) {
-    if (addr + size > data_.size())
+    if (!contains(addr, size))
       return;
     std::memcpy(&data_[addr], src, size);
   }
@@ -109,14 +112,14 @@ public:
   /// @brief MemoryInterface read (truncates addr to 32-bit local address).
   void read(uint64_t addr, uint8_t *dst, uint32_t size) override {
     auto a = static_cast<uint32_t>(addr);
-    assert(a + size <= data_.size());
+    assert(contains(a, size));
     std::memcpy(dst, &data_[a], size);
   }
 
   /// @brief MemoryInterface write (truncates addr to 32-bit local address).
   void write(uint64_t addr, const uint8_t *src, uint32_t size) override {
     auto a = static_cast<uint32_t>(addr);
-    assert(a + size <= data_.size());
+    assert(contains(a, size));
     std::memcpy(&data_[a], src, size);
   }
 
@@ -182,6 +185,10 @@ public:
   uint8_t *data() { return data_.data(); }
 
 private:
+  bool contains(uint32_t addr, uint32_t size) const {
+    return static_cast<uint64_t>(addr) + size <= data_.size();
+  }
+
   std::vector<uint8_t> data_;
 };
 

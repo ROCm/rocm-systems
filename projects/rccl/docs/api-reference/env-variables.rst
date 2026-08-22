@@ -75,6 +75,12 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ALLGATHERV_ENABLE``
+        | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
+          ring kernel when two or more distinct roots appear in a group.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
 Logging and debugging
 =====================
 
@@ -196,6 +202,13 @@ in the following table.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
+        | When unset, RCCL auto-selects an interface in this order:
+        | ``ib*`` first; if none is found and ``NCCL_COMM_ID`` is set, an
+        | interface on the same subnet as that address; then any interface
+        | other than ``docker*``, ``lo`` and ``virbr*``; then ``docker*``;
+        | then ``lo``; and finally ``virbr*``. Libvirt bridge interfaces
+        | (``virbr*``) are considered last because they serve host-to-VM
+        | (virtual machine) traffic and cannot reach a remote node.
       - | Interface prefix string or list
         | Multiple prefixes separated by ``,``
         | Prefix with ``^`` for exclusion, ``=`` for exact match
@@ -374,3 +387,104 @@ application adds explicit synchronization between streams.
         | output feeds into the next.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
+
+Inspector profiling
+===================
+
+The NCCL Inspector is a profiler plugin that emits per-communicator,
+per-operation performance data (collectives and point-to-point) as JSON or
+Prometheus textfile metrics. For a full walkthrough, see
+:doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
+variables are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_INSPECTOR_ENABLE``
+        | Enables the Inspector profiler plugin. The plugin must also be
+        | loaded through ``NCCL_PROFILER_PLUGIN``.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_ENABLE_P2P``
+        | Enables tracking of point-to-point (``Send``/``Recv``) operations in
+        | addition to collectives. Required for the ``nccl_p2p_*`` Prometheus
+        | metrics and the P2P panels of the Grafana dashboard.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_PROM_DUMP``
+        | Selects the Prometheus node-exporter textfile output format
+        | (``nccl_inspector_metrics_<uuid>.prom``) instead of the default JSON.
+      - | ``0``: JSON output (default).
+        | ``1``: Prometheus textfile output.
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
+        | Enables the internal dump thread. When disabled, output is only
+        | written at communicator teardown, regardless of the configured
+        | dump interval.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS``
+        | Interval, in microseconds, at which the internal dump thread writes
+        | output. Output is always written at communicator teardown.
+      - | ``-1``: Dump only at teardown (default).
+        | ``0``: Dump continuously.
+        | ``N``: Dump every ``N`` microseconds. In Prometheus mode a minimum of
+        | ``30000000`` (30 s) is enforced to match node-exporter polling.
+
+    * - | ``NCCL_INSPECTOR_DUMP_DIR``
+        | Output directory for Inspector logs/metrics. For Prometheus mode,
+        | point this at the node-exporter textfile collector directory.
+      - | String path.
+        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | ``nccl-inspector-unknown-jobid``.
+
+    * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``
+        | Includes per-event trace information (sequence numbers and
+        | timestamps) in the JSON output.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES``
+        | Minimum message size (in bytes) tracked by the Inspector.
+      - | Integer value in bytes (default: ``8192``).
+
+    * - | ``NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING``
+        | Requires GPU-based kernel timing for an event to be recorded. When
+        | enabled, events that fall back to CPU-measured timing are discarded.
+      - | ``0``: Record events regardless of timing source.
+        | ``1``: Record only GPU-timed events (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | collectives waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_DUMP_P2P_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | point-to-point operations waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_COLL_POOL_SIZE``
+        | Initial size, and growth stride, of the collective event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_P2P_POOL_SIZE``
+        | Initial size, and growth stride, of the point-to-point event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_COMM_POOL_SIZE``
+        | Initial size, and growth stride, of the communicator event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_POOL_GROW``
+        | Allows the event pools above to grow beyond their initial size. When
+        | disabled, events are dropped once a pool is exhausted.
+      - | ``0``: Fixed-size pools.
+        | ``1``: Pools grow on demand (default).

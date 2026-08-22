@@ -1735,142 +1735,660 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
   return ROCSHMEM_SUCCESS;
 }
 
+// Returns 0 if any dimension has boundary < start_coord (underflow guard) or
+// if the product overflows size_t (overflow guard).
+__device__ inline size_t ipc_tile_num_elements(const size_t* start_coord,
+                                               const size_t* boundary,
+                                               int ndim) {
+  size_t total = 1;
+  for (int dim = 0; dim < ndim; dim++) {
+    if (boundary[dim] < start_coord[dim]) {
+      return 0;
+    }
+    const size_t extent = boundary[dim] - start_coord[dim];
+    if (extent != 0 && total > SIZE_MAX / extent) {
+      return 0;
+    }
+    total *= extent;
+  }
+  return total;
+}
+
+__device__ inline size_t ipc_tile_dst_offset(size_t flat_idx,
+                                             const size_t* dst_strides,
+                                             const size_t* start_coord,
+                                             const size_t* boundary,
+                                             int ndim) {
+  size_t offset = 0;
+  for (int dim = ndim - 1; dim >= 0; dim--) {
+    const size_t extent = boundary[dim] - start_coord[dim];
+    const size_t coord = flat_idx % extent;
+    flat_idx /= extent;
+    offset += (start_coord[dim] + coord) * dst_strides[dim];
+  }
+  return offset;
+}
+
+__device__ inline size_t ipc_tile_src_offset(size_t flat_idx,
+                                             const size_t* src_strides,
+                                             const size_t* start_coord,
+                                             const size_t* boundary,
+                                             int ndim) {
+  size_t offset = 0;
+  for (int dim = ndim - 1; dim >= 0; dim--) {
+    const size_t extent = boundary[dim] - start_coord[dim];
+    const size_t coord = flat_idx % extent;
+    flat_idx /= extent;
+    offset += (start_coord[dim] + coord) * src_strides[dim];
+  }
+  return offset;
+}
+
+__device__ inline bool ipc_tile_is_contiguous(const size_t* strides,
+                                              const size_t* start_coord,
+                                              const size_t* boundary,
+                                              int ndim) {
+  size_t expected_stride = 1;
+  for (int dim = ndim - 1; dim >= 0; dim--) {
+    if (strides[dim] != expected_stride) {
+      return false;
+    }
+    expected_stride *= boundary[dim] - start_coord[dim];
+  }
+  return true;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_impl(
+    rocshmem_team_t team, const void* src_data, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root,
+    size_t segment_start, size_t segment_elems, size_t segment_capacity,
+    int worker_id, int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int team_size = team_obj->num_pes;
+  const int my_pe_in_team = team_obj->my_pe;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+
+  if (root < 0 || root >= team_size || ndim <= 0) {
+    LOGD_WARN("Invalid tile reduce arguments for IPC backend");
+    return ROCSHMEM_ERROR;
+  }
+
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+  T *my_pWrk = &pWrk[my_pe_in_team * segment_capacity];
+
+  const bool src_contiguous =
+      ipc_tile_is_contiguous(src_strides, start_coord, boundary, ndim);
+  const size_t first_src_offset = ipc_tile_src_offset(
+      segment_start, src_strides, start_coord, boundary, ndim);
+  const char *src_base = static_cast<const char *>(src_data) +
+                         first_src_offset * sizeof(T);
+
+  if (src_contiguous && my_pe_in_team != root) {
+    if (worker_count == 1) {
+      internal_putmem(my_pWrk, src_base, segment_elems * sizeof(T),
+                      root_pe_world);
+    } else if (worker_count == WF_SIZE) {
+      internal_putmem_wave(my_pWrk, src_base, segment_elems * sizeof(T),
+                           root_pe_world);
+    } else {
+      internal_putmem_wg(my_pWrk, src_base, segment_elems * sizeof(T),
+                         root_pe_world);
+    }
+  } else if (src_contiguous && my_pe_in_team == root) {
+    const T *src_typed = reinterpret_cast<const T *>(src_base);
+    if (worker_count == 1) {
+      __builtin_memcpy(my_pWrk, src_typed, segment_elems * sizeof(T));
+    } else if (worker_count == WF_SIZE) {
+      for (size_t elem = worker_id; elem < segment_elems; elem += worker_count)
+        my_pWrk[elem] = src_typed[elem];
+    } else {
+      for (size_t elem = worker_id; elem < segment_elems; elem += worker_count)
+        my_pWrk[elem] = src_typed[elem];
+    }
+  } else {
+    for (size_t elem = worker_id; elem < segment_elems; elem += worker_count) {
+      const size_t tile_elem = segment_start + elem;
+      const size_t src_offset =
+          ipc_tile_src_offset(tile_elem, src_strides, start_coord, boundary, ndim);
+      const T src_value =
+          *reinterpret_cast<const T *>(static_cast<const char *>(src_data) +
+                                       src_offset * sizeof(T));
+
+      if (my_pe_in_team == root) {
+        my_pWrk[elem] = src_value;
+      } else {
+        internal_putmem(&my_pWrk[elem], &src_value, sizeof(T), root_pe_world);
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline void ipc_tile_reduce_root_compute(
+    rocshmem_team_t team, void* dst_data, const size_t* dst_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root,
+    size_t segment_start, size_t segment_elems, size_t segment_capacity,
+    int worker_id, int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int team_size = team_obj->num_pes;
+  if (team_obj->my_pe != root) {
+    return;
+  }
+
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+
+  for (size_t elem = worker_id; elem < segment_elems; elem += worker_count) {
+    T reduced_value = pWrk[elem];
+    for (int src_pe_in_team = 1; src_pe_in_team < team_size; src_pe_in_team++) {
+      T src_value = pWrk[src_pe_in_team * segment_capacity + elem];
+      OpWrap<Op>::Calc(&src_value, &reduced_value, 0);
+    }
+
+    const size_t tile_elem = segment_start + elem;
+    const size_t dst_offset =
+        ipc_tile_dst_offset(tile_elem, dst_strides, start_coord, boundary, ndim);
+    char *dst_base = static_cast<char *>(dst_data);
+    *reinterpret_cast<T *>(dst_base + dst_offset * sizeof(T)) = reduced_value;
+  }
+}
+
+__device__ inline void ipc_tile_reduce_reset_psync(rocshmem_team_t team,
+                                                   int root,
+                                                   int worker_id,
+                                                   int worker_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  if (team_obj->my_pe != root) {
+    return;
+  }
+
+  long *pSync = team_obj->reduce_pSync;
+  for (int i = worker_id; i < team_obj->num_pes; i += worker_count) {
+    pSync[i] = ROCSHMEM_SYNC_VALUE;
+  }
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (team_obj->num_pes > static_cast<int>(ROCSHMEM_REDUCE_SYNC_SIZE)) {
+    LOGD_WARN("Tile reduce team size exceeds IPC reduce_pSync capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, 0, 1);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    if (team_obj->my_pe == root) {
+      pSync[team_obj->my_pe] = flag_val;
+      for (int i = 0; i < team_obj->num_pes; i++) {
+        wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+      }
+      threadfence_system();
+    } else {
+      fence(root_pe_world);
+      internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                      root_pe_world);
+    }
+
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, 0, 1);
+    sync(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, 0, 1);
+  sync(team);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  const int wave_id = get_flat_block_id() % WF_SIZE;
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (team_obj->num_pes > static_cast<int>(ROCSHMEM_REDUCE_SYNC_SIZE)) {
+    LOGD_WARN("Tile reduce team size exceeds IPC reduce_pSync capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, wave_id, WF_SIZE);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    __builtin_amdgcn_wave_barrier();
+    if (is_thread_zero_in_wave()) {
+      if (team_obj->my_pe == root) {
+        pSync[team_obj->my_pe] = flag_val;
+        for (int i = 0; i < team_obj->num_pes; i++) {
+          wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+        }
+        threadfence_system();
+      } else {
+        fence(root_pe_world);
+        internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                        root_pe_world);
+      }
+    }
+
+    __builtin_amdgcn_wave_barrier();
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, wave_id, WF_SIZE);
+    sync_wave(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, wave_id, WF_SIZE);
+  sync_wave(team);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int IPCContext::tile_reduce_typed_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, int root) {
+  const int thread_id = get_flat_block_id();
+  const int block_size = get_flat_block_size();
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  long *pSync = team_obj->reduce_pSync;
+  const int root_pe_world = team_obj->get_pe_in_world(root);
+  const size_t tile_elements =
+      ipc_tile_num_elements(start_coord, boundary, ndim);
+  const size_t pwrk_capacity =
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
+  const size_t segment_capacity = pwrk_capacity / team_obj->num_pes;
+
+  if (tile_elements == 0) {
+    LOGD_WARN("Tile reduce: invalid coordinate range (underflow or overflow)");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (segment_capacity == 0) {
+    LOGD_WARN("Tile reduce type exceeds IPC pWrk capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (team_obj->num_pes > static_cast<int>(ROCSHMEM_REDUCE_SYNC_SIZE)) {
+    LOGD_WARN("Tile reduce team size exceeds IPC reduce_pSync capacity");
+    return ROCSHMEM_ERROR;
+  }
+
+  long flag_val = 1;
+  for (size_t segment_start = 0; segment_start < tile_elements;
+       segment_start += segment_capacity, flag_val++) {
+    const size_t segment_elems =
+        min(segment_capacity, tile_elements - segment_start);
+    int result = tile_reduce_typed_impl<T, Op>(
+        team, src_data, src_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, thread_id, block_size);
+    if (result != ROCSHMEM_SUCCESS) {
+      return result;
+    }
+
+    __syncthreads();
+    if (is_thread_zero_in_block()) {
+      if (team_obj->my_pe == root) {
+        pSync[team_obj->my_pe] = flag_val;
+        for (int i = 0; i < team_obj->num_pes; i++) {
+          wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
+        }
+        threadfence_system();
+      } else {
+        fence(root_pe_world);
+        internal_putmem(&pSync[team_obj->my_pe], &flag_val, sizeof(flag_val),
+                        root_pe_world);
+      }
+    }
+
+    __syncthreads();
+    ipc_tile_reduce_root_compute<T, Op>(
+        team, dst_data, dst_strides, start_coord, boundary, ndim, root,
+        segment_start, segment_elems, segment_capacity, thread_id, block_size);
+    sync_wg(team);
+  }
+
+  ipc_tile_reduce_reset_psync(team, root, thread_id, block_size);
+  sync_wg(team);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int ipc_tile_reduce_typed(IPCContext* ctx,
+                                            rocshmem_team_t team,
+                                            void* dst_data,
+                                            const void* src_data,
+                                            const size_t* dst_strides,
+                                            const size_t* src_strides,
+                                            const size_t* start_coord,
+                                            const size_t* boundary,
+                                            int ndim,
+                                            int root) {
+  return ctx->tile_reduce_typed<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int ipc_tile_reduce_typed_wave(IPCContext* ctx,
+                                                 rocshmem_team_t team,
+                                                 void* dst_data,
+                                                 const void* src_data,
+                                                 const size_t* dst_strides,
+                                                 const size_t* src_strides,
+                                                 const size_t* start_coord,
+                                                 const size_t* boundary,
+                                                 int ndim,
+                                                 int root) {
+  return ctx->tile_reduce_typed_wave<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ inline int ipc_tile_reduce_typed_wg(IPCContext* ctx,
+                                               rocshmem_team_t team,
+                                               void* dst_data,
+                                               const void* src_data,
+                                               const size_t* dst_strides,
+                                               const size_t* src_strides,
+                                               const size_t* start_coord,
+                                               const size_t* boundary,
+                                               int ndim,
+                                               int root) {
+  return ctx->tile_reduce_typed_wg<T, Op>(
+      team, dst_data, src_data, dst_strides, src_strides, start_coord,
+      boundary, ndim, root);
+}
+
+#define IPC_TILE_REDUCE_DISPATCH_CASES(TYPED_FN)                              \
+  case ROCSHMEM_TILE_ELEMENT_INT8:                                            \
+    return TYPED_FN<signed char, Op>(ctx, team, dst_data, src_data,            \
+                                     dst_strides, src_strides, start_coord,    \
+                                     boundary, ndim, root);                   \
+  case ROCSHMEM_TILE_ELEMENT_UINT8:                                           \
+    return TYPED_FN<unsigned char, Op>(ctx, team, dst_data, src_data,          \
+                                       dst_strides, src_strides, start_coord,  \
+                                       boundary, ndim, root);                 \
+  case ROCSHMEM_TILE_ELEMENT_INT16:                                           \
+  case ROCSHMEM_TILE_ELEMENT_SHORT:                                           \
+    return TYPED_FN<short, Op>(ctx, team, dst_data, src_data, dst_strides,     \
+                               src_strides, start_coord, boundary, ndim,       \
+                               root);                                         \
+  case ROCSHMEM_TILE_ELEMENT_UINT16:                                          \
+  case ROCSHMEM_TILE_ELEMENT_USHORT:                                          \
+    return TYPED_FN<unsigned short, Op>(                                      \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_INT32:                                           \
+  case ROCSHMEM_TILE_ELEMENT_INT:                                             \
+    return TYPED_FN<int, Op>(ctx, team, dst_data, src_data, dst_strides,       \
+                             src_strides, start_coord, boundary, ndim, root);  \
+  case ROCSHMEM_TILE_ELEMENT_UINT32:                                          \
+  case ROCSHMEM_TILE_ELEMENT_UINT:                                            \
+    return TYPED_FN<unsigned int, Op>(                                        \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_LONG:                                            \
+    return TYPED_FN<long, Op>(ctx, team, dst_data, src_data, dst_strides,      \
+                              src_strides, start_coord, boundary, ndim,        \
+                              root);                                          \
+  case ROCSHMEM_TILE_ELEMENT_ULONG:                                           \
+    return TYPED_FN<unsigned long, Op>(                                       \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_INT64:                                           \
+  case ROCSHMEM_TILE_ELEMENT_LONGLONG:                                        \
+    return TYPED_FN<long long, Op>(ctx, team, dst_data, src_data, dst_strides, \
+                                   src_strides, start_coord, boundary, ndim,   \
+                                   root);                                     \
+  case ROCSHMEM_TILE_ELEMENT_UINT64:                                          \
+  case ROCSHMEM_TILE_ELEMENT_ULONGLONG:                                       \
+    return TYPED_FN<unsigned long long, Op>(                                  \
+        ctx, team, dst_data, src_data, dst_strides, src_strides, start_coord,  \
+        boundary, ndim, root);                                                \
+  case ROCSHMEM_TILE_ELEMENT_FLOAT:                                           \
+    return TYPED_FN<float, Op>(ctx, team, dst_data, src_data, dst_strides,     \
+                               src_strides, start_coord, boundary, ndim,       \
+                               root);                                         \
+  case ROCSHMEM_TILE_ELEMENT_DOUBLE:                                          \
+    return TYPED_FN<double, Op>(ctx, team, dst_data, src_data, dst_strides,    \
+                                src_strides, start_coord, boundary, ndim, root)
+
+#define IPC_TILE_REDUCE_DISPATCH_DEF(DISPATCH_FN, TYPED_FN)                   \
+  template <ROCSHMEM_OP Op>                                                   \
+  __device__ inline int DISPATCH_FN(                                          \
+      IPCContext* ctx, rocshmem_team_t team, void* dst_data,                  \
+      const void* src_data, const size_t* dst_strides,                        \
+      const size_t* src_strides, const size_t* start_coord,                   \
+      const size_t* boundary, int ndim,                                       \
+      [[maybe_unused]] size_t element_size, int root, uint64_t flags) {       \
+    const auto element_type = static_cast<ROCSHMEM_TILE_ELEMENT_TYPE>(        \
+        (flags & ROCSHMEM_TILE_ELEMENT_TYPE_MASK) >>                          \
+        ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT);                                    \
+                                                                               \
+    switch (element_type) {                                                   \
+      IPC_TILE_REDUCE_DISPATCH_CASES(TYPED_FN);                               \
+      default:                                                                \
+        LOGD_WARN("Tile reduce element type not specified for IPC backend");   \
+        return ROCSHMEM_ERROR;                                                \
+    }                                                                         \
+  }
+
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_dispatch, ipc_tile_reduce_typed)
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_wave_dispatch,
+                             ipc_tile_reduce_typed_wave)
+IPC_TILE_REDUCE_DISPATCH_DEF(ipc_tile_reduce_wg_dispatch,
+                             ipc_tile_reduce_typed_wg)
+
+#undef IPC_TILE_REDUCE_DISPATCH_DEF
+#undef IPC_TILE_REDUCE_DISPATCH_CASES
+
 // SUM Reductions - Type-erased implementations
-__device__ inline int IPCContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                  [[maybe_unused]] void* dst_data,
-                                                  [[maybe_unused]] const void* src_data,
-                                                  [[maybe_unused]] const size_t* dst_strides,
-                                                  [[maybe_unused]] const size_t* src_strides,
-                                                  [[maybe_unused]] const size_t* start_coord,
-                                                  [[maybe_unused]] const size_t* boundary,
-                                                  [[maybe_unused]] int ndim,
-                                                  [[maybe_unused]] size_t element_size,
-                                                  [[maybe_unused]] int root,
-                                                  [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_sum_reduce(rocshmem_team_t team,
+                                                  void* dst_data,
+                                                  const void* src_data,
+                                                  const size_t* dst_strides,
+                                                  const size_t* src_strides,
+                                                  const size_t* start_coord,
+                                                  const size_t* boundary,
+                                                  int ndim,
+                                                  size_t element_size,
+                                                  int root,
+                                                  uint64_t flags) {
+  return ipc_tile_reduce_dispatch<ROCSHMEM_SUM>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                       [[maybe_unused]] void* dst_data,
-                                                       [[maybe_unused]] const void* src_data,
-                                                       [[maybe_unused]] const size_t* dst_strides,
-                                                       [[maybe_unused]] const size_t* src_strides,
-                                                       [[maybe_unused]] const size_t* start_coord,
-                                                       [[maybe_unused]] const size_t* boundary,
-                                                       [[maybe_unused]] int ndim,
-                                                       [[maybe_unused]] size_t element_size,
-                                                       [[maybe_unused]] int root,
-                                                       [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_sum_reduce_wave(rocshmem_team_t team,
+                                                       void* dst_data,
+                                                       const void* src_data,
+                                                       const size_t* dst_strides,
+                                                       const size_t* src_strides,
+                                                       const size_t* start_coord,
+                                                       const size_t* boundary,
+                                                       int ndim,
+                                                       size_t element_size,
+                                                       int root,
+                                                       uint64_t flags) {
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_SUM>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                     [[maybe_unused]] void* dst_data,
-                                                     [[maybe_unused]] const void* src_data,
-                                                     [[maybe_unused]] const size_t* dst_strides,
-                                                     [[maybe_unused]] const size_t* src_strides,
-                                                     [[maybe_unused]] const size_t* start_coord,
-                                                     [[maybe_unused]] const size_t* boundary,
-                                                     [[maybe_unused]] int ndim,
-                                                     [[maybe_unused]] size_t element_size,
-                                                     [[maybe_unused]] int root,
-                                                     [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_sum_reduce_wg(rocshmem_team_t team,
+                                                     void* dst_data,
+                                                     const void* src_data,
+                                                     const size_t* dst_strides,
+                                                     const size_t* src_strides,
+                                                     const size_t* start_coord,
+                                                     const size_t* boundary,
+                                                     int ndim,
+                                                     size_t element_size,
+                                                     int root,
+                                                     uint64_t flags) {
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_SUM>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 // MAX Reductions - Type-erased interface
-__device__ inline int IPCContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                   [[maybe_unused]] void* dst_data,
-                                                   [[maybe_unused]] const void* src_data,
-                                                   [[maybe_unused]] const size_t* dst_strides,
-                                                   [[maybe_unused]] const size_t* src_strides,
-                                                   [[maybe_unused]] const size_t* start_coord,
-                                                   [[maybe_unused]] const size_t* boundary,
-                                                   [[maybe_unused]] int ndim,
-                                                   [[maybe_unused]] size_t element_size,
-                                                   [[maybe_unused]] int root,
-                                                   [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_max_reduce(rocshmem_team_t team,
+                                                   void* dst_data,
+                                                   const void* src_data,
+                                                   const size_t* dst_strides,
+                                                   const size_t* src_strides,
+                                                   const size_t* start_coord,
+                                                   const size_t* boundary,
+                                                   int ndim,
+                                                   size_t element_size,
+                                                   int root,
+                                                   uint64_t flags) {
+  return ipc_tile_reduce_dispatch<ROCSHMEM_MAX>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                        [[maybe_unused]] void* dst_data,
-                                                        [[maybe_unused]] const void* src_data,
-                                                        [[maybe_unused]] const size_t* dst_strides,
-                                                        [[maybe_unused]] const size_t* src_strides,
-                                                        [[maybe_unused]] const size_t* start_coord,
-                                                        [[maybe_unused]] const size_t* boundary,
-                                                        [[maybe_unused]] int ndim,
-                                                        [[maybe_unused]] size_t element_size,
-                                                        [[maybe_unused]] int root,
-                                                        [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_max_reduce_wave(rocshmem_team_t team,
+                                                        void* dst_data,
+                                                        const void* src_data,
+                                                        const size_t* dst_strides,
+                                                        const size_t* src_strides,
+                                                        const size_t* start_coord,
+                                                        const size_t* boundary,
+                                                        int ndim,
+                                                        size_t element_size,
+                                                        int root,
+                                                        uint64_t flags) {
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_MAX>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] void* dst_data,
-                                                      [[maybe_unused]] const void* src_data,
-                                                      [[maybe_unused]] const size_t* dst_strides,
-                                                      [[maybe_unused]] const size_t* src_strides,
-                                                      [[maybe_unused]] const size_t* start_coord,
-                                                      [[maybe_unused]] const size_t* boundary,
-                                                      [[maybe_unused]] int ndim,
-                                                      [[maybe_unused]] size_t element_size,
-                                                      [[maybe_unused]] int root,
-                                                      [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_max_reduce_wg(rocshmem_team_t team,
+                                                      void* dst_data,
+                                                      const void* src_data,
+                                                      const size_t* dst_strides,
+                                                      const size_t* src_strides,
+                                                      const size_t* start_coord,
+                                                      const size_t* boundary,
+                                                      int ndim,
+                                                      size_t element_size,
+                                                      int root,
+                                                      uint64_t flags) {
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_MAX>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 // MIN Reductions - Type-erased interface
-__device__ inline int IPCContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                   [[maybe_unused]] void* dst_data,
-                                                   [[maybe_unused]] const void* src_data,
-                                                   [[maybe_unused]] const size_t* dst_strides,
-                                                   [[maybe_unused]] const size_t* src_strides,
-                                                   [[maybe_unused]] const size_t* start_coord,
-                                                   [[maybe_unused]] const size_t* boundary,
-                                                   [[maybe_unused]] int ndim,
-                                                   [[maybe_unused]] size_t element_size,
-                                                   [[maybe_unused]] int root,
-                                                   [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_min_reduce(rocshmem_team_t team,
+                                                   void* dst_data,
+                                                   const void* src_data,
+                                                   const size_t* dst_strides,
+                                                   const size_t* src_strides,
+                                                   const size_t* start_coord,
+                                                   const size_t* boundary,
+                                                   int ndim,
+                                                   size_t element_size,
+                                                   int root,
+                                                   uint64_t flags) {
+  return ipc_tile_reduce_dispatch<ROCSHMEM_MIN>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                        [[maybe_unused]] void* dst_data,
-                                                        [[maybe_unused]] const void* src_data,
-                                                        [[maybe_unused]] const size_t* dst_strides,
-                                                        [[maybe_unused]] const size_t* src_strides,
-                                                        [[maybe_unused]] const size_t* start_coord,
-                                                        [[maybe_unused]] const size_t* boundary,
-                                                        [[maybe_unused]] int ndim,
-                                                        [[maybe_unused]] size_t element_size,
-                                                        [[maybe_unused]] int root,
-                                                        [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_min_reduce_wave(rocshmem_team_t team,
+                                                        void* dst_data,
+                                                        const void* src_data,
+                                                        const size_t* dst_strides,
+                                                        const size_t* src_strides,
+                                                        const size_t* start_coord,
+                                                        const size_t* boundary,
+                                                        int ndim,
+                                                        size_t element_size,
+                                                        int root,
+                                                        uint64_t flags) {
+  return ipc_tile_reduce_wave_dispatch<ROCSHMEM_MIN>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
-__device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] void* dst_data,
-                                                      [[maybe_unused]] const void* src_data,
-                                                      [[maybe_unused]] const size_t* dst_strides,
-                                                      [[maybe_unused]] const size_t* src_strides,
-                                                      [[maybe_unused]] const size_t* start_coord,
-                                                      [[maybe_unused]] const size_t* boundary,
-                                                      [[maybe_unused]] int ndim,
-                                                      [[maybe_unused]] size_t element_size,
-                                                      [[maybe_unused]] int root,
-                                                      [[maybe_unused]] uint64_t flags) {
-  LOGD_WARN("Tile API not implemented for IPC backend");
-  return ROCSHMEM_ERROR;
+__device__ inline int IPCContext::tile_min_reduce_wg(rocshmem_team_t team,
+                                                      void* dst_data,
+                                                      const void* src_data,
+                                                      const size_t* dst_strides,
+                                                      const size_t* src_strides,
+                                                      const size_t* start_coord,
+                                                      const size_t* boundary,
+                                                      int ndim,
+                                                      size_t element_size,
+                                                      int root,
+                                                      uint64_t flags) {
+  return ipc_tile_reduce_wg_dispatch<ROCSHMEM_MIN>(
+      this, team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
 }
 
 }  // namespace rocshmem

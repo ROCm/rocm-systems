@@ -319,7 +319,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable = false; } };
+    const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;
@@ -328,11 +328,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
-    int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
-               : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
-               : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
-               : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
-                                                  : -1;
+    const int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
+                     : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
+                     : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
+                     : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
+                                                        : -1;
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {

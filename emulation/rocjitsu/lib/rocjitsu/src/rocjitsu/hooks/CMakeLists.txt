@@ -108,11 +108,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # target stay identical except for those two axes -- the production target's ABI
     # and compile definitions must be invariant across BUILD_TESTING.
     function(rj_add_hotswap_hook _target _export_map _test_hooks)
-        add_library(${_target} SHARED gfx1250_b0_a0_hotswap.cpp)
+        # The translation store lives in the DBT layer and is compiled in rather
+        # than linked, because this DSO deliberately depends on nothing but the
+        # fixed-profile translator. Another consumer that wants reuse adds the
+        # same source to its own target; nothing about it is specific to this
+        # hook, and the two would keep separate trees.
+        add_library(
+            ${_target}
+            SHARED
+            gfx1250_b0_a0_hotswap.cpp
+            ${ROCJITSU_SRC_DIR}/rocjitsu/code/dbt/translation_store.cpp
+        )
         set_target_properties(${_target} PROPERTIES OUTPUT_NAME ${_target})
         target_link_libraries(
             ${_target}
-            PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads
+            PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
         )
         target_include_directories(
             ${_target}
@@ -125,13 +135,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE -ffunction-sections -fdata-sections
         )
         if(_test_hooks)
-            target_compile_definitions(${_target} PRIVATE RJ_HOTSWAP_TEST_HOOKS)
+            target_compile_definitions(
+                ${_target}
+                PRIVATE RJ_HOTSWAP_TEST_HOOKS RJ_TRANSLATION_STORE_TEST_HOOKS
+            )
         endif()
         set(_map ${CMAKE_CURRENT_SOURCE_DIR}/${_export_map})
         set_property(TARGET ${_target} APPEND PROPERTY LINK_DEPENDS ${_map})
+        # --build-id is not decoration here: the translation store keys entries on
+        # the TRANSLATOR's note, and the same flag is what gives that shared
+        # object one. Without it the store finds no identity and disables itself.
         target_link_options(
             ${_target}
-            PRIVATE "LINKER:--gc-sections" "LINKER:--version-script=${_map}"
+            PRIVATE
+                "LINKER:--gc-sections"
+                "LINKER:--version-script=${_map}"
+                "LINKER:--build-id=sha1"
+        )
+        # The translator is a shared object installed beside this one. Resolving
+        # it relative to our own location keeps an install relocatable and, more
+        # importantly, keeps every consumer bound to the same copy: the cache
+        # identity IS that object's build id, so two consumers resolving to
+        # different copies would silently stop sharing entries.
+        set_target_properties(
+            ${_target}
+            PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN"
         )
     endfunction()
 

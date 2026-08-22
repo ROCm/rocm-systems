@@ -5,6 +5,8 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
@@ -17,11 +19,15 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -175,6 +181,16 @@ enum class ScalarSop2Op {
 struct PcValue {
   int64_t offset = 0;
   uint64_t source_getpc_offset = 0;
+  /// @brief Low SGPR of the pair the producing `s_getpc_b64` wrote.
+  ///
+  /// @details Not always the pair the eventual consumer reads. A lane-banked dispatcher builds
+  /// the address in a scratch pair, stashes it through `v_writelane_b32`, and restores it into a
+  /// different pair before the transfer. patch_recovered_builder_fixups regenerates only the add
+  /// half and leaves the original getpc in place, so its replacement has to name this pair:
+  /// naming the consumer's would pair a fresh add against a getpc that writes something else and
+  /// materialize an address derived from an unrelated register. Fully determined by
+  /// source_getpc_offset, so carrying it splits no lattice value that was previously merged.
+  uint16_t source_sreg = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
   /// @brief False once a non-chain instruction was observed inside the recovery
@@ -183,6 +199,16 @@ struct PcValue {
   /// two builder steps would be erased. A value that stops being contiguous can
   /// never regain the property, so any later delta step keeps it false.
   bool contiguous = true;
+  /// @brief True between a split low `s_add_u32` and the `s_addc_u32` that closes it.
+  ///
+  /// @details The high-half step only advances the recovery range; it never changes @ref offset,
+  /// so a half-built chain is numerically indistinguishable from a finished one. Publishing the
+  /// half-built state would let the patcher regenerate `[begin, end)` -- which stops before the
+  /// carry -- and leave that `s_addc_u32` to apply a stale SCC to the freshly written high half,
+  /// because the gfx1250 replacement is the SCC-neutral `s_add_nc_u64`. The single-instruction
+  /// `s_add_nc_u64` form and the temp-delta patterns that already absorb their own carry never set
+  /// this.
+  bool pending_high_carry = false;
 
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
@@ -220,6 +246,20 @@ struct SgprWriteMask {
       set(static_cast<uint16_t>(ref.index + i));
   }
 
+  [[nodiscard]] bool test(uint16_t sgpr) const {
+    if (sgpr < 64)
+      return (lo & (uint64_t{1} << sgpr)) != 0;
+    if (sgpr < REGISTER_SET_MAX_SGPRS)
+      return (hi & (uint64_t{1} << (sgpr - 64))) != 0;
+    return false;
+  }
+
+  SgprWriteMask &operator|=(const SgprWriteMask &other) {
+    lo |= other.lo;
+    hi |= other.hi;
+    return *this;
+  }
+
   template <typename F> void for_each(F &&f) const {
     uint64_t bits = lo;
     while (bits != 0) {
@@ -234,6 +274,58 @@ struct SgprWriteMask {
       f(sgpr);
       bits &= bits - 1;
     }
+  }
+};
+
+struct CalleeSummary {
+  SgprWriteMask sgprs;
+  std::bitset<REGISTER_SET_MAX_VGPRS> vgprs;
+  std::optional<uint8_t> return_mode;
+  std::optional<bool> return_gpr_idx_enabled;
+
+  CalleeSummary &operator|=(const CalleeSummary &other) {
+    sgprs |= other.sgprs;
+    vgprs |= other.vgprs;
+    if (return_mode != other.return_mode)
+      return_mode = std::nullopt;
+    if (return_gpr_idx_enabled != other.return_gpr_idx_enabled)
+      return_gpr_idx_enabled = std::nullopt;
+    return *this;
+  }
+};
+
+struct CalleeSummaryCacheKey {
+  uint64_t target = 0;
+  uint16_t return_pair = 0;
+  std::optional<uint8_t> mode;
+  std::optional<bool> gpr_idx_enabled;
+
+  friend bool operator==(const CalleeSummaryCacheKey &, const CalleeSummaryCacheKey &) = default;
+};
+
+struct CalleeSummaryCacheKeyHash {
+  [[nodiscard]] size_t operator()(const CalleeSummaryCacheKey &key) const {
+    size_t hash = std::hash<uint64_t>{}(key.target);
+    hash ^= std::hash<uint16_t>{}(key.return_pair) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<std::optional<uint8_t>>{}(key.mode) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<std::optional<bool>>{}(key.gpr_idx_enabled) + 0x9e3779b9u + (hash << 6) +
+            (hash >> 2);
+    return hash;
+  }
+};
+
+struct CalleeSummaryGroupKey {
+  uint64_t target = 0;
+  uint16_t return_pair = 0;
+
+  friend bool operator==(const CalleeSummaryGroupKey &, const CalleeSummaryGroupKey &) = default;
+};
+
+struct CalleeSummaryGroupKeyHash {
+  [[nodiscard]] size_t operator()(const CalleeSummaryGroupKey &key) const {
+    size_t hash = std::hash<uint64_t>{}(key.target);
+    hash ^= std::hash<uint16_t>{}(key.return_pair) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+    return hash;
   }
 };
 
@@ -579,7 +671,7 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
@@ -616,7 +708,7 @@ private:
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -1011,6 +1103,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
   value.offset += delta;
   value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  value.pending_high_carry = true;
   return true;
 }
 
@@ -1031,6 +1124,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (sop2_sreg_inline_zero_to_sreg(inst, word, *addc_u32_opcode, pair_hi, pair_hi) ||
       sop2_sreg_inline_zero_to_sreg(inst, word, *subb_u32_opcode, pair_hi, pair_hi)) {
     value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    value.pending_high_carry = false;
     return true;
   }
 
@@ -1042,6 +1136,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                 literal)) {
     if (literal == 0 || literal == 0xffffffffu) {
       value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+      value.pending_high_carry = false;
       return true;
     }
   }
@@ -1061,7 +1156,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || inst.mnemonic() != "s_add_nc_u64" ||
       inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
     return false;
 
@@ -1113,10 +1208,45 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_offset = ctx.insts[inst_index]->src_loc(),
       .source_target_offset = static_cast<uint64_t>(value.offset),
       .source_call_sreg = pair_lo,
+      .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
+
+/// @brief Identity of a fixup for deduplication: exactly the fields append_unique() compares.
+struct FixupIdentity {
+  uint64_t call;
+  uint64_t target;
+  uint64_t getpc;
+  uint64_t begin;
+  uint64_t end;
+  uint16_t sreg;
+  friend bool operator==(const FixupIdentity &, const FixupIdentity &) = default;
+};
+
+struct FixupIdentityHash {
+  size_t operator()(const FixupIdentity &id) const noexcept {
+    size_t h = std::hash<uint64_t>{}(id.call);
+    const auto mix = [&h](uint64_t v) {
+      h ^= std::hash<uint64_t>{}(v) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    };
+    mix(id.target);
+    mix(id.getpc);
+    mix(id.begin);
+    mix(id.end);
+    mix(id.sreg);
+    return h;
+  }
+};
+
+[[nodiscard]] FixupIdentity fixup_identity(const IndirectCallFixup &fixup) {
+  return {fixup.source_call_offset,         fixup.source_target_offset,
+          fixup.source_getpc_offset,        fixup.source_recovery_begin_offset,
+          fixup.source_recovery_end_offset, fixup.source_call_sreg};
+}
+
+using FixupIndex = std::unordered_map<FixupIdentity, size_t, FixupIdentityHash>;
 
 bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup) {
   // Deduplicate only FULLY identical fixups. A consumer with several distinct
@@ -1148,6 +1278,26 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
     duplicate->source_requires_xcnt_drain =
         duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
+    return false;
+  }
+  out.push_back(fixup);
+  return true;
+}
+
+/// @brief append_unique() with an O(1) duplicate lookup.
+///
+/// @details Same semantics as the scanning form -- same identity, same monotonic flag merge -- but
+/// the caller keeps an index so accumulating N fixups costs O(N) rather than O(N^2). A large
+/// device library recovers tens of thousands of them, and the scan was quadratic in that count on
+/// every round.
+bool append_unique_indexed(std::vector<IndirectCallFixup> &out, FixupIndex &index,
+                           IndirectCallFixup fixup) {
+  const auto [it, inserted] = index.try_emplace(fixup_identity(fixup), out.size());
+  if (!inserted) {
+    IndirectCallFixup &duplicate = out[it->second];
+    duplicate.source_incomplete = duplicate.source_incomplete || fixup.source_incomplete;
+    duplicate.source_requires_xcnt_drain =
+        duplicate.source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
   }
   out.push_back(fixup);
@@ -1289,7 +1439,6 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   std::vector<uint8_t> entries(blocks.size(), 0);
   if (!entries.empty())
     entries[0] = 1;
-
   // Analysis blocks are built from the ordered instruction stream. Both input
   // sequences are therefore ascending and can be matched in one merge pass.
   assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
@@ -1421,7 +1570,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
@@ -1506,7 +1655,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
@@ -1621,10 +1770,21 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // Publish every still-live builder's current value. Called only where the
   // tracked pairs are about to stop being tracked, so the published value is
   // the one the original builder range really produces at that point.
+  // A chain still waiting on its s_addc_u32 is not the value the range produces, and no rewrite of
+  // [begin, end) can be right for it: the regenerated range stops before the carry. Poison instead
+  // of publishing, so a whole-scope relocation claim fails closed rather than resting on a value
+  // the program never finished computing.
+  const auto publish_or_poison = [&](uint16_t pair_lo, const PcValue &value) {
+    if (value.pending_high_carry)
+      poison_pc_builder(pc_builders, value.source_getpc_offset);
+    else
+      note_pc_builder(pc_builders, pair_lo, value);
+  };
+
   const auto note_live_pc_builders = [&] {
     for (uint16_t pair_lo : state.active_pairs()) {
       if (const PcValue *value = state.builder(pair_lo))
-        note_pc_builder(pc_builders, pair_lo, *value);
+        publish_or_poison(pair_lo, *value);
     }
   };
 
@@ -1637,14 +1797,22 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // s_getpc_b64 writes the address of the following instruction. The
       // low/high add sequence edits this base to the eventual branch target.
       const uint16_t pair_lo = *facts.getpc_sdst;
-      // A second builder overwriting the same pair abandons the first one at an
-      // unknown point in its chain. No single delta rewrite is provably correct
-      // for an abandoned chain, so poison it rather than publish a partial value.
+      // A second builder seeding the same pair is a stable point for the first one, in exactly the
+      // sense note_pc_builder means: the pair stops being tracked as the old builder here, and the
+      // old chain cannot be extended afterwards because any later arithmetic on this pair edits the
+      // new builder's value. Whatever the replaced range produces at this instruction is therefore
+      // final, and it is precisely what any consumer between the two getpcs read -- so publish it.
+      //
+      // Poisoning instead used to abandon a completed producer merely because its pair was reused.
+      // Code that materializes several function pointers through one scratch pair -- build, spill
+      // to a VGPR lane, rebuild -- would leave a poisoned record behind for the first pointer and
+      // defeat any whole-scope or whole-object claim that every code address is relocated.
       if (const PcValue *replaced = state.builder(pair_lo))
-        poison_pc_builder(pc_builders, replaced->source_getpc_offset);
+        publish_or_poison(pair_lo, *replaced);
       seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
+                                         .source_sreg = pair_lo,
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
@@ -1790,16 +1958,67 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // that bounded set avoids repeatedly scanning every fact
   // to recover information that changes only when the corresponding vector does.
   std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
-  std::deque<size_t> worklist;
+
+  // Visit blocks in reverse postorder. The least fixed point of this monotone
+  // join does not depend on the visit order, but the order decides how many
+  // times it is recomputed. A recovered indirect call gives its shared callee
+  // block one predecessor per call site -- thousands of them on a large device
+  // library -- and popping in block-index order then re-evaluates that
+  // O(predecessors x pairs) join once for every predecessor that happens to be
+  // processed after it. Reverse postorder evaluates a predecessor before its
+  // successors wherever the graph is acyclic, so a block is normally recomputed
+  // only for its back edges. On the largest hipTensor object this is the
+  // difference between 84.8M block visits and 558k, and between 264 s and 0.7 s
+  // per round.
+  //
+  // The order is a pure function of the block graph: roots are tried in
+  // ascending block index, successors in their stored order, and the root loop
+  // covers every block, so blocks unreachable from any earlier root still
+  // receive a position and are still seeded onto the worklist below.
+  std::vector<size_t> rpo_order;
+  rpo_order.reserve(blocks.size());
+  {
+    std::vector<uint8_t> visited(blocks.size(), 0);
+    std::vector<std::pair<size_t, size_t>> stack;
+    for (size_t root = 0; root < blocks.size(); ++root) {
+      if (visited[root])
+        continue;
+      visited[root] = 1;
+      stack.emplace_back(root, 0);
+      while (!stack.empty()) {
+        const size_t node = stack.back().first;
+        size_t &next_successor = stack.back().second;
+        if (next_successor < blocks[node].successors.size()) {
+          const size_t successor = blocks[node].successors[next_successor++];
+          if (successor < blocks.size() && !visited[successor]) {
+            visited[successor] = 1;
+            stack.emplace_back(successor, 0);
+          }
+          continue;
+        }
+        rpo_order.push_back(node);
+        stack.pop_back();
+      }
+    }
+  }
+  std::ranges::reverse(rpo_order);
+  std::vector<size_t> rpo_position(blocks.size(), 0);
+  for (size_t position = 0; position < rpo_order.size(); ++position)
+    rpo_position[rpo_order[position]] = position;
+
+  // Keyed by reverse-postorder position so the lowest position is always popped
+  // next. Positions are unique, so this is a total order and the pop sequence is
+  // fully determined by the block graph.
+  std::set<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    worklist.push_back(block_index);
+    worklist.insert(rpo_position[block_index]);
     on_worklist[block_index] = true;
   }
 
   while (!worklist.empty()) {
-    const size_t block_index = worklist.front();
-    worklist.pop_front();
+    const size_t block_index = rpo_order[*worklist.begin()];
+    worklist.erase(worklist.begin());
     on_worklist[block_index] = false;
 
     LatticeFacts new_entry;
@@ -1885,7 +2104,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
-      worklist.push_back(successor);
+      worklist.insert(rpo_position[successor]);
       on_worklist[successor] = true;
     }
   }
@@ -1982,12 +2201,366 @@ struct StashedPcHalf {
   friend bool operator==(const StashedPcHalf &, const StashedPcHalf &) = default;
 };
 
+/// @brief Copy-on-write lane facts propagated through the CFG.
+///
+/// @details Most blocks pass an unchanged lane table to their successors. Sharing
+/// that immutable table keeps the retained storage proportional to distinct
+/// transfer states instead of multiplying every live slot by every CFG block.
+class VectorLaneFacts {
+  using Map = std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash>;
+
+public:
+  using ConstIterator = Map::const_iterator;
+
+  [[nodiscard]] ConstIterator find(VectorLaneSlot slot) const { return values().find(slot); }
+  [[nodiscard]] ConstIterator end() const { return values().end(); }
+  [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
+  [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
+
+  void set(VectorLaneSlot slot, StashedPcHalf half) {
+    if (values_) {
+      const auto found = values_->find(slot);
+      if (found != values_->end() && found->second == half)
+        return;
+    }
+    writable_values().insert_or_assign(slot, std::move(half));
+  }
+
+  void erase(VectorLaneSlot slot) {
+    if (!values_ || !values_->contains(slot))
+      return;
+    writable_values().erase(slot);
+    reset_if_empty();
+  }
+
+  template <typename Predicate> void erase_if(Predicate &&predicate) {
+    if (!values_ || std::ranges::none_of(*values_, predicate))
+      return;
+    std::erase_if(writable_values(), std::forward<Predicate>(predicate));
+    reset_if_empty();
+  }
+
+  void intersect_with(const VectorLaneFacts &other) {
+    if (!values_ || values_ == other.values_)
+      return;
+    const auto conflicts = [&](const auto &item) {
+      const auto incoming = other.find(item.first);
+      return incoming == other.end() || incoming->second != item.second;
+    };
+    erase_if(conflicts);
+  }
+
+  void clear() { values_.reset(); }
+
+  friend bool operator==(const VectorLaneFacts &lhs, const VectorLaneFacts &rhs) {
+    return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
+  }
+
+private:
+  [[nodiscard]] const Map &values() const {
+    static const Map empty;
+    return values_ ? *values_ : empty;
+  }
+
+  [[nodiscard]] Map &writable_values() {
+    if (!values_)
+      values_ = std::make_shared<Map>();
+    else if (!values_.unique())
+      values_ = std::make_shared<Map>(*values_);
+    return *values_;
+  }
+
+  void reset_if_empty() {
+    if (values_->empty())
+      values_.reset();
+  }
+
+  std::shared_ptr<Map> values_;
+};
+
+// Bound every variable-size fact retained by lane-table recovery. One unit is
+// deliberately large enough for a lane-map node or restored-SGPR entry. Exact
+// callee summaries are charged by their fixed object size, including a cache
+// node allowance. Logical state facts are charged once per entry/exit/call
+// state even when their backing storage is shared, so the bound is
+// conservative. Recovery is optional and fails closed on exhaustion.
+constexpr size_t kRetainedAnalysisUnitBytes = 64;
+// The retained charge scales with block count, not with how many lane stashes an object actually
+// uses: hipTensor's contraction kernels reach ~2.9M units across ~55k blocks and exhausted a 1<<20
+// bound partway through, which abandons lane recovery for the WHOLE object and leaves every
+// s_swap_pc_i64 unrecovered for the by-construction gate to refuse. The charge is deliberately
+// conservative -- states share copy-on-write backing and are billed once per entry/exit/call even
+// when identical -- so the nominal figure overstates real memory several times over. Measured peak
+// RSS across the hipTensor objects this admits is 243 MB, 273 MB, 288 MB and 653 MB for a 3.4 MB
+// input, against the corpus per-object budget of 4096 MiB, and the slowest takes 4.4 s of a 30 s
+// budget. Exhaustion remains fail-closed, so a still larger object loses recovery rather than
+// memory.
+//
+// Sized to admit the objects real workloads dispatch rather than to leave headroom. hipTensor's
+// scale_contraction and trinary_scale_contraction tests dispatch 4.65 MB and 4.70 MB objects that
+// 1<<24 still refused; at this bound they translate in 7.6 s and 1.06 GB, against a 30 s and
+// 4096 MiB per-object budget.
+//
+// Raising it does NOT expose the loader to the multi-minute translations some very large objects
+// take. Those are pre-existing and not governed by this constant: the 8.3 MB hipTensor object costs
+// 510 s / 2.4 GB on unmodified develop at 1<<20, 541 s at 1<<24 and 552 s at 1<<26 -- about 6%
+// across a 64x change in the bound, because the time is spent outside lane recovery almost
+// entirely. Exhaustion stays fail-closed: an object that outgrows this loses recovery, not memory.
+constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 26;
+constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
+constexpr size_t kCalleeSummaryCacheEntryUnits =
+    1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
+         1) /
+            kRetainedAnalysisUnitBytes;
+
+/// @brief Sparse, canonically ordered SGPR facts carried between CFG blocks.
+///
+/// @details Lane-restored PC halves are uncommon and normally occupy one pair.
+/// Shared, ordered vectors keep copies of an unchanged flow state cheap while
+/// preserving deterministic equality and lookup. A mutation detaches only the
+/// affected state.
+class RestoredSgprFacts {
+  struct Entry {
+    uint16_t sgpr = 0;
+    StashedPcHalf half;
+
+    friend bool operator==(const Entry &, const Entry &) = default;
+  };
+
+  using Storage = std::vector<Entry>;
+
+public:
+  [[nodiscard]] const StashedPcHalf *find(uint16_t sgpr) const {
+    const Storage &current = values();
+    const auto it =
+        std::lower_bound(current.begin(), current.end(), sgpr,
+                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    return it != current.end() && it->sgpr == sgpr ? &it->half : nullptr;
+  }
+
+  void set(uint16_t sgpr, StashedPcHalf half) {
+    const Storage &current = values();
+    const auto found =
+        std::lower_bound(current.begin(), current.end(), sgpr,
+                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    const size_t index = static_cast<size_t>(found - current.begin());
+    if (found != current.end() && found->sgpr == sgpr) {
+      if (found->half == half)
+        return;
+      writable_values()[index].half = std::move(half);
+      return;
+    }
+    Storage &updated = writable_values();
+    updated.insert(updated.begin() + static_cast<Storage::difference_type>(index),
+                   Entry{.sgpr = sgpr, .half = std::move(half)});
+  }
+
+  void erase(uint16_t sgpr) {
+    if (!values_)
+      return;
+    const auto found =
+        std::lower_bound(values_->begin(), values_->end(), sgpr,
+                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    if (found == values_->end() || found->sgpr != sgpr)
+      return;
+    const size_t index = static_cast<size_t>(found - values_->begin());
+    Storage &updated = writable_values();
+    updated.erase(updated.begin() + static_cast<Storage::difference_type>(index));
+    reset_if_empty();
+  }
+
+  template <typename Predicate> void erase_if(Predicate &&predicate) {
+    if (!values_ ||
+        std::ranges::none_of(*values_, [&](const Entry &entry) { return predicate(entry.sgpr); }))
+      return;
+    std::erase_if(writable_values(), [&](const Entry &entry) { return predicate(entry.sgpr); });
+    reset_if_empty();
+  }
+
+  void intersect_with(const RestoredSgprFacts &other) {
+    if (!values_ || values_ == other.values_)
+      return;
+    const auto conflicts = [&](const Entry &entry) {
+      const StashedPcHalf *incoming = other.find(entry.sgpr);
+      return incoming == nullptr || *incoming != entry.half;
+    };
+    if (std::ranges::none_of(*values_, conflicts))
+      return;
+    std::erase_if(writable_values(), conflicts);
+    reset_if_empty();
+  }
+
+  [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
+  [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
+  void clear() { values_.reset(); }
+
+  friend bool operator==(const RestoredSgprFacts &lhs, const RestoredSgprFacts &rhs) {
+    return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
+  }
+
+private:
+  [[nodiscard]] const Storage &values() const {
+    static const Storage empty;
+    return values_ ? *values_ : empty;
+  }
+
+  [[nodiscard]] Storage &writable_values() {
+    if (!values_)
+      values_ = std::make_shared<Storage>();
+    else if (!values_.unique())
+      values_ = std::make_shared<Storage>(*values_);
+    return *values_;
+  }
+
+  void reset_if_empty() {
+    if (values_->empty())
+      values_.reset();
+  }
+
+  std::shared_ptr<Storage> values_;
+};
+
 struct VectorLaneFlowState {
-  std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  VectorLaneFacts slots;
+  RestoredSgprFacts restored_sgprs;
   std::optional<uint8_t> vgpr_msb_imm;
+  std::optional<bool> gpr_idx_enabled;
 
   friend bool operator==(const VectorLaneFlowState &, const VectorLaneFlowState &) = default;
 };
+
+/// @brief Call-only dataflow metadata, allocated only for blocks with call edges.
+struct CallEdgeInfo {
+  std::unordered_set<size_t> target_successors;
+  std::optional<size_t> continuation_successor;
+  std::optional<VectorLaneFlowState> entry_state;
+};
+
+// The pass also allocates dense per-instruction and per-block scaffolding before
+// retaining any logical facts. Bound that fixed footprint independently of the
+// fact budget below. The estimates use the actual value sizes plus conservative
+// pointer allowances for hash nodes, buckets, predecessor storage, and the
+// worklist. Optional recovery fails closed when either budget would be exceeded.
+constexpr size_t kMaxAnalysisScaffoldingBytes = size_t{256} << 20;
+constexpr size_t kInstructionScaffoldingBytes =
+    sizeof(std::pair<const uint64_t, size_t>) + 4 * sizeof(void *) + sizeof(size_t);
+constexpr size_t kBlockScaffoldingBytes =
+    sizeof(std::vector<size_t>) + 2 * sizeof(VectorLaneFlowState) + sizeof(CallEdgeInfo) +
+    6 * sizeof(void *) + 3 * sizeof(size_t) + 2 * sizeof(uint8_t);
+
+[[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
+  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  if (slice.id != amdgpu::MODE_HWREG)
+    return false;
+  const uint16_t end = static_cast<uint16_t>(
+      std::min<uint32_t>(32, static_cast<uint32_t>(slice.begin) + slice.width));
+  return slice.begin < amdgpu::VGPR_MSB_MODE_SHIFT + 8 && end > amdgpu::VGPR_MSB_MODE_SHIFT;
+}
+
+[[nodiscard]] constexpr bool hwreg_slice_overlaps_mode_bit(uint16_t hwreg, uint16_t bit) {
+  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  return slice.id == amdgpu::MODE_HWREG && slice.begin <= bit &&
+         static_cast<uint32_t>(slice.begin) + slice.width > bit;
+}
+
+[[nodiscard]] std::optional<uint8_t> vgpr_bank_for_role(std::optional<uint8_t> mode,
+                                                        amdgpu::VgprMsbRole role) {
+  return amdgpu::vgpr_msb_bank_for_role(mode, role);
+}
+
+[[nodiscard]] std::optional<uint32_t> instruction_literal(const Instruction &inst,
+                                                          std::span<const uint8_t> text);
+
+void update_vgpr_mode(std::optional<uint8_t> &mode, const Instruction &inst,
+                      std::span<const uint8_t> text) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic == "s_set_vgpr_msb") {
+    if (const Operand *imm = inst.src_operand(0))
+      mode = static_cast<uint8_t>(imm->encoding_value() & 0xffu);
+    else
+      mode = std::nullopt;
+    return;
+  }
+  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+    return;
+  const Operand *hwreg_operand = inst.dst_operand(0);
+  if (hwreg_operand == nullptr) {
+    mode = std::nullopt;
+    return;
+  }
+  const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  if (mnemonic == "s_setreg_b32") {
+    if (hwreg_slice_overlaps_vgpr_msb(hwreg))
+      mode = std::nullopt;
+    return;
+  }
+  amdgpu::VgprMsbBanks banks = amdgpu::unpack_vgpr_msb_banks(mode);
+  amdgpu::apply_vgpr_msb_mode_write(banks, hwreg, instruction_literal(inst, text));
+  mode = amdgpu::pack_vgpr_msb_banks(banks);
+}
+
+void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &inst,
+                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+  if (!isa_properties(arch).mode_has_gpr_idx_en)
+    return;
+  constexpr uint16_t kGprIdxEnableBit = 27;
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic == "s_set_gpr_idx_on") {
+    enabled = true;
+    return;
+  }
+  if (mnemonic == "s_set_gpr_idx_off") {
+    enabled = false;
+    return;
+  }
+  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+    return;
+  const Operand *hwreg_operand = inst.dst_operand(0);
+  if (hwreg_operand == nullptr) {
+    enabled = std::nullopt;
+    return;
+  }
+  const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  if (!hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
+    return;
+  if (mnemonic == "s_setreg_b32") {
+    enabled = std::nullopt;
+    return;
+  }
+  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const auto literal = instruction_literal(inst, text);
+  enabled = literal
+                ? std::optional<bool>{((*literal >> (kGprIdxEnableBit - slice.begin)) & 1u) != 0}
+                : std::nullopt;
+}
+
+[[nodiscard]] bool has_explicit_vgpr_destination(const Instruction &inst) {
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    const Operand *dst = inst.dst_operand(index);
+    const auto ref = dst ? dst->to_register_ref() : std::nullopt;
+    if (ref && ref->cls == RegClass::VGPR)
+      return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool has_runtime_relative_destination(std::string_view mnemonic) {
+  return mnemonic.starts_with("s_movreld") || mnemonic.starts_with("s_movrelsd") ||
+         mnemonic.starts_with("v_movreld") || mnemonic.starts_with("v_movrelsd") ||
+         mnemonic.starts_with("v_swaprel");
+}
+
+[[nodiscard]] std::optional<uint32_t> instruction_literal(const Instruction &inst,
+                                                          std::span<const uint8_t> text) {
+  const uint64_t literal_offset = inst.src_loc() + sizeof(uint32_t);
+  if (inst.size() < 2 * static_cast<int>(sizeof(uint32_t)) || literal_offset > text.size() ||
+      sizeof(uint32_t) > text.size() - literal_offset) {
+    return std::nullopt;
+  }
+  uint32_t literal = 0;
+  std::memcpy(&literal, text.data() + literal_offset, sizeof(literal));
+  return literal;
+}
 
 [[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
   if (operand == nullptr || operand->encoding_value() < kInlineInt0 ||
@@ -2024,6 +2597,7 @@ struct VectorLaneFlowState {
 // callee-saved and must fail closed rather than be masked down to its selector.
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
+                                     std::span<const IndirectCallFixup> known_fixups,
                                      std::vector<IndirectCallFixup> &recovered,
                                      std::span<const uint64_t> sorted_extra_leaders,
                                      ExternalEntryPolicy entry_policy) {
@@ -2049,52 +2623,276 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
 
   if (blocks.empty())
     return;
+  if (ctx.insts.size() > kMaxAnalysisScaffoldingBytes / kInstructionScaffoldingBytes)
+    return;
+  const size_t instruction_scaffolding_bytes = ctx.insts.size() * kInstructionScaffoldingBytes;
+  const size_t remaining_scaffolding_bytes =
+      kMaxAnalysisScaffoldingBytes - instruction_scaffolding_bytes;
+  if (blocks.size() > remaining_scaffolding_bytes / kBlockScaffoldingBytes)
+    return;
+  const size_t initial_recovered_size = recovered.size();
   const std::vector<uint8_t> external_entries =
       explicit_external_entries(blocks, sorted_extra_leaders);
 
-  const auto changes_vgpr_msb_bank = [](std::string_view mnemonic) {
-    return mnemonic == "s_set_vgpr_msb" || mnemonic == "s_setreg_b32" ||
-           mnemonic == "s_setreg_imm32_b32";
+  std::unordered_map<uint64_t, size_t> instruction_by_offset;
+  instruction_by_offset.reserve(ctx.insts.size());
+  for (size_t index = 0; index < ctx.insts.size(); ++index)
+    instruction_by_offset.emplace(ctx.insts[index]->src_loc(), index);
+
+  std::vector<size_t> block_for_instruction(ctx.insts.size(), blocks.size());
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    for (size_t index = blocks[block_index].first_index; index <= blocks[block_index].last_index;
+         ++index)
+      block_for_instruction[index] = block_index;
+  }
+
+  // Cache exact register clobbers for a statically recovered helper whose
+  // complete local CFG ends in returns through the call's destination pair (or
+  // in paths that do not return). Nested or still-unresolved control transfers
+  // fall back to the architecture's call-preserved register set below. The
+  // cache key also includes the caller's VGPR-MSB mode and GPR-index enable
+  // state because both can change the physical register named by an operand.
+  size_t retained_state_units = 0;
+  size_t retained_summary_units = 0;
+  bool analysis_budget_exhausted = false;
+  std::unordered_map<CalleeSummaryCacheKey, std::optional<CalleeSummary>, CalleeSummaryCacheKeyHash>
+      callee_summary_cache;
+  std::unordered_map<CalleeSummaryGroupKey, size_t, CalleeSummaryGroupKeyHash>
+      callee_summary_variants;
+  const auto statically_bounded_callee_summary =
+      [&](uint64_t target, uint16_t return_pair, std::optional<uint8_t> initial_mode,
+          std::optional<bool> initial_gpr_idx_enabled) -> std::optional<CalleeSummary> {
+    const CalleeSummaryCacheKey key{.target = target,
+                                    .return_pair = return_pair,
+                                    .mode = initial_mode,
+                                    .gpr_idx_enabled = initial_gpr_idx_enabled};
+    const CalleeSummaryGroupKey group{.target = target, .return_pair = return_pair};
+    auto group_variants = callee_summary_variants.find(group);
+    if (group_variants != callee_summary_variants.end() &&
+        group_variants->second > kMaxCalleeSummaryVariantsPerTarget)
+      return std::nullopt;
+    if (auto cached = callee_summary_cache.find(key); cached != callee_summary_cache.end())
+      return cached->second;
+    // Once a target/return pair needs more than the bounded number of MODE and
+    // GPR-index variants, permanently use the conservative ABI summary for the
+    // group. This loss of precision is monotone across the dataflow fixed point.
+    if (group_variants != callee_summary_variants.end() &&
+        group_variants->second == kMaxCalleeSummaryVariantsPerTarget) {
+      ++group_variants->second;
+      return std::nullopt;
+    }
+
+    std::optional<CalleeSummary> result;
+    auto start = instruction_by_offset.find(target);
+    if (start != instruction_by_offset.end() &&
+        block_for_instruction[start->second] != blocks.size() &&
+        blocks[block_for_instruction[start->second]].first_index == start->second) {
+      CalleeSummary summary;
+      struct WorkItem {
+        size_t block_index;
+        std::optional<uint8_t> mode;
+        std::optional<bool> gpr_idx_enabled;
+      };
+      std::vector<WorkItem> worklist{
+          {block_for_instruction[start->second], initial_mode, initial_gpr_idx_enabled}};
+      std::unordered_set<uint64_t> visited;
+      bool saw_return = false;
+      std::optional<uint8_t> return_mode;
+      std::optional<bool> return_gpr_idx_enabled;
+      bool unsupported = false;
+      while (!worklist.empty() && !unsupported) {
+        const WorkItem item = worklist.back();
+        worklist.pop_back();
+        const uint64_t mode_key = item.mode ? *item.mode : uint64_t{256};
+        const uint64_t gpr_idx_key = item.gpr_idx_enabled ? (*item.gpr_idx_enabled ? 1u : 0u) : 2u;
+        const uint64_t visit_key =
+            (static_cast<uint64_t>(item.block_index) << 11) | (gpr_idx_key << 9) | mode_key;
+        if (!visited.insert(visit_key).second)
+          continue;
+        // Bound malformed or unexpectedly broad callees. Falling back to the
+        // ABI is always safe and avoids turning one recovery into a whole-text
+        // traversal.
+        if (visited.size() > 4096) {
+          unsupported = true;
+          break;
+        }
+
+        const AnalysisBlock &block = blocks[item.block_index];
+        std::optional<uint8_t> mode = item.mode;
+        std::optional<bool> gpr_idx_enabled = item.gpr_idx_enabled;
+        const auto record_all_banks = [&](uint16_t selector) {
+          for (uint16_t bank = 0; bank < 4; ++bank)
+            summary.vgprs.set(static_cast<uint16_t>((selector & 0xffu) + bank * 256u));
+        };
+        for (size_t index = block.first_index; index <= block.last_index; ++index) {
+          const Instruction &inst = *ctx.insts[index];
+          const std::string_view mnemonic = inst.mnemonic();
+          // Relative-register operations can read or write a register selected
+          // at runtime. Likewise, an ordinary VGPR destination is not a static
+          // destination while GPR indexing may be enabled. An exact clobber
+          // summary cannot represent either case, so use the ABI fallback.
+          if (mnemonic.starts_with("s_movrel") || mnemonic.starts_with("v_movrel") ||
+              mnemonic.starts_with("v_swaprel") ||
+              (gpr_idx_enabled != std::optional<bool>{false} &&
+               has_explicit_vgpr_destination(inst))) {
+            unsupported = true;
+            break;
+          }
+          ensure_written_sgprs(ctx, index);
+          ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) { summary.sgprs.set(sgpr); });
+          RegisterSet implicit_defs;
+          inst.implicit_defs(implicit_defs);
+          implicit_defs.for_each([&](RegisterRef ref) {
+            if (ref.cls == RegClass::VGPR)
+              for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref.width); ++lane)
+                record_all_banks(static_cast<uint16_t>(ref.index + lane));
+          });
+          for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
+            const Operand *dst = inst.dst_operand(dst_index);
+            if (dst == nullptr)
+              continue;
+            auto ref = dst->to_register_ref();
+            if (!ref || ref->cls != RegClass::VGPR)
+              continue;
+            const auto bank = vgpr_bank_for_role(mode, dst->vgpr_msb_role());
+            for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref->width); ++lane) {
+              const uint16_t selector = static_cast<uint16_t>(ref->index + lane);
+              if (!bank || selector >= 256) {
+                record_all_banks(selector);
+              } else {
+                summary.vgprs.set(
+                    static_cast<uint16_t>(selector + static_cast<uint16_t>(*bank) * 256u));
+              }
+            }
+          }
+          update_vgpr_mode(mode, inst, ctx.text);
+          update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
+        }
+        if (unsupported)
+          break;
+
+        const Instruction &term = *ctx.insts[block.last_index];
+        const InstructionFacts &facts = ctx.facts[block.last_index];
+        if (facts.setpc_ssrc) {
+          if (*facts.setpc_ssrc != return_pair)
+            unsupported = true;
+          else if (!saw_return) {
+            return_mode = mode;
+            return_gpr_idx_enabled = gpr_idx_enabled;
+            saw_return = true;
+          } else {
+            if (return_mode != mode)
+              return_mode = std::nullopt;
+            if (return_gpr_idx_enabled != gpr_idx_enabled)
+              return_gpr_idx_enabled = std::nullopt;
+          }
+          continue;
+        }
+        if (facts.call_sdst || facts.swappc_ssrc || is_indirect_branch(term)) {
+          unsupported = true;
+          continue;
+        }
+        if (block.successors.empty()) {
+          if (!is_program_path_terminator(term))
+            unsupported = true;
+          continue;
+        }
+        for (size_t successor : block.successors)
+          worklist.push_back({successor, mode, gpr_idx_enabled});
+      }
+      // A transfer through the nominal return pair is only a proven return if
+      // the callee never repurposed either half. This deliberately rejects
+      // save-and-restore sequences that this summary does not value-track.
+      if (!unsupported && saw_return && !summary.sgprs.test(return_pair) &&
+          !summary.sgprs.test(static_cast<uint16_t>(return_pair + 1))) {
+        summary.return_mode = return_mode;
+        summary.return_gpr_idx_enabled = return_gpr_idx_enabled;
+        result = summary;
+      }
+    }
+    const size_t retained_units =
+        kCalleeSummaryCacheEntryUnits + (group_variants == callee_summary_variants.end() ? 1 : 0);
+    const size_t available_units =
+        kMaxRetainedAnalysisUnits - retained_state_units - retained_summary_units;
+    if (retained_units > available_units) {
+      analysis_budget_exhausted = true;
+      return std::nullopt;
+    }
+    callee_summary_cache.emplace(key, result);
+    if (group_variants == callee_summary_variants.end())
+      callee_summary_variants.emplace(group, 1);
+    else
+      ++group_variants->second;
+    retained_summary_units += retained_units;
+    return result;
   };
 
-  constexpr unsigned kDstBankShift = 6;  // s_set_vgpr_msb immediate DST field.
-  constexpr unsigned kSrc0BankShift = 0; // s_set_vgpr_msb immediate SRC0 field.
-
   const auto scan_block = [&](const AnalysisBlock &block, VectorLaneFlowState state,
-                              bool emit_fixups) {
+                              bool emit_fixups,
+                              std::optional<VectorLaneFlowState> *call_entry_state) {
     BlockState builders;
-    std::array<std::optional<StashedPcHalf>, REGISTER_SET_MAX_SGPRS> read_halves;
-    std::set<uint16_t> active_read_halves;
+    const auto publish_builders = [&]() {
+      for (uint16_t pair_lo : builders.active_pairs()) {
+        const PcValue *value = builders.builder(pair_lo);
+        if (value == nullptr || static_cast<size_t>(pair_lo) + 1 >= REGISTER_SET_MAX_SGPRS)
+          continue;
+        state.restored_sgprs.set(pair_lo, StashedPcHalf{.value = *value, .high = false});
+        state.restored_sgprs.set(static_cast<uint16_t>(pair_lo + 1),
+                                 StashedPcHalf{.value = *value, .high = true});
+      }
+    };
 
-    const auto physical_vgpr = [&](uint16_t low, unsigned bank_shift) -> std::optional<uint16_t> {
-      if (!state.vgpr_msb_imm)
+    const auto physical_vgpr = [&](uint16_t low,
+                                   amdgpu::VgprMsbRole role) -> std::optional<uint16_t> {
+      const auto bank = amdgpu::vgpr_msb_bank_for_role(state.vgpr_msb_imm, role);
+      if (!bank)
         return std::nullopt;
-      const uint8_t bank = static_cast<uint8_t>((*state.vgpr_msb_imm >> bank_shift) & 0x3u);
-      return static_cast<uint16_t>(low + static_cast<uint16_t>(bank) * 256u);
+      return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
     };
 
     for (size_t index = block.first_index; index <= block.last_index; ++index) {
       const Instruction &inst = *ctx.insts[index];
       const InstructionFacts &facts = ctx.facts[index];
       const std::string_view mnemonic = inst.mnemonic();
-
-      if (!active_read_halves.empty()) {
+      // Large dispatchers keep getpc-built targets in long-lived SGPRs, then
+      // copy selected pairs into short-lived call operands. Capture the source
+      // before generic destination invalidation and publish the copy only when
+      // both halves carry the same proven PC value.
+      std::optional<std::pair<uint16_t, PcValue>> copied_pair;
+      if (mnemonic == "s_mov_b64" && inst.num_dst_operands() == 1 && inst.num_src_operands() == 1) {
+        const Operand *dst_operand = inst.dst_operand(0);
+        const Operand *src_operand = inst.src_operand(0);
+        const auto dst = dst_operand ? dst_operand->to_register_ref() : std::nullopt;
+        const auto src = src_operand ? src_operand->to_register_ref() : std::nullopt;
+        if (dst && src && dst->cls == RegClass::SGPR && src->cls == RegClass::SGPR &&
+            dst->width == 2 && src->width == 2 && dst->index < kMaxTrackedSgprPair &&
+            src->index < kMaxTrackedSgprPair) {
+          const StashedPcHalf *lo = state.restored_sgprs.find(src->index);
+          const StashedPcHalf *hi =
+              state.restored_sgprs.find(static_cast<uint16_t>(src->index + 1));
+          if (lo != nullptr && hi != nullptr && !lo->high && hi->high && lo->value == hi->value) {
+            copied_pair = std::pair{dst->index, lo->value};
+          } else if (const PcValue *value = builders.builder(src->index)) {
+            copied_pair = std::pair{dst->index, *value};
+          }
+        }
+      }
+      if (!state.restored_sgprs.empty()) {
         ensure_written_sgprs(ctx, index);
-        ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
-          read_halves[sgpr].reset();
-          active_read_halves.erase(sgpr);
-        });
+        ctx.facts[index].written_sgprs.for_each(
+            [&](uint16_t sgpr) { state.restored_sgprs.erase(sgpr); });
       }
 
       if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
                                                         .source_getpc_offset = inst.src_loc(),
+                                                        .source_sreg = *facts.getpc_sdst,
                                                         .source_recovery_begin_offset = next_offset,
                                                         .source_recovery_end_offset = next_offset});
         continue;
@@ -2108,36 +2906,76 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         // context-sensitive return edge. Drop every stash in a caller-saved
         // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
         // stash there survives (see is_callee_saved_vgpr).
-        std::erase_if(state.slots,
-                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
+        const uint16_t destination = *facts.call_sdst;
+        builders.invalidate_pair(destination);
+        state.restored_sgprs.erase(destination);
+        state.restored_sgprs.erase(static_cast<uint16_t>(destination + 1));
+        publish_builders();
+        if (call_entry_state != nullptr)
+          *call_entry_state = state;
+        const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+        const auto delta = inst.branch_offset_bytes();
+        const std::optional<CalleeSummary> callee_summary =
+            delta && static_cast<int64_t>(next_offset) + *delta >= 0
+                ? statically_bounded_callee_summary(
+                      static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta),
+                      *facts.call_sdst, state.vgpr_msb_imm, state.gpr_idx_enabled)
+                : std::nullopt;
+        const auto survives_call = [&](uint16_t sgpr) {
+          return callee_summary ? !callee_summary->sgprs.test(sgpr) : is_callee_saved_sgpr(sgpr);
+        };
+        state.slots.erase_if([&](const auto &item) {
+          return callee_summary ? callee_summary->vgprs.test(item.first.vgpr)
+                                : !is_callee_saved_vgpr(item.first.vgpr);
+        });
+        state.restored_sgprs.erase_if([&](uint16_t sgpr) { return !survives_call(sgpr); });
+        const std::vector<uint16_t> active_pairs = builders.active_pairs();
+        for (uint16_t pair_lo : active_pairs) {
+          if (!survives_call(pair_lo) || !survives_call(static_cast<uint16_t>(pair_lo + 1)))
+            builders.invalidate_pair(pair_lo);
+        }
+        state.vgpr_msb_imm =
+            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
+        state.gpr_idx_enabled =
+            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
       }
 
       if (mnemonic == "v_writelane_b32") {
         const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
         const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
         const auto lane = inline_lane(inst.src_operand(1));
-        const auto dst_phys = dst ? physical_vgpr(dst->index, kDstBankShift) : std::nullopt;
-        if (dst && lane) {
+        const auto dst_phys =
+            dst ? physical_vgpr(dst->index, inst.dst_operand(0)->vgpr_msb_role()) : std::nullopt;
+        if (dst && lane && state.gpr_idx_enabled == std::optional<bool>{false}) {
           if (dst_phys) {
             const VectorLaneSlot written_slot{*dst_phys, *lane};
             state.slots.erase(written_slot);
             if (src) {
-              for (uint16_t pair_lo : builders.active_pairs()) {
-                const PcValue *value = builders.builder(pair_lo);
-                if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
-                  continue;
-                state.slots[written_slot] =
-                    StashedPcHalf{.value = *value, .high = src->index == pair_lo + 1};
-                break;
+              const StashedPcHalf *restored = state.restored_sgprs.find(src->index);
+              if (restored != nullptr) {
+                // Dispatchers can move a proven target from one lane table to
+                // callee-saved SGPRs and then re-stash it in another table.
+                state.slots.set(written_slot, *restored);
+              } else {
+                for (uint16_t pair_lo : builders.active_pairs()) {
+                  const PcValue *value = builders.builder(pair_lo);
+                  if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+                    continue;
+                  state.slots.set(written_slot, StashedPcHalf{.value = *value,
+                                                              .high = src->index == pair_lo + 1});
+                  break;
+                }
               }
             }
           } else {
             // The destination bank is unknown. It may overwrite any physical
             // register with this low selector, so invalidate all four banks.
-            std::erase_if(state.slots, [&](const auto &item) {
+            state.slots.erase_if([&](const auto &item) {
               return (item.first.vgpr & 0xffu) == (dst->index & 0xffu) && item.first.lane == *lane;
             });
           }
+        } else if (dst && lane) {
+          state.slots.clear();
         }
         invalidate_written_sgprs(ctx, index, builders);
         continue;
@@ -2148,23 +2986,21 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
         const auto lane = inline_lane(inst.src_operand(1));
         invalidate_written_sgprs(ctx, index, builders);
-        const auto src_phys = src ? physical_vgpr(src->index, kSrc0BankShift) : std::nullopt;
-        if (dst && lane && src_phys) {
+        const auto src_phys =
+            src ? physical_vgpr(src->index, inst.src_operand(0)->vgpr_msb_role()) : std::nullopt;
+        if (dst && lane && src_phys && state.gpr_idx_enabled == std::optional<bool>{false}) {
           auto slot = state.slots.find(VectorLaneSlot{*src_phys, *lane});
-          if (slot != state.slots.end()) {
-            read_halves[dst->index] = slot->second;
-            active_read_halves.insert(dst->index);
-          }
+          if (slot != state.slots.end())
+            state.restored_sgprs.set(dst->index, slot->second);
         }
         continue;
       }
 
-      if (emit_fixups && is_lane_fixup_consumer(facts) &&
-          static_cast<size_t>(*facts.swappc_ssrc + 1) < read_halves.size()) {
+      if (emit_fixups && is_lane_fixup_consumer(facts)) {
         const uint16_t pair_lo = *facts.swappc_ssrc;
-        const auto &lo = read_halves[pair_lo];
-        const auto &hi = read_halves[pair_lo + 1];
-        if (lo && hi && !lo->high && hi->high && lo->value == hi->value) {
+        const StashedPcHalf *lo = state.restored_sgprs.find(pair_lo);
+        const StashedPcHalf *hi = state.restored_sgprs.find(static_cast<uint16_t>(pair_lo + 1));
+        if (lo != nullptr && hi != nullptr && !lo->high && hi->high && lo->value == hi->value) {
           if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
             append_unique(recovered, *fixup);
         }
@@ -2176,49 +3012,148 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         // publishing the block exit so a callee-clobbered value cannot reach
         // the continuation. A callee-saved VGPR is preserved by a conforming
         // callee, so a stash there survives (see is_callee_saved_vgpr).
-        std::erase_if(state.slots,
-                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
+        const uint16_t pair_lo = *facts.swappc_ssrc;
+        std::vector<uint64_t> targets;
+        const StashedPcHalf *restored_lo = state.restored_sgprs.find(pair_lo);
+        const StashedPcHalf *restored_hi =
+            state.restored_sgprs.find(static_cast<uint16_t>(pair_lo + 1));
+        if (restored_lo != nullptr && restored_hi != nullptr && !restored_lo->high &&
+            restored_hi->high && restored_lo->value == restored_hi->value) {
+          if (restored_lo->value.offset >= 0)
+            targets.push_back(static_cast<uint64_t>(restored_lo->value.offset));
+        } else if (const PcValue *builder = builders.builder(pair_lo)) {
+          if (builder->offset >= 0)
+            targets.push_back(static_cast<uint64_t>(builder->offset));
+        }
+        if (targets.empty()) {
+          bool complete = true;
+          for (const IndirectCallFixup &fixup : known_fixups) {
+            if (fixup.source_call_offset != inst.src_loc())
+              continue;
+            if (fixup.source_incomplete) {
+              complete = false;
+              break;
+            }
+            targets.push_back(fixup.source_target_offset);
+          }
+          if (!complete)
+            targets.clear();
+        }
+        const uint16_t destination = *facts.swappc_sdst;
+        builders.invalidate_pair(destination);
+        state.restored_sgprs.erase(destination);
+        state.restored_sgprs.erase(static_cast<uint16_t>(destination + 1));
+        publish_builders();
+        if (call_entry_state != nullptr)
+          *call_entry_state = state;
+        std::ranges::sort(targets);
+        targets.erase(std::ranges::unique(targets).begin(), targets.end());
+        std::optional<CalleeSummary> callee_summary;
+        if (!targets.empty()) {
+          std::optional<CalleeSummary> combined;
+          bool all_bounded = true;
+          for (uint64_t target : targets) {
+            auto summary = statically_bounded_callee_summary(
+                target, *facts.swappc_sdst, state.vgpr_msb_imm, state.gpr_idx_enabled);
+            if (!summary) {
+              all_bounded = false;
+              break;
+            }
+            if (combined)
+              *combined |= *summary;
+            else
+              combined = *summary;
+          }
+          if (all_bounded)
+            callee_summary = combined;
+        }
+        const auto survives_call = [&](uint16_t sgpr) {
+          return callee_summary ? !callee_summary->sgprs.test(sgpr) : is_callee_saved_sgpr(sgpr);
+        };
+        state.slots.erase_if([&](const auto &item) {
+          return callee_summary ? callee_summary->vgprs.test(item.first.vgpr)
+                                : !is_callee_saved_vgpr(item.first.vgpr);
+        });
+        state.restored_sgprs.erase_if([&](uint16_t sgpr) { return !survives_call(sgpr); });
+        const std::vector<uint16_t> active_pairs = builders.active_pairs();
+        for (uint16_t active_pair : active_pairs) {
+          if (!survives_call(active_pair) || !survives_call(static_cast<uint16_t>(active_pair + 1)))
+            builders.invalidate_pair(active_pair);
+        }
+        state.vgpr_msb_imm =
+            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
+        state.gpr_idx_enabled =
+            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
       }
 
       // VGPR defs are decoded only to invalidate tracked slots; no slots makes
-      // this entire region a no-op.
+      // this entire region a no-op. Explicit destinations use MODE's DST bank,
+      // so a bank-zero scratch address in v[0:1] does not clobber a lane table
+      // in v[256:257]. Implicit definitions have no operand role from which to
+      // select a bank and therefore conservatively invalidate every bank with
+      // the same low selector.
       if (!state.slots.empty()) {
-        RegisterSet vgpr_defs;
+        if ((has_runtime_relative_destination(mnemonic) && mnemonic.starts_with("v_")) ||
+            (state.gpr_idx_enabled != std::optional<bool>{false} &&
+             has_explicit_vgpr_destination(inst))) {
+          state.slots.clear();
+        }
+        const auto erase_selector_in_all_banks = [&](uint16_t selector) {
+          state.slots.erase_if(
+              [&](const auto &item) { return (item.first.vgpr & 0xffu) == (selector & 0xffu); });
+        };
         for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
           const Operand *op = inst.dst_operand(dst_index);
           if (op == nullptr)
             continue;
-          if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-            vgpr_defs.expand(*ref);
+          auto ref = op->to_register_ref();
+          if (!ref || ref->cls != RegClass::VGPR)
+            continue;
+          for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref->width); ++lane) {
+            const uint32_t selector = static_cast<uint32_t>(ref->index) + lane;
+            if (selector >= 256) {
+              erase_selector_in_all_banks(static_cast<uint16_t>(selector));
+              continue;
+            }
+            const auto physical =
+                physical_vgpr(static_cast<uint16_t>(selector), op->vgpr_msb_role());
+            if (physical) {
+              state.slots.erase_if([&](const auto &item) { return item.first.vgpr == *physical; });
+            } else {
+              erase_selector_in_all_banks(static_cast<uint16_t>(selector));
+            }
+          }
         }
-        inst.implicit_defs(vgpr_defs);
-        vgpr_defs.for_each([&](RegisterRef ref) {
+        RegisterSet implicit_defs;
+        inst.implicit_defs(implicit_defs);
+        implicit_defs.for_each([&](RegisterRef ref) {
           if (ref.cls != RegClass::VGPR)
             return;
-          // Operand metadata does not expose a role for every implicit/wide def.
-          // Conservatively invalidate every physical bank sharing this selector.
-          std::erase_if(state.slots, [&](const auto &item) {
-            return (item.first.vgpr & 0xffu) == (ref.index & 0xffu);
-          });
+          erase_selector_in_all_banks(ref.index);
         });
       }
 
       if (!builders.active_pairs().empty())
         invalidate_written_sgprs(ctx, index, builders);
 
-      if (changes_vgpr_msb_bank(mnemonic)) {
-        if (mnemonic == "s_set_vgpr_msb") {
-          if (const auto *imm = inst.src_operand(0))
-            state.vgpr_msb_imm = static_cast<uint8_t>(imm->encoding_value() & 0xffu);
-          else
-            state.vgpr_msb_imm = std::nullopt;
-        } else {
-          // Without scalar constant propagation, a SETREG write to MODE makes
-          // the operand-bank mapping unknown. Physical slots remain intact.
-          state.vgpr_msb_imm = std::nullopt;
-        }
+      if (has_runtime_relative_destination(mnemonic) && mnemonic.starts_with("s_")) {
+        state.restored_sgprs.clear();
+        for (uint16_t pair_lo : builders.active_pairs())
+          builders.invalidate_pair(pair_lo);
       }
+
+      if (copied_pair) {
+        const uint16_t pair_lo = copied_pair->first;
+        state.restored_sgprs.set(pair_lo,
+                                 StashedPcHalf{.value = copied_pair->second, .high = false});
+        state.restored_sgprs.set(static_cast<uint16_t>(pair_lo + 1),
+                                 StashedPcHalf{.value = copied_pair->second, .high = true});
+      }
+
+      update_vgpr_mode(state.vgpr_msb_imm, inst, ctx.text);
+      update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text, ctx.arch);
     }
+    publish_builders();
     return state;
   };
 
@@ -2226,6 +3161,51 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
+  }
+
+  // A call block has two different outgoing states: the callee sees the
+  // pre-call register state, while the fallthrough continuation sees the
+  // summarized return state. AnalysisBlock stores both as ordinary successors,
+  // so classify target edges here and select the matching state during meet.
+  std::unordered_map<size_t, CallEdgeInfo> call_edges;
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+    const AnalysisBlock &block = blocks[block_index];
+    const Instruction &term = *ctx.insts[block.last_index];
+    const InstructionFacts &facts = ctx.facts[block.last_index];
+    if (!facts.call_sdst && !facts.swappc_sdst)
+      continue;
+    CallEdgeInfo &call = call_edges[block_index];
+    const uint64_t next_offset = term.src_loc() + static_cast<uint64_t>(term.size());
+    if (const auto next = instruction_by_offset.find(next_offset);
+        next != instruction_by_offset.end() && block_for_instruction[next->second] != blocks.size())
+      call.continuation_successor = block_for_instruction[next->second];
+    if (!facts.call_sdst)
+      continue;
+    const auto delta = term.branch_offset_bytes();
+    if (!delta || static_cast<int64_t>(next_offset) + *delta < 0)
+      continue;
+    const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta);
+    if (const auto entry = instruction_by_offset.find(target);
+        entry != instruction_by_offset.end() &&
+        block_for_instruction[entry->second] != blocks.size())
+      call.target_successors.insert(block_for_instruction[entry->second]);
+  }
+  // Every known source offset was added as a leader before these blocks were
+  // built, so a recovered call is the first instruction in its source block
+  // and this classification matches add_recovered_successors(). Incomplete
+  // targets are still useful here: extra predecessor edges only weaken the
+  // entry-state meet.
+  for (const IndirectCallFixup &fixup : known_fixups) {
+    if (!fixup.source_is_call)
+      continue;
+    const auto source = instruction_by_offset.find(fixup.source_call_offset);
+    const auto target = instruction_by_offset.find(fixup.source_target_offset);
+    if (source == instruction_by_offset.end() || target == instruction_by_offset.end())
+      continue;
+    const size_t source_block = block_for_instruction[source->second];
+    const size_t target_block = block_for_instruction[target->second];
+    if (source_block < blocks.size() && target_block < blocks.size())
+      call_edges[source_block].target_successors.insert(target_block);
   }
 
   std::vector<VectorLaneFlowState> entry_states(blocks.size());
@@ -2236,7 +3216,17 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
     worklist.push_back(block_index);
 
+  const auto state_units = [](const VectorLaneFlowState &state) {
+    return state.slots.size() + state.restored_sgprs.size();
+  };
+  size_t worklist_visits = 0;
+  const size_t max_worklist_visits = std::max<size_t>(4096, blocks.size() * 64);
   while (!worklist.empty()) {
+    // Exact-summary selection is intentionally fail-closed, but switching
+    // between a state-derived target and the ABI fallback is not monotone.
+    // Abandon this optional recovery if malformed control flow oscillates.
+    if (++worklist_visits > max_worklist_visits)
+      return;
     const size_t block_index = worklist.front();
     worklist.pop_front();
     on_worklist[block_index] = 0;
@@ -2244,25 +3234,35 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     VectorLaneFlowState new_entry;
     bool new_reachable = false;
     bool have_predecessor_state = false;
+    const auto meet_predecessor = [&](const VectorLaneFlowState &incoming) {
+      new_reachable = true;
+      if (!have_predecessor_state) {
+        new_entry = incoming;
+        have_predecessor_state = true;
+        return;
+      }
+      new_entry.slots.intersect_with(incoming.slots);
+      new_entry.restored_sgprs.intersect_with(incoming.restored_sgprs);
+      if (new_entry.vgpr_msb_imm != incoming.vgpr_msb_imm)
+        new_entry.vgpr_msb_imm = std::nullopt;
+      if (new_entry.gpr_idx_enabled != incoming.gpr_idx_enabled)
+        new_entry.gpr_idx_enabled = std::nullopt;
+    };
     for (size_t predecessor : predecessors[block_index]) {
       if (!reachable[predecessor])
         continue;
-      new_reachable = true;
-      if (!have_predecessor_state) {
-        new_entry = exit_states[predecessor];
-        have_predecessor_state = true;
-        continue;
-      }
-
-      for (auto it = new_entry.slots.begin(); it != new_entry.slots.end();) {
-        auto incoming = exit_states[predecessor].slots.find(it->first);
-        if (incoming == exit_states[predecessor].slots.end() || incoming->second != it->second)
-          it = new_entry.slots.erase(it);
+      const auto call = call_edges.find(predecessor);
+      const bool call_target =
+          call != call_edges.end() && call->second.target_successors.contains(block_index);
+      if (call_target) {
+        if (call->second.entry_state)
+          meet_predecessor(*call->second.entry_state);
         else
-          ++it;
+          meet_predecessor(VectorLaneFlowState{});
       }
-      if (new_entry.vgpr_msb_imm != exit_states[predecessor].vgpr_msb_imm)
-        new_entry.vgpr_msb_imm = std::nullopt;
+      if (!call_target ||
+          (call != call_edges.end() && call->second.continuation_successor == block_index))
+        meet_predecessor(exit_states[predecessor]);
     }
 
     // Generic callers conservatively infer predecessorless device-function
@@ -2274,27 +3274,69 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     if (is_analysis_root(block_index, external_entries, predecessors, entry_policy)) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
-      if (external_entries[block_index] != 0)
+      if (external_entries[block_index] != 0) {
         external_entry.vgpr_msb_imm = uint8_t{0};
+        external_entry.gpr_idx_enabled = false;
+      }
       if (!have_predecessor_state) {
         new_entry = std::move(external_entry);
       } else {
         new_entry.slots.clear();
+        new_entry.restored_sgprs.clear();
         if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
           new_entry.vgpr_msb_imm = std::nullopt;
+        if (new_entry.gpr_idx_enabled != external_entry.gpr_idx_enabled)
+          new_entry.gpr_idx_enabled = std::nullopt;
       }
     }
     if (!new_reachable)
       continue;
 
-    VectorLaneFlowState new_exit = scan_block(blocks[block_index], new_entry, false);
+    std::optional<VectorLaneFlowState> new_call_entry;
+    VectorLaneFlowState new_exit =
+        scan_block(blocks[block_index], new_entry, false, &new_call_entry);
+    if (analysis_budget_exhausted)
+      return;
+    auto call = call_edges.find(block_index);
+    const bool call_entry_unchanged =
+        new_call_entry ? call != call_edges.end() && call->second.entry_state == new_call_entry
+                       : call == call_edges.end() || !call->second.entry_state;
     if (reachable[block_index] && entry_states[block_index] == new_entry &&
-        exit_states[block_index] == new_exit)
+        exit_states[block_index] == new_exit && call_entry_unchanged)
       continue;
+
+    // Count logical facts rather than unique COW allocations. This makes the
+    // limit independent of sharing details and bounds both lane and restored
+    // SGPR state together with the summary-cache units already retained.
+    size_t next_retained_state_units = retained_state_units;
+    const auto replace_fact_count = [&](size_t old_count, size_t new_count) {
+      assert(next_retained_state_units >= old_count);
+      next_retained_state_units -= old_count;
+      if (new_count >
+          kMaxRetainedAnalysisUnits - retained_summary_units - next_retained_state_units)
+        return false;
+      next_retained_state_units += new_count;
+      return true;
+    };
+    if (!replace_fact_count(state_units(entry_states[block_index]), state_units(new_entry)) ||
+        !replace_fact_count(state_units(exit_states[block_index]), state_units(new_exit)))
+      return;
+    if (call != call_edges.end()) {
+      const size_t old_call_count =
+          call->second.entry_state ? state_units(*call->second.entry_state) : 0;
+      const size_t new_call_count = new_call_entry ? state_units(*new_call_entry) : 0;
+      if (!replace_fact_count(old_call_count, new_call_count))
+        return;
+    }
 
     reachable[block_index] = 1;
     entry_states[block_index] = std::move(new_entry);
     exit_states[block_index] = std::move(new_exit);
+    if (call != call_edges.end())
+      call->second.entry_state = std::move(new_call_entry);
+    else
+      assert(!new_call_entry);
+    retained_state_units = next_retained_state_units;
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
@@ -2314,8 +3356,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         break;
       }
     }
-    if (has_consumer)
-      (void)scan_block(block, entry_states[block_index], true);
+    if (has_consumer) {
+      (void)scan_block(block, entry_states[block_index], true, nullptr);
+      if (analysis_budget_exhausted) {
+        recovered.resize(initial_recovered_size);
+        return;
+      }
+    }
   }
 }
 
@@ -2406,6 +3453,7 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .offset = static_cast<int64_t>(getpc_next) +
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
+        .source_sreg = *pair_lo,
         .source_recovery_begin_offset = getpc_next,
         .source_recovery_end_offset = sub_consumer->recovery_end,
     };
@@ -2435,14 +3483,23 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
   std::vector<IndirectCallFixup> recovered;
+  FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch);
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
                              sorted_extra_leaders.end());
+  // A split point shapes the block graph but says nothing about how a block is entered. Keeping
+  // these out of sorted_extra_leaders is the whole point of the distinction: under ExplicitOnly
+  // every explicit entry is treated as externally entered, so promoting an ordinary helper to one
+  // would discard the incoming SGPR-pair facts its real callers establish and leave otherwise
+  // recoverable getpc flows unresolved.
   std::vector<uint64_t> leaders(sorted_extra_leaders);
+  leaders.insert(leaders.end(), extra_split_points.begin(), extra_split_points.end());
+  std::ranges::sort(leaders);
+  leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
 
   PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2457,8 +3514,8 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // edges proven in earlier rounds. Keep the sorted explicit entries separate
     // from leaders: recovered targets become reachable through those edges, not
     // by being promoted to external roots.
-    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, sorted_extra_leaders,
-                                    entry_policy);
+    recover_vector_lane_stashed_pcs(ctx, blocks, recovered, iteration_recovered,
+                                    sorted_extra_leaders, entry_policy);
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
@@ -2476,7 +3533,7 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
-      changed |= append_unique(recovered, fixup);
+      changed |= append_unique_indexed(recovered, recovered_index, fixup);
     if (!changed)
       break;
   }
@@ -2505,10 +3562,16 @@ bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
   return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
 }
 
+bool is_callee_saved_sgpr(uint16_t sgpr) {
+  // Intersection of CSR_AMDGPU_SGPRs and CSR_AMDGPU_SI_Gfx_SGPRs.
+  return (sgpr >= 30 && sgpr <= 31) || (sgpr >= 64 && sgpr <= 71) || (sgpr >= 80 && sgpr <= 87) ||
+         (sgpr >= 96 && sgpr <= 105);
+}
+
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -2527,14 +3590,14 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr);
+        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
   return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders);
+                                                   pc_builders, extra_split_points);
 }
 
 } // namespace rocjitsu

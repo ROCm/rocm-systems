@@ -820,7 +820,6 @@ class DsReadU8D16Ds : public Ds {
 public:
   DsReadU8D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -830,7 +829,6 @@ class DsReadU8D16HiDs : public Ds {
 public:
   DsReadU8D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -840,7 +838,6 @@ class DsReadI8D16Ds : public Ds {
 public:
   DsReadI8D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -850,7 +847,6 @@ class DsReadI8D16HiDs : public Ds {
 public:
   DsReadI8D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -860,7 +856,6 @@ class DsReadU16D16Ds : public Ds {
 public:
   DsReadU16D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -870,7 +865,6 @@ class DsReadU16D16HiDs : public Ds {
 public:
   DsReadU16D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;

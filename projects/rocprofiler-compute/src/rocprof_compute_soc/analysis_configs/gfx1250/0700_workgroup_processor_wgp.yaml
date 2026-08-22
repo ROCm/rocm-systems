@@ -6,7 +6,7 @@ Panel Config:
   data source:
   - metric_table:
       id: 701
-      title: "Utilization"
+      title: Utilization
       header:
         metric: Metric
         avg: Avg
@@ -15,9 +15,9 @@ Panel Config:
         unit: Unit
       metric:
         WGP Utilization:
-          avg: AVG((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQG_BUSY_CYCLES_sum) / SUM(SQG_CYCLES_sum)
+          min: 100 * MIN(SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum)
+          max: 100 * MAX(SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum)
           unit: Percent
         Wall Clock:
           avg: AVG(SQG_REFCLKS_sum)
@@ -25,9 +25,9 @@ Panel Config:
           max: MAX(SQG_REFCLKS_sum)
           unit: Cycles
         Active WGPs:
-          avg: AVG((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          min: MIN((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          max: MAX((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          avg: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum) / SUM(SQG_CYCLES_sum)
+          min: MIN(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum / SQG_CYCLES_sum)
+          max: MAX(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum / SQG_CYCLES_sum)
           unit: Count
 
   - metric_table:
@@ -78,7 +78,7 @@ Panel Config:
 
   - metric_table:
       id: 703
-      title: "Wave Dispatch"
+      title: Wave Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -98,7 +98,7 @@ Panel Config:
           unit: Threads
   - metric_table:
       id: 704
-      title: "Wave Life"
+      title: Wave Life
       header:
         metric: Metric
         avg: Avg
@@ -107,13 +107,13 @@ Panel Config:
         unit: Unit
       metric:
         Wave Life:
-          avg: AVG((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
-          min: MIN((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
-          max: MAX((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
+          avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
+          min: MIN(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
+          max: MAX(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           unit: Cycles
   - metric_table:
       id: 705
-      title: "Wave Instruction Mix"
+      title: Wave Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -122,53 +122,53 @@ Panel Config:
         unit: Unit
       metric:
         Total Instructions:
-          avg: AVG(SQ_INSTS_ALL_sum / $denom)
+          avg: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ALL_sum / $denom)
           max: MAX(SQ_INSTS_ALL_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Internal:
-          avg: AVG(SQ_INSTS_INTERNAL_sum / $denom)
+          avg: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
           min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
           max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - VALU:
-          avg: AVG(SQ_INSTS_VALU_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - SALU:
-          avg: AVG(SQ_INSTS_SALU_sum / $denom)
+          avg: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_SALU_sum / $denom)
           max: MAX(SQ_INSTS_SALU_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - SMEM:
-          avg: AVG(SQ_INSTS_SMEM_sum / $denom)
+          avg: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
           min: MIN(SQ_INSTS_SMEM_sum / $denom)
           max: MAX(SQ_INSTS_SMEM_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Transcendental:
-          avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Double Precision:
-          avg: AVG(SQ_INSTS_VALU_DP_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_DP_sum / $denom)
           max: MAX(SQ_INSTS_VALU_DP_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - VMEM:
-          avg: AVG(SQ_INSTS_TEX_sum / $denom)
+          avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
           max: MAX(SQ_INSTS_TEX_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS:
-          avg: AVG(SQ_INSTS_LDS_sum / $denom)
+          avg: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_LDS_sum / $denom)
           max: MAX(SQ_INSTS_LDS_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 706
-      title: "VMEM Instruction Mix"
+      title: VMEM Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -177,12 +177,12 @@ Panel Config:
         unit: Unit
       metric:
         Instructions - VMEM Flat:
-          avg: AVG(SQ_INSTS_FLAT_sum / $denom)
+          avg: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Global Scratch:
-          avg: AVG(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum / $denom)
           unit: (Count + $normUnit)
@@ -192,73 +192,73 @@ Panel Config:
         # SQ_INSTS_TEX_LOAD_sum will always be 0 on gfx1250.
         # Instructions - VMEM Store (SQ_INSTS_TEX_STORE_sum): Same reason — removed.
         Instructions - Flat Load:
-          avg: AVG(SQ_INSTS_FLAT_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Flat Store:
-          avg: AVG(SQ_INSTS_FLAT_STORE_sum / $denom)
+          avg: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Buffer Load:
-          avg: AVG(SQ_INSTS_BUFFER_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_BUFFER_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_BUFFER_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_BUFFER_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Buffer Store:
-          avg: AVG(SQ_INSTS_BUFFER_STORE_sum / $denom)
+          avg: SUM(SQ_INSTS_BUFFER_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_BUFFER_STORE_sum / $denom)
           max: MAX(SQ_INSTS_BUFFER_STORE_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Global Scratch Load:
-          avg: AVG(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Global Scratch Store:
-          avg: AVG(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Global Scratch Atomics:
-          avg: AVG(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - VMEM Atomic RTN:
-          avg: AVG(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
+          avg: SUM(SQ_INSTS_TEX_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - VMEM Atomic NORTN:
-          avg: AVG(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
+          avg: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Multicast Load:
-          avg: AVG(SQ_INSTS_MULTICAST_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_MULTICAST_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_MULTICAST_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_MULTICAST_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Async Load:
-          avg: AVG(SQ_INSTS_ASYNC_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ASYNC_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_ASYNC_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - Async Store:
-          avg: AVG(SQ_INSTS_ASYNC_STORE_sum / $denom)
+          avg: SUM(SQ_INSTS_ASYNC_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ASYNC_STORE_sum / $denom)
           max: MAX(SQ_INSTS_ASYNC_STORE_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - TDM:
-          avg: AVG(SQ_INSTS_TDM_sum / $denom)
+          avg: SUM(SQ_INSTS_TDM_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TDM_sum / $denom)
           max: MAX(SQ_INSTS_TDM_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 707
-      title: "LDS Instruction Mix"
+      title: LDS Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -267,38 +267,38 @@ Panel Config:
         unit: Unit
       metric:
         Total LDS Instructions:
-          avg: AVG(SQ_INSTS_VEC32_LDS_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS Load:
-          avg: AVG(SQ_INSTS_VEC32_LDS_LOAD_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS Store:
-          avg: AVG(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS Atomic RTN:
-          avg: AVG(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS Atomic NORTN:
-          avg: AVG(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
           unit: (Count + $normUnit)
         Instructions - LDS Other:
-          avg: AVG(SQ_INSTS_VEC32_LDS_OTHER_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_LDS_OTHER_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_OTHER_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_OTHER_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 708
-      title: "VALU Instruction Mix"
+      title: VALU Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -307,43 +307,43 @@ Panel Config:
         unit: Unit
       metric:
         Total VALU Instructions:
-          avg: AVG(SQ_INSTS_VALU_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - Trans:
-          avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - Double Precision:
-          avg: AVG(SQ_INSTS_VALU_DP_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_DP_sum / $denom)
           max: MAX(SQ_INSTS_VALU_DP_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - CMACC:
-          avg: AVG(SQ_INSTS_VALU_CMACC_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_CMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_CMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_CMACC_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - SMACC:
-          avg: AVG(SQ_INSTS_VALU_SMACC_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_SMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_SMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_SMACC_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - XDL:
-          avg: AVG(SQ_INSTS_VALU_XDLMACC_sum / $denom)
+          avg: SUM(SQ_INSTS_VALU_XDLMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_XDLMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_XDLMACC_sum / $denom)
           unit: (Count + $normUnit)
         VALU Instructions - WMMA:
-          avg: AVG(SQ_INSTS_VEC32_VALU_WMMA_sum / $denom)
+          avg: SUM(SQ_INSTS_VEC32_VALU_WMMA_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_VALU_WMMA_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_VALU_WMMA_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 709
-      title: "VALU FLOPs and IOPs Counting"
+      title: VALU FLOPs and IOPs Counting
       header:
         metric: Metric
         avg: Avg
@@ -351,9 +351,45 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        VALU Integer Operations:
+          avg: SUM(SP_VALU_IOPS_sum) / SUM($denom)
+          min: MIN(SP_VALU_IOPS_sum / $denom)
+          max: MAX(SP_VALU_IOPS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP16:
+          avg: SUM(SP_VALU_FLOPS_FP16_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP16_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP16_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP16 Trans:
+          avg: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP32:
+          avg: SUM(SP_VALU_FLOPS_FP32_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP32_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP32_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP32 Trans:
+          avg: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP64:
+          avg: SUM(SP_VALU_FLOPS_FP64_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP64_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP64_sum / $denom)
+          unit: (Count + $normUnit)
+        VALU FP Operations - FP64 Trans:
+          avg: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM($denom)
+          min: MIN(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
+          max: MAX(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+
   - metric_table:
       id: 710
-      title: "WMMA Instruction FLOPs and IOPs Counting"
+      title: WMMA Instruction FLOPs and IOPs Counting
       header:
         metric: Metric
         avg: Avg
@@ -362,58 +398,58 @@ Panel Config:
         unit: Unit
       metric:
         WMMA FP Operations - FP32:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP32_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP32_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP32_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP64:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP64_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP64_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP64_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP16:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP16_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP16_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP16_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - BF16:
-          avg: AVG(SQ_VALU_WMMA_FLOP_BF16_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_BF16_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_BF16_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP8:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP8_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP8_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP8_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP6:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP6_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP6_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP6_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP4:
-          avg: AVG(SQ_VALU_WMMA_FLOP_FP4_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP4_sum / $denom)
           unit: (Count + $normUnit)
         WMMA FP Operations - FP6FP4:
-          avg: AVG(SQ_VALU_WMMA_FLOP_F6F4_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_F6F4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_F6F4_sum / $denom)
           unit: (Count + $normUnit)
         WMMA Int Operations - Int8:
-          avg: AVG(SQ_VALU_WMMA_FLOP_I8_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_I8_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_I8_sum / $denom)
           unit: (Count + $normUnit)
         WMMA Int Operations - Int4:
-          avg: AVG(SQ_VALU_WMMA_FLOP_I4_sum / $denom)
+          avg: SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_I4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_I4_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 711
-      title: "Instruction Issue Stalls"
+      title: Instruction Issue Stalls
       header:
         metric: Metric
         avg: Avg
@@ -422,14 +458,14 @@ Panel Config:
         unit: Unit
       metric:
         TDM Issue Stall Rate:
-          avg: AVG((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_ISSUE_TDM_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
       id: 712
-      title: "Compute Pipeline Utilization"
+      title: Compute Pipeline Utilization
       header:
         metric: Metric
         avg: Avg
@@ -438,38 +474,44 @@ Panel Config:
         unit: Unit
       metric:
         Pipeline Utilization - CMACC:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VALU_CORE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - SMACC:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VALU_SIDE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - Double Precision:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VALU_DP_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - XDL:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VALU_WMMA_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
       id: 713
-      title: "WGP Latencies"
+      title: WGP Latencies
       header:
         metric: Metric
         avg: Avg
         min: Min
         max: Max
         unit: Unit
+      metric:
+        LDS Access Latency:
+          avg: SUM(SQ_INST_LEVEL_LDS_ACCUM_sum) / SUM(SQ_INSTS_LDS_sum)
+          min: MIN(SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum)
+          max: MAX(SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum)
+          unit: Cycles
   - metric_table:
       id: 714
-      title: "WGP-TXA Interface"
+      title: WGP-TXA Interface
       header:
         metric: Metric
         avg: Avg
@@ -478,55 +520,55 @@ Panel Config:
         unit: Unit
       metric:
         WGP-GL0 Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_TEX_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 LDS Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_LDS_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VMEM_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Read Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VMEM_LOAD_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Write Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_INST_CYCLES_VMEM_STORE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         # Metrics 104-107: Dual-port Row0/Row1 bus utilization and stall rates
         Bus Utilization - Row0:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Stall Rate - Row0:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Utilization - Row1:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Stall Rate - Row1:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: 100 * SUM(SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
       id: 715
-      title: "WGP-TXD Interface"
+      title: WGP-TXD Interface
       header:
         metric: Metric
         avg: Avg
@@ -534,9 +576,15 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        TXD Data Bus Utilization:
+          avg: 100 * SUM(SP_VGPR_TDLDS_DATA_WR_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum)
+          unit: Percent
+
   - metric_table:
       id: 716
-      title: "Instruction Cache"
+      title: Instruction Cache
       header:
         metric: Metric
         avg: Avg
@@ -545,13 +593,13 @@ Panel Config:
         unit: Unit
       metric:
         Icache Hit Rate:
-          avg: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
-          min: MIN((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
-          max: MAX((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
+          avg: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          min: 100 * MIN(SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          max: 100 * MAX(SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
           unit: Percent
   - metric_table:
       id: 717
-      title: "Scalar Data Cache"
+      title: Scalar Data Cache
       header:
         metric: Metric
         avg: Avg
@@ -560,18 +608,18 @@ Panel Config:
         unit: Unit
       metric:
         Dcache Hit Rate:
-          avg: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          min: MIN((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          max: MAX((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          avg: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+          min: 100 * MIN(SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
+          max: 100 * MAX(SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
           unit: Percent
         Dcache Request Bandwidth:
-          avg: AVG(SQC_SMEM_LOAD_DWORDS_sum * 4 / $denom)
+          avg: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)
           min: MIN(SQC_SMEM_LOAD_DWORDS_sum * 4 / $denom)
           max: MAX(SQC_SMEM_LOAD_DWORDS_sum * 4 / $denom)
           unit: (Bytes + $normUnit)
   - metric_table:
       id: 718
-      title: "SQC-GL1 Interface"
+      title: SQC-GL1 Interface
       header:
         metric: Metric
         avg: Avg
@@ -579,6 +627,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        Interface Stall Rate:
+          avg: 100 * SUM(SQC_TC_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          min: 100 * MIN(SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum)
+          max: 100 * MAX(SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum)
+          unit: Percent
+
   metrics_description:
     WGP Utilization: >-
       Percentage of WGP clock cycles at least one wavefront is active.
@@ -587,7 +641,28 @@ Panel Config:
       Total elapsed kernel clock cycles.
 
     Active WGPs: >-
-      Average number of WGPs with at least one active wavefront.
+      Average number of WGPs with at least one active wavefront in a cycle.
+
+    Grid Size: >-
+      Total number of work-items in the dispatch grid.
+
+    Workgroup Size: >-
+      Number of work-items per workgroup.
+
+    VGPRs: >-
+      Number of architectural VGPRs allocated per wave.
+
+    AGPRs: >-
+      Number of accumulation VGPRs allocated per wave.
+
+    SGPRs: >-
+      Number of SGPRs allocated per wave.
+
+    LDS Allocation: >-
+      Bytes of LDS allocated per workgroup.
+
+    Scratch Allocation: >-
+      Bytes of scratch (private) memory allocated per work-item.
 
     Dispatched Waves: >-
       Total wavefronts dispatched.
@@ -595,56 +670,8 @@ Panel Config:
     Dispatched Threads: >-
       Total work-items dispatched.
 
-    Saved Waves: >-
-      Total wavefronts saved to off-chip memory due to preemption.
-
-    Restored Waves: >-
-      Total wavefronts restored from off-chip memory after preemption.
-
-    Initial Prefetch Waves: >-
-      Total wavefronts dispatched as initial prefetch waves to warm caches.
-
-    Messages: >-
-      Total wave-to-driver message events issued.
-
     Wave Life: >-
       Average wavefront lifetime in cycles.
-
-    Time in Ready State: >-
-      Fraction of wavefront lifetime cycles in ready-to-issue state.
-
-    Time in Wait State: >-
-      Fraction of wavefront lifetime cycles stalled waiting for a resource.
-
-    Wait for Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a waitcnt instruction.
-
-    Wait for Load Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a load-type waitcnt.
-
-    Wait for Store Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a store-type waitcnt.
-
-    Wait for KM Counter: >-
-      Fraction of wavefront lifetime cycles stalled on a kernel-message counter.
-
-    Wait for DS Counter: >-
-      Fraction of wavefront lifetime cycles stalled on an LDS wait count.
-
-    Wait for Instruction Fetch: >-
-      Fraction of wavefront lifetime cycles stalled on instruction fetch.
-
-    Wait for Barrier: >-
-      Fraction of wavefront lifetime cycles stalled at a workgroup barrier.
-
-    Wait for Sleep: >-
-      Fraction of wavefront lifetime cycles in a sleep state.
-
-    Wait for Delay Depctr: >-
-      Fraction of wavefront lifetime cycles stalled on a delay-based dependency counter.
-
-    Wait for Depctr: >-
-      Fraction of wavefront lifetime cycles stalled on a dependency counter.
 
     Total Instructions: >-
       Total instructions issued.
@@ -676,17 +703,8 @@ Panel Config:
     Instructions - VMEM Flat: >-
       Number of flat-addressed VMEM instructions issued.
 
-    Instructions - VMEM Buffer: >-
-      Number of buffer VMEM instructions issued.
-
     Instructions - Global Scratch: >-
       Number of global/scratch VMEM instructions issued.
-
-    Instructions - VMEM Load: >-
-      Number of VMEM load instructions issued.
-
-    Instructions - VMEM Store: >-
-      Number of VMEM store instructions issued.
 
     Instructions - Flat Load: >-
       Number of flat-addressed load instructions issued.
@@ -817,27 +835,6 @@ Panel Config:
     WMMA Int Operations - Int4: >-
       Total Int4 WMMA instruction dispatches.
 
-    Instruction Issue Stall Rate: >-
-      Percentage of WGP-busy cycles no wave could issue an instruction.
-
-    SMEM Issue Stall Rate: >-
-      Percentage of WGP-busy cycles stalled on a pending SMEM result.
-
-    SALU Issue Stall Rate: >-
-      Percentage of WGP-busy cycles stalled on a pending SALU result.
-
-    VALU Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the VALU pipeline cannot accept a new instruction.
-
-    VMEM Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the VMEM pipeline cannot accept a new instruction.
-
-    VMEM Issue Stall Rate - Arbiter: >-
-      Percentage of WGP-busy cycles the VMEM arbiter is stalled.
-
-    LDS Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the LDS pipeline cannot accept a new instruction.
-
     TDM Issue Stall Rate: >-
       Percentage of WGP-busy cycles the TDM pipeline cannot accept a new instruction.
 
@@ -853,26 +850,8 @@ Panel Config:
     Pipeline Utilization - XDL: >-
       Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
 
-    SMEM Latency: >-
-      Average SMEM instruction latency.
-
-    VMEM Load Latency: >-
-      Average VMEM load latency.
-
-    VMEM Store Latency: >-
-      Average VMEM store latency.
-
     LDS Access Latency: >-
-      Average LDS access latency.
-
-    LDS Load Latency: >-
-      Average LDS load latency.
-
-    LDS Store Latency: >-
-      Average LDS store latency.
-
-    Instruction Fetch Latency: >-
-      Average instruction fetch latency.
+      Average LDS access latency in cycles.
 
     WGP-GL0 Request Bus Util: >-
       Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
@@ -904,53 +883,14 @@ Panel Config:
     TXD Data Bus Utilization: >-
       Percentage of cycles the TXD data return bus is carrying valid return data.
 
-    Icache Utilization: >-
-      Percentage of cycles the Instruction Cache is serving requests.
-
     Icache Hit Rate: >-
       Instruction Cache hit rate.
-
-    Icache Latency: >-
-      Average Instruction Cache access latency.
-
-    Icache Request Stall Rate: >-
-      Percentage of cycles the Instruction Cache is stalled on instruction fetch.
-
-    Icache-GL1 Request Latency: >-
-      Average latency for Instruction Cache misses serviced from GL1.
-
-    Dcache Utilization: >-
-      Percentage of cycles the Scalar Data Cache is serving requests.
 
     Dcache Hit Rate: >-
       Scalar Data Cache hit rate.
 
-    Dcache Latency: >-
-      Average Scalar Data Cache access latency.
-
-    Dcache Request Stall Rate: >-
-      Percentage of cycles the Scalar Data Cache is stalled.
-
     Dcache Request Bandwidth: >-
       Total Scalar Data Cache bandwidth.
-
-    Dcache Request - 1DWord: >-
-      Number of 1-DWORD (4-byte) scalar memory requests.
-
-    Dcache Request - 2DWord: >-
-      Number of 2-DWORD (8-byte) scalar memory requests.
-
-    Dcache Request - 4DWord: >-
-      Number of 4-DWORD (16-byte) scalar memory requests.
-
-    Dcache Request - 8DWord: >-
-      Number of 8-DWORD (32-byte) scalar memory requests.
-
-    Dcache Request - 16DWord: >-
-      Number of 16-DWORD (64-byte) scalar memory requests.
-
-    Dcache-GL1 Request Latency: >-
-      Average latency for Scalar Data Cache misses serviced from GL1.
 
     Interface Stall Rate: >-
       Percentage of cycles the SQC-GL1 interface is stalled.

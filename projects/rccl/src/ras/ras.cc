@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "ras_internal.h"
 #include "os.h"
+#include "os_socket_pair.h"
 
 // Type of a notification from a local NCCL thread.
 typedef enum {
@@ -48,7 +49,7 @@ static std::thread rasThread;
 
 // Used for communication from regular NCCL threads to the RAS thread.
 static std::mutex rasNotificationMutex;
-static int rasNotificationPipe[2] = {-1, -1};
+static ncclSocketPairDescriptor rasNotificationPipe[2] = {NCCL_SOCKET_PAIR_INVALID, NCCL_SOCKET_PAIR_INVALID};
 
 // Data for the main poll() in the RAS thread.
 struct pollfd* rasPfds;
@@ -95,7 +96,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 
       memcpy(&addr, &myRank->addr, sizeof(addr));
       (addr.sa.sa_family == AF_INET ? addr.sin.sin_port : addr.sin6.sin6_port) = htons(0);
-      NCCLCHECKGOTO(ncclSocketInit(&rasNetListeningSocket, &addr, NCCL_SOCKET_MAGIC, ncclSocketTypeRasNetwork,
+      NCCLCHECKGOTO(ncclSocketInit(&rasNetListeningSocket, &addr, ncclSocketDefaultMagic(), ncclSocketTypeRasNetwork,
                                    /*abortFlag*/ nullptr, /*asyncFlag*/ 1),
                     ret, fail);
       NCCLCHECKGOTO(ncclSocketListen(&rasNetListeningSocket), ret, fail);
@@ -103,7 +104,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 
       (void)rasClientInitSocket();
 
-      SYSCHECKGOTO(pipe(rasNotificationPipe), "pipe", ret, fail);
+      NCCLCHECKGOTO(ncclOsSocketPairCreate(rasNotificationPipe), ret, fail);
 
       rasThread = std::thread(rasThreadMain, nullptr);
       ncclSetThreadName(rasThread, "NCCL RAS");
@@ -135,8 +136,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 exit:
   return ret;
 fail:
-  if (rasNotificationPipe[1] != 0) (void)close(rasNotificationPipe[1]);
-  if (rasNotificationPipe[0] != 0) (void)close(rasNotificationPipe[0]);
+  (void)ncclOsSocketPairClose(rasNotificationPipe);
   (void)close(rasClientListeningSocket);
   (void)ncclSocketClose(&rasNetListeningSocket);
   goto exit;
@@ -190,8 +190,8 @@ static ncclResult_t rasLocalNotify(const struct rasNotification* msg) {
   std::lock_guard<std::mutex> lock(rasNotificationMutex);
   size_t done = 0;
   while (done < sizeof(*msg)) {
-    ssize_t written;
-    SYSCHECK(written = write(rasNotificationPipe[1], (char*)msg + done, sizeof(*msg) - done), "write");
+    size_t written;
+    NCCLCHECK(ncclOsSocketPairWrite(rasNotificationPipe[1], (char*)msg + done, sizeof(*msg) - done, &written));
     done += written;
   }
   return ncclSuccess;
@@ -207,10 +207,12 @@ static ncclResult_t rasLocalHandle(bool* terminate) {
 
   size_t done = 0;
   while (done < sizeof(msg)) {
-    ssize_t nread;
-    SYSCHECK(nread = read(rasNotificationPipe[0], (char*)&msg + done, sizeof(msg) - done), "read");
-    if (nread == 0) // EOF
+    size_t nread;
+    NCCLCHECK(ncclOsSocketPairRead(rasNotificationPipe[0], (char*)&msg + done, sizeof(msg) - done, &nread));
+    if (nread == 0) {
+      // EOF
       return ncclSystemError;
+    }
     done += nread;
   }
 
@@ -237,10 +239,8 @@ static void rasThreadCleanup() {
 
   {
     std::lock_guard<std::mutex> lock(rasInitMutex);
-    (void)close(rasNotificationPipe[1]);
-    (void)close(rasNotificationPipe[0]);
+    (void)ncclOsSocketPairClose(rasNotificationPipe);
     // rasClientListeningSocket is taken care of by rasClientSupportTerminate().
-    rasNotificationPipe[0] = rasNotificationPipe[1] = -1;
     (void)ncclSocketClose(&rasNetListeningSocket);
     rasInitRefCount = 0;
     rasInitialized = false;
@@ -267,9 +267,10 @@ static void rasThreadCleanup() {
 // Behind the scenes allocates encapsulating rasMsgMeta structure, which includes local metadata stored in front
 // of the message.
 // Must use rasMsgFree to free.
+// ncclCallocQuiet is limited to rasMsgAlloc/rasMsgRecv: routine and keep-alive traffic otherwise floods ALLOC_HOST.
 ncclResult_t rasMsgAlloc(struct rasMsg** msg, size_t msgLen) {
   struct rasMsgMeta* meta = nullptr;
-  NCCLCHECK(ncclCalloc((char**)&meta, offsetof(struct rasMsgMeta, msg) + msgLen));
+  NCCLCHECK(ncclCallocQuiet((char**)&meta, offsetof(struct rasMsgMeta, msg) + msgLen));
   *msg = &meta->msg;
   // coverity[leaked_storage:FALSE] => rasMsgFree is used to free it
   return ncclSuccess;
@@ -354,7 +355,7 @@ ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, int* closed
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, &sock->recvLength, sizeof(sock->recvLength),
                                  &sock->recvOffset, closed));
     if (*closed || sock->recvOffset < sizeof(sock->recvLength)) return ncclSuccess;
-    NCCLCHECK(ncclCalloc((char**)&sock->recvMsg, sock->recvLength));
+    NCCLCHECK(ncclCallocQuiet((char**)&sock->recvMsg, sock->recvLength));
   }
   // Receive the body of the message.
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, ((char*)sock->recvMsg) - sizeof(sock->recvLength),
@@ -458,7 +459,8 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
         rasSocketTerminate(conn->sock);
       }
     }
-  } else { // conn == nullptr
+  } else {
+    // conn == nullptr
     NCCLCHECK(getNewConnEntry(&conn));
     memcpy(&conn->addr, &msg->connInit.listeningAddr, sizeof(conn->addr));
   }

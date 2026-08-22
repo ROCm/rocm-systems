@@ -8,7 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna3 {
@@ -45,6 +45,17 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadFormatXMubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyMubuf)),
@@ -66,6 +77,17 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -89,6 +111,17 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyzMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyzwMubuf)),
@@ -110,6 +143,17 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyzwMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -133,6 +177,17 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreFormatXMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyMubuf)),
@@ -154,6 +209,17 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -177,6 +243,17 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyzMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyzwMubuf)),
@@ -198,6 +275,17 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyzwMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -221,12 +309,16 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -250,6 +342,17 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XyzMubuf)),
@@ -272,12 +375,17 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyzMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -301,6 +409,18 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyzwMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XMubuf)),
@@ -322,6 +442,17 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -345,6 +476,18 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xy",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XyzMubuf)),
@@ -366,6 +509,18 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyzMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -389,6 +544,18 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyzwMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadUbyteMubuf)),
@@ -410,6 +577,17 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadUbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding *>(inst),
@@ -433,6 +611,17 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadSbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadUshortMubuf)),
@@ -454,6 +643,17 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadUshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ushort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUshortMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding *>(inst),
@@ -477,6 +677,17 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadSshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sshort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSshortMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadDwordMubuf)),
@@ -498,6 +709,17 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadDwordMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
@@ -521,6 +743,17 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadDwordx3Mubuf)),
@@ -542,6 +775,17 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx3Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
@@ -565,6 +809,17 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx4Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreByteMubuf)),
@@ -586,6 +841,17 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreByteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreByteMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -609,6 +875,17 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreByteD16HiMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreShortMubuf)),
@@ -630,6 +907,17 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreShortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreShortMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -653,6 +941,17 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreShortD16HiMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreDwordMubuf)),
@@ -674,6 +973,17 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreDwordMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
@@ -697,6 +1007,17 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreDwordx3Mubuf)),
@@ -718,6 +1039,17 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx3Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
@@ -741,6 +1073,17 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx4Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadUbyteD16Mubuf)),
@@ -763,12 +1106,16 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteD16Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -792,12 +1139,16 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteD16HiMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -821,12 +1172,16 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteD16Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -850,12 +1205,16 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteD16HiMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -879,12 +1238,16 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadShortD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadShortD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadShortD16Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -908,12 +1271,16 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadShortD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadShortD16HiMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -937,12 +1304,17 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16HiXMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -966,6 +1338,18 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16HiXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferWbl2Mubuf)) {
@@ -973,12 +1357,33 @@ BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+DecodeResult decodeBufferWbl2Mubuf(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_wbl2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferWbl2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
     : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferInvMubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeBufferInvMubuf(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_inv", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferInvMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -1003,6 +1408,17 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSwapMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSwapMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
@@ -1033,6 +1449,17 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicCmpswapMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAddMubuf)),
@@ -1056,6 +1483,17 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicAddMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
@@ -1081,6 +1519,17 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicSubMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSubMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSminMubuf)),
@@ -1104,6 +1553,17 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSminMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
@@ -1129,6 +1589,17 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicUminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUminMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSmaxMubuf)),
@@ -1152,6 +1623,17 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSmaxMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
@@ -1177,6 +1659,17 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicUmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUmaxMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAndMubuf)),
@@ -1200,6 +1693,17 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicAndMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAndMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
@@ -1225,6 +1729,17 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicOrMubuf(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicOrMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicXorMubuf)),
@@ -1248,6 +1763,17 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicXorMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicXorMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
@@ -1273,6 +1799,17 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicIncMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicIncMubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicDecMubuf)),
@@ -1296,6 +1833,17 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicDecMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicDecMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1321,6 +1869,17 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f32", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddF16Mubuf)),
@@ -1344,6 +1903,17 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_pk_add_f16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicPkAddF16Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1369,6 +1939,17 @@ BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicAddF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddF64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMinF64Mubuf)),
@@ -1392,6 +1973,17 @@ BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicMinF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_min_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicMinF64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1417,6 +2009,17 @@ BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicMaxF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_max_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicMaxF64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSwapX2Mubuf)),
@@ -1440,6 +2043,17 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSwapX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1470,6 +2084,17 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicCmpswapX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAddX2Mubuf)),
@@ -1493,6 +2118,17 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1518,6 +2154,17 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSubX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSminX2Mubuf)),
@@ -1541,6 +2188,17 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSminX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1566,6 +2224,17 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUminX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSmaxX2Mubuf)),
@@ -1589,6 +2258,17 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSmaxX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1614,6 +2294,17 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUmaxX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAndX2Mubuf)),
@@ -1637,6 +2328,17 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAndX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1662,6 +2364,17 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicOrX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicXorX2Mubuf)),
@@ -1685,6 +2398,17 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicXorX2Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1710,6 +2434,17 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicIncX2Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicDecX2Mubuf)),
@@ -1733,6 +2468,17 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicDecX2Mubuf>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna3
 } // namespace rocjitsu
