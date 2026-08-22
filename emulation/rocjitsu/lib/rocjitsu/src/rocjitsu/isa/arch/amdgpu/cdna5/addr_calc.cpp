@@ -211,8 +211,10 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 
 uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
                                 uint32_t lds_operand, uint32_t access_size_bytes) {
-  int64_t relative_addr = static_cast<int64_t>(lds_operand) + signed_ioffset(inst.ioffset);
-  if (relative_addr < 0 || static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
+  // The VGPR operand is 32 bits, so adding IOFFSET wraps before the LDS bounds check. This
+  // matters when code materializes (address - IOFFSET) in the VGPR, for example -64 + 64.
+  uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
+  if (static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
     return amdgpu::kInvalidLdsAddress;
 
   uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
