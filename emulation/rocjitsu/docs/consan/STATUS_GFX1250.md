@@ -702,9 +702,33 @@ solution kernels while a numeric run selects only a subset.
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
 | P2 | `006_sk_hgemm_quick` | 🟧 136 exact numeric passes with zero failures; first 143-solution problem remains active at 300 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.02x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟧 Current tip executes 189 exact rows with zero failures before the fixed 180-second bound | Record/Replay and Sampled are accepted; SuperCollider and Inline Shadow lack a full-client verdict. |
-| P3 | `015_spmm_f8_ml` stress | 🟧 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟨 Current clean E2E accepts all seven clients with 172,468/172,468 accesses and 3,060/3,060 barriers; paired and reviewed-fault bundle pending | 🟩 All seven clients exact; 172,468/172,468 accesses and 6,120/6,120 barriers; paired 4.88x; reviewed fault, containment, and health accepted | 🟧 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Sampled is accepted; Record/Replay lacks paired/fault evidence, and the other profiles remain bounded. |
+| P3 | `015_spmm_f8_ml` stress | 🟧 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟨 Current clean E2E accepts all eight generated clients with 172,468/172,468 accesses and 3,060/3,060 barriers. Multi-block exact-size sharding now preserves all eight clients in each of three concurrent size slices, but the large-size baseline's first client remains compute-active beyond five minutes; paired and reviewed-fault bundles remain | 🟩 All eight generated clients exact; 172,468/172,468 accesses and 6,120/6,120 barriers; paired 4.88x; reviewed fault, containment, and health accepted | 🟧 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Sampled is accepted; Record/Replay lacks paired/fault evidence, and the other profiles remain bounded. |
 | P2 | `019_spmm_f16_sb` closure | 🟧 9,546/9,546 accesses patched; first client exceeds 300 seconds without a numeric row | 🟩 Four exact orientations; 31,265/31,265 accesses; current paired 2.48x | 🟧 9,546/9,546 accesses and 646/646 applicable barriers patched; first client exceeds 300 seconds without a numeric row | 🟧 9,546/9,546 accesses and 323/323 barriers patched; first client exceeds 300 seconds without a numeric row | Sampled is accepted; the other profiles retain the bounded partial results shown in their cells. |
 | Survey | Remaining Tensile configurations | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows, including full `019_spmm_f16_sb` bundle | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | Survey complete; selected high-signal rows above define the executable denominator. |
+
+### 2026-08-22 `015_spmm_f8_ml` Record/Replay sharding diagnostic
+
+The source configuration has eight benchmark blocks, not seven, and every
+block repeats the same three Exact problem sizes. The validation harness now
+fails closed unless all block inventories are identical, filters every block
+into each size shard, runs the three shards concurrently, and requires all
+eight generated clients plus every emitted numerical row to pass. Focused
+host regressions cover multi-block filtering, inconsistent source inventories,
+the complete command/fault policy, per-shard timing canaries, and the explicit
+eight-client denominator. Fixed numerical-row counts are intentionally not
+used: repeated clean generation produced 13--16, 23--29, and 40--45 printed
+winners for the same three source sizes while every generated client and row
+passed.
+
+Standalone baseline diagnostics for the three slices complete in roughly 73,
+82, and 117 seconds. Concurrent paired attempt
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-spmm-f8ml-rr-sharded-693-v3`
+finishes the two smaller baseline slices in 83 and 89 seconds, each with all
+eight clients passing. The large slice's first client remains compute-active
+after five minutes, so the attempt is terminated before Record/Replay rather
+than spending a second long cycle. This is bounded duration evidence, not a
+paired result or promotion; the cell remains yellow and rotates. The earlier
+clean full-client coverage result remains valid.
 
 ### 2026-08-21 `007_sk_mxf4gemm_tdm` Record/Replay far-fence fix
 

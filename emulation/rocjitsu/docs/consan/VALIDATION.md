@@ -273,10 +273,10 @@ sizes before writing any filtered configuration, so a corpus addition,
 deletion, reorder, duplicate, or non-Exact problem form fails closed instead
 of silently narrowing the 96-row denominator.
 
-The seven-block `tensile-spmm-f8-ml` row uses the same contract for the three
+The eight-block `tensile-spmm-f8-ml` row uses the same contract for the three
 Exact sizes repeated identically by every block. The filtered YAML must retain
-all seven blocks and selects one size in each; differing block inventories
-fail closed. Each shard requires all seven generated clients to exit `PASS`,
+all eight blocks and selects one size in each; differing block inventories
+fail closed. Each shard requires all eight generated clients to exit `PASS`,
 every emitted numerical row to pass, and at least one such row. The count of
 printed winning rows is deliberately not frozen because Tensile may reject a
 different subset of generated solutions while retaining the same source
@@ -289,7 +289,7 @@ timing quotas.
 
 Fault inventory and contained exact-one mutation use the manifest-selected
 first shard and retain its complete numerical oracle: 16 fixed rows for the
-MXF4 workload and all seven generated clients for sparse F8. This keeps the
+MXF4 workload and all eight generated clients for sparse F8. This keeps the
 fault gate bounded while clean and paired
 overhead continue to cover every declared size, benchmark block, and generated
 row. The representative fault shard is explicit in the executable manifest; a

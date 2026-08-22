@@ -1651,7 +1651,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             # The clean and overhead phases still qualify every shard.
             "tensile_fault_shard_index": 0,
         },
-        # The seven sparse benchmark blocks repeat the same three Exact
+        # The eight sparse benchmark blocks repeat the same three Exact
         # problem sizes. Give each size an independent all-block numeric
         # oracle and run the three complete size slices concurrently. This
         # retains every generated client and solution while replacing the
@@ -1665,7 +1665,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
                 ((16, 16, 1, 256),),
                 ((128, 128, 1, 128),),
             ),
-            "tensile_expected_client_passes": 7,
+            "tensile_expected_client_passes": 8,
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
