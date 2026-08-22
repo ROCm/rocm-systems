@@ -450,31 +450,49 @@ def _exact_problem_size_blocks(document: object) -> list[list[object]]:
 
 def _exact_problem_size_inventory(document: object) -> tuple[tuple[int, ...], ...]:
     blocks = _exact_problem_size_blocks(document)
-    if len(blocks) != 1:
-        raise ValueError(
-            "exact-size sharding requires exactly one ProblemSizes block, "
-            f"found {len(blocks)}"
-        )
-    sizes = []
-    for index, entry in enumerate(blocks[0]):
-        if not isinstance(entry, dict) or set(entry) != {"Exact"}:
+    if not blocks:
+        raise ValueError("exact-size sharding requires at least one ProblemSizes block")
+    inventories = []
+    for block_index, block in enumerate(blocks):
+        sizes = []
+        for entry_index, entry in enumerate(block):
+            if not isinstance(entry, dict) or set(entry) != {"Exact"}:
+                raise ValueError(
+                    "exact-size sharding requires every ProblemSizes entry to "
+                    "contain only Exact; "
+                    f"block {block_index} entry {entry_index} is unsupported"
+                )
+            size = entry["Exact"]
+            if (
+                not isinstance(size, list)
+                or not size
+                or any(
+                    type(dimension) is not int or dimension <= 0
+                    for dimension in size
+                )
+            ):
+                raise ValueError(
+                    f"ProblemSizes block {block_index} Exact entry "
+                    f"{entry_index} is malformed"
+                )
+            sizes.append(tuple(size))
+        if not sizes:
             raise ValueError(
-                "exact-size sharding requires every ProblemSizes entry to contain "
-                f"only Exact; entry {index} is unsupported"
+                f"ProblemSizes block {block_index} contains no Exact entries"
             )
-        size = entry["Exact"]
-        if (
-            not isinstance(size, list)
-            or not size
-            or any(type(dimension) is not int or dimension <= 0 for dimension in size)
-        ):
-            raise ValueError(f"ProblemSizes Exact entry {index} is malformed")
-        sizes.append(tuple(size))
-    if not sizes:
-        raise ValueError("ProblemSizes contains no Exact entries")
-    if len(set(sizes)) != len(sizes):
-        raise ValueError("ProblemSizes contains duplicate Exact entries")
-    return tuple(sizes)
+        if len(set(sizes)) != len(sizes):
+            raise ValueError(
+                f"ProblemSizes block {block_index} contains duplicate Exact entries"
+            )
+        inventories.append(tuple(sizes))
+    source_inventory = inventories[0]
+    for block_index, inventory in enumerate(inventories[1:], start=1):
+        if inventory != source_inventory:
+            raise ValueError(
+                "exact-size sharding requires every ProblemSizes block to have "
+                f"the same Exact inventory; block {block_index} differs"
+            )
+    return source_inventory
 
 
 def _write_exact_problem_size_shard(
@@ -498,11 +516,11 @@ def _write_exact_problem_size_shard(
         raise ValueError(f"selected Exact problem sizes are absent: {missing}")
 
     filtered = copy.deepcopy(document)
-    block = _exact_problem_size_blocks(filtered)[0]
     selected_set = set(selected)
-    block[:] = [
-        entry for entry in block if tuple(entry["Exact"]) in selected_set
-    ]
+    for block in _exact_problem_size_blocks(filtered):
+        block[:] = [
+            entry for entry in block if tuple(entry["Exact"]) in selected_set
+        ]
     filtered_inventory = _exact_problem_size_inventory(filtered)
     if filtered_inventory != tuple(
         size for size in source_inventory if size in selected_set

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
@@ -250,6 +251,60 @@ class TensileValidationTest(unittest.TestCase):
             tensile_validation._exact_problem_size_inventory(filtered),
             ((128, 128, 1, 1024),),
         )
+
+    def test_exact_problem_size_shard_filters_every_identical_block(self) -> None:
+        problem_sizes = [
+            {"Exact": [16, 16, 1, 64]},
+            {"Exact": [16, 16, 1, 256]},
+            {"Exact": [128, 128, 1, 128]},
+        ]
+        source_document = {
+            "BenchmarkProblems": [
+                [
+                    {"OperationType": "GEMM", "TransposeA": transpose_a},
+                    {
+                        "BenchmarkFinalParameters": [
+                            {"ProblemSizes": copy.deepcopy(problem_sizes)}
+                        ]
+                    },
+                ]
+                for transpose_a in (False, True)
+            ]
+        }
+        expected = (
+            (16, 16, 1, 64),
+            (16, 16, 1, 256),
+            (128, 128, 1, 128),
+        )
+        with temporary_root() as root:
+            source = root / "source.yaml"
+            selected = root / "selected.yaml"
+            source.write_text(
+                yaml.safe_dump(source_document, sort_keys=False), encoding="utf-8"
+            )
+            inventory = tensile_validation._write_exact_problem_size_shard(
+                source,
+                selected,
+                ((16, 16, 1, 256),),
+                expected,
+            )
+            filtered = yaml.safe_load(selected.read_text(encoding="utf-8"))
+        self.assertEqual(inventory, expected)
+        self.assertEqual(len(tensile_validation._exact_problem_size_blocks(filtered)), 2)
+        for block in tensile_validation._exact_problem_size_blocks(filtered):
+            self.assertEqual(block, [{"Exact": [16, 16, 1, 256]}])
+
+    def test_exact_problem_size_sharding_rejects_different_block_inventory(
+        self,
+    ) -> None:
+        document = {
+            "BenchmarkProblems": [
+                {"ProblemSizes": [{"Exact": [16, 16, 1, 64]}]},
+                {"ProblemSizes": [{"Exact": [16, 16, 1, 256]}]},
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "block 1 differs"):
+            tensile_validation._exact_problem_size_inventory(document)
 
     def test_exact_problem_size_shard_fails_closed_on_corpus_change(self) -> None:
         document = {"ProblemSizes": [{"Exact": [128, 128, 1, 1024]}]}
