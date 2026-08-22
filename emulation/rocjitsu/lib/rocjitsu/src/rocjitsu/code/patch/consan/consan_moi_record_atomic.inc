@@ -48,6 +48,13 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     retain_unavailable_cas(function.name, false, function.atomic_sites);
     append_atomic_record_candidates(function, result, sync_index, candidates);
   }
+  std::vector<AtomicRecordCandidate> ordinary_candidates;
+  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
+  std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
+                       [&](const AtomicRecordCandidate &candidate) {
+                         return !ordinary_atomic_candidate_is_covered_by_eligible_fence(
+                             result, sync_index, candidate);
+                       });
   apply_test_container_filter(candidates, options);
   if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
     return;

@@ -119,7 +119,9 @@ bool consan_ordinary_release_metadata_compatible(const ConSanSyncEvent &cache,
                });
   };
   return cache.kind == ConSanSyncEventKind::Fence &&
-         cache.operation == ConSanSyncOperation::Fence && cache.mnemonic == "global_wb" &&
+         cache.operation == ConSanSyncOperation::Fence &&
+         (cache.mnemonic == "global_wb" || cache.mnemonic == "buffer_wb" ||
+          cache.mnemonic == "buffer_wbl2") &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
          store.kind == ConSanSyncEventKind::OrdinaryMemory &&
          store.operation == ConSanSyncOperation::OrdinaryStore && store.width_bits != 0u &&

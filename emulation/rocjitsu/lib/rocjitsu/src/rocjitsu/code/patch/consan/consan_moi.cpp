@@ -625,6 +625,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       return atomic_event_kind_for_site(sync_index, container.name, in_kernel, site).has_value();
     });
   };
+  std::vector<AtomicRecordCandidate> operational_ordinary_atomics;
+  append_ordered_ordinary_atomic_candidates(result, sync_index, operational_ordinary_atomics);
   const bool has_operational_atomic_or_fence =
       std::ranges::any_of(
           result.kernels,
@@ -633,6 +635,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                           [&](const ConSanFunctionInfo &function) {
                             return has_operational_atomic(function, false);
                           }) ||
+      !operational_ordinary_atomics.empty() ||
       std::ranges::any_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible);
   const bool atomic_or_fence_relevant =
       effective_options.moi_track_atomics &&

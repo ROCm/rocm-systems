@@ -28,16 +28,17 @@ struct AtomicRecordCandidate {
          std::tie(left.address_space_hint, left.text_offset, left.file_offset, left.size,
                   left.width_bits, left.dst_vgpr, left.addr_vgpr, left.data_vgpr, left.saddr_sgpr,
                   left.raw_op, left.raw_addr, left.raw_data0, left.raw_data1, left.raw_vdst,
-                  left.raw_saddr, left.raw_vaddr, left.raw_vsrc, left.raw_vdata, left.raw_rsrc,
-                  left.raw_soffset, left.raw_offen, left.raw_idxen, left.raw_ioffset,
-                  left.raw_scope, left.raw_th, left.returns_old_value, left.mnemonic) ==
+                  left.raw_saddr, left.raw_scale_offset, left.raw_vaddr, left.raw_vsrc,
+                  left.raw_vdata, left.raw_rsrc, left.raw_soffset, left.raw_offen, left.raw_idxen,
+                  left.raw_ioffset, left.raw_scope, left.raw_th, left.returns_old_value,
+                  left.mnemonic) ==
              std::tie(right.address_space_hint, right.text_offset, right.file_offset, right.size,
                       right.width_bits, right.dst_vgpr, right.addr_vgpr, right.data_vgpr,
                       right.saddr_sgpr, right.raw_op, right.raw_addr, right.raw_data0,
-                      right.raw_data1, right.raw_vdst, right.raw_saddr, right.raw_vaddr,
-                      right.raw_vsrc, right.raw_vdata, right.raw_rsrc, right.raw_soffset,
-                      right.raw_offen, right.raw_idxen, right.raw_ioffset, right.raw_scope,
-                      right.raw_th, right.returns_old_value, right.mnemonic);
+                      right.raw_data1, right.raw_vdst, right.raw_saddr, right.raw_scale_offset,
+                      right.raw_vaddr, right.raw_vsrc, right.raw_vdata, right.raw_rsrc,
+                      right.raw_soffset, right.raw_offen, right.raw_idxen, right.raw_ioffset,
+                      right.raw_scope, right.raw_th, right.returns_old_value, right.mnemonic);
 }
 
 [[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
@@ -211,6 +212,7 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   normalized.raw_offen = site.raw_offen;
   normalized.raw_idxen = site.raw_idxen;
   normalized.raw_saddr = site.raw_saddr;
+  normalized.raw_scale_offset = site.raw_scale_offset;
   normalized.raw_ioffset = site.raw_ioffset;
   normalized.raw_scope = site.raw_scope;
   normalized.raw_th = site.raw_th;
@@ -283,19 +285,17 @@ void append_fence_record_candidates(const ConSanResult &result,
 void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
                                                const MoiSyncInventoryIndex &sync_index,
                                                std::vector<AtomicRecordCandidate> &candidates) {
-  std::vector<FenceRecordCandidate> fence_candidates;
-  append_fence_record_candidates(result, sync_index, fence_candidates);
-  for (const FenceRecordCandidate &fence_candidate : fence_candidates) {
-    const ConSanSyncEvent *communication =
-        sync_index.event(fence_candidate.fence.communication_event_identity);
-    if (communication == nullptr || communication->kind != ConSanSyncEventKind::OrdinaryMemory)
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        !consan_sync_confidence_meets(sequence.confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                      ConSanSemanticConfidence::Conservative)) {
       continue;
-    const ConSanSyncSequence *sequence = sync_index.sequence(communication->identity);
-    if (sequence == nullptr || sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory)
-      continue;
+    }
 
     std::optional<ConSanMoiAtomicEventKind> event_kind;
-    switch (fence_candidate.fence.memory_role) {
+    switch (sequence.memory_role) {
     case ConSanSyncMemoryRole::Release:
       event_kind = ConSanMoiAtomicEventKind::Release;
       break;
@@ -311,22 +311,81 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
     if (!event_kind)
       continue;
 
-    AtomicRecordCandidate candidate;
-    candidate.container_name = (fence_candidate.fence.in_kernel ? "kernel:" : "function:") +
-                               fence_candidate.fence.container_name;
-    candidate.site = fence_candidate.communication_site;
-    candidate.kernel_descriptor_file_offset = fence_candidate.kernel_descriptor_file_offset;
-    candidate.event_kind = *event_kind;
-    candidate.is_rmw = false;
-    candidate.ordered_sequence_end_text_offset = sequence->end_text_offset;
-    if (fence_candidate.fence.in_kernel) {
-      const auto kernel = std::ranges::find(result.kernels, fence_candidate.fence.container_name,
-                                            &ConSanKernelInfo::name);
-      if (kernel != result.kernels.end())
-        candidate.uses_gfx1250_cluster_workgroup_id = kernel->uses_gfx1250_cluster_workgroup_id;
+    const ConSanSyncEvent *communication = nullptr;
+    for (const std::string &identity : sequence.member_event_identities) {
+      const ConSanSyncEvent *event = sync_index.event(identity);
+      if (event == nullptr || event->kind != ConSanSyncEventKind::OrdinaryMemory)
+        continue;
+      if (communication != nullptr) {
+        communication = nullptr;
+        break;
+      }
+      communication = event;
     }
-    candidates.push_back(std::move(candidate));
+    if (communication == nullptr || communication->execution_owners.empty() ||
+        communication->container_name != sequence.container_name ||
+        communication->in_kernel != sequence.in_kernel) {
+      continue;
+    }
+
+    const auto append_from = [&](const auto &container,
+                                 std::optional<uint64_t> descriptor_file_offset) {
+      const auto site =
+          std::ranges::find(container.ordinary_memory_sites, communication->text_offset,
+                            &ConSanOrdinaryMemorySite::text_offset);
+      if (site == container.ordinary_memory_sites.end() ||
+          std::ranges::count(container.ordinary_memory_sites, communication->text_offset,
+                             &ConSanOrdinaryMemorySite::text_offset) != 1 ||
+          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+           site->support_reason !=
+               ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)) {
+        return;
+      }
+      if (descriptor_file_offset &&
+          (communication->execution_owners.size() != 1u ||
+           communication->execution_owners.front().descriptor_file_offset !=
+               *descriptor_file_offset)) {
+        descriptor_file_offset.reset();
+      }
+      AtomicRecordCandidate candidate;
+      candidate.container_name =
+          (communication->in_kernel ? "kernel:" : "function:") + communication->container_name;
+      candidate.site = normalize_ordinary_fence_communication(*site);
+      candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+      candidate.event_kind = *event_kind;
+      candidate.is_rmw = false;
+      candidate.ordered_sequence_end_text_offset = sequence.end_text_offset;
+      if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
+        candidate.uses_gfx1250_cluster_workgroup_id = container.uses_gfx1250_cluster_workgroup_id;
+      candidates.push_back(std::move(candidate));
+    };
+    if (communication->in_kernel) {
+      const auto kernel =
+          std::ranges::find(result.kernels, communication->container_name, &ConSanKernelInfo::name);
+      if (kernel != result.kernels.end() && !is_rocclr_runtime_kernel_name(kernel->name))
+        append_from(*kernel, kernel->descriptor_file_offset);
+    } else {
+      const auto function = std::ranges::find(result.functions, communication->container_name,
+                                              &ConSanFunctionInfo::name);
+      if (function != result.functions.end())
+        append_from(*function, std::nullopt);
+    }
   }
+}
+
+[[nodiscard]] bool
+ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &result,
+                                                       const MoiSyncInventoryIndex &sync_index,
+                                                       const AtomicRecordCandidate &candidate) {
+  return std::ranges::any_of(
+      result.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
+        if (!fence.eligible)
+          return false;
+        const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
+        return communication != nullptr &&
+               communication->kind == ConSanSyncEventKind::OrdinaryMemory &&
+               communication->file_offset == candidate.site.file_offset;
+      });
 }
 
 [[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicSite &site,
@@ -2923,6 +2982,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       errors.emplace_back("ConSan MOI inline release transaction requires an owning descriptor");
       return std::nullopt;
     }
+    // An ISA release RMW extends the claimed predecessor's release sequence.
+    // A language-level ordinary release store starts a new publication: it
+    // must reserve and stage metadata before the guest store, but must not
+    // inherit an unrelated predecessor's causal frontier.
+    const bool import_claimed_predecessor = claims_release_predecessor && candidate.is_rmw;
     const auto workgroup_sources = moi_descriptor_workgroup_sources(
         bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!workgroup_sources ||
@@ -2930,10 +2994,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, options, arch, slot_base,
             inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
             token_table_base, inline_acquired_token_capacity,
-            /*emit_guest_instruction=*/true,
-            // A release RMW extends every predecessor's release sequence. Keep
-            // the claimed predecessor until its causal frontier is imported.
-            /*import_claimed_predecessor=*/claims_release_predecessor,
+            /*emit_guest_instruction=*/true, import_claimed_predecessor,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
           "ConSan MOI inline release could not emit a versioned causal transaction");

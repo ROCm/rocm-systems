@@ -3107,6 +3107,143 @@ TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
   EXPECT_EQ(result.moi_fence_candidates[1].memory_role, ConSanSyncMemoryRole::Acquire);
 }
 
+TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
+  const std::vector<uint32_t> text_words = {
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDE708004u,
+      0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+  options.fault_dry_run = true;
+
+  const ConSanResult result =
+      try_patch_consan(make_cdna4_lds_code_object(text_words, "ordinary_release_store"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.sync_sequences.size(), 1u) << testing::PrintToString(result.sync_sequences);
+  const ConSanSyncSequence &release = result.sync_sequences.front();
+  EXPECT_EQ(release.kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(release.operation, ConSanSyncOperation::OrdinaryStore);
+  EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(release.begin_text_offset, 0u);
+  EXPECT_EQ(release.end_text_offset, 5u * sizeof(uint32_t));
+  ASSERT_EQ(result.moi_fence_candidates.size(), 1u)
+      << testing::PrintToString(result.moi_fence_candidates);
+  const ConSanMoiFenceCandidate &candidate = result.moi_fence_candidates.front();
+  EXPECT_TRUE(candidate.eligible) << candidate.rejection_reason;
+  EXPECT_EQ(candidate.memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(candidate.communication_event_identity, result.sync_events.back().identity);
+  EXPECT_EQ(candidate.communication_static_byte_offset, 4u);
+  ASSERT_TRUE(candidate.raw_scope);
+  EXPECT_EQ(*candidate.raw_scope, 2u);
+}
+
+TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
+  const auto rdna3_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
+  const auto gfx12_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(rdna3_wait && gfx12_wait);
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+
+  const std::array<uint32_t, 4> rdna3_words = {
+      *rdna3_wait,
+      0xDC6A0004u,
+      0x00000100u, // global_store_b32 v0, v1, s[0:1] offset:4
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3),
+  };
+  const ConSanResult rdna3 =
+      try_patch_consan(make_rdna3_lds_code_object(rdna3_words, "rdna3_release_store"), options);
+  ASSERT_TRUE(consan_patch_succeeded(rdna3)) << testing::PrintToString(rdna3.errors);
+  const auto rdna3_release = std::ranges::find(rdna3.sync_sequences, ConSanSyncMemoryRole::Release,
+                                               &ConSanSyncSequence::memory_role);
+  ASSERT_NE(rdna3_release, rdna3.sync_sequences.end())
+      << testing::PrintToString(rdna3.sync_sequences);
+  EXPECT_EQ(rdna3_release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(rdna3_release->begin_text_offset, 0u);
+  EXPECT_EQ(rdna3_release->end_text_offset, 3u * sizeof(uint32_t));
+  EXPECT_EQ(rdna3_release->release_wait_text_offset, 0u);
+
+  const std::array<uint32_t, 5> rdna4_words = {
+      *gfx12_wait,
+      0xEE068000u,
+      0x00880000u,
+      0x00000400u, // global_store_b32 v0, v1, s[0:1] offset:4 scope:SCOPE_DEV
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const ConSanResult rdna4 =
+      try_patch_consan(make_rdna4_lds_code_object(rdna4_words, "rdna4_release_store"), options);
+  ASSERT_TRUE(consan_patch_succeeded(rdna4)) << testing::PrintToString(rdna4.errors);
+  const auto rdna4_release = std::ranges::find(rdna4.sync_sequences, ConSanSyncMemoryRole::Release,
+                                               &ConSanSyncSequence::memory_role);
+  ASSERT_NE(rdna4_release, rdna4.sync_sequences.end())
+      << testing::PrintToString(rdna4.sync_sequences);
+  EXPECT_EQ(rdna4_release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(rdna4_release->begin_text_offset, 0u);
+  EXPECT_EQ(rdna4_release->end_text_offset, 4u * sizeof(uint32_t));
+  EXPECT_EQ(rdna4_release->release_wait_text_offset, 0u);
+}
+
+TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
+  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(wait_store);
+  constexpr auto writeback =
+      cdna5::build_vglobal(cdna5::kGlobalWbVglobal, {.saddr = 124u, .scope = 2u});
+  constexpr auto store = cdna5::build_vglobal(
+      cdna5::kGlobalStoreB32Vglobal,
+      {.saddr = 0u, .scale_offset = 1u, .scope = 2u, .vsrc = 1u, .vaddr = 0u, .ioffset = 4u});
+  EXPECT_EQ(writeback, (std::array<uint32_t, 3>{0xEE0B007Cu, 0x00080000u, 0x00000000u}));
+  EXPECT_EQ(store, (std::array<uint32_t, 3>{0xEE068000u, 0x00890000u, 0x00000400u}));
+  const std::array<uint32_t, 9> words = {
+      *wait_store,
+      writeback[0],
+      writeback[1],
+      writeback[2], // global_wb scope:SCOPE_DEV
+      *wait_store,
+      store[0],
+      store[1],
+      store[2], // global_store_b32 scope:SCOPE_DEV
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  ConSanOptions options = moi_options();
+  options.moi_track_atomics = true;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(words, "gfx1250_release_store"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().ordinary_memory_sites.size(), 1u);
+  const ConSanOrdinaryMemorySite &store_site = result.kernels.front().ordinary_memory_sites.front();
+  EXPECT_EQ(store_site.support_reason,
+            ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
+  ASSERT_TRUE(store_site.raw_scale_offset);
+  EXPECT_TRUE(*store_site.raw_scale_offset);
+  const auto store_event =
+      std::ranges::find_if(result.sync_events, [](const ConSanSyncEvent &event) {
+        return event.kind == ConSanSyncEventKind::OrdinaryMemory &&
+               event.operation == ConSanSyncOperation::OrdinaryStore;
+      });
+  ASSERT_NE(store_event, result.sync_events.end()) << testing::PrintToString(result.sync_events);
+  EXPECT_EQ(store_event->confidence, ConSanSemanticConfidence::Conservative);
+  EXPECT_EQ(store_event->width_bits, 32u);
+  ASSERT_TRUE(store_event->raw_scope);
+  EXPECT_EQ(*store_event->raw_scope, 2u);
+  EXPECT_FALSE(store_event->execution_owners.empty());
+  const auto release = std::ranges::find(result.sync_sequences, ConSanSyncMemoryRole::Release,
+                                         &ConSanSyncSequence::memory_role);
+  ASSERT_NE(release, result.sync_sequences.end()) << testing::PrintToString(result.sync_sequences)
+                                                  << testing::PrintToString(result.sync_events);
+  EXPECT_EQ(release->kind, ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(release->begin_text_offset, sizeof(uint32_t));
+  EXPECT_EQ(release->end_text_offset, 8u * sizeof(uint32_t));
+  EXPECT_EQ(release->member_event_identities.size(), 2u);
+  EXPECT_NE(release->identity.find("|release-cache="), std::string::npos);
+}
+
 TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
   const auto wait = build_rdna3_s_wait_vmcnt0(kArch);

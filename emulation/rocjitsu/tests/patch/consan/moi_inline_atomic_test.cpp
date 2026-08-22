@@ -546,6 +546,88 @@ TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
                          cave.begin() + static_cast<ptrdiff_t>(guest_word)));
 }
 
+TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
+  constexpr std::array<uint32_t, 5> kReleaseSequence = {
+      0xE0A08000u,
+      0x00000000u, // buffer_wbl2 sc1
+      0xBF8C0F70u, // s_waitcnt vmcnt(0)
+      0xDE708004u,
+      0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
+  };
+  constexpr uint64_t kStoreTextOffset = 5u * sizeof(uint32_t);
+  std::vector<uint32_t> words = {
+      0xD81A0004u,
+      0x00000302u, // ds_write_b32 v2, v3 offset:4
+  };
+  words.insert(words.end(), kReleaseSequence.begin(), kReleaseSequence.end());
+  words.insert(words.end(), {
+                                0xDD058004u,
+                                0x01000203u, // global_atomic_cmpswap v1, v3, v[2:3], s[0:1]
+                                0xBF8C0F70u, // s_waitcnt vmcnt(0)
+                                0xE0A48000u,
+                                0x00000000u, // buffer_inv sc1
+                                0xD86C0004u,
+                                0x04000002u, // ds_read_b32 v4, v2 offset:4
+                            });
+  words.resize(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(words, "inline_ordinary_release_store",
+                                 /*vgpr_granulated=*/0u,
+                                 /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/1u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.moi_owner_sgpr = 60;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 64;
+  options.moi_dispatch_id_vgpr = 50;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto release = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
+           patch.anchor_offset == kStoreTextOffset;
+  });
+  ASSERT_NE(release, result.patches.end())
+      << testing::PrintToString(result.patches) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(release->original_size, 2u * sizeof(uint32_t));
+  ASSERT_TRUE(release->relocated_guest_instruction_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, release->trampoline_offset, release->trampoline_size);
+  const size_t guest_word =
+      (*release->relocated_guest_instruction_offset - release->trampoline_offset) /
+      sizeof(uint32_t);
+  ASSERT_LE(guest_word + 2u, cave.size());
+  EXPECT_EQ(cave[guest_word], kReleaseSequence[3]);
+  EXPECT_EQ(cave[guest_word + 1u], kReleaseSequence[4]);
+
+  const auto release_claim_and_commit = build_cdna4_flat_atomic_cmpswap_b32(
+      /*vaddr=*/8, /*vsrc=*/12, /*vdst=*/12, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto predecessor_token_transaction = build_cdna4_flat_atomic_cmpswap_b32(
+      /*vaddr=*/8, /*vsrc=*/26, /*vdst=*/26, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(release_claim_and_commit && predecessor_token_transaction);
+  EXPECT_EQ(count_subsequence(cave, *release_claim_and_commit), 2u)
+      << "ordinary release must reserve before the guest store and commit afterward";
+  EXPECT_EQ(count_subsequence(cave, *predecessor_token_transaction), 0u)
+      << "ordinary release store must not inherit an RMW predecessor release sequence";
+}
+
 TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint16_t kIndirectPcSgpr = 48u;
@@ -2419,6 +2501,94 @@ TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
   EXPECT_TRUE(flat_words->empty());
 }
 
+TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
+  constexpr auto atomic = cdna5::build_vglobal(
+      cdna5::kGlobalAtomicAddU32Vglobal,
+      {.saddr = 0u, .scale_offset = 1u, .scope = 2u, .vsrc = 1u, .vaddr = 2u, .ioffset = 4u});
+  const std::array<uint32_t, 4> words = {atomic[0], atomic[1], atomic[2],
+                                         build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  ConSanOptions inventory_options;
+  inventory_options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult inventory =
+      try_patch_consan(make_gfx1250_code_object(words, "scaled_global_atomic"), inventory_options);
+
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_EQ(inventory.kernels.size(), 1u);
+  ASSERT_EQ(inventory.kernels.front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite &site = inventory.kernels.front().atomic_sites.front();
+  ASSERT_TRUE(site.raw_scale_offset);
+  EXPECT_TRUE(*site.raw_scale_offset);
+  EXPECT_EQ(site.raw_ioffset, 4);
+  ASSERT_TRUE(site.saddr_sgpr);
+  EXPECT_EQ(*site.saddr_sgpr, 0u);
+
+  constexpr uint16_t kScratch = 8u;
+  constexpr uint16_t kVccSave = 80u;
+  constexpr uint16_t kSccSave = 82u;
+  const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
+      site, kScratch, /*scratch_vgpr_count=*/5, ConSanRegisterAllocationSource::Explicit,
+      ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(plan.supported()) << consan_moi_atomic_address_support_name(plan.support);
+  EXPECT_EQ(plan.kind, ConSanMoiAtomicAddressKind::VglobalMaterialized);
+  EXPECT_EQ(plan.input_address_vgpr, 2u);
+  EXPECT_EQ(plan.input_address_scale, 4u);
+  EXPECT_EQ(plan.signed_byte_offset, 4);
+  EXPECT_EQ(plan.result_address_vgpr, 11u);
+
+  const auto materialization = build_consan_moi_atomic_address_materialization(
+      plan, kVccSave, kSccSave, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto save_scc =
+      build_rdna4_s_cselect_b32(kSccSave, scalar_positive_inline_u32(1),
+                                scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
+  const auto save_vcc = build_s_mov_b64(kVccSave, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto scale = instrumentation::build_v_lshlrev_b32(kScratch, scalar_positive_inline_u32(2),
+                                                          /*vsrc1=*/2, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto add_vaddr =
+      build_v_add_u64_vgpr_offset(plan.result_address_vgpr, kScratch, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto add_displacement =
+      build_v_add_u64_signed_i24(plan.result_address_vgpr, 4, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, kVccSave, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto restore_scc =
+      build_rdna4_s_cmp_lg_u32(kSccSave, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(materialization);
+  ASSERT_TRUE(save_scc && save_vcc && scale && add_vaddr && add_displacement && restore_vcc &&
+              restore_scc);
+  std::vector<uint32_t> expected = {
+      *save_scc,
+      *save_vcc,
+      *scale,
+      build_v_mov_b32_e32(plan.result_address_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5),
+      build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 1u, ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  expected.insert(expected.end(), add_vaddr->begin(), add_vaddr->end());
+  expected.insert(expected.end(), add_displacement->begin(), add_displacement->end());
+  expected.push_back(*restore_vcc);
+  expected.push_back(*restore_scc);
+  EXPECT_EQ(*materialization, expected);
+
+  ConSanAtomicSite unscaled = site;
+  unscaled.raw_scale_offset = false;
+  const ConSanMoiAtomicAddressPlan unscaled_plan = plan_consan_moi_atomic_address(
+      unscaled, kScratch, /*scratch_vgpr_count=*/5, ConSanRegisterAllocationSource::Explicit,
+      ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(unscaled_plan.supported());
+  EXPECT_EQ(unscaled_plan.input_address_scale, 1u);
+
+  ConSanAtomicSite missing_scale = site;
+  missing_scale.raw_scale_offset.reset();
+  EXPECT_EQ(plan_consan_moi_atomic_address(missing_scale, kScratch, 5,
+                                           ConSanRegisterAllocationSource::Explicit,
+                                           ROCJITSU_CODE_ARCH_CDNA5)
+                .support,
+            ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+  EXPECT_EQ(plan_consan_moi_atomic_address(site, kScratch, 5,
+                                           ConSanRegisterAllocationSource::Explicit,
+                                           ROCJITSU_CODE_ARCH_RDNA4)
+                .support,
+            ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+}
+
 TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
   ConSanAtomicSite site;
   site.text_offset = 0;
@@ -2518,6 +2688,7 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
   ASSERT_EQ(inventory.kernels.front().atomic_sites.size(), 1u);
   ConSanAtomicSite site = inventory.kernels.front().atomic_sites.front();
   site.raw_ioffset = -4;
+  site.raw_scale_offset = false;
 
   constexpr uint16_t kVccSave = 80;
   constexpr uint16_t kSccSave = 82;

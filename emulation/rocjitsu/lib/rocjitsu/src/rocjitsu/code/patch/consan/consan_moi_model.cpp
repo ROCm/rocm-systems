@@ -2597,6 +2597,12 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
       two_word_flat_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+  // CDNA5 gives bit 48 address meaning; other admitted layouts reserve it.
+  // Require decoded CDNA5 sites to state the bit explicitly so a future
+  // decoder regression cannot silently reconstruct an unscaled address.
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA5 && !site.raw_scale_offset) ||
+      (arch != ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false)))
+    return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
   // Scope does not affect effective-address reconstruction. Wave scope is not
   // an inter-wave synchronization event, but workgroup, agent, and system
   // atomics all have the same address operands and are valid record targets.
@@ -2732,6 +2738,8 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   plan.support = ConSanMoiAtomicAddressSupport::Supported;
   plan.input_address_vgpr = *site.addr_vgpr;
   plan.input_address_vgpr_count = 1u;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false))
+    plan.input_address_scale = static_cast<uint16_t>(site.width_bits / 8u);
   plan.scalar_base_sgpr = *site.saddr_sgpr;
   plan.signed_byte_offset = *site.raw_ioffset;
   plan.result_address_vgpr = result_address_vgpr;
@@ -2790,8 +2798,13 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized || buffer_resource;
   const bool vector_pair = plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
                            plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
+  const bool supported_scaled_vglobal =
+      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized &&
+      (plan.input_address_scale == 4u || plan.input_address_scale == 8u);
   if ((!scalar_vector && !vector_pair) ||
       plan.input_address_vgpr_count != (scalar_vector ? 1u : 2u) ||
+      (plan.input_address_scale != 1u && !supported_scaled_vglobal) ||
       plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
       vcc_save_sgpr >= 105u || scc_save_sgpr >= 106u || scc_save_sgpr == vcc_save_sgpr ||
       scc_save_sgpr == vcc_save_sgpr + 1u ||
@@ -2823,6 +2836,19 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
   words.push_back(*save_vcc);
   if (scalar_vector) {
     uint16_t offset_vgpr = plan.input_address_vgpr;
+    if (plan.input_address_scale != 1u) {
+      const uint16_t scaled_offset_vgpr = plan.scratch_vgpr;
+      if (scaled_offset_vgpr >= plan.result_address_vgpr)
+        return std::nullopt;
+      const auto scale = instrumentation::build_v_lshlrev_b32(
+          scaled_offset_vgpr,
+          scalar_positive_inline_u32(std::countr_zero(plan.input_address_scale)),
+          plan.input_address_vgpr, arch);
+      if (!scale)
+        return std::nullopt;
+      words.push_back(*scale);
+      offset_vgpr = scaled_offset_vgpr;
+    }
     if (buffer_resource && plan.input_address_vgpr >= plan.result_address_vgpr &&
         plan.input_address_vgpr < plan.result_address_vgpr + 2u) {
       offset_vgpr = plan.scratch_vgpr;

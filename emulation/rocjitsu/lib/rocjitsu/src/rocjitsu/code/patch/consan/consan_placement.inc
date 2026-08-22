@@ -958,6 +958,8 @@ void append_decoded_operand(std::string &summary, std::string_view name,
   append_decoded_operand(result, "addr_vgpr", site.addr_vgpr);
   append_decoded_operand(result, "data_vgpr", site.data_vgpr);
   append_decoded_operand(result, "saddr_sgpr", site.saddr_sgpr);
+  if (site.raw_scale_offset)
+    append_decoded_operand(result, "raw_scale_offset", *site.raw_scale_offset ? 1 : 0);
   append_decoded_operand(result, "raw_ioffset", site.raw_ioffset);
   append_decoded_operand(result, "raw_scope", site.raw_scope);
   append_decoded_operand(result, "raw_th", site.raw_th);
@@ -990,6 +992,8 @@ void append_decoded_operand(std::string &summary, std::string_view name,
   append_decoded_operand(result, "value_vgpr", site.value_vgpr);
   append_decoded_operand(result, "raw_saddr", site.raw_saddr);
   append_decoded_operand(result, "raw_nv", site.raw_nv);
+  if (site.raw_scale_offset)
+    append_decoded_operand(result, "raw_scale_offset", *site.raw_scale_offset ? 1 : 0);
   append_decoded_operand(result, "raw_sve", site.raw_sve);
   append_decoded_operand(result, "raw_vaddr", site.raw_vaddr);
   append_decoded_operand(result, "raw_vsrc", site.raw_vsrc);

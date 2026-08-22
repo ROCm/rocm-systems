@@ -1460,6 +1460,8 @@ atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tra
 template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+  if constexpr (requires { raw.scale_offset; })
+    site.raw_scale_offset = raw.scale_offset != 0u;
   site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
   site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
@@ -1893,6 +1895,8 @@ template <typename Raw>
 void fill_ordinary_memory_raw(ConSanOrdinaryMemorySite &site, const Raw &raw) {
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_nv = static_cast<uint32_t>(raw.nv);
+  if constexpr (requires { raw.scale_offset; })
+    site.raw_scale_offset = raw.scale_offset != 0u;
   site.raw_sve = static_cast<uint32_t>(raw.sve);
   site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
   site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
@@ -1919,7 +1923,7 @@ template <typename Raw>
 [[nodiscard]] bool ordinary_memory_encoding_is_well_formed(const cdna5::VglobalMachineInst &raw,
                                                            uint32_t expected_encoding) {
   return raw.encoding == expected_encoding && raw.pad_8_13 == 0u && raw.pad_22_23 == 0u &&
-         raw.pad_40_47 == 0u && raw.scale_offset == 0u && raw.pad_63 == 0u;
+         raw.pad_40_47 == 0u && raw.pad_63 == 0u;
 }
 
 void fill_cdna_global_ordinary_memory_raw(ConSanOrdinaryMemorySite &site,
@@ -2081,10 +2085,8 @@ void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kern
       cdna5::VflatMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_ordinary_memory_raw(site, raw);
-      // CDNA5 VFLAT has the same scale-offset distinction as VGLOBAL. Keep
-      // scaled offsets out of the bounded synchronization contract for now.
       well_formed = raw.encoding == 0xecu && raw.pad_8_13 == 0u && raw.pad_22_23 == 0u &&
-                    raw.pad_40_47 == 0u && raw.scale_offset == 0u && raw.pad_63 == 0u;
+                    raw.pad_40_47 == 0u && raw.pad_63 == 0u;
     } else {
       cdna5::VglobalMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));

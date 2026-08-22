@@ -486,10 +486,15 @@ TEST(ConSan, OrdinaryReleaseAssociationFailsClosedOnInexactShapes) {
   const std::array<uint32_t, 4> intervening_load = {*wait_store, load[0], load[1], load[2]};
   const std::array<uint32_t, 2> intervening_barrier = {*wait_store, 0xBF940000u};
   const std::array<uint32_t, 2> block_split = {*wait_store, 0xBFA00000u};
+  // A compiler-proven wait-only release and redundant consecutive writebacks
+  // are both semantically valid. Keep them explicit so the negative table
+  // below tests missing ordering rather than historical shape restrictions.
+  EXPECT_EQ(release_count(shape(0u, wait, store)), 1u);
+  EXPECT_EQ(release_count(shape(2u, wait, store)), 1u);
   const std::vector<std::vector<uint32_t>> rejected = {
       shape(1u, {}, store),
-      shape(0u, wait, store),
-      shape(2u, wait, store),
+      shape(0u, {}, store),
+      shape(2u, {}, store),
       shape(1u, intervening_load, store),
       shape(1u, intervening_barrier, store),
       shape(1u, block_split, store),
@@ -628,8 +633,8 @@ TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
   constexpr std::array<uint32_t, 3> device_store = {0xEE068004u, 2u << 18u | 7u << 23u, 10u};
   constexpr std::array<uint32_t, 3> wave_store = {0xEE068004u, 7u << 23u, 10u};
   const std::vector<std::vector<uint32_t>> rejected = {
-      {*wait_store, device_store[0], device_store[1], device_store[2], 0xBFB00000u},
       {*wait_load_ds, device_store[0], device_store[1], device_store[2], 0xBFB00000u},
+      {*wait_store | 1u, device_store[0], device_store[1], device_store[2], 0xBFB00000u},
       {*wait_store, *wait_load_ds | 1u, device_store[0], device_store[1], device_store[2],
        0xBFB00000u},
       {*wait_store, *wait_load_ds, 0xBF800000u, device_store[0], device_store[1], device_store[2],
@@ -680,6 +685,12 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
   store.raw_scope = 2u;
   cache.mnemonic = "buffer_wb";
+  EXPECT_TRUE(
+      consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
+  cache.mnemonic = "buffer_wbl2";
+  EXPECT_TRUE(
+      consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
+  cache.mnemonic = "buffer_inv";
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
   cache.mnemonic = "global_wb";

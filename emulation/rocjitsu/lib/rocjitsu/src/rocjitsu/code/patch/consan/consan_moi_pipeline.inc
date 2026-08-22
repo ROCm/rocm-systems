@@ -680,8 +680,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
                                       [&](const auto &candidate) {
                                         return classify_consan_moi_inline_atomic_support(
-                                                   candidate.site, candidate.event_kind,
-                                                   state.arch) !=
+                                                   candidate.site, candidate.event_kind, state.arch,
+                                                   candidate.is_rmw) !=
                                                ConSanMoiInlineAtomicSupport::Supported;
                                       }),
                        candidates.end());
@@ -691,6 +691,14 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       for (const ConSanFunctionInfo &function : result.functions)
         append_atomic_record_candidates(function, result, sync_index, candidates);
     }
+    std::vector<AtomicRecordCandidate> ordinary_candidates;
+    append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
+    std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
+                         [&](const AtomicRecordCandidate &candidate) {
+                           return options.moi_engine != ConSanMoiEngine::RecordReplay ||
+                                  !ordinary_atomic_candidate_is_covered_by_eligible_fence(
+                                      result, sync_index, candidate);
+                         });
     apply_test_container_filter(candidates, options);
     if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
       return;
@@ -873,6 +881,40 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
   }
 }
 
+void append_moi_ordered_ordinary_site_dispositions(const ConSanOptions &options,
+                                                   const ConSanResult &semantic_result,
+                                                   const MoiSyncInventoryIndex &sync_index,
+                                                   ConSanResult &result) {
+  if (!options.moi_track_atomics)
+    return;
+  std::vector<AtomicRecordCandidate> candidates;
+  append_ordered_ordinary_atomic_candidates(semantic_result, sync_index, candidates);
+  for (const AtomicRecordCandidate &candidate : candidates) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        ordinary_atomic_candidate_is_covered_by_eligible_fence(semantic_result, sync_index,
+                                                               candidate)) {
+      continue;
+    }
+    const bool in_kernel = candidate.container_name.starts_with("kernel:");
+    const size_t prefix_size =
+        in_kernel ? std::string_view("kernel:").size() : std::string_view("function:").size();
+    const std::string_view container_name(candidate.container_name.data() + prefix_size,
+                                          candidate.container_name.size() - prefix_size);
+    if ((!options.test_kernel_name_filter.empty() &&
+         container_name.find(options.test_kernel_name_filter) == std::string_view::npos) ||
+        (in_kernel && is_rocclr_runtime_kernel_name(container_name))) {
+      continue;
+    }
+    const ConSanMoiInlineAtomicSupport support = classify_consan_moi_inline_atomic_support(
+        candidate.site, candidate.event_kind, semantic_result.arch, candidate.is_rmw);
+    const ConSanSiteDispositionReason reason = inline_atomic_disposition_reason(support);
+    append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container_name, in_kernel,
+                                candidate.site.text_offset, candidate.site.mnemonic, reason, result,
+                                reason == ConSanSiteDispositionReason::UnsupportedScope &&
+                                    candidate.site.raw_scope && *candidate.site.raw_scope == 0u);
+  }
+}
+
 template <typename Container>
 void append_moi_barrier_site_dispositions(const Container &container, const ConSanOptions &options,
                                           const MoiSyncInventoryIndex &sync_index,
@@ -940,6 +982,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     append_moi_atomic_site_dispositions(function, options, semantic_result, sync_index, result);
     append_moi_barrier_site_dispositions(function, options, sync_index, result);
   }
+  append_moi_ordered_ordinary_site_dispositions(options, semantic_result, sync_index, result);
 
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;

@@ -212,6 +212,7 @@ struct ConSanOrdinaryMemorySite {
   std::optional<uint16_t> value_vgpr;
   std::optional<uint32_t> raw_saddr;
   std::optional<uint32_t> raw_nv;
+  std::optional<bool> raw_scale_offset;
   std::optional<uint32_t> raw_sve;
   std::optional<uint32_t> raw_rsrc;
   std::optional<uint32_t> raw_soffset;
@@ -294,6 +295,7 @@ struct ConSanAtomicSite {
   std::optional<uint32_t> raw_data1;
   std::optional<uint32_t> raw_vdst;
   std::optional<uint32_t> raw_saddr;
+  std::optional<bool> raw_scale_offset;
   std::optional<uint32_t> raw_vaddr;
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdata;

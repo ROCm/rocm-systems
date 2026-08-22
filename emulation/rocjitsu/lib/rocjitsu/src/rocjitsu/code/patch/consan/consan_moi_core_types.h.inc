@@ -227,6 +227,10 @@ struct ConSanMoiAtomicAddressPlan {
   ConSanMoiAtomicAddressSupport support = ConSanMoiAtomicAddressSupport::UnsupportedAddressKind;
   uint16_t input_address_vgpr = 0;
   uint16_t input_address_vgpr_count = 0;
+  /// Multiplicative scale applied to a scalar-base VGLOBAL's 32-bit vector
+  /// offset before zero/sign extension. This is one except for CDNA5's
+  /// SCALE_OFFSET form, where it is the communication access width in bytes.
+  uint16_t input_address_scale = 1;
   std::optional<uint16_t> scalar_base_sgpr;
   std::optional<uint16_t> scalar_offset_sgpr;
   int32_t signed_byte_offset = 0;
@@ -271,7 +275,9 @@ consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support);
 /// pair into the scratch tail. VGLOBAL likewise reserves the last two VGPRs of
 /// a five-VGPR private window for an aliased pair or scalar-base address.
 /// RDNA4 scalar-base VGLOBAL uses
-/// `saddr + zero_extend(vaddr) + signed24(ioffset)`; CDNA3/4 uses
+/// `saddr + zero_extend(vaddr) + signed24(ioffset)`; CDNA5 uses
+/// `saddr + zero_extend(vaddr * (scale_offset ? access_bytes : 1)) +
+/// signed24(ioffset)`; CDNA3/4 uses
 /// `saddr + sign_extend(vaddr) + signed13(ioffset)`. Operand overlap is only
 /// valid for a spill consumer that executes the guest first and preserves its
 /// effective-address inputs until materialization. The CDNA rule matches

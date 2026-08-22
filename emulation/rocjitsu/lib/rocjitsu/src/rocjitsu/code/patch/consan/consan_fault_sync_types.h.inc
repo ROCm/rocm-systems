@@ -228,9 +228,10 @@ struct ConSanSyncSequence {
   bool in_kernel = true;
   uint64_t begin_text_offset = 0;
   uint64_t end_text_offset = 0;
-  /// Exact same-block gfx12 release-wait boundary associated with an atomic.
-  /// This is not a standalone synchronization event: it is meaningful only
-  /// as part of the containing atomic sequence.
+  /// Exact same-block architecture-specific release-wait boundary associated
+  /// with an atomic or ordinary store. This is not a standalone
+  /// synchronization event: it is meaningful only as part of the containing
+  /// communication sequence.
   std::optional<uint64_t> release_wait_text_offset;
   std::optional<uint32_t> basic_block_index;
   bool in_cyclic_cfg_component = false;

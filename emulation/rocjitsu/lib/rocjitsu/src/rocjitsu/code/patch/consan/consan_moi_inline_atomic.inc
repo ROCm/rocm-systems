@@ -37,13 +37,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     append_inline_atomic_candidates(function, sync_index, candidates);
   std::vector<AtomicRecordCandidate> ordinary_candidates;
   append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
-  std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
-                       [](const auto &candidate) {
-                         // The current inline transaction can import after a complete ordinary
-                         // acquire sequence. Ordinary release publication needs a separate
-                         // pre-guest transaction contract and is not admitted by this tranche.
-                         return candidate.event_kind == ConSanMoiAtomicEventKind::Acquire;
-                       });
+  std::ranges::copy(ordinary_candidates, std::back_inserter(candidates));
   apply_test_container_filter(candidates, options);
   if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
     return;
