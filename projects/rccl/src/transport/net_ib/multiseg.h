@@ -33,9 +33,7 @@
 // segStart[s]/segLen[s] describe segment s (s in [0, nSegments)). A zero-length
 // range is contained wherever addr lands. Overflow of addr+len is treated as
 // not-contained.
-static inline int ncclIbSegmentIndexForRange(int nSegments,
-                                             const uintptr_t* segStart,
-                                             const size_t* segLen,
+static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* segStart, const size_t* segLen,
                                              uintptr_t addr, size_t len) {
   for (int s = 0; s < nSegments; s++) {
     uintptr_t b = segStart[s];
@@ -59,8 +57,7 @@ static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   if (nSegments <= 1) return true;
   for (int s = 1; s < nSegments; s++) {
     bool last = (s == nSegments - 1);
-    if ((!last && segLen[s] != segLen[0]) || (last && segLen[s] > segLen[0]))
-      return false;
+    if ((!last && segLen[s] != segLen[0]) || (last && segLen[s] > segLen[0])) return false;
   }
   return true;
 }
@@ -86,8 +83,8 @@ struct ncclIbSegSlice {
   uint64_t localAddr;   // sender VA for this slice
   uint64_t remoteAddr;  // receiver VA for this slice
   uint32_t len;         // slice byte count
-  int      localSeg;    // sender segment index
-  int      remoteSeg;   // receiver segment index
+  int localSeg;    // sender segment index
+  int remoteSeg;   // receiver segment index
 };
 
 // Return the segment index whose [segOff[s], segOff[s+1]) contains `off`, or -1.
@@ -103,11 +100,10 @@ static inline int ncclIbSegmentForOffset(int nSeg, const uint64_t* segOff, uint6
 // start at different offsets within their registrations. Writes up to
 // maxSlices entries into out[] and returns the count, or -1 if either range is
 // out of bounds or more than maxSlices slices are needed.
-static inline int ncclIbSplitTransferAtOffsets(
-    int nLocal,  const uint64_t* localSegVA,  const uint64_t* localSegOff,
-    int nRemote, const uint64_t* remoteSegVA, const uint64_t* remoteSegOff,
-    uint64_t localOff, uint64_t remoteOff, uint64_t len,
-    struct ncclIbSegSlice* out, int maxSlices) {
+static inline int ncclIbSplitTransferAtOffsets(int nLocal, const uint64_t* localSegVA, const uint64_t* localSegOff,
+                                               int nRemote, const uint64_t* remoteSegVA, const uint64_t* remoteSegOff,
+                                               uint64_t localOff, uint64_t remoteOff, uint64_t len,
+                                               struct ncclIbSegSlice* out, int maxSlices) {
   int n = 0;
   uint64_t localEnd = localOff + len;
   uint64_t remoteEnd = remoteOff + len;
@@ -125,11 +121,11 @@ static inline int ncclIbSplitTransferAtOffsets(
     if (remoteAvail < sliceLen) sliceLen = remoteAvail;
     if (sliceLen == 0 || sliceLen > UINT32_MAX) return -1;
     if (n >= maxSlices) return -1;
-    out[n].localAddr  = localSegVA[ls]  + (localOff - localSegOff[ls]);
+    out[n].localAddr = localSegVA[ls] + (localOff - localSegOff[ls]);
     out[n].remoteAddr = remoteSegVA[rs] + (remoteOff - remoteSegOff[rs]);
-    out[n].len        = (uint32_t)sliceLen;
-    out[n].localSeg   = ls;
-    out[n].remoteSeg  = rs;
+    out[n].len = (uint32_t)sliceLen;
+    out[n].localSeg = ls;
+    out[n].remoteSeg = rs;
     n++;
     localOff += sliceLen;
     remoteOff += sliceLen;
@@ -140,14 +136,11 @@ static inline int ncclIbSplitTransferAtOffsets(
 
 // Common case where the local and remote request begin at the same logical
 // offset within their registrations.
-static inline int ncclIbSplitTransfer(
-    int nLocal,  const uint64_t* localSegVA,  const uint64_t* localSegOff,
-    int nRemote, const uint64_t* remoteSegVA, const uint64_t* remoteSegOff,
-    uint64_t off, uint64_t len,
-    struct ncclIbSegSlice* out, int maxSlices) {
-  return ncclIbSplitTransferAtOffsets(nLocal, localSegVA, localSegOff,
-                                      nRemote, remoteSegVA, remoteSegOff,
-                                      off, off, len, out, maxSlices);
+static inline int ncclIbSplitTransfer(int nLocal, const uint64_t* localSegVA, const uint64_t* localSegOff, int nRemote,
+                                      const uint64_t* remoteSegVA, const uint64_t* remoteSegOff, uint64_t off,
+                                      uint64_t len, struct ncclIbSegSlice* out, int maxSlices) {
+  return ncclIbSplitTransferAtOffsets(nLocal, localSegVA, localSegOff, nRemote, remoteSegVA, remoteSegOff, off, off,
+                                      len, out, maxSlices);
 }
 
 #endif // NCCL_NET_IB_MULTISEG_H_
