@@ -2259,9 +2259,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       static_cast<uint32_t>(consan_moi_sampled_watchpoint::epoch_generation_mask);
   const uint32_t high_generation_mask =
       static_cast<uint32_t>(consan_moi_sampled_watchpoint::generation_mask >> 32u);
-  const uint32_t high_range_mask = static_cast<uint32_t>(
-      (consan_moi_sampled_watchpoint::start_mask | consan_moi_sampled_watchpoint::count_mask) >>
-      32u);
+  const uint32_t high_range_mask =
+      static_cast<uint32_t>((consan_moi_sampled_watchpoint::start_byte_mask |
+                             consan_moi_sampled_watchpoint::count_mask) >>
+                            32u);
   auto append_equal_masked = [&](uint16_t current_vgpr, uint16_t prior_vgpr, uint32_t mask) {
     const auto current =
         instrumentation::build_v_and_b32_literal(address_lo_vgpr, mask, current_vgpr, arch);
@@ -2570,8 +2571,6 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
        reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                              scratch_count, "MOI epoch", errors)))
     return std::nullopt;
-  const ConSanMoiLdsCellRange static_range =
-      consan_moi_lds_cell_range_for_bytes(access_range.static_byte_offset, access_range.byte_count);
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
@@ -2632,7 +2631,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       consan_moi_sampled_watchpoint::valid_mask |
       (static_cast<uint64_t>(kind) << consan_moi_sampled_watchpoint::access_kind_shift) |
       generation_field);
-  const uint32_t encoded_cell_count = encode_consan_moi_sampled_cell_count(static_range.cell_count)
+  const uint32_t encoded_byte_count = encode_consan_moi_sampled_byte_count(access_range.byte_count)
                                       << (consan_moi_sampled_watchpoint::count_shift - 32u);
   const uint32_t encoded_generation_high = static_cast<uint32_t>(generation_field >> 32u);
   const uint64_t sampled_entry_address = *options.moi_report_buffer_address +
@@ -2806,8 +2805,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
           build_v_mov_b32_e32(low_vgpr, vector_source_vgpr(*lds_byte_offset_vgpr), arch));
     }
     const auto cell = instrumentation::build_v_lshrrev_b32(
-        low_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
-        low_vgpr, arch);
+        low_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), low_vgpr,
+        arch);
     const auto residue = instrumentation::build_v_and_b32_literal(
         low_vgpr, options.moi_runtime_sample_stride - 1u, low_vgpr, arch);
     const auto selected_value = instrumentation::build_v_mov_b32_literal(
@@ -3030,21 +3029,17 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     }
     effective_lds_byte_offset_vgpr = tmp_vgpr;
   }
-  const auto start_cell_shift = instrumentation::build_v_lshrrev_b32(
-      tmp_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
-      effective_lds_byte_offset_vgpr, arch);
   const auto high_from_start = instrumentation::build_v_lshlrev_b32(
-      high_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_shift - 32u),
-      tmp_vgpr, arch);
-  if (!start_cell_shift || !high_from_start) {
-    errors.emplace_back("ConSan MOI sampled probe could not encode sampled entry start cell");
+      high_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_byte_shift - 32u),
+      effective_lds_byte_offset_vgpr, arch);
+  if (!high_from_start) {
+    errors.emplace_back("ConSan MOI sampled probe could not encode sampled entry byte offset");
     return std::nullopt;
   }
-  words.push_back(*start_cell_shift);
   words.push_back(*high_from_start);
-  if (!append_add_literal_field(words, high_vgpr, encoded_cell_count | encoded_generation_high,
+  if (!append_add_literal_field(words, high_vgpr, encoded_byte_count | encoded_generation_high,
                                 tmp_vgpr, arch)) {
-    errors.emplace_back("ConSan MOI sampled probe could not encode cell-count field");
+    errors.emplace_back("ConSan MOI sampled probe could not encode byte-count field");
     return std::nullopt;
   }
   for (uint32_t prior_record_index : prior_record_indices) {

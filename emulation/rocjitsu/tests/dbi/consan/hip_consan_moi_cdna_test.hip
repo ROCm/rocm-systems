@@ -64,7 +64,7 @@ struct SampledEntry {
   uint32_t kind;
   uint32_t epoch;
   uint32_t generation;
-  uint32_t cell_count;
+  uint32_t byte_count;
 };
 
 SampledEntry sampled_entry(const std::vector<uint8_t> &report, uint32_t capacity, uint32_t index) {
@@ -76,7 +76,7 @@ SampledEntry sampled_entry(const std::vector<uint8_t> &report, uint32_t capacity
       (value & 1u) != 0,
       static_cast<uint32_t>((value >> 2u) & 0x7u),
       static_cast<uint32_t>((value >> 15u) & 0x3ffu),
-      static_cast<uint32_t>((value >> 25u) & 0xfffffu),
+      static_cast<uint32_t>((value >> 25u) & 0x3ffffu),
       static_cast<uint32_t>(((value >> 59u) & 0x1fu) + 1u),
   };
 }
@@ -162,8 +162,9 @@ __launch_bounds__(64) void moi_cdna_barrier_forced_spill_kernel_for_instrumentat
 }
 
 __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
-    64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(
-    uint32_t *vector_atomic_value, uint32_t *scalar_atomic_value, uint32_t *out) {
+    64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(uint32_t *vector_atomic_value,
+                                                                     uint32_t *scalar_atomic_value,
+                                                                     uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t values[8] = {
       0xa1000000u ^ tid, 0xa2000000u ^ tid, 0xa3000000u ^ tid, 0xa4000000u ^ tid,
@@ -379,8 +380,8 @@ TEST(ConSanMoiCdnaTest, AtomicForcedSpillExecutesVglobalAddressForms) {
 
   std::array<uint32_t, kAtomicSlots> atomic_values{};
   std::vector<uint32_t> out(kThreads * kValuesPerThread);
-  HIP_ASSERT(hipMemcpy(atomic_values.data(), atomic_device, sizeof(atomic_values),
-                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(
+      hipMemcpy(atomic_values.data(), atomic_device, sizeof(atomic_values), hipMemcpyDeviceToHost));
   HIP_ASSERT(
       hipMemcpy(out.data(), out_device, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(out_device));
@@ -397,7 +398,6 @@ TEST(ConSanMoiCdnaTest, AtomicForcedSpillExecutesVglobalAddressForms) {
       EXPECT_EQ(out[tid * kValuesPerThread + i], kBases[i] ^ tid)
           << "tid=" << tid << " value=" << i;
   }
-
 }
 
 TEST(ConSanMoiCdnaTest, DynamicStackInlineSpillPreservesPrivateValues) {
@@ -458,7 +458,7 @@ TEST(ConSanMoiCdnaTest, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
   const SampledEntry entry = sampled_entry(report, kSampledSlots, 0);
   ASSERT_TRUE(entry.valid);
   EXPECT_EQ(entry.kind, 2u);
-  EXPECT_EQ(entry.cell_count, 1u);
+  EXPECT_EQ(entry.byte_count, sizeof(uint32_t));
 
   MoiSampledCausalWindow window{};
   std::memcpy(&window, report.data() + sizeof(MoiReportHeader), sizeof(window));

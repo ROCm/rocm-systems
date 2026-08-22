@@ -718,8 +718,9 @@ TEST(ConSanMoi, DirectSampledProbeAddsNativeLdsImmediateOffsets) {
   std::memcpy(patched_words.data(), text->data(), text->size());
 
   constexpr uint16_t tmp_vgpr = 24;
-  const auto zero_shift = build_v_lshrrev_b32_e32(
-      tmp_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
+  constexpr uint16_t high_vgpr = 23;
+  const auto zero_shift = build_v_lshlrev_b32_e32(
+      high_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_byte_shift - 32u),
       /*vsrc1=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(zero_shift);
   EXPECT_TRUE(contains_subsequence(patched_words, std::array<uint32_t, 1>{*zero_shift}));
@@ -728,9 +729,10 @@ TEST(ConSanMoi, DirectSampledProbeAddsNativeLdsImmediateOffsets) {
         build_v_mov_b32_e64_literal(tmp_vgpr, byte_offset, ROCJITSU_CODE_ARCH_RDNA4);
     const auto add_offset = build_v_add_nc_u32_e32(tmp_vgpr, vector_source_vgpr(/*address=*/0),
                                                    tmp_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto shift = build_v_lshrrev_b32_e32(
-        tmp_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
-        tmp_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto shift = build_v_lshlrev_b32_e32(
+        high_vgpr,
+        scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_byte_shift - 32u), tmp_vgpr,
+        ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_TRUE(mov_offset);
     ASSERT_TRUE(add_offset);
     ASSERT_TRUE(shift);
@@ -772,11 +774,12 @@ TEST(ConSanMoi, DirectSampledProbeSnapshotsOverlappingLoadAddress) {
       build_v_mov_b32_e32(/*vdst=*/25, vector_source_vgpr(/*vsrc=*/0), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_TRUE(contains_subsequence(
       patched_words, std::array<uint32_t, 3>{snapshot, text_words[0], text_words[1]}));
-  const auto start_cell = build_v_lshrrev_b32_e32(
-      /*vdst=*/24, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
+  const auto start_byte = build_v_lshlrev_b32_e32(
+      /*vdst=*/23,
+      scalar_positive_inline_u32(consan_moi_sampled_watchpoint::start_byte_shift - 32u),
       /*saved address=*/25, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(start_cell);
-  EXPECT_TRUE(contains_subsequence(patched_words, std::array<uint32_t, 1>{*start_cell}));
+  ASSERT_TRUE(start_byte);
+  EXPECT_TRUE(contains_subsequence(patched_words, std::array<uint32_t, 1>{*start_byte}));
 }
 
 TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
@@ -4694,8 +4697,8 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
         ROCJITSU_CODE_ARCH_RDNA4);
     const uint16_t high_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 3u);
     const auto select_cell = build_v_lshrrev_b32_e32(
-        low_vgpr, scalar_positive_inline_u32(consan_moi_sampled_watchpoint::granule_shift),
-        low_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+        low_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), low_vgpr,
+        ROCJITSU_CODE_ARCH_RDNA4);
     const auto select_residue =
         build_v_and_b32_e32_literal(low_vgpr, 3u, low_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
     const auto selected_value =
@@ -8092,8 +8095,8 @@ TEST(ConSanMoi, SampledWatchpointRoundTripsRangeFields) {
                                                /*owner_id=*/0x512,
                                                /*epoch=*/0x4aa,
                                                /*generation=*/0x1abcde,
-                                               /*start_cell=*/0x4567,
-                                               /*cell_count=*/32,
+                                               /*start_byte=*/0x4567,
+                                               /*byte_count=*/32,
                                                /*consumed=*/true);
   constexpr ConSanMoiSampledWatchpointEntry decoded =
       decode_consan_moi_sampled_watchpoint_entry(packed);
@@ -8103,9 +8106,9 @@ TEST(ConSanMoi, SampledWatchpointRoundTripsRangeFields) {
   EXPECT_EQ(decoded.kind, ConSanMoiShadowAccessKind::Read);
   EXPECT_EQ(decoded.owner_id, 0x112u);
   EXPECT_EQ(decoded.epoch, 0xaau);
-  EXPECT_EQ(decoded.generation, 0xabcdeu);
-  EXPECT_EQ(decoded.start_cell, 0x567u);
-  EXPECT_EQ(decoded.cell_count, 32u);
+  EXPECT_EQ(decoded.generation, 0x2bcdeu);
+  EXPECT_EQ(decoded.start_byte, 0x4567u);
+  EXPECT_EQ(decoded.byte_count, 32u);
 }
 
 TEST(ConSanMoi, SampledAtomicPublicationHasNoStableHybridSnapshot) {
@@ -8141,7 +8144,7 @@ TEST(ConSanMoi, SampledAtomicPublicationHasNoStableHybridSnapshot) {
           EXPECT_EQ(low_after_stage, 1u);
           EXPECT_EQ(snapshot.entry.generation, 7u);
           EXPECT_EQ(snapshot.entry.owner_id, 7u);
-          EXPECT_EQ(snapshot.entry.start_cell, 31u);
+          EXPECT_EQ(snapshot.entry.start_byte, 31u);
         } else if (low_before_stage == 0 && high_stage == 0 && low_after_stage == 0) {
           EXPECT_EQ(snapshot.state, ConSanMoiSampledSnapshotState::StaleGeneration);
         } else {
@@ -8256,8 +8259,8 @@ TEST(ConSanMoi, SampledWatchpointPublishesPackedAccessRecords) {
   EXPECT_EQ(first.owner_id, 1u);
   EXPECT_EQ(first.epoch, 3u);
   EXPECT_EQ(first.generation, 7u);
-  EXPECT_EQ(first.start_cell, 2u);
-  EXPECT_EQ(first.cell_count, 1u);
+  EXPECT_EQ(first.start_byte, 8u);
+  EXPECT_EQ(first.byte_count, 4u);
 
   const ConSanMoiSampledWatchpointEntry second =
       decode_consan_moi_sampled_watchpoint_entry(sampled[1]);
@@ -8266,8 +8269,8 @@ TEST(ConSanMoi, SampledWatchpointPublishesPackedAccessRecords) {
   EXPECT_EQ(second.owner_id, 2u);
   EXPECT_EQ(second.epoch, 4u);
   EXPECT_EQ(second.generation, 9u);
-  EXPECT_EQ(second.start_cell, 5u);
-  EXPECT_EQ(second.cell_count, 2u);
+  EXPECT_EQ(second.start_byte, 20u);
+  EXPECT_EQ(second.byte_count, 8u);
 }
 
 TEST(ConSanMoi, SampledWatchpointPublishReportsCapacityExhaustion) {
@@ -8385,8 +8388,8 @@ TEST(ConSanMoi, SampledWatchpointConflictRequiresExactRangeOverlap) {
       /*owner_id=*/3,
       /*epoch=*/11,
       /*generation=*/42,
-      /*start_cell=*/20,
-      /*cell_count=*/4,
+      /*start_byte=*/20,
+      /*byte_count=*/2,
   };
   constexpr ConSanMoiSampledWatchpointEntry overlapping_read{
       /*valid=*/true,
@@ -8394,8 +8397,8 @@ TEST(ConSanMoi, SampledWatchpointConflictRequiresExactRangeOverlap) {
       /*owner_id=*/1,
       /*epoch=*/11,
       /*generation=*/42,
-      /*start_cell=*/23,
-      /*cell_count=*/3,
+      /*start_byte=*/21,
+      /*byte_count=*/2,
   };
   constexpr ConSanMoiSampledWatchpointEntry adjacent_read{
       /*valid=*/true,
@@ -8403,8 +8406,8 @@ TEST(ConSanMoi, SampledWatchpointConflictRequiresExactRangeOverlap) {
       /*owner_id=*/1,
       /*epoch=*/11,
       /*generation=*/42,
-      /*start_cell=*/24,
-      /*cell_count=*/2,
+      /*start_byte=*/22,
+      /*byte_count=*/2,
   };
   constexpr ConSanMoiSampledWatchpointEntry consumed_read{
       /*valid=*/true,
@@ -8412,8 +8415,8 @@ TEST(ConSanMoi, SampledWatchpointConflictRequiresExactRangeOverlap) {
       /*owner_id=*/1,
       /*epoch=*/11,
       /*generation=*/42,
-      /*start_cell=*/23,
-      /*cell_count=*/3,
+      /*start_byte=*/21,
+      /*byte_count=*/2,
   };
   constexpr ConSanMoiSampledWatchpointEntry old_generation{
       /*valid=*/true,
@@ -8421,8 +8424,8 @@ TEST(ConSanMoi, SampledWatchpointConflictRequiresExactRangeOverlap) {
       /*owner_id=*/1,
       /*epoch=*/11,
       /*generation=*/41,
-      /*start_cell=*/23,
-      /*cell_count=*/3,
+      /*start_byte=*/21,
+      /*byte_count=*/2,
   };
 
   EXPECT_TRUE(consan_moi_sampled_watchpoints_conflict(current, overlapping_read));

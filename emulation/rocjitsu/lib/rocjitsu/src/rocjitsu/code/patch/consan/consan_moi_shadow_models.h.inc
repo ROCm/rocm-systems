@@ -890,9 +890,6 @@ consan_moi_filter_deferred_inline_diagnostics(
 
 namespace consan_moi_sampled_watchpoint {
 
-inline constexpr uint32_t granule_shift = 2;
-inline constexpr uint32_t granule_bytes = 1u << granule_shift;
-
 inline constexpr uint32_t valid_shift = 0;
 inline constexpr uint32_t consumed_shift = 1;
 inline constexpr uint32_t access_kind_shift = 2;
@@ -902,9 +899,14 @@ inline constexpr uint32_t owner_bits = 10;
 inline constexpr uint32_t epoch_shift = 15;
 inline constexpr uint32_t epoch_bits = 10;
 inline constexpr uint32_t generation_shift = 25;
-inline constexpr uint32_t generation_bits = 20;
-inline constexpr uint32_t start_shift = 45;
-inline constexpr uint32_t start_bits = 14;
+// A sampled entry is published with one 64-bit atomic exchange. Eighteen
+// generation bits still distinguish 262,144 report generations in one
+// process, while leaving enough space to retain an exact LDS byte range.
+// Four-byte cells are insufficient here: cooperative kernels commonly assign
+// adjacent FP16 halves of one dword to different waves.
+inline constexpr uint32_t generation_bits = 18;
+inline constexpr uint32_t start_byte_shift = 43;
+inline constexpr uint32_t start_byte_bits = 16;
 inline constexpr uint32_t count_shift = 59;
 inline constexpr uint32_t count_bits = 5;
 
@@ -916,15 +918,16 @@ inline constexpr uint64_t owner_mask = consan_moi_bit_field_mask(owner_shift, ow
 inline constexpr uint64_t epoch_mask = consan_moi_bit_field_mask(epoch_shift, epoch_bits);
 inline constexpr uint64_t generation_mask =
     consan_moi_bit_field_mask(generation_shift, generation_bits);
-inline constexpr uint64_t start_mask = consan_moi_bit_field_mask(start_shift, start_bits);
+inline constexpr uint64_t start_byte_mask =
+    consan_moi_bit_field_mask(start_byte_shift, start_byte_bits);
 inline constexpr uint64_t count_mask = consan_moi_bit_field_mask(count_shift, count_bits);
 inline constexpr uint64_t epoch_generation_mask = epoch_mask | generation_mask;
 
 inline constexpr uint32_t max_owner = (1u << owner_bits) - 1u;
 inline constexpr uint32_t max_epoch = (1u << epoch_bits) - 1u;
 inline constexpr uint32_t max_generation = (1u << generation_bits) - 1u;
-inline constexpr uint32_t max_start = (1u << start_bits) - 1u;
-inline constexpr uint32_t max_count = 1u << count_bits;
+inline constexpr uint32_t max_start_byte = (1u << start_byte_bits) - 1u;
+inline constexpr uint32_t max_byte_count = 1u << count_bits;
 
 } // namespace consan_moi_sampled_watchpoint
 
@@ -958,8 +961,8 @@ struct ConSanMoiSampledWatchpointEntry {
   uint32_t owner_id = 0;
   uint32_t epoch = 0;
   uint32_t generation = 0;
-  uint32_t start_cell = 0;
-  uint32_t cell_count = 0;
+  uint32_t start_byte = 0;
+  uint32_t byte_count = 0;
 };
 
 struct ConSanMoiSampledAtomicAttachmentKey {
@@ -1003,14 +1006,14 @@ struct ConSanMoiSampledSnapshot {
   ConSanMoiSampledWatchpointEntry entry;
 };
 
-[[nodiscard]] constexpr uint32_t encode_consan_moi_sampled_cell_count(uint32_t cell_count) {
-  return cell_count == 0 ? 0 : cell_count - 1u;
+[[nodiscard]] constexpr uint32_t encode_consan_moi_sampled_byte_count(uint32_t byte_count) {
+  return byte_count == 0 ? 0 : byte_count - 1u;
 }
 
 [[nodiscard]] constexpr uint64_t
 pack_consan_moi_sampled_watchpoint_entry(ConSanMoiShadowAccessKind kind, uint32_t owner_id,
-                                         uint32_t epoch, uint32_t generation, uint32_t start_cell,
-                                         uint32_t cell_count, bool consumed = false) {
+                                         uint32_t epoch, uint32_t generation, uint32_t start_byte,
+                                         uint32_t byte_count, bool consumed = false) {
   return consan_moi_sampled_watchpoint::valid_mask |
          (consumed ? consan_moi_sampled_watchpoint::consumed_mask : uint64_t{0}) |
          ((static_cast<uint64_t>(kind) &
@@ -1025,10 +1028,10 @@ pack_consan_moi_sampled_watchpoint_entry(ConSanMoiShadowAccessKind kind, uint32_
          ((static_cast<uint64_t>(generation) &
            consan_moi_low_bit_mask(consan_moi_sampled_watchpoint::generation_bits))
           << consan_moi_sampled_watchpoint::generation_shift) |
-         ((static_cast<uint64_t>(start_cell) &
-           consan_moi_low_bit_mask(consan_moi_sampled_watchpoint::start_bits))
-          << consan_moi_sampled_watchpoint::start_shift) |
-         ((static_cast<uint64_t>(encode_consan_moi_sampled_cell_count(cell_count)) &
+         ((static_cast<uint64_t>(start_byte) &
+           consan_moi_low_bit_mask(consan_moi_sampled_watchpoint::start_byte_bits))
+          << consan_moi_sampled_watchpoint::start_byte_shift) |
+         ((static_cast<uint64_t>(encode_consan_moi_sampled_byte_count(byte_count)) &
            consan_moi_low_bit_mask(consan_moi_sampled_watchpoint::count_bits))
           << consan_moi_sampled_watchpoint::count_shift);
 }
@@ -1047,8 +1050,8 @@ decode_consan_moi_sampled_watchpoint_entry(uint64_t value) {
                             consan_moi_sampled_watchpoint::epoch_shift),
       static_cast<uint32_t>((value & consan_moi_sampled_watchpoint::generation_mask) >>
                             consan_moi_sampled_watchpoint::generation_shift),
-      static_cast<uint32_t>((value & consan_moi_sampled_watchpoint::start_mask) >>
-                            consan_moi_sampled_watchpoint::start_shift),
+      static_cast<uint32_t>((value & consan_moi_sampled_watchpoint::start_byte_mask) >>
+                            consan_moi_sampled_watchpoint::start_byte_shift),
       static_cast<uint32_t>(((value & consan_moi_sampled_watchpoint::count_mask) >>
                              consan_moi_sampled_watchpoint::count_shift) +
                             1u),
@@ -1078,17 +1081,22 @@ classify_consan_moi_sampled_snapshot(ConSanMoiSampledSnapshotWords words,
   return {ConSanMoiSampledSnapshotState::Stable, entry};
 }
 
-[[nodiscard]] constexpr uint32_t consan_moi_range_end_cell(uint32_t start_cell,
-                                                           uint32_t cell_count) {
-  return start_cell + cell_count;
+[[nodiscard]] constexpr uint32_t consan_moi_range_end(uint32_t start, uint32_t count) {
+  return start + count;
+}
+
+[[nodiscard]] constexpr bool consan_moi_ranges_overlap(uint32_t first_start, uint32_t first_count,
+                                                       uint32_t second_start,
+                                                       uint32_t second_count) {
+  return first_start < consan_moi_range_end(second_start, second_count) &&
+         second_start < consan_moi_range_end(first_start, first_count);
 }
 
 [[nodiscard]] constexpr bool consan_moi_cell_ranges_overlap(uint32_t first_start,
                                                             uint32_t first_count,
                                                             uint32_t second_start,
                                                             uint32_t second_count) {
-  return first_start < consan_moi_range_end_cell(second_start, second_count) &&
-         second_start < consan_moi_range_end_cell(first_start, first_count);
+  return consan_moi_ranges_overlap(first_start, first_count, second_start, second_count);
 }
 
 [[nodiscard]] constexpr bool consan_moi_cell_ranges_overlap(ConSanMoiLdsCellRange first,
@@ -1112,8 +1120,8 @@ consan_moi_sampled_watchpoints_conflict(const ConSanMoiSampledWatchpointEntry &c
   return current.valid && prior.valid && !prior.consumed && current.epoch == prior.epoch &&
          current.generation == prior.generation && current.owner_id != prior.owner_id &&
          consan_moi_shadow_kind_conflicts(current.kind, prior.kind) &&
-         consan_moi_cell_ranges_overlap(current.start_cell, current.cell_count, prior.start_cell,
-                                        prior.cell_count);
+         consan_moi_ranges_overlap(current.start_byte, current.byte_count, prior.start_byte,
+                                   prior.byte_count);
 }
 
 [[nodiscard]] bool

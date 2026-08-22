@@ -789,16 +789,16 @@ void expect_moi_engines_admit_native_b96_accesses(
       } else {
         const uint16_t high_vgpr = static_cast<uint16_t>(*access_patch->scratch_vgpr + 3u);
         const uint16_t tmp_vgpr = static_cast<uint16_t>(*access_patch->scratch_vgpr + 4u);
-        const uint32_t encoded_three_cell_count =
-            encode_consan_moi_sampled_cell_count(3u)
+        const uint32_t encoded_twelve_byte_count =
+            encode_consan_moi_sampled_byte_count(12u)
             << (consan_moi_sampled_watchpoint::count_shift - 32u);
-        const auto cell_count_literal =
-            instrumentation::build_v_mov_b32_literal(tmp_vgpr, encoded_three_cell_count, arch);
-        const auto add_cell_count = instrumentation::build_v_add_u32(
+        const auto byte_count_literal =
+            instrumentation::build_v_mov_b32_literal(tmp_vgpr, encoded_twelve_byte_count, arch);
+        const auto add_byte_count = instrumentation::build_v_add_u32(
             high_vgpr, vector_source_vgpr(high_vgpr), tmp_vgpr, arch);
-        ASSERT_TRUE(cell_count_literal && add_cell_count);
-        std::vector<uint32_t> expected = *cell_count_literal;
-        expected.insert(expected.end(), add_cell_count->begin(), add_cell_count->end());
+        ASSERT_TRUE(byte_count_literal && add_byte_count);
+        std::vector<uint32_t> expected = *byte_count_literal;
+        expected.insert(expected.end(), add_byte_count->begin(), add_byte_count->end());
         EXPECT_TRUE(contains_subsequence(body, expected));
       }
       EXPECT_EQ(std::ranges::count_if(result.site_dispositions,

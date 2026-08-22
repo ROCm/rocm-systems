@@ -180,6 +180,43 @@ the exact aggregate and no diagnostic, and the incorrect member requires the
 conflict. All 60 baseline/all-engine rows pass on all five simulator targets
 and physical gfx950. The Sampled cell is green.
 
+### 2026-08-22 Stream-K two-tile Sampled exact-byte qualification
+
+Current clean and fault artifacts are
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-streamk-two-tile-sampled-byte-range-v2`
+and
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-streamk-two-tile-sampled-byte-range-fault-v2`.
+The source-matched clean row passes its exact oracle with complete 80/80
+access, 5/5 applicable-barrier, and 2/2 atomic coverage and zero diagnostics.
+Sampled takes 558.432 ms against a 275.763 ms paired baseline, for 2.025x
+slowdown.
+
+The prospectively reviewed exact-one removal of the publication barrier at
+`.text+0x1810` is requested, planned, reserved, installed, applied, and reached
+once. It preserves the exact numerical oracle and covers 80/80 accesses, 4/4
+surviving barriers, and 2/2 atomics while emitting six Sampled conflicts. The
+fault commits 28 sampled windows, peaks at 1,844,584 live report bytes, returns
+to zero live bytes without allocation, capacity, or cleanup failure, and
+passes both physical-GPU health probes. The detector-owned fault uses the
+prospectively frozen diagnostic oracle rather than revising its expectation
+after execution.
+
+This workload exposed Sampled's compression of LDS accesses to four-byte
+cells: distinct producer waves writing the adjacent FP16 halves of one dword
+could falsely conflict. Sampled now retains exact byte ranges. Focused host
+tests pin range packing, overlap, generation, and logging, while the new
+checked-in `AdjacentSubwordWriters` correct/incorrect behavioral pair avoids
+asserting the representation. Its 60 baseline/all-engine rows pass across all
+five RocJitsu targets and physical gfx950: the correct member requires the
+exact combined result and no diagnostic, and the incorrect member removes only
+the third-wave consumer publication barrier and requires the conflict.
+
+The artifacts pin the executed hook hash and source revisions, but record the
+candidate ConSan edits and preserved unrelated workspace changes as a dirty
+source tree. They are valid current-candidate behavioral evidence, not a claim
+of clean-provenance acceptance; a clean-revision refresh remains part of the
+eventual global green revalidation.
+
 ### 2026-08-22 D128-pressure Sampled fault qualification
 
 Current artifact
@@ -434,22 +471,24 @@ so the Record/Replay cell is green.
 
 ### 2026-08-21 post-merge Hip-MOI tree atomic-OR simulator limitation
 
-After merging `origin/develop`, the broad non-device gate passes 5,830 tests
-and has exactly one failure:
+After merging `origin/develop`, the current broad non-device gate selects 1,627
+tests and passes 1,626, with exactly one failure:
 `ConSanGfx950HipMoiSim.TreeAtomicOr`. The original Hip-MOI correct workload
 still passes directly on the physical gfx950 in 0.12 seconds, and its paired
 incorrect workload also retains the expected physical diagnostic. The failure
 therefore does not change any physical ConSan matrix cell above.
 
 The RocJitsu simulation reproducer fails only the external Hip-MOI correct
-workload, with 256 false conflicts; its numerical oracle passes, and the
+workload, with 512 false conflicts; its numerical oracle passes, and the
 relaxed negative workload passes. Instrumenting Hip-MOI's metadata protocol
 showed that all four producer release records are eventually published, but
 the final subgroup imports only producer 0's record: Hip-MOI's generic atomic
 acquire lookup stops as soon as *any* matching release record exists, before
 producers 1 and 2 have published their post-atomic metadata under this legal
 RocJitsu interleaving. Disabling Hip-MOI's lookup cache does not alter the
-outcome, so this is not stale cache state.
+outcome, so this is not stale cache state. At the final acquire, the simulator
+therefore observes per-producer tokens `[2, 0, 0, 0]`, whereas the physical
+gfx950 run observes `[2, 2, 2, 0]`.
 
 RocJitsu must not constrain legal scheduling merely to hide this external
 metadata-publication race. The corresponding checked-in ConSan tree atomic-OR
@@ -458,7 +497,10 @@ baseline and all four engines (10/10 tests), directly guarding ConSan's
 architecture behavior. The remaining external smoke failure is recorded as an
 upstream Hip-MOI protocol prerequisite rather than an emulator or ConSan
 regression; resolving it requires making Hip-MOI wait for all applicable
-post-atomic publishers instead of returning after the first record.
+post-atomic publishers instead of returning after the first record. A temporary
+diagnostic experiment that accumulated all retry probes instead of returning
+after the first hit produced `[2, 2, 2, 0]` and made the simulator test pass;
+that external Hip-MOI edit was then reverted and is not part of this branch.
 
 ### 2026-08-21 Sampled independent scalar-proof repair
 

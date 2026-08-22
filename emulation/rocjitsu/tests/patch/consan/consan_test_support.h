@@ -2483,7 +2483,9 @@ static_assert(consan_moi_exact_shadow::granule_bytes == 4);
 static_assert(consan_moi_exact_shadow::instruction_offset_shift +
                   consan_moi_exact_shadow::instruction_offset_bits ==
               64);
-static_assert(consan_moi_sampled_watchpoint::granule_bytes == 4);
+static_assert(consan_moi_sampled_watchpoint::start_byte_shift +
+                  consan_moi_sampled_watchpoint::start_byte_bits ==
+              consan_moi_sampled_watchpoint::count_shift);
 static_assert(consan_moi_sampled_watchpoint::count_shift +
                   consan_moi_sampled_watchpoint::count_bits ==
               64);

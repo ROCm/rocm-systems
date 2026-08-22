@@ -1876,7 +1876,7 @@ private:
                              : std::numeric_limits<uint16_t>::max();
       log_message(kLogInfo,
                   "ConSan MOI auto sampled reader=%llu index=%u kind=%u owner=%u epoch=%u "
-                  "generation=%u cells=[%u,%u) consumed=%s dispatch=0x%llx "
+                  "generation=%u bytes=[%u,%u) consumed=%s dispatch=0x%llx "
                   "workgroup=(%u,%u,%u) instruction=0x%llx trampoline=0x%llx "
                   "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s "
                   "sync_class=%u sync_kind=%u sync_role=%u sync_scope=%u sync_outcome=%u "
@@ -1884,8 +1884,8 @@ private:
                   static_cast<unsigned long long>(entry.reader), sampled_entry.index,
                   static_cast<uint32_t>(sampled_entry.entry.kind), sampled_entry.entry.owner_id,
                   sampled_entry.entry.epoch, sampled_entry.entry.generation,
-                  sampled_entry.entry.start_cell,
-                  sampled_entry.entry.start_cell + sampled_entry.entry.cell_count,
+                  sampled_entry.entry.start_byte,
+                  sampled_entry.entry.start_byte + sampled_entry.entry.byte_count,
                   sampled_entry.entry.consumed ? "true" : "false",
                   static_cast<unsigned long long>(sampled_entry.dispatch_id),
                   sampled_entry.workgroup_x, sampled_entry.workgroup_y, sampled_entry.workgroup_z,
@@ -1909,17 +1909,17 @@ private:
     if (first_sampled_conflict) {
       const SampledEntry &first = first_sampled_conflict->first;
       const SampledEntry &second = first_sampled_conflict->second;
-      const uint32_t first_end = first.entry.start_cell + first.entry.cell_count;
-      const uint32_t second_end = second.entry.start_cell + second.entry.cell_count;
+      const uint32_t first_end = first.entry.start_byte + first.entry.byte_count;
+      const uint32_t second_end = second.entry.start_byte + second.entry.byte_count;
       log_message(kLogInfo,
                   "ConSan MOI auto sampled conflict reader=%llu first_index=%u second_index=%u "
                   "first_kind=%u second_kind=%u first_owner=%u second_owner=%u epoch=%u "
-                  "generation=%u first_cells=[%u,%u) second_cells=[%u,%u)",
+                  "generation=%u first_bytes=[%u,%u) second_bytes=[%u,%u)",
                   static_cast<unsigned long long>(entry.reader), first.index, second.index,
                   static_cast<uint32_t>(first.entry.kind), static_cast<uint32_t>(second.entry.kind),
                   first.entry.owner_id, second.entry.owner_id, second.entry.epoch,
-                  second.entry.generation, first.entry.start_cell, first_end,
-                  second.entry.start_cell, second_end);
+                  second.entry.generation, first.entry.start_byte, first_end,
+                  second.entry.start_byte, second_end);
     }
     return summary;
   }

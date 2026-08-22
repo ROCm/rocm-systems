@@ -115,8 +115,8 @@ struct MoiSampledEntry {
   uint32_t owner_id = 0;
   uint32_t epoch = 0;
   uint32_t generation = 0;
-  uint32_t start_cell = 0;
-  uint32_t cell_count = 0;
+  uint32_t start_byte = 0;
+  uint32_t byte_count = 0;
 };
 
 constexpr uint32_t kMoiSampledWindowEmpty = 0;
@@ -177,8 +177,8 @@ MoiSampledEntry decode_moi_sampled_entry(uint64_t value) {
       static_cast<uint32_t>((value >> 2u) & 0x7u),
       static_cast<uint32_t>((value >> 5u) & 0x3ffu),
       static_cast<uint32_t>((value >> 15u) & 0x3ffu),
-      static_cast<uint32_t>((value >> 25u) & 0xfffffu),
-      static_cast<uint32_t>((value >> 45u) & 0x3fffu),
+      static_cast<uint32_t>((value >> 25u) & 0x3ffffu),
+      static_cast<uint32_t>((value >> 43u) & 0xffffu),
       static_cast<uint32_t>(((value >> 59u) & 0x1fu) + 1u),
   };
 }
@@ -239,12 +239,12 @@ bool moi_access_kinds_conflict(uint32_t current, uint32_t prior) {
 }
 
 bool moi_sampled_entries_conflict(const MoiSampledEntry &current, const MoiSampledEntry &prior) {
-  const uint32_t current_end = current.start_cell + current.cell_count;
-  const uint32_t prior_end = prior.start_cell + prior.cell_count;
+  const uint32_t current_end = current.start_byte + current.byte_count;
+  const uint32_t prior_end = prior.start_byte + prior.byte_count;
   return current.valid && prior.valid && !prior.consumed && current.epoch == prior.epoch &&
          current.generation == prior.generation && current.owner_id != prior.owner_id &&
-         moi_access_kinds_conflict(current.kind, prior.kind) && current.start_cell < prior_end &&
-         prior.start_cell < current_end;
+         moi_access_kinds_conflict(current.kind, prior.kind) && current.start_byte < prior_end &&
+         prior.start_byte < current_end;
 }
 
 bool moi_acquired_epoch_orders(const std::vector<MoiAcquiredEpoch> &tokens, uint64_t generation,
@@ -1249,7 +1249,7 @@ TEST(ConSanMoiHipTest, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
   }
   ASSERT_TRUE(live_entry);
   EXPECT_EQ(live_entry->kind, kMoiAccessKindWrite);
-  EXPECT_EQ(live_entry->cell_count, 1u);
+  EXPECT_EQ(live_entry->byte_count, sizeof(uint32_t));
   const MoiSampledCausalWindow window = moi_sampled_window(report, 0);
   EXPECT_EQ(window.publication_state, kMoiSampledWindowReady);
   EXPECT_EQ(window.first_entry, 0u);
@@ -1731,9 +1731,9 @@ TEST(ConSanMoiHipTest, SampledBackendWritesDirectEntries) {
   EXPECT_EQ(live_entries[1].epoch, 0u);
   EXPECT_EQ(live_entries[0].generation, 0u);
   EXPECT_EQ(live_entries[1].generation, 0u);
-  EXPECT_EQ(live_entries[0].start_cell, live_entries[1].start_cell);
-  EXPECT_EQ(live_entries[0].cell_count, 1u);
-  EXPECT_EQ(live_entries[1].cell_count, 1u);
+  EXPECT_EQ(live_entries[0].start_byte, live_entries[1].start_byte);
+  EXPECT_EQ(live_entries[0].byte_count, sizeof(uint32_t));
+  EXPECT_EQ(live_entries[1].byte_count, sizeof(uint32_t));
   EXPECT_TRUE(moi_sampled_entries_conflict(live_entries[1], live_entries[0]));
 }
 
@@ -1769,10 +1769,10 @@ TEST(ConSanMoiHipTest, RuntimeSampledBackendRetainsAllWavesForSelectedAddress) {
 
   ASSERT_EQ(live_entries.size(), 2u);
   EXPECT_NE(live_entries[0].owner_id, live_entries[1].owner_id);
-  EXPECT_EQ(live_entries[0].start_cell, live_entries[1].start_cell);
+  EXPECT_EQ(live_entries[0].start_byte, live_entries[1].start_byte);
   for (const MoiSampledEntry &entry : live_entries) {
     EXPECT_EQ(entry.epoch, 0u);
-    EXPECT_EQ(entry.cell_count, 1u);
+    EXPECT_EQ(entry.byte_count, sizeof(uint32_t));
   }
   size_t ready_windows = 0;
   for (uint32_t i = 0; i < kSampledSlots; ++i) {
@@ -1958,7 +1958,7 @@ TEST(ConSanMoiHipTest, DirectSampledRetainsExactMultiWorkgroupWindows) {
       EXPECT_EQ(window.epoch, entry.epoch) << "slot=" << i;
       EXPECT_EQ(window.generation & 3u, entry.generation) << "slot=" << i;
       EXPECT_EQ(window.cluster_workgroup_id, 0u) << "slot=" << i;
-      EXPECT_EQ(entry.cell_count, 1u) << "slot=" << i;
+      EXPECT_EQ(entry.byte_count, sizeof(uint32_t)) << "slot=" << i;
       if (entry.valid)
         published.push_back({window, entry});
     } else {
@@ -1978,8 +1978,8 @@ TEST(ConSanMoiHipTest, DirectSampledRetainsExactMultiWorkgroupWindows) {
       EXPECT_EQ(entry.owner_id, 0u) << "slot=" << i;
       EXPECT_EQ(entry.epoch, 0u) << "slot=" << i;
       EXPECT_EQ(entry.generation, 0u) << "slot=" << i;
-      EXPECT_EQ(entry.start_cell, 0u) << "slot=" << i;
-      EXPECT_EQ(entry.cell_count, 1u) << "slot=" << i;
+      EXPECT_EQ(entry.start_byte, 0u) << "slot=" << i;
+      EXPECT_EQ(entry.byte_count, 1u) << "slot=" << i;
     }
   }
   ASSERT_EQ(published.size(), 2u);
@@ -1997,9 +1997,9 @@ TEST(ConSanMoiHipTest, DirectSampledRetainsExactMultiWorkgroupWindows) {
   EXPECT_EQ(published[1].entry.owner_id, 1u);
   EXPECT_EQ(published[0].entry.epoch, 0u);
   EXPECT_EQ(published[1].entry.epoch, 0u);
-  EXPECT_EQ(published[0].entry.start_cell, 0u);
-  EXPECT_EQ(published[0].entry.start_cell, published[1].entry.start_cell);
-  // The entry-only predicate intentionally sees the same-cell write/read
+  EXPECT_EQ(published[0].entry.start_byte, 0u);
+  EXPECT_EQ(published[0].entry.start_byte, published[1].entry.start_byte);
+  // The entry-only predicate intentionally sees the same-byte-range write/read
   // conflict. Replay keeps this clean by partitioning entries by the exact
   // workgroup descriptor carried by their enclosing causal windows.
   EXPECT_TRUE(moi_sampled_entries_conflict(published[0].entry, published[1].entry));

@@ -2086,17 +2086,20 @@ consan_moi_sampled_publish_access_records(const ConSanMoiReportHeader &header,
     }
 
     const ConSanMoiAccessRecord &record = access_records[i];
-    ConSanMoiLdsCellRange range{record.start_cell, record.cell_count};
-    if (range.cell_count == 0 && record.lds_byte_count != 0)
-      range = consan_moi_lds_cell_range_for_bytes(record.lds_byte_offset, record.lds_byte_count);
-    if (range.cell_count == 0)
+    const uint32_t start_byte = record.lds_byte_count != 0
+                                    ? record.lds_byte_offset
+                                    : record.start_cell * consan_moi_exact_shadow::granule_bytes;
+    const uint32_t byte_count = record.lds_byte_count != 0
+                                    ? record.lds_byte_count
+                                    : record.cell_count * consan_moi_exact_shadow::granule_bytes;
+    if (byte_count == 0)
       continue;
 
     sampled_watchpoint_entries[publish.published_entry_count] =
         pack_consan_moi_sampled_watchpoint_entry(
             decode_access_kind(record.access_kind), record.wave_id, record.epoch,
             static_cast<uint32_t>(record.generation != 0 ? record.generation : header.generation),
-            range.start_cell, range.cell_count);
+            start_byte, byte_count);
     ++publish.published_entry_count;
   }
   return publish;
@@ -2129,7 +2132,8 @@ consan_moi_sampled_publish_causal_windows(const ConSanMoiReportHeader &header,
   struct Item {
     ConSanMoiShadowAccessKind kind = ConSanMoiShadowAccessKind::Empty;
     uint32_t owner = 0;
-    ConSanMoiLdsCellRange range;
+    uint32_t start_byte = 0;
+    uint32_t byte_count = 0;
   };
   struct Window {
     WindowKey key;
@@ -2172,20 +2176,23 @@ consan_moi_sampled_publish_causal_windows(const ConSanMoiReportHeader &header,
     if (inserted)
       windows.push_back(Window{key, {}, false});
     Window &window = windows[position->second];
-    ConSanMoiLdsCellRange range{record.start_cell, record.cell_count};
-    if (range.cell_count == 0 && record.lds_byte_count != 0)
-      range = consan_moi_lds_cell_range_for_bytes(record.lds_byte_offset, record.lds_byte_count);
+    const uint32_t start_byte = record.lds_byte_count != 0
+                                    ? record.lds_byte_offset
+                                    : record.start_cell * consan_moi_exact_shadow::granule_bytes;
+    const uint32_t byte_count = record.lds_byte_count != 0
+                                    ? record.lds_byte_count
+                                    : record.cell_count * consan_moi_exact_shadow::granule_bytes;
     const ConSanMoiShadowAccessKind kind = decode_kind(record.access_kind);
     const bool malformed =
         generation != header.generation ||
         record.wave_id > consan_moi_sampled_watchpoint::max_owner ||
         record.epoch > consan_moi_sampled_watchpoint::max_epoch ||
-        kind == ConSanMoiShadowAccessKind::Empty || range.cell_count == 0 ||
-        range.cell_count > consan_moi_sampled_watchpoint::max_count ||
-        range.start_cell > consan_moi_sampled_watchpoint::max_start ||
-        range.cell_count > consan_moi_sampled_watchpoint::max_start + 1u - range.start_cell;
+        kind == ConSanMoiShadowAccessKind::Empty || byte_count == 0 ||
+        byte_count > consan_moi_sampled_watchpoint::max_byte_count ||
+        start_byte > consan_moi_sampled_watchpoint::max_start_byte ||
+        byte_count > consan_moi_sampled_watchpoint::max_start_byte + 1u - start_byte;
     window.malformed |= malformed;
-    window.items.push_back(Item{kind, record.wave_id, range});
+    window.items.push_back(Item{kind, record.wave_id, start_byte, byte_count});
   }
 
   for (const Window &window : windows) {
@@ -2213,7 +2220,7 @@ consan_moi_sampled_publish_causal_windows(const ConSanMoiReportHeader &header,
       sampled_watchpoint_entries[publish.published_entry_count++] =
           pack_consan_moi_sampled_watchpoint_entry(item.kind, item.owner, window.key.epoch,
                                                    static_cast<uint32_t>(window.key.generation),
-                                                   item.range.start_cell, item.range.cell_count);
+                                                   item.start_byte, item.byte_count);
     }
     causal_windows[publish.published_window_count++] = ConSanMoiSampledCausalWindow{
         window.key.generation,
