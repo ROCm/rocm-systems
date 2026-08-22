@@ -13,9 +13,6 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
-from utils.kernel_name_shortener import (
-    kernel_name_shortener,
-)
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
@@ -235,8 +232,6 @@ def is_roofline_shown(
             )
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-            if not kernel_top_df.empty:
-                kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
             # Display roofline metrics
             for kernel_id, metrics in workload.roofline_metrics.items():

@@ -12,7 +12,6 @@ import yaml
 
 import config
 from utils import schema, utils_analysis
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -75,7 +74,6 @@ def create_df_kernel_top_stats(
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
-    kernel_verbose: int,
     sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -312,7 +310,6 @@ def process_pc_sampling_kernel_trace(
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
 ) -> pd.DataFrame:
     """
@@ -333,11 +330,6 @@ def create_df_pmc(
             "Please re-profile this workload with a current release.",
         )
     df = utils_analysis.process_rocpd_csv(df)
-
-    # Demangle original KernelNames
-    # Skip for Standalone Roofline with -1 to keep full kernel names
-    if kernel_verbose >= 0:
-        kernel_name_shortener(df, kernel_verbose)
 
     utils_analysis.add_unit_counter(df)
 
