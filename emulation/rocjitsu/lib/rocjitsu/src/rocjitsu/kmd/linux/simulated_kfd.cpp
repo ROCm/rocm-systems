@@ -2207,9 +2207,20 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     hw.doorbell_base = gs.doorbell_monitor_page;
     hw.last_doorbell = ~uint64_t(0);
     hw.host_accessible = true;
-    hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
-                  args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
-                  args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    hw.is_sdma = (args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID);
+    // The topology advertises every XCD's compute units as one agent, so a
+    // compute dispatch must be able to reach all of them. Without this a
+    // single-queue application would only ever use the XCD that
+    // assign_queue_owner_cp() happened to pick.
+    //
+    // Named types only, rather than "anything that is not SDMA". SDMA queues are
+    // per-engine and are not spread, but an unrecognized queue_type is not
+    // thereby a compute queue, and device-wide replication should not be what an
+    // unsupported value silently acquires.
+    hw.xcd_fanout = (args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE ||
+                     args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
     if (!hw.is_sdma)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
