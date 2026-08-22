@@ -2028,6 +2028,50 @@ class ConSanValidationTest(unittest.TestCase):
         }
         self.assertTrue(expected.keys().isdisjoint(gfx942_ids))
 
+    def test_gfx950_manifest_registers_exact_rocblas_sgemm_row(self) -> None:
+        gfx950 = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx950")["workloads"]
+        }
+        row = gfx950["rocblas-sgemm-square-64"]
+        self.assertEqual(row["kind"], "native-executable")
+        self.assertEqual(
+            row["relative_path"],
+            (
+                "rocjitsu-test-corpus-build/kernels-gfx950-rocblas/cases/"
+                "rocblas/rocblas_sgemm"
+            ),
+        )
+        self.assertEqual(
+            row["command_arguments"],
+            ("--gtest_filter=RocblasGemmTest.Square_64x64",),
+        )
+        self.assertEqual(row["fault_families"], ("barrier-drop",))
+        self.assertEqual(row["run_timeout_seconds"], 120)
+
+        workload = validation.WORKLOAD_BY_ID["rocblas-sgemm-square-64"]
+        expected_command = [
+            str(Path("/workspace") / workload.relative_path),
+            "--gtest_filter=RocblasGemmTest.Square_64x64",
+        ]
+        for phase in ("clean", "overhead", "fault"):
+            self.assertEqual(
+                validation._workload_command(
+                    Path("/workspace"),
+                    "gfx950",
+                    workload,
+                    phase,
+                    Path("/workspace/unused.json"),
+                ),
+                expected_command,
+            )
+
+        gfx942_ids = {
+            workload["id"]
+            for workload in validation._manifest("gfx942")["workloads"]
+        }
+        self.assertNotIn("rocblas-sgemm-square-64", gfx942_ids)
+
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

@@ -36,7 +36,7 @@ build-tree paths.
 
 | Location | Current role | How to extend it |
 | --- | --- | --- |
-| `tests/dbi/consan/device/` | The checked-in behavioral-conformance tier. Twenty-three all-engine `*_test.hip` pairs cover the portable workload abstractions. Shared focused pairs additionally cover group-FLAT and Sampled dual-address LDS budgeting on all five targets. Adjacent family/target sources cover CDNA MFMA/full-bank/AccVGPR/B96, mixed fixed-stack/live-AccVGPR and dynamic-stack/full-VGPR owners, clobbering LDS reduction loads, access-heavy two-tile Stream-K, dense routing, large-text wave64 shapes, and a TopK-derived Record/Replay long-range/full-resource-pressure contract; gfx950 large LDS; RDNA B96/WMMA/FP8; gfx11 VGLOBAL/lifecycle identity; and gfx1250 clustered/TDM plus high-bank/double-barrier LDS addressing. The gfx1250 cluster host fixture submits a real extended HSA dispatch packet rather than hiding cluster dimensions behind an ordinary HIP launch. | Add one descriptively named source per new semantic scenario. Prefer extending a scenario with another tightly related pair over creating broad clean/racy grab bags. |
+| `tests/dbi/consan/device/` | The checked-in behavioral-conformance tier. Twenty-four all-engine `*_test.hip` pairs cover the portable workload abstractions, including the 256-thread/16-KiB multi-wave GEMM tile distilled from physical rocBLAS SGEMM. Shared focused pairs additionally cover group-FLAT and Sampled dual-address LDS budgeting on all five targets. Adjacent family/target sources cover CDNA MFMA/full-bank/AccVGPR/B96, mixed fixed-stack/live-AccVGPR and dynamic-stack/full-VGPR owners, clobbering LDS reduction loads, access-heavy two-tile Stream-K, dense routing, large-text wave64 shapes, and a TopK-derived Record/Replay long-range/full-resource-pressure contract; gfx950 large LDS; RDNA B96/WMMA/FP8; gfx11 VGLOBAL/lifecycle identity; and gfx1250 clustered/TDM plus high-bank/double-barrier LDS addressing. The gfx1250 cluster host fixture submits a real extended HSA dispatch packet rather than hiding cluster dimensions behind an ordinary HIP launch. | Add one descriptively named source per new semantic scenario. Prefer extending a scenario with another tightly related pair over creating broad clean/racy grab bags. |
 | `tests/dbi/consan/device/consan_device_test_support.h` | Small shared fixture utilities used by the paired HIP sources. | Put only genuinely reusable fixture mechanics here; keep scenario semantics and expected results local to each test source. |
 | `tests/dbi/consan/hip_consan_{lds,moi,moi_cdna,moi_rdna3,inline_shadow,spill_gfx950}_test.hip` and related support | Older target- or engine-specific device fixtures. They provide useful ISA and implementation test material but are not the common behavioral conformance tier. | Distill behaviorally justified idioms into the new paired suite. Keep implementation-specific assertions here when they remain useful, but do not count them as substitutes for portable correct/incorrect contracts. |
 | `tests/consan/CMakeLists.txt` | Builds target-specific HIP executables and registers every baseline/engine/backend row, labels, diagnostic requirements, simulator configuration, target-scoped physical resource lock, and health dependency. The shared registration path rejects any physical device row without a lock. It is included by `tests/CMakeLists.txt`. | Register every new pair here across the common matrix. As the table grows, move the declarative pair inventory and registration helpers into a focused `tests/consan/device_tests.cmake` included from this file rather than duplicating per-architecture blocks. |
@@ -86,32 +86,30 @@ produce a deterministic value from the deliberately racy data path.
 
 ## Current state
 
-The portable tier has 23 adjacent correct/incorrect all-engine pairs. Each
+The portable tier has 24 adjacent correct/incorrect all-engine pairs. Each
 common pair runs as baseline plus all four engines on five RocJitsu targets
 and physical `gfx950`, for 60 rows per scenario. Shared and target-specific
 pair names cover behavior only on the architectures and engines where the form
 exists. E2E-derived focused regressions add further adjacent pairs where one
 engine-specific resource/control path is the behavior under test. The current
-registered `consan-device` matrix is 2,025 tests, including the 60-row
+registered `consan-device` matrix is 2,085 tests, including the 60-row
 heterogeneous-object pair, the 60-row fence/barrier-publication pair, the
 60-row ordinary release-store pair, the 60-row cooperative-LDS-initialization
-pair, the 24-row Sampled dual-address pair, the
-36-row baseline/Inline/Sampled empty-EXEC scalar-spill pair, four physical
-module-load lifecycle rows, four gfx1250 high-bank/double-barrier LDS rows, the
-12-row CDNA long-range/full-pressure Record/Replay pair, the new 30-row CDNA
-mixed-persistent-state pair, the new 30-row CDNA direct-to-LDS-publication pair,
-and the physical post-instrumentation health row. The most recent one-command
-qualification is fully green for the preceding 1,995-row matrix: all 1,618
-simulator rows and all 377 serialized physical rows pass, including the
-physical post-instrumentation health check. The 20 new simulator and 10 new
-physical direct-to-LDS rows also pass in focused invocations; a whole-matrix
-2,025-row timing and qualification remains to be collected. The preceding
-1,995-row matrix takes 126.89 seconds of wall time and 2,201.11 seconds of
-summed CTest process duration on the current reference host at `-j64`. This
-checkpoint did not collect shell user/system CPU accounting, so the figures
-from the preceding suite revision are not carried forward. The wall time
-remains below the five-minute lower review threshold, so the residual coverage
-audit remains active; it is not a reason to add artificial work.
+pair, the 60-row multi-wave-GEMM-tile pair, the 24-row Sampled dual-address
+pair, the 36-row baseline/Inline/Sampled empty-EXEC scalar-spill pair, four
+physical module-load lifecycle rows, four gfx1250 high-bank/double-barrier LDS
+rows, the 12-row CDNA long-range/full-pressure Record/Replay pair, the 30-row
+CDNA mixed-persistent-state pair, the 30-row CDNA
+direct-to-LDS-publication pair, and the physical post-instrumentation health
+row. The most recent one-command qualification is fully green for all 2,085
+rows: 1,688 simulator rows and 397 serialized physical rows pass, including
+the physical post-instrumentation health check. The matrix takes 137.692
+seconds of wall time and 2,578.00 seconds of summed CTest process duration on
+the current reference host at `-j64`. Shell process-tree accounting records
+793.220 user plus 890.666 system seconds, or 1,683.886 seconds of actual CPU
+time. The wall time remains below the five-minute lower review threshold, so
+the residual coverage audit remains active; it is not a reason to add
+artificial work.
 
 | Scenario | Workload-derived contract | Status |
 | --- | --- | --- |
@@ -130,6 +128,7 @@ audit remains active; it is not a reason to add artificial work.
 | Stream-K last arriver | Partial publication, fetch-add arrival, and last-arriver consumption | Paired and green |
 | Tree atomic-OR | Bitmask publication, polling, and completion | Paired and green |
 | Double-buffered pipeline | Wide LDS stages, storage reuse, lane exchange, a correct redundant adjacent-barrier publication pair, and an incorrect missing stage edge | Paired and green across all five RocJitsu targets and physical gfx950 |
+| Multi-wave GEMM tile | A 256-thread workgroup cooperatively publishes a 16-KiB tile, reconverges at one publication edge, and makes every wave consume a peer wave's 16-word stripe; the incorrect member removes only that edge | Paired and green in 50 all-target RocJitsu rows and ten physical-gfx950 rows; distilled from the exact rocBLAS SGEMM Record/Replay campaign |
 | Cooperative LDS initialization | Two waves cooperatively initialize LDS and consume peer-initialized slots; the incorrect member removes only the initialization-publication edge | Paired and green in all 60 baseline/engine/backend rows across CDNA3/4/5, RDNA3/4, and physical gfx950 |
 | Histogram/scatter | LDS-bin atomics and collision-heavy global scatter updates | Paired and green |
 | Segmented top-k | Value/index tuples, segmented phases, wide traffic, and non-multiple tails | Paired and green |
@@ -179,7 +178,7 @@ idiom; the new CDNA B96 pair protects that capability on gfx942 and gfx950.
 | Physical-gfx950 PyTorch `torch.sort`, Inline Shadow owner-local planning | After the empty-wave behavior was covered, the full generated object still corrupted 744 output indices because disconnected kernels with different SGPR tails were forced through an unsafe object-wide scalar ABI. This is not a new race contract: it is the resource-planning envelope around the existing eight-site correct/incorrect pair. | A focused host regression synthesizes disconnected 64- and 96-SGPR owners, requires both device access sites to survive lowering, and verifies that only the incompatible owner receives scalar-spill and persistent-dispatch overrides. All 722 `ConSanMoi.*` tests pass, while the final physical E2E run passes exact values and indices with complete 56,884-access/6,032-barrier coverage. Do not add a prototype-layout assertion to the device tier; expand the paired workload only if a future replacement exposes a distinct observable behavior not already covered by the empty/nonempty-wave contract. |
 | Physical-gfx950 PyTorch norm/softmax, Sampled | The exact device oracle completed before the 30-second limit, but host teardown scanned all 46,080 allocated watchpoint slots even though the report contained zero claimed windows. The reader now stops after the committed `Ready` count and reconstructs deferred releases with one scan per relevant owner bank instead of one capacity scan per visible access. This is report-reader complexity, not a new device semantic: the existing adjacent two-stage-softmax pair owns the reduction/global-intermediate behavior and the existing Stream-K pairs own Sampled acquire-release publication. | Two focused host regressions pin zero examined slots for an empty allocated report and one capacity scan, rather than two, for two visible entries sharing a pending owner bank. All 186 hook tests pass. The 18 selected Sampled Stream-K correct/incorrect rows pass across all five RocJitsu targets plus physical gfx950 in 0.94 seconds. The final E2E run passes exact norm/softmax, complete 4,820-access/2,030-barrier coverage, and the ordinary 30-second contract in 28.98 seconds. |
 | Physical-gfx950 PyTorch norm/softmax, Inline Shadow | Compiler-generated reduction loads use tied address/result operands (`ds_read_b32 vN, vN`) while ordinary and accumulator liveness leave only a compact spill window disjoint from `vN`. The paired reduction preserves the max/sum shape and exact live ordinary/AccVGPR values; its incorrect member removes only the LDS publication barrier. | The new source runs baseline plus all four engines on RocJitsu gfx942/gfx950 and physical gfx950, for 30 passing rows. Inline Shadow additionally requires selection of the 16-VGPR spill-backed recovery path. Three host regressions prove both overlapping and disjoint clobbered-address cases and forbid an out-of-window snapshot. This closes the compact-VGPR resource defect, but not the E2E cell: 41 full-pressure sites still need a scalar branch-only body whose nearest safe relay is roughly 1.5 MiB away. |
-| Physical-gfx950 HIP Stream-K and rocBLAS, Record/Replay | Exact device oracles finished, but repeated field-wise scans and replay directly from 237--526 MB fine-grained HSA report allocations imposed a 45--120-second post-oracle latency floor. The reader now takes one sequential snapshot into cacheable host storage before any parser or replay pass. The two-tile row then exposed eager event-count-squared causal metadata, unbounded per-fence logging, lane-scaled fence capacity being conflated with wave-scaled barrier capacity, and access/barrier placement consuming relays needed by later compiler fences. These are host model, report-policy, and target-native placement envelopes around device behavior already owned by the adjacent Stream-K pairs. | Focused host regressions pin the fine-grained snapshot, independent barrier/fence relays around 80 access sites, lane-scaled report headroom, demand-grown metadata on a 4,096-fence trace, and bounded detail logging. The exact simple and two-tile source/build commands are registered descriptors with a host regression pinning their complete contracts. Both source-matched Record/Replay rows are green. Simple preserves `Errors: 0`, covers 32/32 accesses, 3/3 barriers, and 2/2 fences at 7.01×, and detects its reviewed phase-publication deletion. Two-tile preserves `Errors: 0`, covers 80/80 accesses, 5/5 barriers, and 2/2 fences at 31.05×, losslessly replays 20,525 fences with only one retained causal component, and emits 281,397 diagnostics for its prospectively reviewed exact-one publication-barrier deletion. All 752 `ConSanMoi.*` tests, 192 hook tests, and 314 simulator Record/Replay device rows pass. The existing CDNA two-tile pair and all-target Stream-K last-arriver pair own the observable behavior; no prototype-layout fixture is needed. `rocblas_sgemm` still needs current paired/fault qualification. |
+| Physical-gfx950 HIP Stream-K and rocBLAS, Record/Replay | Exact device oracles finished, but repeated field-wise scans and replay directly from 237--526 MB fine-grained HSA report allocations imposed a 45--120-second post-oracle latency floor. The reader now takes one sequential snapshot into cacheable host storage before any parser or replay pass. The two-tile row then exposed eager event-count-squared causal metadata, unbounded per-fence logging, lane-scaled fence capacity being conflated with wave-scaled barrier capacity, and access/barrier placement consuming relays needed by later compiler fences. These are host model, report-policy, and target-native placement envelopes around device behavior already owned by the adjacent Stream-K pairs. | Focused host regressions pin the fine-grained snapshot, independent barrier/fence relays around 80 access sites, lane-scaled report headroom, demand-grown metadata on a 4,096-fence trace, and bounded detail logging. The exact simple, two-tile, and rocBLAS SGEMM commands are registered descriptors with host regressions pinning their complete contracts. All three source-matched Record/Replay rows are green. Simple preserves `Errors: 0`, covers 32/32 accesses, 3/3 barriers, and 2/2 fences at 7.01×, and detects its reviewed phase-publication deletion. Two-tile preserves `Errors: 0`, covers 80/80 accesses, 5/5 barriers, and 2/2 fences at 31.05×, losslessly replays 20,525 fences with only one retained causal component, and emits 281,397 diagnostics for its reviewed exact-one deletion. rocBLAS preserves the exact `Square_64x64` oracle, covers 49,435/49,435 accesses and 4,997/4,997 barriers at 59.60×, and emits 4,086 replay diagnostics for its prospectively selected exact-one tile-publication deletion while retaining the numerical result. All 752 `ConSanMoi.*` tests, 192 hook tests, and 314 simulator Record/Replay rows passed at the preceding implementation checkpoint. The new all-target `MultiWaveGemmTile` pair distills rocBLAS's 256-thread, 16-KiB cooperative tile and reconverged publication edge: its 50 simulator and ten physical baseline/all-engine rows pass. Existing CDNA MFMA and Stream-K pairs retain the target-native instruction and access-heavy aspects without prototype-layout assertions. |
 | Physical-gfx950 PyTorch `torch.mode`, Record/Replay | Even after sparse compaction, the exact fully covered row spent roughly 13 seconds copying semantically visible fields from a 533-MB fine-grained HSA report during host teardown. Record/Replay auto reports now prefer coarse-grained storage when available and use the existing HSA bulk-snapshot path, while retaining fine fallback and leaving Sampled and Inline Shadow's fine preference unchanged; SuperCollider has a separate allocator. This is host allocation policy, not a new device race semantic: the existing reduction, B96 tuple-publication, segmented-top-k, and replay pairs own the relevant transformed-device behavior. | A focused host regression offers fine then coarse regions and requires Record/Replay's coarse preference and fine fallback plus the two other MOI engines' unchanged fine preference. All 166 hook tests, all 250 simulator Record/Replay device rows, all 58 physical Record/Replay rows, and the physical health check pass. The physical E2E row falls from 40.79 to 27.61 seconds while retaining the exact oracle, complete 25,523-access/3,920-barrier coverage, lossless replay of 13,017 accesses plus 49 barriers, and zero diagnostics. Do not add a prototype-specific device assertion for region selection; extend the behavioral pairs only if the production replacement exposes a distinct device-observable contract. |
 | Physical-gfx950 PyTorch `torch.topk`, Record/Replay | The 20.8-MB generated object needs 403,542,016 bytes of alignment-inclusive growth, just above the former 384-MiB default, so strict validation rejected before either exact oracle. Qualified generated workloads now define a still-bounded 400-MiB default envelope without a workload-specific expert override. This is resource admission rather than a new device semantic: the adjacent segmented-top-k pair already owns value/index tuples, FP64/BF16-like pressure, tails, phase publication, and the missing-edge diagnostic. The residual large-object gap then showed that a safe ordinary-instruction run whose appended copy is itself more than one SOPP hop away must be able to extend the route recursively through later materialized runs. | Focused host tests pin the growth envelope, recursive reservoir planning and transitive materialization, routed-reservoir validation, preservation of pristine-NOP capacity, and the new cross-cut capacity invariant. The paired host capacity fixture proves that surplus donors in earlier cuts cannot compensate for an under-capacity terminal cut. The adjacent `CdnaRecordReplayLongRangeFullPressure` device pair distills the observable TopK geometry into a 100,000-instruction no-cave block with complete scalar-bank and alternating full-VGPR pressure: its correct member requires exact warmup/publication/control values with no diagnostic, while the incorrect member removes only the cross-wave publication edge and requires the conflict. It deliberately asserts no prototype routing telemetry. Baseline and Record/Replay contribute 12 green rows on RocJitsu gfx942/gfx950 and physical gfx950. Fresh physical TopK runs pass both exact oracles, emit zero diagnostics, and replay completely, but retain a static 232,814/239,722-access and 6,743/11,423-barrier frontier. The 57,155 candidates across the object do not cure the limiting cut: its 400 adopted reservoirs provide 13,688 relay words against 23,176 required entry/return paths, a 9,488-word deficit. The E2E cell therefore remains orange pending an owner-local gateway/shared-dispatch or equivalent routing-ABI design. A device fixture scaled to that exact relay count would freeze prototype layout rather than add behavioral coverage. |
 | Physical-gfx950 PyTorch norm/softmax, Record/Replay | A barrier-only replay can have a zero-access compact input and zero-byte replay scratch while retaining the full report's nonzero diagnostic capacity. The validator conflated those producer contracts and rejected an otherwise exact, fully covered clean run. The fully covered device interval then finished below 30 seconds while fixed Python/framework startup pushed the whole process just above the generic bound. Finally, a loaded FP32 norm specialization was not the one dispatched by the exact workload: mutation installation alone could not prove site reach. These are validation bookkeeping, target process-envelope, and fault-qualification issues rather than new device semantics. | Focused parser regressions pin zero-input replay, clamped compact capacity, historical summaries, and the target-resolved 60-second process envelope. A descriptor-to-dispatch mapping plus final-ISA control-flow review selects the actually executed specialization before freezing the fault policy. The prospective exact-one drop of its first adjacent barrier is accepted as a reached `not_detected/pass` qualified miss; the earlier loaded-but-undispatched trial remains rejected rather than being given retrospective reach. Exact norm/softmax retains full 4,820-access/2,096-barrier coverage and zero diagnostics. The architecture-general `TwoStageSoftmax` pair already owns reduction/intermediate publication, while `DoubleBufferedPipeline` owns redundant-adjacent versus missing-publication barriers across all five RocJitsu targets and physical gfx950; adding a prototype-shaped fixture would duplicate those observable contracts. |
@@ -232,14 +231,14 @@ behavior-first contracts that can survive the production replacement.
 | --- | --- | --- |
 | Synchronization faults | Every scenario is shape-matched and paired; reductions, helpers, dynamic stacks, pipelines, routing, batching, cache sequence, and instruction scope all change one real property. | A dedicated wrong-LDS-address pair remains a useful refinement. |
 | Stream-K publication | Fetch-add last-arriver and tree atomic-OR pairs cover partial publication and completion. The CDNA two-tile pair adds 80 distinct static LDS sites and five phase barriers, with only the central publication edge removed by the incorrect member. | `ds_bpermute` broadcast and a closer relaxed-poll/final-RMW tree remain target-specific refinements. |
-| Multi-stage pipelines | Double buffering, storage reuse, wide LDS, lane exchange, two-stage softmax, CDNA MFMA, RDNA WMMA, FP8 staging, repeated dispatch, and a gfx950-specific 160-KiB/32-stage/eight-wave publication pipeline are covered. | A separate FP16 production reduction remains pressure work. |
+| Multi-stage pipelines | Double buffering, storage reuse, wide LDS, lane exchange, two-stage softmax, CDNA MFMA, RDNA WMMA, FP8 staging, repeated dispatch, a portable 256-thread/16-KiB peer-wave GEMM tile, and a gfx950-specific 160-KiB/32-stage/eight-wave publication pipeline are covered. | A separate FP16 production reduction remains pressure work. |
 | Selection and reduction | Segmented value/index top-k, tails, two-stage softmax, and the MoE router cover multi-phase selection/reduction shapes. | Signed/unsigned D16-high variants and a sort-network-specific pair remain optional refinements. |
 | Atomic diversity | Arrival add, tree OR, release CAS plus language-level acquire load, language-level release store plus acquire CAS, LDS histogram collisions, global scatter collisions, MoE bins, cache-qualified VGLOBAL publication, and gfx12 instruction-scoped atomics are paired. | BF16/FP32 atomic payload variants remain absent. |
 | LDS and data movement | The suite exercises subwords, B32/B96/B128, group-FLAT wide traffic, B128-to-AccVGPR, CDNA direct-global-to-LDS writes with implicit physical-lane/M0 destinations, gfx1250 high-bank SRC0 addresses beside adjacent split barriers and descriptor waits, target-native load/store spellings, and dual-address instructions whose logical ranges outnumber static sites. | Strided/transpose, D16-high, `ds_swizzle`, and `ds_bpermute` remain mostly in older implementation fixtures. |
 | TDM and clusters | gfx1250 now uses real extended clustered-dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, `cluster_load_async_to_lds_b32` plus `s_wait_asynccnt`, and multicast. | Store-from-LDS, wider tensor fragments, scale-WMMA, more than two CTAs per cluster, and a distinct remote cluster-memory opcode remain unabstracted. |
 | Resource and control pressure | Dynamic stack, shared helpers, MFMA/WMMA live state, CDNA AccVGPR destinations, full ordinary-VGPR-bank pressure, disconnected fixed-stack/private and dynamic-stack/register persistent-state owners, gfx1250 high-bank address capture with a spill-backed low-bank window and adjacent double-barrier tail, B96/B128 aliasing, a dense-routed B16 access with live SCC, native VGLOBAL forms, descriptor growth, repeated dispatch, and spill-backed scalar preservation under empty and nonempty `EXEC` are exercised. The tranche caught AccVGPR-boundary, mixed-owner recovery/composition, dynamic-frame spill, dense-dispatch SCC, high-bank capture, and empty-wave scalar-restore defects. A paired host fixture additionally proves that direct-reservoir demand must fit through every mandatory branch-range cut. | Combined worst-case forms and production-sized placement/relay limits remain E2E obligations. In particular, physical TopK currently needs 23,176 paths across a cut with capacity for 13,688; a future owner-local gateway/shared-dispatch design should gain a small device contract for its observable behavior, while the existing host pair continues to own the capacity invariant. |
 | Object and dispatch shape | Shared helpers have multiple kernel owners; softmax uses multiple stages and a global intermediate; continuous batching repeats changing dispatches from reset state; the heterogeneous-object pair executes three independent kernels beside an unexecuted pressure owner and guards cross-kernel diagnostic attribution; the CDNA mixed-state pair combines two incompatible owner-resource envelopes in one loaded object. | Multiple loaded objects, unload/reload, multi-stream module launch, and graph replay remain lifecycle envelopes rather than covered semantic categories. |
-| Scale | The registered 2,025-row matrix crosses the portable and target-specific pairs plus focused E2E-derived contracts, five simulator targets, physical CDNA4, every engine, a heterogeneous framework-shaped object, large-LDS/deep-pipeline, long-range full-resource-pressure, large-generated-text, access-heavy relay, mixed owner-resource envelopes, direct-to-LDS publication, and module-load lifecycle cases while staying checked in and bounded. The preceding 1,995 rows pass together in 126.89 seconds at `-j64`, and the 30 new rows pass focused qualification; a full 2,025-row run remains. Because the last whole-matrix time remains below the lower review threshold, the residual coverage audit stays open. | Maximum-capacity and production-sized heterogeneous objects remain E2E responsibilities; add another medium object pair only if a distinct concrete failure mode justifies it. |
+| Scale | The registered 2,085-row matrix crosses the portable and target-specific pairs plus focused E2E-derived contracts, five simulator targets, physical CDNA4, every engine, a heterogeneous framework-shaped object, large-LDS/deep-pipeline, portable multi-wave GEMM staging, long-range full-resource-pressure, large-generated-text, access-heavy relay, mixed owner-resource envelopes, direct-to-LDS publication, and module-load lifecycle cases while staying checked in and bounded. All 2,085 rows pass together in 137.692 seconds at `-j64`. Because the whole-matrix time remains below the lower review threshold, the residual coverage audit stays open. | Maximum-capacity and production-sized heterogeneous objects remain E2E responsibilities; add another medium object pair only if a distinct concrete failure mode justifies it. |
 
 ## Aorta workload expansion
 
@@ -369,7 +368,7 @@ CTest names make the pairing visible, for example `...Reduction.Correct` and
 selected across all applicable architectures. One all-engine pair/backend
 application is ten rows: correct and incorrect under the baseline and four
 ConSan flavors.
-The 23 common pairs contribute 1,380 rows across the five RocJitsu targets plus
+The 24 common pairs contribute 1,440 rows across the five RocJitsu targets plus
 physical `gfx950`. The non-rectangular target and engine extensions contribute
 640 rows, including 36 baseline/Inline/Sampled rows in the generalized
 empty-EXEC scalar-spill pair, 24 baseline/Sampled rows in the dual-address
@@ -377,18 +376,18 @@ budget pair, and 12 baseline/Record-Replay rows in the CDNA
 long-range/full-pressure pair, plus 30 baseline/all-engine rows in the CDNA
 mixed-persistent-state pair and 30 in the CDNA direct-to-LDS-publication pair.
 The physical module-load reduction contributes four rows and the physical
-health check contributes one, for 2,025 total.
+health check contributes one, for 2,085 total.
 
 The per-configuration arithmetic is:
 
 | Configuration | Pairs | Rows |
 | --- | ---: | ---: |
-| RocJitsu `gfx942` | 40 | 372; the dense-SCC pair omits unsupported Record/Replay rows, the production-threshold pair is SuperCollider-only, and the long-range/full-pressure pair is Record/Replay-only |
-| RocJitsu `gfx950` | 41 | 382; the dense-SCC pair omits unsupported Record/Replay rows, the production-threshold pair is SuperCollider-only, and the long-range/full-pressure pair is Record/Replay-only |
-| Physical `gfx950` | 42 | 387, including four module-load rows and health |
-| RocJitsu `gfx1100` | 28 | 270 |
-| RocJitsu `gfx1201` | 30 | 290 |
-| RocJitsu `gfx1250` | 34 | 324 |
+| RocJitsu `gfx942` | 41 | 382; the dense-SCC pair omits unsupported Record/Replay rows, the production-threshold pair is SuperCollider-only, and the long-range/full-pressure pair is Record/Replay-only |
+| RocJitsu `gfx950` | 42 | 392; the dense-SCC pair omits unsupported Record/Replay rows, the production-threshold pair is SuperCollider-only, and the long-range/full-pressure pair is Record/Replay-only |
+| Physical `gfx950` | 43 | 397, including four module-load rows and health |
+| RocJitsu `gfx1100` | 29 | 280 |
+| RocJitsu `gfx1201` | 31 | 300 |
+| RocJitsu `gfx1250` | 35 | 334 |
 
 Run every pair using RocJitsu on CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5
 (`gfx1250`), RDNA3 (`gfx1100`), and RDNA4 (`gfx1201`). Do not introduce an FFM
@@ -409,11 +408,11 @@ artificially slower or to fill a time quota.
   sampled less often without materially reducing behavioral or architecture
   coverage.
 
-The most recent whole-matrix 1,995-test qualification passes in **126.89 seconds** on this
-host. Its CTest rows sum to **2,201.11 seconds of process duration**. Shell
-user/system CPU accounting was not collected for this checkpoint and must not
-be inferred from CTest's duration. This result is below the five-minute lower
-review threshold, so the next coverage pass must ask whether meaningful
+The most recent whole-matrix 2,085-test qualification passes in **137.692
+seconds** on this host. Its CTest rows sum to **2,578.00 seconds of process
+duration**. Shell process-tree accounting reports **793.220 user + 890.666
+system = 1,683.886 seconds of CPU time**. This result is below the five-minute
+lower review threshold, so the next coverage pass must ask whether meaningful
 workload-derived, architecture-specific, or lifecycle contracts are still
 missing; it is not a reason to add artificial work.
 CTest's summed duration remains a concurrency-insensitive test-capacity
@@ -422,7 +421,7 @@ on the simulator, runtime, or physical GPU.
 
 This measurement supersedes the earlier 67.91-second result, which allowed
 all physical gfx950 processes to compete for one GPU and eventually reproduced
-a GPU memory fault. All 387 currently registered physical rows share the
+a GPU memory fault. All 397 currently registered physical rows share the
 target-scoped `consan_physical_gfx950` CTest resource lock. The five simulator targets still
 run concurrently with each other and with the one active physical row; a
 different physical target would use its own lock rather than creating a global
@@ -522,7 +521,7 @@ simulator rows pass after the transport.
 
 | Contract family | Applies and runs | Capability-based disposition elsewhere |
 | --- | --- | --- |
-| Twenty-three common pairs | CDNA3/4/5 and RDNA3/4, plus physical CDNA4 | None; these are the rectangular semantic baseline. |
+| Twenty-four common pairs | CDNA3/4/5 and RDNA3/4, plus physical CDNA4 | None; these are the rectangular semantic baseline. The newest member transports rocBLAS's cooperative multi-wave GEMM tile from physical CDNA4 to every target. |
 | Wide group-FLAT | All five targets, plus physical CDNA4 | None. The gfx1250 omission was a registration gap, not an ISA limitation. |
 | CDNA MFMA/full-bank/two-tile/B96/dense-route/B16/clobbered-load/AccVGPR/large-text pairs | CDNA3 and CDNA4, plus physical CDNA4 where available | RDNA uses distinct wave32 register and LDS forms; its WMMA/B96 pairs carry the transported pipeline and aliasing ideas. CDNA5 uses its gfx12-style LDS/register model and needs a native scaled-WMMA pair rather than a nominal CDNA encoding. |
 | Dense SuperCollider threshold | CDNA3 and CDNA4, plus physical CDNA4 | The current 1,024-site cliff is specific to the CDNA dense dispatcher. Other targets retain smaller all-engine placement contracts; add a production-threshold pair only when their own router has a distinct evidenced cliff. |
@@ -536,8 +535,8 @@ simulator rows pass after the transport.
 
 ### CDNA3 (`gfx942`)
 
-**Implemented evidence:** 39 pair names produce 362 green RocJitsu rows. In addition
-to the 23 common pairs, `CdnaMfmaPipeline` keeps MFMA/AccVGPR state live across
+**Implemented evidence:** 41 pair names produce 382 green RocJitsu rows. In addition
+to the 24 common pairs, `CdnaMfmaPipeline` keeps MFMA/AccVGPR state live across
 an LDS publication edge; `CdnaFullBankStreamk` combines all 256 ordinary VGPRs,
 a dynamic private frame, shared helpers, cache-qualified VGLOBAL fetch-add,
 and last-arriver consumption; `CdnaB96Boundary` pairs native 12-byte tuple
@@ -575,9 +574,9 @@ external availability gap.
 
 ### CDNA4 (`gfx950`)
 
-**Implemented evidence:** 41 pair names contribute 382 green RocJitsu rows. Physical
+**Implemented evidence:** 42 pair names contribute 392 green RocJitsu rows. Physical
 gfx950 repeats the applicable contracts, adds four module-load rows and a
-health check, and contributes 387 rows in total.
+health check, and contributes 397 rows in total.
 Alongside the CDNA3 MFMA,
 full-bank Stream-K, B96, group-FLAT, and common VGLOBAL contracts, the
 CDNA4-only `Gfx950LargeLdsPipeline`
@@ -639,8 +638,8 @@ module/graph, or unload/reload lifecycle validation.
 
 ### RDNA3 (`gfx1100`)
 
-**Implemented evidence:** 28 pairs produce 270 green RocJitsu rows. Beyond the
-23 common pairs, `GroupFlatWide` supplies the shared group-FLAT byte/numerical
+**Implemented evidence:** 29 pairs produce 280 green RocJitsu rows. Beyond the
+24 common pairs, `GroupFlatWide` supplies the shared group-FLAT byte/numerical
 oracle, `RdnaWmmaPipeline` cross-pollinates the green gfx12 attention idiom into
 gfx11 WMMA plus LDS staging, `Gfx11ScalarVglobal` complements the vector-only
 common VGLOBAL form with an SGPR-base acquire and a missing-GL0-invalidate
@@ -658,7 +657,7 @@ gaps.
 
 ### RDNA4 (`gfx1201`)
 
-**Implemented evidence:** 30 pairs produce 290 green RocJitsu rows. The target
+**Implemented evidence:** 31 pairs produce 300 green RocJitsu rows. The target
 extensions deliberately execute group-FLAT; native aliasing B96 loads/stores
 with canaries; a returning VGLOBAL atomic whose incorrect member changes only
 the instruction-encoded scope; WMMA interleaved with a split-barrier LDS
@@ -675,8 +674,8 @@ pressure owner; production-size placement remains an E2E obligation.
 
 ### CDNA5 (`gfx1250`) summary
 
-**Implemented evidence:** 34 pairs produce 324 green RocJitsu rows. In addition
-to the 23 common pairs, gfx1250 now runs the wide group-FLAT contract, shares
+**Implemented evidence:** 35 pairs produce 334 green RocJitsu rows. In addition
+to the 24 common pairs, gfx1250 now runs the wide group-FLAT contract, shares
 native B96 and instruction-encoded atomic scope with gfx1201, and
 `Gfx1250TopKPrefix` covers the target's prefix and
 last-arriver idiom. `Gfx1250HighBankLdsAddress` covers SRC0-bank address
@@ -738,24 +737,22 @@ and ISA classes for each pair and verify them on every target where they exist.
 
 ## Completion assessment
 
-The preceding portable and target-specific tier is fully qualified: the
-cooperative-LDS-initialization and CDNA mixed-persistent-state pairs and every
-preexisting row pass together in one 1,995-row invocation. The newly registered
-CDNA direct-to-LDS-publication pair adds 20 green focused simulator rows and ten
-green focused physical rows; the resulting 2,025-row matrix still needs one
-combined qualification and timing run. The Part 1 coverage review remains open
-because the last complete matrix finishes below the five-minute lower
-heuristic. Twenty-three common all-engine
+The portable and target-specific tier is fully qualified in one combined
+2,085-row invocation, including the cooperative-LDS-initialization, CDNA
+mixed-persistent-state, CDNA direct-to-LDS-publication, and portable
+multi-wave-GEMM-tile pairs. The Part 1 coverage review remains open because the
+complete matrix finishes below the five-minute lower heuristic. Twenty-four
+common all-engine
 pairs plus shared engine-scoped and family/target pairs cover the
 main synchronization, atomic, pipeline, selection/reduction, resource,
 cluster/TDM, and repeated-dispatch idioms distilled from `VALIDATION.md` and
 Aorta. Every pair runs through the baseline and each engine declared
 semantically applicable in RocJitsu; CDNA4 repeats the same coverage on the
 physical `gfx950`. The last complete `ctest -j64 -L consan-device` qualification
-passes all 1,618 simulator and 377 physical rows without expected-failure
-exemptions in 126.89 seconds wall time and 2,201.11 seconds of summed CTest
-process duration; the 2,025-row combined run is pending. Revisit workload,
-architecture, and lifecycle gaps before declaring the tier complete.
+passes all 1,688 simulator and 397 physical rows without expected-failure
+exemptions in 137.692 seconds wall time, 1,683.886 seconds of shell-accounted
+CPU time, and 2,578.00 seconds of summed CTest process duration. Revisit
+workload, architecture, and lifecycle gaps before declaring the tier complete.
 
 This materially shrinks, but cannot eliminate, regression risk. The remaining
 gaps are narrower uncommon instruction forms, production-size placement,

@@ -666,6 +666,27 @@ WORKLOADS = (
         run_timeout_seconds=120,
     ),
     Workload(
+        id="rocblas-sgemm-square-64",
+        priority="P2",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx950-rocblas/cases/"
+            "rocblas/rocblas_sgemm"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        command_arguments=("--gtest_filter=RocblasGemmTest.Square_64x64",),
+        targets=("gfx950",),
+        run_timeout_seconds=120,
+    ),
+    Workload(
         id="tensile-sk-sgemm-quick",
         priority="P2",
         corpus="rocjitsu-test-corpus",

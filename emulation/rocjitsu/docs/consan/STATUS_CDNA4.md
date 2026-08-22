@@ -1112,7 +1112,7 @@ detector acceptance.
 | P1 | `hipkittens_gemm_mxfp8_4wave::m256_n256_k256` | 🟨 Current physical strict run passes all 65,536 exact output checks with complete 64/64 supported LDS-access coverage, zero check mismatches, and complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟩 Clean-source paired qualification passes all 65,536 exact checks with complete 96/96 accesses--including all 32 direct-global-to-LDS writers--and 5/5 barriers, zero diagnostics, and a 226.24-ms paired baseline versus 725.83-ms Record/Replay time (3.21×). A prospectively frozen exact-one drop of the reached initial tile-publication barrier produces the required detector-owned diagnostic with complete 96/96 access and 4/4 remaining-barrier coverage, no overflow/incomplete state, and complete containment, cleanup, and health evidence | 🟨 Physical strict stride-1 run passes all 65,536 exact checks with complete 64/64 accesses and 4/4 applicable barriers, 256 samples plus 4 synchronization records, zero diagnostics, and complete static/dynamic verdicts; the standard offset-0 cadence selects no workgroup, and paired overhead/reviewed-fault evidence remain | 🟨 Current physical strict run passes all 65,536 exact checks in 17.11 seconds with complete 64/64 access and 5/5 barrier coverage, 294,912 visible evidence events, zero diagnostics or malformed/incomplete state, and complete static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Explicit gfx950 four-wave microscaling GEMM. Record/Replay now qualifies the implicit direct-to-LDS producer addresses as well as the wide DS consumers while retaining all 65,536 output checks. |
 | P1 | `hip_streamk_simple::m256_n256_k256` gfx950 port | 🟨 Current physical strict run preserves the exact zero-error oracle, patches all 32/32 supported LDS accesses, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟩 Clean-source paired qualification preserves the exact `Errors: 0` oracle with complete 32/32 access, 3/3 barrier, and 2/2 fence coverage, zero clean diagnostics, and a 155.74-ms paired baseline versus 1,091.97-ms Record/Replay time (7.01×). A prospectively frozen exact-one drop of the reached loop phase-publication barrier produces 36,864 attributable replay diagnostics with complete 32/32 access, 2/2 remaining-barrier, and 2/2 fence coverage, no overflow/incomplete state, bounded report memory and cleanup, and healthy pre/post GPU probes | 🟨 Current physical stride-1 diagnostic preserves the exact oracle, patches all 32/32 accesses plus 3/3 barriers, publishes 192 samples plus 3 synchronization records with zero diagnostics, and reports complete static/dynamic verdicts; the standard stride-256 cadence selects no workgroup, and paired-overhead/reviewed-fault acceptance remain | 🟨 Current physical standard-profile run preserves the exact oracle in 18.53 seconds, patches all 32/32 accesses plus 3/3 barriers, publishes 4,800,512 visible evidence events with zero diagnostics or incomplete state, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | The current manifest pins the exact m=n=k=256, grid=4, one-run oracle and the checked-in architecture-general Stream-K pairs own the corresponding publication/conflict behavior. Record/Replay is fully qualified; paired-overhead and reviewed-fault evidence remain for the other three flavors. |
 | P1 | `hip_streamk_two_tile::m256_n256_k256` gfx950 port | 🟨 Current physical strict run preserves the exact zero-error oracle, patches all 80/80 supported LDS accesses, and reports complete static and dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟩 Clean-source paired qualification preserves the exact `Errors: 0` oracle with complete 80/80 access, 5/5 barrier, and 2/2 fence coverage, zero clean diagnostics or dropped records, and a 305.30-ms paired baseline versus 9,479.56-ms Record/Replay time (31.05×). Replay processes all 2,359,296 committed accesses, 2,208 barriers, and 20,525 fences while retaining only one live release-metadata component. A prospectively frozen exact-one drop of the reached loop publication barrier produces 281,397 attributable replay diagnostics with complete 80/80 access, 4/4 surviving-barrier, and 2/2 fence coverage, no overflow/incomplete state, bounded report memory and cleanup, and healthy pre/post GPU probes | 🟨 Current physical standard-profile run preserves the exact oracle in 0.55 seconds, patches all 80/80 accesses plus 5/5 barriers, publishes 28 visible samples with zero diagnostics, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | 🟨 Current physical standard-profile run preserves the exact oracle in 17.72 seconds, patches all 80/80 accesses plus 5/5 barriers, publishes 10,485,760 visible evidence events with zero diagnostics or incomplete state, and reports complete static/dynamic verdicts; paired-overhead and reviewed-fault acceptance remain | The checked-in access-heavy `CdnaStreamkTwoTile` pair owns the target-native relay and publication shape, while the architecture-general Stream-K pair owns the portable last-arriver contract. Record/Replay is fully qualified; paired-overhead and reviewed-fault evidence remain for the other three flavors. |
-| P2 | `rocblas_sgemm` compact exact cases | 🟨 The repaired physical strict run passes the exact `Square_64x64` oracle in 28.963 seconds, patches all 49,435/49,435 supported LDS accesses, reports no check mismatches, and has complete static/analysis/dynamic verdicts; paired overhead and reviewed-fault evidence remain | 🟨 Current physical strict standard-profile validation passes the exact oracle in 16.761 seconds, then completes report replay and teardown within roughly 36 seconds total. It patches all 49,435/49,435 accesses and 4,997/4,997 barriers, publishes 24,596 visible events, emits no forbidden diagnostics or incomplete state, and has complete static/analysis/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Current physical stride-1 diagnostic passes the exact oracle in 14.698 seconds with complete 49,435/49,435 access and 4,995/4,995 barrier coverage, 96 visible samples, zero diagnostics, and complete static/analysis/dynamic verdicts; the standard stride-256 cadence still selects no workgroup, and paired-overhead/reviewed-fault evidence remain | 🟨 Current physical strict Inline Shadow passes the exact oracle in 23.742 seconds with complete 49,435/49,435 access and 4,997/4,997 barrier coverage, zero forbidden diagnostics, and complete static/analysis/dynamic verdicts; paired-overhead and reviewed-fault evidence remain | Current Record/Replay evidence is retained under `consan-validation/rebase-20260821-gfx950-rocblas-record-replay-snapshot-v1`; the repaired SuperCollider evidence remains under `consan-validation/rebase-20260821-gfx950-rocblas-supercollider-dense-final`, and the other current evidence remains under `consan-validation/rebase-20260821-gfx950-rocblas-sgemm-current`. |
+| P2 | `rocblas_sgemm` compact exact cases | 🟨 The repaired physical strict run passes the exact `Square_64x64` oracle in 28.963 seconds, patches all 49,435/49,435 supported LDS accesses, reports no check mismatches, and has complete static/analysis/dynamic verdicts; paired overhead and reviewed-fault evidence remain | 🟩 The registered exact `Square_64x64` row passes 292.12- and 282.59-ms bracketing baselines and the 17,125.36-ms Record/Replay run (59.60×), with complete 49,435/49,435 access and 4,997/4,997 barrier coverage and zero clean diagnostics. A prospectively frozen exact-one drop of the sole observed dispatch's reviewed tile-publication barrier is reached and produces 4,086 detector-owned replay diagnostics while the exact oracle still passes; all 49,435 accesses and 4,996 surviving barriers remain covered, mutation/reservation evidence is complete, and pre/post GPU health is clean | 🟨 Current physical stride-1 diagnostic passes the exact oracle in 14.698 seconds with complete 49,435/49,435 access and 4,995/4,995 barrier coverage, 96 visible samples, zero diagnostics, and complete static/analysis/dynamic verdicts; the standard stride-256 cadence still selects no workgroup, and paired-overhead/reviewed-fault evidence remain | 🟨 Current physical strict Inline Shadow passes the exact oracle in 23.742 seconds with complete 49,435/49,435 access and 4,997/4,997 barrier coverage, zero forbidden diagnostics, and complete static/analysis/dynamic verdicts; paired-overhead and reviewed-fault evidence remain | The exact command is now a registered validation descriptor with a pinned host regression. The all-target `MultiWaveGemmTile` correct/incorrect pair distills the 256-thread, 16-KiB cooperative tile-publication behavior into 60 green baseline/all-engine rows; `CdnaMfmaPipeline` retains the target-native MFMA/AccVGPR part. Current qualification artifacts are detailed below. |
 
 ### 2026-08-22 HIP Stream-K simple Record/Replay qualification
 
@@ -1201,6 +1201,51 @@ the portable Stream-K last-arriver pair carries the synchronization idea across
 all five targets. The new defects outside those device-observable contracts are
 covered by the focused host tests above rather than by prototype-layout device
 assertions.
+
+### 2026-08-22 rocBLAS SGEMM Record/Replay qualification
+
+`rocblas-sgemm-square-64` is now a registered validation workload rather than
+an external manual command. Its host manifest regression pins the exact
+`rocblas_sgemm` executable, `RocblasGemmTest.Square_64x64` filter, physical
+gfx950 target, barrier fault family, and 120-second bound for every phase.
+
+The paired clean artifact at
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-rocblas-sgemm-rr-paired-v1`
+passes the exact GoogleTest oracle in both 292.12- and 282.59-ms bracketing
+baselines and in the 17,125.36-ms Record/Replay row, a 59.60× paired slowdown.
+The 7,240,976-byte generated code object contains 285 kernels; the sole
+observed dispatch is instrumented with complete 49,435/49,435 access and
+4,997/4,997 barrier coverage, 24,576 committed accesses and 20 dynamic barrier
+records, no drops, no unsupported event, zero diagnostics, and complete static,
+analysis, dynamic, and replay verdicts.
+
+The inventory at
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-rocblas-sgemm-rr-inventory-v1`
+was reviewed before mutation. The selected exact site is occurrence 0 at
+original `.text+0x56f18` in the dispatched
+`Cijk_Ailk_Bljk_SB_MT64x64x32...` specialization. In the unbundled final code
+object, the branch at VMA `0x170090` and its fallthrough reconverge at
+`0x170114`; `s_waitcnt` is followed by the selected `s_barrier` at `0x170118`
+and peer LDS reads. The clean trace independently observes all four waves at
+that barrier. The reviewed policy therefore froze `detected/any` without using
+the later mutation result to choose the site or expected outcome.
+
+The exact-one fault artifact at
+`/home/ossci/xx/consan-validation/prep-20260822-gfx950-rocblas-sgemm-rr-fault-v1`
+requests, reserves, installs, and applies precisely that barrier deletion. It
+emits 4,086 detector-owned replay diagnostics while the exact numerical oracle
+still passes, covers all 49,435 accesses and 4,996 surviving barriers, reports
+no overflow or incomplete evidence, preserves the hook hash, and passes both
+pre- and post-run GPU health probes. This promotes the Record/Replay cell to
+green.
+
+The new checked-in `MultiWaveGemmTile` adjacent pair preserves the E2E row's
+portable behavioral idea without freezing rocBLAS code generation: 256 threads
+cooperatively publish a 16-KiB tile, then each wave consumes a peer wave's
+stripe after a reconverged publication edge; the incorrect member removes only
+that edge. Its 50 RocJitsu rows pass on all five targets in 2.01 seconds, and
+its ten physical-gfx950 rows pass in 6.30 seconds. The existing CDNA MFMA pair
+continues to own the target-native live-MFMA/AccVGPR aspect.
 
 ### 2026-08-21 Record/Replay fine-grained report snapshot
 
