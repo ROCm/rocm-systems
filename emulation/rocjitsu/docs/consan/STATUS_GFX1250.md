@@ -697,7 +697,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟨 The exact-size sharded current run passes all 96/96 numerical rows with complete 2448/2448 access, 544/544 barrier, and 64/64 fence coverage. Real replay processes all 5,281,152 published accesses and 108,992 barriers with zero drops, unsupported events, diagnostics, or shadow overflow. Focused host regressions and the adjacent high-bank LDS device pair protect both physical-address capture and save-before-capture spill ordering. Paired overhead and reviewed fault/containment evidence remain before green | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. Exact-size sharding replaces the obsolete monolithic timeout path while preserving all six configured problem sizes. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟩 All 96/96 exact numerical rows pass with complete 2448/2448 access, 544/544 barrier, and 64/64 fence coverage and lossless replay. The current paired slowdown is 19.47x. A prospectively reviewed exact-one redundant-barrier mutation is reached, preserves the exact oracle, produces the expected qualified miss, and passes containment, health, and cleanup. Focused host regressions plus the adjacent high-bank/double-barrier LDS device pair protect the distilled behavior | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. Exact-size sharding replaces the obsolete monolithic timeout path while preserving all six configured problem sizes. |
 | P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
@@ -808,19 +808,51 @@ adjacent checked-in device pair uses the same encoded high-bank LDS address in
 correct-barrier and missing-barrier workloads; baseline and Record/Replay pass
 all four rows with exact clean results and the required conflict diagnostic.
 
-This evidence promotes the cell from orange to yellow. Green still requires a
-current paired baseline/overhead measurement plus reviewed fault, containment,
-health, and cleanup evidence at the same accepted revision.
-
 A follow-up harness audit found that inventory and contained fault execution
 still bypassed the exact-size shard policy and would have retraced the obsolete
 monolithic 96-row command. They now use an explicit manifest-selected
 representative shard with its complete 16-row numerical oracle; clean and
 paired-overhead qualification continue to require all six shards and all 96
 rows. Host regressions prove that both inventory and fault use the bounded
-command and that missing or out-of-range shard policies fail closed. This
-removes the fault-readiness blocker but does not itself promote the cell; fresh
-reviewed inventory and contained-fault evidence remain required.
+command and that missing or out-of-range shard policies fail closed.
+
+The same frozen clean source, `da6167f4fbd686b0737c43dbd02e1a597634b0b6`,
+now also has the paired-overhead artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-mxf4-tdm-rr-overhead-highbank-current-da616-v2`.
+All 18 processes and all 288 numerical rows pass: six baseline-before shards,
+six Record/Replay shards, and six baseline-after shards. The mean of the two
+baseline medians is 20,428.11 ms, the Record/Replay median is 397,813.07 ms,
+and the paired slowdown is 19.47x. Every instrumented shard retains complete
+2448/2448 access, 544/544 barrier, and 64/64 fence coverage and lossless
+replay.
+
+The reviewed inventory artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-mxf4-tdm-rr-inventory-fault-shard-v1`
+contains 544 barrier members and 272 split-barrier pairs for the representative
+exact `120x120x1x1024` shard. A prospectively frozen mutation of the first
+tensor-to-LDS publication barrier was correctly rejected as evidence: the
+oracle passed but the expected diagnostic was absent, and there was no
+precommitted reach witness. That observed result was not relabeled after the
+fact. A distinct, previously untried adjacent second split barrier was then
+reviewed from final ISA before execution. The immediately preceding
+publication pair remains intact and only `s_wait_dscnt` separates it from the
+selected pair, so dropping exactly that second signal is expected to be a
+semantically redundant qualified miss.
+
+Artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-mxf4-tdm-rr-fault-redundant-tensor-lds-barrier-da616-v4`
+accepts that prospective contract at the same source revision. It requests,
+plans, reserves, and applies exactly one mutation with complete installation
+and process evidence. The reviewed site is reached; all 16 exact rows pass;
+the expected no-diagnostic qualified miss is observed; and surviving coverage
+is complete at 2448/2448 accesses, 542/542 barrier members, and 64/64 fences.
+The run publishes 2,097,152 access events and 12,512 barrier events without
+overflow, and both pre- and post-run health checks pass. The checked-in correct
+member now mirrors this adjacent-barrier tail with split barriers separated by
+`s_wait_dscnt`; the incorrect member still removes the publication edge and
+must diagnose. All four gfx1250 baseline/Record/Replay rows pass. This closes
+the paired, fault, containment, health, cleanup, and quick-regression gates and
+promotes the Record/Replay cell from yellow to green.
 
 ## PyTorch expansion
 
