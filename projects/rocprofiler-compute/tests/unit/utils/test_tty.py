@@ -437,13 +437,20 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
         gfx11_stub,
     )
+    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls["gfx1250"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered gfx1250 memory chart"
+
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
         gfx9_stub,
     )
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        record("gfx1250", "rendered gfx1250 memory chart"),
+        gfx1250_stub,
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
