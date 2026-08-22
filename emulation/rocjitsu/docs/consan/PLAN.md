@@ -14,14 +14,15 @@ structure.
 
 **Status: active; test-suite expansion and end-to-end qualification remain**
 
-At the 2026-08-22 checkpoint, the freshly fetched `origin/develop` still
+At the 2026-08-22 plan checkpoint, the freshly fetched `origin/develop` still
 resolves to `550548c58ae9`. It is already an ancestor of the current branch
-through merge commit `cf1df8ec82`, so there is no newer change to merge and no
-empty merge should be manufactured. Before further qualification, recheck this
-relationship; if `origin/develop` has advanced, integrate it with a merge
-commit. That integration is not complete until every resulting build or test
-failure is repaired and each behavioral integration defect is protected by a
-focused host-unit or device regression.
+through merge commit `cf1df8ec82`, so the requested integration checkpoint is
+current and Git has no new merge to perform; no empty merge should be
+manufactured. Before execution resumes and again before final qualification,
+recheck this relationship. If `origin/develop` has advanced, integrate it with
+a merge commit. That integration is not complete until every resulting build
+or test failure is repaired and each behavioral integration defect is
+protected by a focused host-unit or device regression.
 
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
@@ -72,10 +73,11 @@ validation loop.
    red cells to bypass unfinished higher-priority-engine cells merely because
    red looks worse than orange. Keep CDNA4 and gfx1250 moving under that
    ordering rather than completing one architecture before returning to the
-   other. Tactical latency may change which currently useful cell is taken
-   next, but it does not remove deferred higher-priority cells. After all
-   applicable cells are green, re-run every green cell on one reviewed
-   revision.
+   other. Until CDNA4 has caught up, bias approximately 75% of investigation
+   time to CDNA4 and 25% to gfx1250 without starving either ledger. Tactical
+   latency may change which currently useful cell is taken next, but it does
+   not remove deferred higher-priority cells. After all applicable cells are
+   green, re-run every green cell on one reviewed revision.
 4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
    slowness when that is actionable; otherwise record and defer a slow cell and
    move to the next useful target. A tactically slow higher-priority cell must
@@ -130,8 +132,10 @@ validation loop.
    Within that ordering, lift the floor horizontally: resolve red cells before
    orange, orange before yellow, and yellow before green. Select work across
    both architectures under those rules rather than serializing the project by
-   architecture. Once every applicable cell is green, make a fresh global pass
-   over all green cells rather than relying on accumulated historical evidence.
+   architecture. While CDNA4 remains behind, use the standing approximate
+   75% CDNA4 / 25% gfx1250 time allocation without allowing either ledger to
+   stall. Once every applicable cell is green, make a fresh global pass over
+   all green cells rather than relying on accumulated historical evidence.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in
