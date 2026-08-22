@@ -651,6 +651,17 @@ void inspectorDumpThread::stopThread() {
   INFO_INSPECTOR( "NCCL Inspector inspectorDumpThread: stopped");
 }
 
+// Writes whatever has been collected so far. Callers use this at communicator
+// teardown, which is the only output when no periodic interval is configured and
+// which also captures records completed since the last periodic dump.
+inspectorResult_t inspectorDumpNow() {
+  if (!dumper) return inspectorSuccess;
+  inspectorLockWr(&dumper->guard);
+  inspectorResult_t res = dumper->inspectorStateDump(dumper->outputRoot);
+  inspectorUnlockRWLock(&dumper->guard);
+  return res;
+}
+
 inspectorResult_t inspectorDumpThread::inspectorStateDump(const char* output_root) {
   if (!ncclInspectorInit) {
     return inspectorUninitializedError;
@@ -785,12 +796,6 @@ void* inspectorDumpThread::dumpMain(void* arg) {
  *   inspectorResult_t - success or error code.
  */
 static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
-  if (intervalUsecs < 0) {
-    INFO_INSPECTOR( "NCCL Inspector: dump thread disabled "
-                    "(interval is -1); not starting internal dump thread.");
-    return inspectorSuccess;
-  }
-
   char* dumpdir;
   genDumpDir(&dumpdir);
 
@@ -803,7 +808,13 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
     }
 
     dumper = new inspectorDumpThread(dumpdir, intervalUsecs);
-    if (intervalUsecs == 0) {
+    if (intervalUsecs < 0) {
+      INFO_INSPECTOR(
+        "NCCL Inspector enabled with no periodic dumping, "
+        "output written at finalization to %s, format %s",
+        dumpdir,
+        enableNcclInspectorPromDump ? "Prometheus" : "JSON");
+    } else if (intervalUsecs == 0) {
       INFO_INSPECTOR(
         "NCCL Inspector enabled with continuous dumping, "
         "output directory %s, format %s",
@@ -816,7 +827,11 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
         intervalUsecs, dumpdir,
         enableNcclInspectorPromDump ? "Prometheus" : "JSON");
     }
-    dumper->startThread();
+    // A negative interval means no periodic sampling; the dumper is still needed
+    // so finalization can write the collected state once.
+    if (intervalUsecs >= 0) {
+      dumper->startThread();
+    }
 
     free(dumpdir);
   } else {
