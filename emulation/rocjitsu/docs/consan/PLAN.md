@@ -24,6 +24,12 @@ test-coverage disposition is therefore not complete preparation work: extract
 the durable regression when possible, or record why no faithful checked-in
 reduction exists.
 
+This phase is judged primarily by the breadth and quality of that automated
+safety net, not by the number of E2E cells promoted or prototype fixes landed.
+The status campaigns are both qualification work and a systematic source of
+real user behavior from which to derive the tests that will make section 2
+safe to iterate on.
+
 The checked-in device tier and its coverage gaps are tracked in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md). E2E procedures and acceptance
 rules live in [VALIDATION.md](VALIDATION.md); current evidence lives in
@@ -38,8 +44,10 @@ than baking a transient commit ID into this plan. If it has advanced, integrate
 it with a merge commit; if it is already an ancestor, record the verified no-op
 instead of manufacturing an empty merge. Repair all resulting build and test
 failures, and protect every behavioral integration fix with a focused host-unit
-or device regression before accepting new validation evidence. Repeat this
-check at later qualification checkpoints.
+or device regression before accepting new validation evidence. Build failures,
+host-test failures, emulated-device failures, and physical-device failures are
+all integration breakage for this purpose. Repeat this check at later
+qualification checkpoints.
 
 ### Working contract
 
@@ -59,15 +67,19 @@ check at later qualification checkpoints.
    investigation should identify the relevant compiler, ISA,
    resource-pressure, control-flow, memory, or synchronization idiom and
    distill it into a quick checked-in host or device contract, even when the
-   E2E workload already passes and no prototype bug is found. If a faithful
-   reduction is impossible, record the concrete reason in the relevant plan or
-   status ledger. Keep each status file current in the same change that alters
-   its evidence.
+   E2E workload already passes and no prototype bug is found. Every studied
+   case must end with an explicit test disposition: a new or identified host
+   regression, a new or identified device contract, both where appropriate, or
+   a concrete reason that no faithful checked-in reduction exists. This also
+   applies when the E2E cell is tactically deferred. Keep each status file
+   current in the same change that alters its evidence.
 3. **Apply one global priority order.** Across both ledgers, select the engine
    column first: Record/Replay, then Sampled, then SuperCollider, then Inline
    Shadow. Within the active column, lift the floor: red before orange, orange
-   before yellow, and yellow before green. This is the default selection order,
-   not permission to ignore either ledger. Keep both architectures moving; use
+   before yellow, and yellow before green. In other words, the ordering is
+   lexicographic: engine priority first, then lowest color across both ledgers
+   for that engine. This is the default selection order, not permission to
+   ignore either ledger. Keep both architectures moving; use
    the standing approximate 75% CDNA4 / 25% gfx1250 catch-up bias while CDNA4
    remains behind, without starving gfx1250. Once every applicable cell is
    green, make a fresh global pass over every green cell on one reviewed
@@ -76,20 +88,24 @@ check at later qualification checkpoints.
 4. **Be tactical about slow tests.** Do not spend repeated long iterations
    merely waiting for an abnormally slow reproducer. Investigate the slowness
    when it may itself reveal a hang, performance defect, or smaller reproducer;
-   otherwise bound the experiment, record the evidence, defer the cell, and
-   move to another useful item. Prefer fixing everything that can be learned
-   without repeated long waits before rotating away. Deferral changes
-   scheduling but never removes the cell from the exit criteria.
+   otherwise bound the experiment, record the evidence and a concrete return
+   point, defer the cell, and move to another useful item. Prefer fixing
+   everything that can be learned without repeated long waits before rotating
+   away. Deferral changes scheduling but never removes the cell from the exit
+   criteria. An abnormally long run is itself something to diagnose when that
+   investigation is more productive than repeatedly enduring the delay.
 5. **Generalize behavioral ideas across architectures.** Make a deliberate,
    suite-wide pass over both new and already-existing ConSan host and device
    tests. For every contract, consider all five supported targets: CDNA3
    (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
    RDNA4 (`gfx1201`). Port the behavioral idea wherever it is semantically
-   applicable. A transport need not reuse identical device code: preserve the
-   behavioral contract while adapting target-native code, instruction forms,
-   and ISA details as necessary. Historical `gfx950`-to-`gfx942` ports are
-   examples, not a boundary; cross-generation and CDNA/RDNA transports are
-   expected for cross-cutting behavior. Record a capability-based reason
+   applicable. Treat portability of the behavioral idea as the default
+   hypothesis, since most sanitizer behavior is cross-cutting. A transport need
+   not reuse identical device code: preserve the behavioral contract while
+   adapting target-native code, instruction forms, and ISA details as
+   necessary. Historical `gfx950`-to-`gfx942` ports are examples, not a
+   boundary; cross-generation and CDNA/RDNA transports are expected for
+   cross-cutting behavior. Record a capability-based reason
    wherever a port is genuinely not applicable. The audit is not complete if a
    test merely remains on the architecture where it was first discovered:
    every host and device contract needs an explicit per-target disposition,
@@ -99,11 +115,12 @@ check at later qualification checkpoints.
    omit the serialized physical `gfx950` tier temporarily when it accounts for
    most of the device-suite latency, explicitly accepting the short-lived risk
    of a physical-only regression in exchange for faster iteration. Do not
-   disable that tier, redesign the checked-in tests around its omission, or
-   treat an omitted run as passing. Keep it separately filterable for fast
-   iteration, then run physical `gfx950`, every emulator target, and the
-   complete host suite periodically, after relevant native-sensitive changes,
-   and at final qualification.
+   disable that tier, redesign the checked-in tests around its omission, treat
+   an omitted run as passing, or use fast-loop evidence alone to promote a cell
+   whose acceptance requires physical execution. Keep it separately filterable
+   for fast iteration, then run physical `gfx950`, every emulator target, and
+   the complete host suite periodically, after relevant native-sensitive
+   changes, and at final qualification.
 
 ### Per-investigation loop
 
@@ -125,8 +142,9 @@ check at later qualification checkpoints.
 
 1. As the next execution step, run the requested integration of the freshly
    fetched `origin/develop` and establish that the post-integration build, host
-   tests, emulated-device tests, and physical-device tests are green. The
-   current ancestry check predicts a no-op. For every future ref advance,
+   tests, emulated-device tests, and physical-device tests are green. If the
+   fetched ref has advanced, create the requested merge commit; if it is already
+   integrated, verify and record that fact. For every future ref advance,
    create a merge commit, repair all resulting breakage, and add focused
    regressions for behavioral integration defects.
 2. Continue the global E2E loop over both
