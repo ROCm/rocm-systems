@@ -1616,6 +1616,14 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
+        # The exact norm/softmax device interval completes in about 27.5
+        # seconds, while the same official PyTorch wheel spends about 4.7
+        # seconds in fixed process startup and teardown even without ConSan.
+        # Give this physical validation row a bounded whole-process margin;
+        # this does not change the production Record/Replay cadence.
+        "pytorch-norm-softmax": {
+            "run_timeout_seconds": 60,
+        },
     },
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after

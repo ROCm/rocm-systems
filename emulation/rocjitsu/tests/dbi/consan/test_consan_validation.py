@@ -2102,6 +2102,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300
         )
+        self.assertEqual(
+            workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60
+        )
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
