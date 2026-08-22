@@ -6225,6 +6225,7 @@ amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_hand
  *  @param[in,out] status_string A pointer to a const char * which will be made
  *  to point to a description of the provided error code
  *
+ *  @retval ::AMDSMI_STATUS_INVAL if @p status_string is NULL
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string);

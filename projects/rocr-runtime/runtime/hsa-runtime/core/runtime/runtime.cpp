@@ -979,7 +979,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -3213,7 +3213,7 @@ void Runtime::CloseTools() {
 
 void Runtime::AsyncEventsControl::Shutdown() {
   exit.store(true, std::memory_order_release);
-  hsa_signal_handle(wake)->StoreRelaxed(1);
+  hsa_signal_handle(wake)->StoreReleaseAndNotify(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
