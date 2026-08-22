@@ -68,6 +68,17 @@ std::string ppod_id_to_str(const std::uint8_t (&id)[MAX_UUID_ELEMENTS]) {
   return outstream.str();
 }
 
+std::string lane_bitmap_to_str(const std::uint8_t (&bitmap)[AMDSMI_FABRIC_MAX_BITMAP_SIZE]) {
+  std::ostringstream outstream{};
+  outstream << std::hex << std::setfill('0');
+  for (auto idx = std::size_t(0); idx < AMDSMI_FABRIC_MAX_BITMAP_SIZE; ++idx) {
+    outstream << std::setw(2) << static_cast<unsigned>(bitmap[idx]);
+  }
+  outstream << std::dec;
+
+  return outstream.str();
+}
+
 constexpr auto MAX_COLUMNS_PER_GRID = std::uint16_t(8);
 void print_array_grid(std::ostream& outstrm, std::string_view line_prefix,
                       std::string_view line_title, const uint32_t* array_data,
@@ -216,6 +227,7 @@ int main() {
 
       // Get the fabric info (partial sysfs reads; NO_DATA if no UALoE files had content)
       amdsmi_fabric_info_t fabric_info{};
+      fabric_info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
       ret = amdsmi_get_gpu_fabric_info(processor_handles[device_index], &fabric_info);
       if (ret != AMDSMI_STATUS_SUCCESS && ret != AMDSMI_STATUS_NO_DATA &&
           ret != AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -230,31 +242,49 @@ int main() {
                     << "\n";
           continue;
         }
+        if (fabric_info.fabric_version != AMDSMI_FABRIC_INFO_VERSION_2) {
+          // A library predating the nested layout filled the flat v1 member instead, so every
+          // field below would be read at the wrong offset
+          std::cout << "\t\t\tNote: library filled fabric info version "
+                    << fabric_info.fabric_version << ", not version 2." << "\n";
+          continue;
+        }
         std::cout << "\t\t\tFabric info data: " << "\n";
         std::cout << "\t\t\t\t** BDF: " << bdf_to_str(fabric_info.bdf) << "\n";
         std::cout << "\t\t\t\t** Fabric Version: " << fabric_info.fabric_version << "\n";
-        std::cout << "\t\t\t\t** Fabric Type: " << fabric_info.fabric_info.v1.fabric_type << "\n";
-        std::cout << "\t\t\t\t** Accelerator ID: " << fabric_info.fabric_info.v1.ppod.accelerator_id
+        std::cout << "\t\t\t\t** Fabric Type: " << fabric_info.fabric_info.v2.fabric_type << "\n";
+        std::cout << "\t\t\t\t** Accelerator ID: " << fabric_info.fabric_info.v2.ppod.accelerator_id
                   << "\n";
-        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.fabric_info.v1.ppod.bandwidth << "\n";
-        std::cout << "\t\t\t\t** Latency: " << fabric_info.fabric_info.v1.ppod.latency << "\n";
+        std::cout << "\t\t\t\t** Bandwidth: " << fabric_info.fabric_info.v2.ppod.bandwidth << "\n";
+        std::cout << "\t\t\t\t** Latency: " << fabric_info.fabric_info.v2.ppod.latency << "\n";
         std::cout << "\t\t\t\t** PPOD ID: "
-                  << ppod_id_to_str(fabric_info.fabric_info.v1.ppod.ppod_id) << "\n";
-        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.v1.ppod.ppod_size << "\n";
+                  << ppod_id_to_str(fabric_info.fabric_info.v2.ppod.ppod_id) << "\n";
+        std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.v2.ppod.ppod_size << "\n";
         std::cout << "\t\t\t\t** Local Accelerator Count: "
-                  << fabric_info.fabric_info.v1.ppod.local_accelerator_count << "\n";
-        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.v1.vpod.vpod_id << "\n";
-        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.v1.vpod.vpod_size << "\n";
+                  << fabric_info.fabric_info.v2.ppod.local_accelerator_count << "\n";
+        std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.v2.vpod.vpod_id << "\n";
+        std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.v2.vpod.vpod_size << "\n";
         print_array_grid(std::cout, "\t\t\t\t", "VPOD Active Accelerators",
-                         fabric_info.fabric_info.v1.vpod.vpod_active_accelerators,
+                         fabric_info.fabric_info.v2.vpod.vpod_active_accelerators,
                          AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE, MAX_COLUMNS_PER_GRID);
         print_array_grid(std::cout, "\t\t\t\t", "Local Accelerators",
-                         fabric_info.fabric_info.v1.ppod.local_accelerators,
+                         fabric_info.fabric_info.v2.ppod.local_accelerators,
                          AMDSMI_FABRIC_MAX_LOCAL_GPUS, MAX_COLUMNS_PER_GRID);
-        std::cout << "\t\t\t\t** Address Mode: " << fabric_info.fabric_info.v1.vpod.addr_mode
+        std::cout << "\t\t\t\t** Address Mode: " << fabric_info.fabric_info.v2.vpod.addr_mode
                   << "\n";
-        std::cout << "\t\t\t\t** Accelerator State: " << fabric_info.fabric_info.v1.accel_state
+        std::cout << "\t\t\t\t** Accelerator State: " << fabric_info.fabric_info.v2.accel_state
                   << "\n";
+        std::cout << "\t\t\t\t** Station Flags: "
+                  << fabric_info.fabric_info.v2.station.station_flags << "\n";
+        std::cout << "\t\t\t\t** Number of Stations: "
+                  << static_cast<unsigned>(fabric_info.fabric_info.v2.station.num_stations) << "\n";
+        std::cout << "\t\t\t\t** Lane Enable Bitmap: "
+                  << lane_bitmap_to_str(fabric_info.fabric_info.v2.station.lane_en_bitmap) << "\n";
+        // A clear mask bit means the matching field was not read and holds its default value
+        std::cout << "\t\t\t\t** Read Masks (ppod/vpod/station): " << std::hex << "0x"
+                  << fabric_info.fabric_info.v2.ppod_mask << " 0x"
+                  << fabric_info.fabric_info.v2.vpod_mask << " 0x"
+                  << fabric_info.fabric_info.v2.station_mask << std::dec << "\n";
         std::cout << "\n";
       }
     }

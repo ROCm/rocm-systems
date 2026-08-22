@@ -23,7 +23,9 @@
 // Hardware-free round-trip of the fabric config serialize/parse paths. The
 // apply_*_at / query_*_at cores take a resolved sysfs root + support flag instead
 // of a live device, so the real WriteRequestBuilder/FieldReader logic is exercised
-// against a temp directory with commit=false: no hardware, no irreversible commit.
+// against a temp directory: no hardware, and the commit file lands in that temp
+// directory rather than on a driver. Round-trip cases set commit=true because a
+// non-committing request writes nothing.
 
 #include <gtest/gtest.h>
 
@@ -92,6 +94,7 @@ TEST(GpuUnit, FabricConfigPpodAllFieldsRoundTrip) {
   auto in = amdsmi_fabric_ppod_config_t{};
   in.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
   in.mask = kPpodAllFields;
+  in.commit = true;
   in.data.accelerator_id = 42;
   for (auto idx = 0; idx < AMDSMI_MAX_UUID_ELEMENTS; ++idx) {
     in.data.ppod_id[idx] = static_cast<uint8_t>(0x10 + idx);
@@ -134,6 +137,7 @@ TEST(GpuUnit, FabricConfigPpodLocalAccelsStopAtCount) {
   auto in = amdsmi_fabric_ppod_config_t{};
   in.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
   in.mask = AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS;
+  in.commit = true;
   for (auto idx = 0; idx < AMDSMI_FABRIC_MAX_LOCAL_GPUS; ++idx) {
     in.data.local_accelerators[idx] = static_cast<uint32_t>(200 + idx);
   }
@@ -162,6 +166,7 @@ TEST(GpuUnit, FabricConfigPpodPartialWriteLeavesUnwrittenAtSentinel) {
   auto in = amdsmi_fabric_ppod_config_t{};
   in.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
   in.mask = AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID;
+  in.commit = true;
   in.data.accelerator_id = 77;
   ASSERT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_SUCCESS);
 
@@ -186,6 +191,7 @@ TEST(GpuUnit, FabricConfigVpodRoundTripAccelIdZeroPreserved) {
   auto in = amdsmi_fabric_vpod_config_t{};
   in.version = AMDSMI_FABRIC_VPOD_CONFIG_V1;
   in.mask = kVpodAllFields;
+  in.commit = true;
   in.data.vpod_id = 7;
   in.data.vpod_size = 4;
   // Contract: unused slots hold the UNSET sentinel; the run ends at the first one.
@@ -221,6 +227,7 @@ TEST(GpuUnit, FabricConfigStationRoundTripFullBitmap) {
   auto in = amdsmi_fabric_station_config_t{};
   in.version = AMDSMI_FABRIC_STATION_CONFIG_V1;
   in.mask = kStationAllFields;
+  in.commit = true;
   in.data.station_flags = 0xABCD;
   in.data.num_stations = 12;
   for (auto idx = 0; idx < AMDSMI_FABRIC_MAX_BITMAP_SIZE; ++idx) {
@@ -262,6 +269,24 @@ TEST(GpuUnit, FabricConfigPpodCommitWritesCommitFile) {
   auto contents = std::string();
   std::getline(stream, contents);
   EXPECT_EQ(contents, "1");
+}
+
+// commit=false validates and writes nothing: the driver ignores the staging files
+// unless a commit follows, so leaving values there would only feed the next commit.
+TEST(GpuUnit, FabricConfigNoCommitWritesNothing) {
+  auto root = TempRoot{};
+  ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
+
+  auto in = amdsmi_fabric_ppod_config_t{};
+  in.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
+  in.mask = AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID;
+  in.commit = false;
+  in.data.accelerator_id = 3;
+  ASSERT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_SUCCESS);
+
+  const auto setup_dir = fs::path(root.path) / std::string(kUALOE_UALINK_SETUP_SUBDIR);
+  EXPECT_FALSE(fs::exists(setup_dir / std::string(kUALOE_ACCEL_ID)));
+  EXPECT_FALSE(fs::exists(setup_dir / std::string(kUALOE_UALINK_COMMIT_FILE)));
 }
 
 // device_supports_ualink=false is rejected even when the sysfs tree exists.
@@ -397,6 +422,48 @@ TEST(GpuUnit, FabricConfigQueryMissingSubdirNotSupported) {
 
   auto ec = std::error_code{};
   fs::remove_all(empty_root, ec);
+}
+
+// A commit with nothing freshly staged would flush a prior partial write's residue.
+TEST(GpuUnit, FabricConfigBareCommitIsRejected) {
+  auto root = TempRoot{};
+  ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
+
+  auto in = amdsmi_fabric_ppod_config_t{};
+  in.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
+  in.mask = 0;
+  in.commit = true;
+  EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
+}
+
+// The unified getter reads the flat surface, which the driver syncs on commit. Fields must
+// come back even when the setup/config/stations write subtrees are absent.
+TEST(GpuUnit, FabricConfigQueryFlatSurfaceWithoutWriteSubtrees) {
+  auto tmpl = std::string("/tmp/amdsmi_fabric_flat_XXXXXX");
+  ASSERT_NE(::mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed";
+  const auto flat_root = std::string(tmpl);
+
+  {
+    auto accel_id_file = std::ofstream(fs::path(flat_root) / std::string(kUALOE_ACCEL_ID));
+    accel_id_file << "42\n";
+    auto ppod_size_file = std::ofstream(fs::path(flat_root) / std::string(kUALOE_PPOD_SIZE));
+    ppod_size_file << "8\n";
+  }
+
+  auto cfg = amdsmi_fabric_ppod_config_t{};
+  cfg.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
+  cfg.mask = (AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID | AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE |
+              AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH);
+  EXPECT_EQ(fabric_ualink::query_ppod_config_at(flat_root, true, cfg, kUALOE_UALINK_FLAT_SUBDIR),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(cfg.mask, static_cast<uint32_t>(AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID |
+                                            AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE));
+  EXPECT_EQ(cfg.data.accelerator_id, 42u);
+  EXPECT_EQ(cfg.data.ppod_size, 8u);
+  EXPECT_EQ(cfg.data.bandwidth, kU32Sentinel);
+
+  auto ec = std::error_code{};
+  fs::remove_all(flat_root, ec);
 }
 
 }  // namespace

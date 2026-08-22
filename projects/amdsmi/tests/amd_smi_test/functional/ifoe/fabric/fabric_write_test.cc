@@ -110,6 +110,7 @@ void TestFabricWrite::Run() {
    */
   {
     auto probe = amdsmi_fabric_info_t{};
+    probe.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
     if (amdsmi_get_gpu_fabric_info(device, &probe) == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Fabric (IFoE) not supported on this system; skipping test" << "\n";
@@ -232,6 +233,8 @@ void TestFabricWrite::Run() {
 
   /**
    *    Hw path: accepts valid requests or reports NOT_SUPPORTED
+   *      - commit=false, so this reaches the support gate without writing sysfs;
+   *        the round-trip block below covers the write path
    */
   for (auto dv_ind = uint32_t(0); dv_ind < num_monitor_devs(); ++dv_ind) {
     auto dev = processor_handles_[dv_ind];
@@ -293,6 +296,7 @@ void TestFabricWrite::Run() {
     PrintDeviceHeader(dev);
 
     auto baseline_info = amdsmi_fabric_info_t{};
+    baseline_info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
     auto baseline_status = amdsmi_get_gpu_fabric_info(dev, &baseline_info);
     if (baseline_status == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -301,16 +305,15 @@ void TestFabricWrite::Run() {
       continue;
     }
     ASSERT_TRUE((baseline_status == AMDSMI_STATUS_SUCCESS) ||
-                (baseline_status == AMDSMI_STATUS_NO_DATA) ||
-                (baseline_status == AMDSMI_STATUS_NOT_INIT));
+                (baseline_status == AMDSMI_STATUS_NO_DATA));
 
-    const auto& baseline_v1 = baseline_info.fabric_info.v1;
+    const auto& baseline_v2 = baseline_info.fabric_info.v2;
 
     /**
      *  Ppod: accelerator_id round-trip
      */
     {
-      const auto baseline_accel_id = baseline_v1.ppod.accelerator_id;
+      const auto baseline_accel_id = baseline_v2.ppod.accelerator_id;
       if (baseline_accel_id == std::numeric_limits<uint32_t>::max()) {
         IF_VERB(STANDARD) {
           std::cout << "\t**Ppod accelerator_id unconfigured; skipping round-trip "
@@ -328,9 +331,10 @@ void TestFabricWrite::Run() {
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
+          post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
-          ASSERT_TRUE((rd == AMDSMI_STATUS_SUCCESS) || (rd == AMDSMI_STATUS_NOT_INIT));
-          ASSERT_EQ(post.fabric_info.v1.ppod.accelerator_id, 7u);
+          ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(post.fabric_info.v2.ppod.accelerator_id, 7u);
 
           auto restore = make_minimal_ppod_config();
           restore.mask = AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID;
@@ -345,7 +349,7 @@ void TestFabricWrite::Run() {
      *  Vpod: vpod_id round-trip
      */
     {
-      const auto baseline_vpod_id = baseline_v1.vpod.vpod_id;
+      const auto baseline_vpod_id = baseline_v2.vpod.vpod_id;
       if (baseline_vpod_id == std::numeric_limits<uint32_t>::max()) {
         IF_VERB(STANDARD) {
           std::cout << "\t**Vpod vpod_id unconfigured; skipping round-trip "
@@ -363,9 +367,10 @@ void TestFabricWrite::Run() {
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
+          post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
-          ASSERT_TRUE((rd == AMDSMI_STATUS_SUCCESS) || (rd == AMDSMI_STATUS_NOT_INIT));
-          ASSERT_EQ(post.fabric_info.v1.vpod.vpod_id, 3u);
+          ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(post.fabric_info.v2.vpod.vpod_id, 3u);
 
           auto restore = make_minimal_vpod_config();
           restore.mask = AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID;
@@ -383,7 +388,7 @@ void TestFabricWrite::Run() {
      *        serialized as accelerator ID 0)
      */
     {
-      const auto baseline_head = baseline_v1.vpod.vpod_active_accelerators[0];
+      const auto baseline_head = baseline_v2.vpod.vpod_active_accelerators[0];
       if (baseline_head == std::numeric_limits<uint32_t>::max()) {
         IF_VERB(STANDARD) {
           std::cout << "\t**Vpod vpod_active_accelerators unconfigured; skipping round-trip "
@@ -404,9 +409,10 @@ void TestFabricWrite::Run() {
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
+          post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
-          ASSERT_TRUE((rd == AMDSMI_STATUS_SUCCESS) || (rd == AMDSMI_STATUS_NOT_INIT));
-          const auto& accels = post.fabric_info.v1.vpod.vpod_active_accelerators;
+          ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
+          const auto& accels = post.fabric_info.v2.vpod.vpod_active_accelerators;
           ASSERT_EQ(accels[0], 2u);
           ASSERT_EQ(accels[1], 5u);
           ASSERT_EQ(accels[2], std::numeric_limits<uint32_t>::max());
@@ -414,8 +420,8 @@ void TestFabricWrite::Run() {
           auto restore = make_minimal_vpod_config();
           restore.mask = AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS;
           restore.commit = true;
-          std::copy(std::begin(baseline_v1.vpod.vpod_active_accelerators),
-                    std::end(baseline_v1.vpod.vpod_active_accelerators),
+          std::copy(std::begin(baseline_v2.vpod.vpod_active_accelerators),
+                    std::end(baseline_v2.vpod.vpod_active_accelerators),
                     std::begin(restore.data.vpod_active_accelerators));
           ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(dev, &restore), AMDSMI_STATUS_SUCCESS);
         }
@@ -426,7 +432,7 @@ void TestFabricWrite::Run() {
      *  Station: station_flags round-trip
      */
     {
-      const auto baseline_station_flags = baseline_v1.station.station_flags;
+      const auto baseline_station_flags = baseline_v2.station.station_flags;
       if (baseline_station_flags == std::numeric_limits<uint32_t>::max()) {
         IF_VERB(STANDARD) {
           std::cout << "\t**Station station_flags unconfigured; skipping round-trip "
@@ -444,9 +450,10 @@ void TestFabricWrite::Run() {
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
+          post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
-          ASSERT_TRUE((rd == AMDSMI_STATUS_SUCCESS) || (rd == AMDSMI_STATUS_NOT_INIT));
-          ASSERT_EQ(post.fabric_info.v1.station.station_flags, 1u);
+          ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(post.fabric_info.v2.station.station_flags, 1u);
 
           auto restore = make_minimal_station_config();
           restore.mask = AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS;

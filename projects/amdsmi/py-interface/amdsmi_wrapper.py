@@ -3836,10 +3836,12 @@ amdsmi_fabric_size_constants_t__enumvalues = {
     32: 'AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE',
     16: 'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
     64: 'AMDSMI_FABRIC_MAX_BITMAP_SIZE',
+    37: 'AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS',
 }
 AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE = 32
 AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16
 AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64
+AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS = 37
 amdsmi_fabric_size_constants_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_fabric_type_t'
@@ -3925,17 +3927,53 @@ struct_amdsmi_fabric_station_data_t._fields_ = [
 
 amdsmi_fabric_station_data_t = struct_amdsmi_fabric_station_data_t
 class struct_amdsmi_fabric_info_v1_t(Structure):
-    _pack_ = 1 # source:False
-    _layout_ = 'ms'
-    _fields_ = [
+    pass
+
+struct_amdsmi_fabric_info_v1_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_info_v1_t._layout_ = 'ms'
+struct_amdsmi_fabric_info_v1_t._fields_ = [
+    ('accelerator_id', ctypes.c_uint32),
+    ('fabric_type', amdsmi_fabric_type_t),
+    ('bandwidth', ctypes.c_uint32),
+    ('latency', ctypes.c_uint32),
+    ('ppod_id', ctypes.c_ubyte * 16),
+    ('ppod_size', ctypes.c_uint32),
+    ('vpod_id', ctypes.c_uint32),
+    ('vpod_size', ctypes.c_uint32),
+    ('vpod_active_accelerators', ctypes.c_uint32 * 32),
+    ('local_accelerators', ctypes.c_uint32 * 16),
+    ('addr_mode', amdsmi_fabric_npa_address_mode_t),
+    ('accel_state', amdsmi_fabric_accelerator_vpod_state_t),
+]
+
+amdsmi_fabric_info_v1_t = struct_amdsmi_fabric_info_v1_t
+class struct_amdsmi_fabric_info_v2_t(Structure):
+    pass
+
+struct_amdsmi_fabric_info_v2_t._pack_ = 1 # source:False
+struct_amdsmi_fabric_info_v2_t._layout_ = 'ms'
+struct_amdsmi_fabric_info_v2_t._fields_ = [
     ('fabric_type', amdsmi_fabric_type_t),
     ('accel_state', amdsmi_fabric_accelerator_vpod_state_t),
     ('ppod', amdsmi_fabric_ppod_data_t),
     ('vpod', amdsmi_fabric_vpod_data_t),
     ('station', amdsmi_fabric_station_data_t),
-     ]
+    ('ppod_mask', ctypes.c_uint32),
+    ('vpod_mask', ctypes.c_uint32),
+    ('station_mask', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 37),
+]
 
-amdsmi_fabric_info_v1_t = struct_amdsmi_fabric_info_v1_t
+amdsmi_fabric_info_v2_t = struct_amdsmi_fabric_info_v2_t
+
+# values for enumeration 'amdsmi_fabric_info_version_t'
+amdsmi_fabric_info_version_t__enumvalues = {
+    0: 'AMDSMI_FABRIC_INFO_VERSION_1',
+    4205903874: 'AMDSMI_FABRIC_INFO_VERSION_2',
+}
+AMDSMI_FABRIC_INFO_VERSION_1 = 0
+AMDSMI_FABRIC_INFO_VERSION_2 = 4205903874
+amdsmi_fabric_info_version_t = ctypes.c_uint32 # enum
 class struct_amdsmi_fabric_info_t(Structure):
     pass
 
@@ -3944,6 +3982,7 @@ class union_fabric_info_(Union):
     _layout_ = 'ms'
     _fields_ = [
     ('v1', amdsmi_fabric_info_v1_t),
+    ('v2', amdsmi_fabric_info_v2_t),
      ]
 
 struct_amdsmi_fabric_info_t._pack_ = 1 # source:False
@@ -5207,6 +5246,8 @@ __all__ = \
     'AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP',
     'AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS',
     'AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS',
+    'AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS',
+    'AMDSMI_FABRIC_INFO_VERSION_1', 'AMDSMI_FABRIC_INFO_VERSION_2',
     'AMDSMI_FABRIC_MAX_BITMAP_SIZE', 'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION',
@@ -5514,6 +5555,7 @@ __all__ = \
     'amdsmi_fabric_accelerator_vpod_state_t',
     'amdsmi_fabric_config_version_t', 'amdsmi_fabric_df_field_t',
     'amdsmi_fabric_info_t', 'amdsmi_fabric_info_v1_t',
+    'amdsmi_fabric_info_v2_t', 'amdsmi_fabric_info_version_t',
     'amdsmi_fabric_label_t', 'amdsmi_fabric_npa_address_mode_t',
     'amdsmi_fabric_ppod_config_t', 'amdsmi_fabric_ppod_data_t',
     'amdsmi_fabric_ppod_field_t', 'amdsmi_fabric_size_constants_t',
@@ -5754,7 +5796,7 @@ __all__ = \
     'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',
-    'struct_amdsmi_fabric_label_t',
+    'struct_amdsmi_fabric_info_v2_t', 'struct_amdsmi_fabric_label_t',
     'struct_amdsmi_fabric_ppod_config_t',
     'struct_amdsmi_fabric_ppod_data_t',
     'struct_amdsmi_fabric_station_config_t',

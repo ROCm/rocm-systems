@@ -4,6 +4,7 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <set>
@@ -153,6 +154,8 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   /**
    *    UALoE fabric sysfs:
    *        - partial reads (see amdsmi_get_gpu_fabric_info() for status info)
+   *        - fabric_info is in/out: its fabric_version on entry selects the layout written back,
+   *          and only the bytes belonging to that layout are touched
    */
   auto get_fabric_info_from_ualoe(
       amdsmi_fabric_info_t& fabric_info,
@@ -213,6 +216,25 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
    */
   auto get_ualink_directory_path() const -> std::string;
 };
+
+namespace gpu_device::details {
+
+/**
+ *  Project the version 2 payload onto the frozen version 1 layout
+ */
+auto flatten_v2_to_v1(const amdsmi_fabric_info_v2_t& source, amdsmi_fabric_info_v1_t& destination)
+    -> void;
+
+/**
+ *  Bounded write into caller memory: only the union member named by requested_version is
+ *  touched, so a caller that predates version 2 keeps its smaller allocation intact.
+ *  Declared here so the layout tests can exercise the bound without a live device
+ */
+auto publish_fabric_info(const amdsmi_bdf_t& fabric_bdf, const amdsmi_fabric_info_v2_t& source,
+                         std::uint32_t requested_version, amdsmi_fabric_info_t& destination)
+    -> void;
+
+}  // namespace gpu_device::details
 
 }  // namespace amd::smi
 

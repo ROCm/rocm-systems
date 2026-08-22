@@ -7139,35 +7139,39 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     """
     Return fabric info from UALoE sysfs (partial reads).
 
-    The C API may return AMDSMI_STATUS_NOT_INIT when the accelerators are not configured/setup
     The C API may return AMDSMI_STATUS_NO_DATA when no sysfs files produced usable
     lines; the struct is still populated with BDF and sentinel/default fabric fields.
+    An unconfigured accelerator returns AMDSMI_STATUS_SUCCESS and reports itself
+    through the accelerator_state key.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     fabric_info = amdsmi_wrapper.amdsmi_fabric_info_t()
+    # Selects the nested layout; the flat v1 layout carries no station data
+    fabric_info.fabric_version = amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2
     ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(fabric_info))
     if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
         raise AmdSmiRetryException()
     if ret == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
         raise AmdSmiTimeoutException()
-    if ret not in (
-        amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
-        amdsmi_wrapper.AMDSMI_STATUS_NO_DATA,
-        amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-    ):
+    if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    v1 = fabric_info.fabric_info.v1
-    ppod = v1.ppod
-    vpod = v1.vpod
-    station = v1.station
+    if fabric_info.fabric_version != amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2:
+        # A library predating the nested layout filled the flat v1 member instead, so every
+        # field below would be read at the wrong offset
+        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
+    v2 = fabric_info.fabric_info.v2
+    ppod = v2.ppod
+    vpod = v2.vpod
+    station = v2.station
     return {
         "bdf": _format_bdf(fabric_info.bdf),
-        "version": fabric_info.fabric_version,
+        "version": 2,
         "accelerator_id": ppod.accelerator_id,
-        "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
+        "fabric_type": _FABRIC_TYPE_NAMES.get(v2.fabric_type, "UNKNOWN"),
         "bandwidth": ppod.bandwidth,
         "latency": ppod.latency,
         "ppod_id": list(ppod.ppod_id),
@@ -7178,10 +7182,14 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
         "local_accelerator_count": ppod.local_accelerator_count,
         "vpod_active_accelerators": list(vpod.vpod_active_accelerators),
         "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(vpod.addr_mode, "UNKNOWN"),
-        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v2.accel_state, "UNKNOWN"),
         "station_flags": station.station_flags,
         "num_stations": station.num_stations,
         "lane_en_bitmap": list(station.lane_en_bitmap),
+        # Which fields above were actually read; a clear bit means the field holds its sentinel
+        "ppod_mask": v2.ppod_mask,
+        "vpod_mask": v2.vpod_mask,
+        "station_mask": v2.station_mask,
     }
 
 

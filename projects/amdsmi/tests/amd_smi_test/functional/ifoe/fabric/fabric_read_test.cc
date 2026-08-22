@@ -79,6 +79,7 @@ void TestFabricRead::Run(void) {
    */
   {
     amdsmi_fabric_info_t probe = {};
+    probe.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
     if (amdsmi_get_gpu_fabric_info(processor_handles_[0], &probe) == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Fabric (IFoE) not supported on this system; skipping test" << std::endl;
@@ -136,6 +137,7 @@ void TestFabricRead::Run(void) {
     IF_VERB(STANDARD) { std::cout << "\t** Testing amdsmi_get_gpu_fabric_info()" << std::endl; }
 
     amdsmi_fabric_info_t fabric_info = {};
+    fabric_info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
     err = amdsmi_get_gpu_fabric_info(device, &fabric_info);
@@ -149,8 +151,7 @@ void TestFabricRead::Run(void) {
                   << std::endl;
       }
       continue;
-    } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA &&
-               err != AMDSMI_STATUS_NOT_INIT) {
+    } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
       IF_VERB(STANDARD) {
@@ -159,12 +160,7 @@ void TestFabricRead::Run(void) {
                        "(no UALoE sysfs content); BDF may still be valid"
                     << std::endl;
         }
-        if (err == AMDSMI_STATUS_NOT_INIT) {
-          std::cout << "\t**amdsmi_get_gpu_fabric_info() returned NOT_INIT "
-                       "(no UALoE sysfs content); accelerators may not be configured/setup"
-                    << std::endl;
-        }
-        const auto& v1 = fabric_info.fabric_info.v1;
+        const auto& v2 = fabric_info.fabric_info.v2;
 
         // Render a byte array (ppod_id, lane_en_bitmap) as contiguous "0x.." hex.
         auto to_hex = [](const uint8_t* data, std::size_t count) {
@@ -191,29 +187,29 @@ void TestFabricRead::Run(void) {
         };
 
         std::cout << "\t\tversion:                  " << fabric_info.fabric_version << "\n"
-                  << "\t\tfabric_type:              " << v1.fabric_type << "\n"
-                  << "\t\taccel_state:              " << v1.accel_state << "\n"
-                  << "\t\taccelerator_id:           " << v1.ppod.accelerator_id << "\n"
-                  << "\t\tbandwidth:                " << v1.ppod.bandwidth << " Mb/s\n"
-                  << "\t\tlatency:                  " << v1.ppod.latency << " ns\n"
+                  << "\t\tfabric_type:              " << v2.fabric_type << "\n"
+                  << "\t\taccel_state:              " << v2.accel_state << "\n"
+                  << "\t\taccelerator_id:           " << v2.ppod.accelerator_id << "\n"
+                  << "\t\tbandwidth:                " << v2.ppod.bandwidth << " Mb/s\n"
+                  << "\t\tlatency:                  " << v2.ppod.latency << " ns\n"
                   << "\t\tppod_id:                  "
-                  << to_hex(v1.ppod.ppod_id, AMDSMI_MAX_UUID_ELEMENTS) << "\n"
-                  << "\t\tppod_size:                " << v1.ppod.ppod_size << "\n"
+                  << to_hex(v2.ppod.ppod_id, AMDSMI_MAX_UUID_ELEMENTS) << "\n"
+                  << "\t\tppod_size:                " << v2.ppod.ppod_size << "\n"
                   << "\t\tlocal_accelerators:       "
-                  << to_id_list(v1.ppod.local_accelerators, AMDSMI_FABRIC_MAX_LOCAL_GPUS) << "\n"
-                  << "\t\tlocal_accelerator_count:  " << v1.ppod.local_accelerator_count << "\n"
-                  << "\t\tvpod_id:                  " << v1.vpod.vpod_id << "\n"
-                  << "\t\tvpod_size:                " << v1.vpod.vpod_size << "\n"
+                  << to_id_list(v2.ppod.local_accelerators, AMDSMI_FABRIC_MAX_LOCAL_GPUS) << "\n"
+                  << "\t\tlocal_accelerator_count:  " << v2.ppod.local_accelerator_count << "\n"
+                  << "\t\tvpod_id:                  " << v2.vpod.vpod_id << "\n"
+                  << "\t\tvpod_size:                " << v2.vpod.vpod_size << "\n"
                   << "\t\tvpod_active_accelerators: "
-                  << to_id_list(v1.vpod.vpod_active_accelerators,
+                  << to_id_list(v2.vpod.vpod_active_accelerators,
                                 AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE)
                   << "\n"
-                  << "\t\taddr_mode:                " << v1.vpod.addr_mode << "\n"
-                  << "\t\tstation_flags:            " << v1.station.station_flags << "\n"
+                  << "\t\taddr_mode:                " << v2.vpod.addr_mode << "\n"
+                  << "\t\tstation_flags:            " << v2.station.station_flags << "\n"
                   << "\t\tnum_stations:             "
-                  << static_cast<unsigned>(v1.station.num_stations) << "\n"
+                  << static_cast<unsigned>(v2.station.num_stations) << "\n"
                   << "\t\tlane_en_bitmap:           "
-                  << to_hex(v1.station.lane_en_bitmap, AMDSMI_FABRIC_MAX_BITMAP_SIZE) << "\n";
+                  << to_hex(v2.station.lane_en_bitmap, AMDSMI_FABRIC_MAX_BITMAP_SIZE) << "\n";
       }
     }
 

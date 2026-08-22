@@ -217,21 +217,16 @@ auto format_lane_en_bitmap(const uint8_t* bytes, std::size_t count) -> std::stri
 }
 
 auto validate_request_common(uint32_t version, uint32_t expected_version, uint32_t mask,
-                             uint32_t valid_mask, bool commit) -> amdsmi_status_t {
+                             uint32_t valid_mask) -> amdsmi_status_t {
   if (version != expected_version) {
     return amdsmi_status_t::AMDSMI_STATUS_INVAL;
   }
 
   /**
-   *  A bare commit (mask==0, commit==true) is permitted so pre-staged fields can be
-   *  flushed by a later call. That same path lets a prior partial-write's residue be
-   *  applied, so it is also the lever for closing that window.
-   *
-   *  TODO: confirm with the driver team whether a commit with nothing freshly staged
-   *  is accepted or rejected; if rejected, tighten this to reject all mask==0 and
-   *  drop bare-commit support.
+   *  A commit with nothing freshly staged would flush whatever a prior partial write left
+   *  behind, so every request must name at least one field
    */
-  if ((mask == 0) && !commit) {
+  if (mask == 0) {
     return amdsmi_status_t::AMDSMI_STATUS_INVAL;
   }
   if ((mask & ~valid_mask) != 0) {
@@ -284,13 +279,19 @@ struct WriteRequestBuilder_t {
 };
 
 /**
- *  Flushes a built write data request, then writes the subtree commit when requested
+ *  Flushes a built write data request, then writes the subtree commit
  *      - All entries share one subtree, so commit targets that same @p subdir
  *      - A mid-flush hardware failure could still leave partial state; the
  *        build/flush split only removes avoidable partial state from bad input
+ *      - The driver ignores the staging files until a commit follows, so a non-committing
+ *        request stops at validation instead of leaving values for the next commit to apply
  */
 auto flush_writes(const std::string& ualink_root, const WriteRequestList_t& request_list,
                   std::string_view subdir, bool commit) -> amdsmi_status_t {
+  if (!commit) {
+    return amdsmi_status_t::AMDSMI_STATUS_SUCCESS;
+  }
+
   for (const auto& request : request_list) {
     if (auto status = write_field(ualink_root, request.m_subdir, request.m_file, request.m_payload);
         status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
@@ -298,11 +299,7 @@ auto flush_writes(const std::string& ualink_root, const WriteRequestList_t& requ
     }
   }
 
-  if (commit) {
-    return write_commit(ualink_root, subdir);
-  }
-
-  return amdsmi_status_t::AMDSMI_STATUS_SUCCESS;
+  return write_commit(ualink_root, subdir);
 }
 
 /**
@@ -393,26 +390,29 @@ auto parse_hex_bytes(const std::string& text, uint8_t* out, std::size_t max)
     return std::nullopt;
   }
 
-  const auto hex_value = [](char ch) -> std::optional<int> {
+  /**
+   *    Reject the whole string before writing a byte: bailing out mid-loop would leave the
+   *    caller's buffer part sentinel, part payload, behind a mask bit reported as unread
+   */
+  for (const auto ch : packed) {
+    if ((std::isxdigit(static_cast<unsigned char>(ch)) == 0)) {
+      return std::nullopt;
+    }
+  }
+
+  const auto hex_value = [](char ch) -> int {
     if (((ch >= '0') && (ch <= '9'))) {
       return (ch - '0');
     }
     if (((ch >= 'a') && (ch <= 'f'))) {
       return ((ch - 'a') + 10);
     }
-    if (((ch >= 'A') && (ch <= 'F'))) {
-      return ((ch - 'A') + 10);
-    }
-    return std::nullopt;
+    return ((ch - 'A') + 10);
   };
 
   for (auto idx = std::size_t(0); idx < byte_count; ++idx) {
-    const auto hi = hex_value(packed[(idx * 2)]);
-    const auto lo = hex_value(packed[((idx * 2) + 1)]);
-    if (((!hi.has_value()) || (!lo.has_value()))) {
-      return std::nullopt;
-    }
-    out[idx] = static_cast<uint8_t>(((hi.value() << 4) | lo.value()));
+    out[idx] = static_cast<uint8_t>(
+        ((hex_value(packed[(idx * 2)]) << 4) | hex_value(packed[((idx * 2) + 1)])));
   }
 
   return byte_count;
@@ -420,21 +420,28 @@ auto parse_hex_bytes(const std::string& text, uint8_t* out, std::size_t max)
 
 /**
  *  Parses a space-separated decimal list (inverse of format_accel_list_space_separated)
- *      - Stops at @p max tokens, a value exceeding uint32_t ends parsing
- *      - Returns the count of values written
+ *      - Returns std::nullopt and leaves @p out untouched on a malformed token, a value
+ *        exceeding uint32_t, or more than @p max values
+ *      - A list too long to hold is reported absent rather than truncated: with no count
+ *        field, a truncated list is indistinguishable from a complete one
  */
-auto parse_u32_list(const std::string& text, uint32_t* out, std::size_t max) -> std::size_t {
+auto parse_u32_list(const std::string& text, uint32_t* out, std::size_t max)
+    -> std::optional<std::size_t> {
   auto instream = std::istringstream(text);
   auto token = std::uint64_t(0);
-  auto count = std::size_t(0);
-  while (((count < max) && (instream >> token))) {
-    if ((token > std::numeric_limits<uint32_t>::max())) {
-      break;
+  auto values = std::vector<uint32_t>();
+  while ((instream >> token)) {
+    if (((token > std::numeric_limits<uint32_t>::max()) || (values.size() >= max))) {
+      return std::nullopt;
     }
-    out[count++] = static_cast<uint32_t>(token);
+    values.push_back(static_cast<uint32_t>(token));
+  }
+  if (!instream.eof()) {
+    return std::nullopt;
   }
 
-  return count;
+  std::copy(values.begin(), values.end(), out);
+  return values.size();
 }
 
 auto parse_addr_mode(const std::string& text) -> std::optional<amdsmi_fabric_npa_address_mode_t> {
@@ -492,27 +499,34 @@ struct FieldReader_t {
   }
 };
 
+enum class SurfacePhase_t { PreStage, PostCommit };
+
 }  // namespace
 
 /**
- *  Post-commit diagnostics: Re-read the just-committed fields from both the write
- *  subtree and the flat surface and LOG_DEBUG any field that disagrees (value or
- *  presence).
+ *  Surface diagnostics: Re-read fields from both the write subtree and the flat surface and
+ *  LOG_DEBUG any that disagree (value or presence).
+ *
+ *  PreStage runs before a committing request writes anything, over the full valid mask, so a
+ *  disagreement means an earlier partial write left fields staged that this commit is about to
+ *  apply. PostCommit runs afterwards over the committed fields only.
  *
  *  Purely observational: It never changes the apply result.
- *  The double read is skipped entirely when logging is off, so there is no cost on the hot path.
+ *  The comparison runs at every log level so the sysfs read path does not vary with logging
+ *  state; only the report itself is gated, inside LOG_DEBUG.
  */
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_ppod_config_t& committed) -> void;
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_vpod_config_t& committed) -> void;
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_station_config_t& committed) -> void;
+auto log_surface_divergence(const AMDSmiGPUDevice& device, const amdsmi_fabric_ppod_config_t& probe,
+                            SurfacePhase_t phase) -> void;
+auto log_surface_divergence(const AMDSmiGPUDevice& device, const amdsmi_fabric_vpod_config_t& probe,
+                            SurfacePhase_t phase) -> void;
+auto log_surface_divergence(const AMDSmiGPUDevice& device,
+                            const amdsmi_fabric_station_config_t& probe, SurfacePhase_t phase)
+    -> void;
 
 auto apply_ppod_config_at(const std::string& ualink_root, bool device_supports_ualink,
                           const amdsmi_fabric_ppod_config_t& config) -> amdsmi_status_t {
   if (auto status = validate_request_common(config.version, AMDSMI_FABRIC_PPOD_CONFIG_V1,
-                                            config.mask, kPpodValidMask, config.commit);
+                                            config.mask, kPpodValidMask);
       status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -582,10 +596,22 @@ auto apply_ppod_config_at(const std::string& ualink_root, bool device_supports_u
 
 auto apply_ppod_config(const AMDSmiGPUDevice& device, const amdsmi_fabric_ppod_config_t& config)
     -> amdsmi_status_t {
+  /**
+   *    A commit applies everything staged, not only this request's fields, so residue from an
+   *    earlier partial write is about to be applied too. Probe before staging, while that residue
+   *    is still distinguishable from this request's own writes
+   */
+  if (config.commit) {
+    auto probe = amdsmi_fabric_ppod_config_t{};
+    probe.version = AMDSMI_FABRIC_PPOD_CONFIG_V1;
+    probe.mask = kPpodValidMask;
+    log_surface_divergence(device, probe, SurfacePhase_t::PreStage);
+  }
+
   const auto status =
       apply_ppod_config_at(get_ualink_root(device), device.device_has_ualink(), config);
   if (((status == amdsmi_status_t::AMDSMI_STATUS_SUCCESS) && config.commit)) {
-    verify_commit_propagation(device, config);
+    log_surface_divergence(device, config, SurfacePhase_t::PostCommit);
   }
   return status;
 }
@@ -593,7 +619,7 @@ auto apply_ppod_config(const AMDSmiGPUDevice& device, const amdsmi_fabric_ppod_c
 auto apply_vpod_config_at(const std::string& ualink_root, bool device_supports_ualink,
                           const amdsmi_fabric_vpod_config_t& config) -> amdsmi_status_t {
   if (auto status = validate_request_common(config.version, AMDSMI_FABRIC_VPOD_CONFIG_V1,
-                                            config.mask, kVpodValidMask, config.commit);
+                                            config.mask, kVpodValidMask);
       status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -663,10 +689,17 @@ auto apply_vpod_config_at(const std::string& ualink_root, bool device_supports_u
 
 auto apply_vpod_config(const AMDSmiGPUDevice& device, const amdsmi_fabric_vpod_config_t& config)
     -> amdsmi_status_t {
+  if (config.commit) {
+    auto probe = amdsmi_fabric_vpod_config_t{};
+    probe.version = AMDSMI_FABRIC_VPOD_CONFIG_V1;
+    probe.mask = kVpodValidMask;
+    log_surface_divergence(device, probe, SurfacePhase_t::PreStage);
+  }
+
   const auto status =
       apply_vpod_config_at(get_ualink_root(device), device.device_has_ualink(), config);
   if (((status == amdsmi_status_t::AMDSMI_STATUS_SUCCESS) && config.commit)) {
-    verify_commit_propagation(device, config);
+    log_surface_divergence(device, config, SurfacePhase_t::PostCommit);
   }
   return status;
 }
@@ -674,7 +707,7 @@ auto apply_vpod_config(const AMDSmiGPUDevice& device, const amdsmi_fabric_vpod_c
 auto apply_station_config_at(const std::string& ualink_root, bool device_supports_ualink,
                              const amdsmi_fabric_station_config_t& config) -> amdsmi_status_t {
   if (auto status = validate_request_common(config.version, AMDSMI_FABRIC_STATION_CONFIG_V1,
-                                            config.mask, kStationValidMask, config.commit);
+                                            config.mask, kStationValidMask);
       status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -688,8 +721,8 @@ auto apply_station_config_at(const std::string& ualink_root, bool device_support
   }
 
   /**
-   *    Build phase: format every masked field before any sysfs write
-   *    An invalid input must not leave partial sysfs state that a subsequent commit would apply
+   *    Build phase mirrors the ppod/vpod paths, but no station field has a value constraint
+   *    checkable here, so the driver is what rejects a bad value at write time
    */
   auto request_list = WriteRequestList_t{};
   auto writer = WriteRequestBuilder_t{request_list, config.mask, kUALOE_UALINK_STATIONS_SUBDIR};
@@ -706,10 +739,17 @@ auto apply_station_config_at(const std::string& ualink_root, bool device_support
 
 auto apply_station_config(const AMDSmiGPUDevice& device,
                           const amdsmi_fabric_station_config_t& config) -> amdsmi_status_t {
+  if (config.commit) {
+    auto probe = amdsmi_fabric_station_config_t{};
+    probe.version = AMDSMI_FABRIC_STATION_CONFIG_V1;
+    probe.mask = kStationValidMask;
+    log_surface_divergence(device, probe, SurfacePhase_t::PreStage);
+  }
+
   const auto status =
       apply_station_config_at(get_ualink_root(device), device.device_has_ualink(), config);
   if (((status == amdsmi_status_t::AMDSMI_STATUS_SUCCESS) && config.commit)) {
-    verify_commit_propagation(device, config);
+    log_surface_divergence(device, config, SurfacePhase_t::PostCommit);
   }
   return status;
 }
@@ -770,8 +810,11 @@ auto query_ppod_config_at(const std::string& ualink_root, bool device_supports_u
               [&](const std::string& str_value) {
                 const auto count = parse_u32_list(str_value, config.data.local_accelerators,
                                                   AMDSMI_FABRIC_MAX_LOCAL_GPUS);
-                config.data.local_accelerator_count = static_cast<uint32_t>(count);
-                return (count > 0);
+                if (!count.has_value()) {
+                  return false;
+                }
+                config.data.local_accelerator_count = static_cast<uint32_t>(count.value());
+                return (count.value() > 0);
               });
   reader.read(AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH, kUALOE_BANDWIDTH,
               [&](const std::string& str_value) {
@@ -847,7 +890,7 @@ auto query_vpod_config_at(const std::string& ualink_root, bool device_supports_u
               [&](const std::string& str_value) {
                 const auto count = parse_u32_list(str_value, config.data.vpod_active_accelerators,
                                                   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE);
-                return (count > 0);
+                return (count.has_value() && (count.value() > 0));
               });
   reader.read(AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE, kUALOE_ADDR_MODE,
               [&](const std::string& str_value) {
@@ -936,20 +979,28 @@ auto query_station_config(const AMDSmiGPUDevice& device, amdsmi_fabric_station_c
 namespace {
 
 /**
- *  Accumulates flat-vs-subtree disagreements for one config's committed fields.
- *  A field is only compared when its bit was in the committed mask.
- *  Both surfaces reporting the field lets us compare values. Exactly one reporting it is itself
- *  a divergence (the commit reached one surface but not the other).
+ *  Accumulates flat-vs-subtree disagreements over one config's compared mask.
+ *  Both surfaces reporting a field lets us compare values.
+ *
+ *  Presence handling differs by phase. PostCommit expects both surfaces to hold the committed
+ *  fields, so either direction is a divergence. PreStage treats only subtree-present/flat-absent
+ *  as one: the reverse is a field nobody has staged since boot, which says nothing about residue
+ *  and would otherwise fire on every field the caller has never written.
+ *
+ *  PostCommit assumes the driver leaves applied values in the write subtree. If it starts clearing
+ *  those files instead, every committed field reports a spurious PRESENCE-DIFF and that phase needs
+ *  reworking; PreStage degrades to silence on its own.
  */
 struct SurfaceComparison_t {
   std::ostringstream& m_report;
-  uint32_t m_committed_mask;
+  SurfacePhase_t m_phase;
+  uint32_t m_compared_mask;
   uint32_t m_subtree_mask;
   uint32_t m_flat_mask;
   int m_mismatches = 0;
 
   auto comparable(uint32_t bit, const char* name) -> bool {
-    if (((m_committed_mask & bit) == 0)) {
+    if (((m_compared_mask & bit) == 0)) {
       return false;
     }
 
@@ -959,7 +1010,10 @@ struct SurfaceComparison_t {
       return true;
     }
 
-    if ((subtree_has != flat_has)) {
+    const auto is_presence_diff =
+        ((m_phase == SurfacePhase_t::PostCommit) ? (subtree_has != flat_has)
+                                                 : (subtree_has && (!flat_has)));
+    if (is_presence_diff) {
       m_report << " | PRESENCE-DIFF " << name << " subtree=" << (subtree_has ? "present" : "absent")
                << " flat=" << (flat_has ? "present" : "absent");
       ++m_mismatches;
@@ -985,27 +1039,45 @@ struct SurfaceComparison_t {
   }
 };
 
+auto phase_label(SurfacePhase_t phase) -> const char* {
+  return ((phase == SurfacePhase_t::PreStage) ? "pre-stage" : "post-commit");
+}
+
+/**
+ *  An empty or unreadable write subtree is the clean pre-stage state, not a divergence. It is also
+ *  how a driver that clears the subtree on commit would read, so staying quiet keeps the log usable
+ *  if the retention assumption above turns out to be wrong.
+ *
+ *  The status has to be checked, not just the mask: the query functions leave @p config.mask at the
+ *  caller's request on their early-return paths, so a missing subtree would otherwise look like
+ *  every field is staged
+ */
+auto is_quiet_phase(SurfacePhase_t phase, amdsmi_status_t subtree_status, uint32_t subtree_mask)
+    -> bool {
+  return ((phase == SurfacePhase_t::PreStage) &&
+          ((subtree_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) || (subtree_mask == 0)));
+}
+
 }  // namespace
 
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_ppod_config_t& committed) -> void {
-  if ((!ROCmLogging::Logger::getInstance()->isLoggerEnabled())) {
-    return;
-  }
-
+auto log_surface_divergence(const AMDSmiGPUDevice& device, const amdsmi_fabric_ppod_config_t& probe,
+                            SurfacePhase_t phase) -> void {
   auto subtree = amdsmi_fabric_ppod_config_t{};
-  subtree.version = committed.version;
-  subtree.mask = committed.mask;
+  subtree.version = probe.version;
+  subtree.mask = probe.mask;
   auto flat = subtree;
 
   const auto subtree_status = query_ppod_config(device, subtree);
   const auto flat_status = query_ppod_config(device, flat, kUALOE_UALINK_FLAT_SUBDIR);
+  if (is_quiet_phase(phase, subtree_status, subtree.mask)) {
+    return;
+  }
 
   auto report = std::ostringstream();
-  report << __func__ << " | ppod | subtree_status: " << subtree_status
-         << " | flat_status: " << flat_status;
+  report << __func__ << " | ppod | " << phase_label(phase)
+         << " | subtree_status: " << subtree_status << " | flat_status: " << flat_status;
 
-  auto diff = SurfaceComparison_t{report, committed.mask, subtree.mask, flat.mask};
+  auto diff = SurfaceComparison_t{report, phase, probe.mask, subtree.mask, flat.mask};
   diff.scalar(AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID, "accelerator_id", subtree.data.accelerator_id,
               flat.data.accelerator_id);
   diff.array(AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID, "ppod_id", subtree.data.ppod_id, flat.data.ppod_id,
@@ -1027,25 +1099,24 @@ auto verify_commit_propagation(const AMDSmiGPUDevice& device,
   LOG_DEBUG(report);
 }
 
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_vpod_config_t& committed) -> void {
-  if ((!ROCmLogging::Logger::getInstance()->isLoggerEnabled())) {
-    return;
-  }
-
+auto log_surface_divergence(const AMDSmiGPUDevice& device, const amdsmi_fabric_vpod_config_t& probe,
+                            SurfacePhase_t phase) -> void {
   auto subtree = amdsmi_fabric_vpod_config_t{};
-  subtree.version = committed.version;
-  subtree.mask = committed.mask;
+  subtree.version = probe.version;
+  subtree.mask = probe.mask;
   auto flat = subtree;
 
   const auto subtree_status = query_vpod_config(device, subtree);
   const auto flat_status = query_vpod_config(device, flat, kUALOE_UALINK_FLAT_SUBDIR);
+  if (is_quiet_phase(phase, subtree_status, subtree.mask)) {
+    return;
+  }
 
   auto report = std::ostringstream();
-  report << __func__ << " | vpod | subtree_status: " << subtree_status
-         << " | flat_status: " << flat_status;
+  report << __func__ << " | vpod | " << phase_label(phase)
+         << " | subtree_status: " << subtree_status << " | flat_status: " << flat_status;
 
-  auto surface_compare = SurfaceComparison_t{report, committed.mask, subtree.mask, flat.mask};
+  auto surface_compare = SurfaceComparison_t{report, phase, probe.mask, subtree.mask, flat.mask};
   surface_compare.scalar(AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID, "vpod_id", subtree.data.vpod_id,
                          flat.data.vpod_id);
   surface_compare.scalar(AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE, "vpod_size", subtree.data.vpod_size,
@@ -1063,25 +1134,25 @@ auto verify_commit_propagation(const AMDSmiGPUDevice& device,
   LOG_DEBUG(report);
 }
 
-auto verify_commit_propagation(const AMDSmiGPUDevice& device,
-                               const amdsmi_fabric_station_config_t& committed) -> void {
-  if ((!ROCmLogging::Logger::getInstance()->isLoggerEnabled())) {
-    return;
-  }
-
+auto log_surface_divergence(const AMDSmiGPUDevice& device,
+                            const amdsmi_fabric_station_config_t& probe, SurfacePhase_t phase)
+    -> void {
   auto subtree = amdsmi_fabric_station_config_t{};
-  subtree.version = committed.version;
-  subtree.mask = committed.mask;
+  subtree.version = probe.version;
+  subtree.mask = probe.mask;
   auto flat = subtree;
 
   const auto subtree_status = query_station_config(device, subtree);
   const auto flat_status = query_station_config(device, flat, kUALOE_UALINK_FLAT_SUBDIR);
+  if (is_quiet_phase(phase, subtree_status, subtree.mask)) {
+    return;
+  }
 
   auto report = std::ostringstream();
-  report << __func__ << " | station | subtree_status: " << subtree_status
-         << " | flat_status: " << flat_status;
+  report << __func__ << " | station | " << phase_label(phase)
+         << " | subtree_status: " << subtree_status << " | flat_status: " << flat_status;
 
-  auto surface_compare = SurfaceComparison_t{report, committed.mask, subtree.mask, flat.mask};
+  auto surface_compare = SurfaceComparison_t{report, phase, probe.mask, subtree.mask, flat.mask};
   surface_compare.scalar(AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS, "station_flags",
                          subtree.data.station_flags, flat.data.station_flags);
   surface_compare.scalar(AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS, "num_stations",

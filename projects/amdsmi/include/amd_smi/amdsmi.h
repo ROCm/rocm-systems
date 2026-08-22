@@ -5819,9 +5819,12 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
  */
 typedef enum {
   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
-      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
-  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16,  //!< Maximum local GPUs in fabric
-  AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64  //!< Maximum bitmap size (64 bytes = 512 bits)
+      32,                              //!< Maximum active accelerator IDs reported per vPoD
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16,   //!< Maximum local GPUs in fabric
+  AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64,  //!< Maximum bitmap size (64 bytes = 512 bits)
+  AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS =
+      37  //!< Growth window in ::amdsmi_fabric_info_v2_t (148 bytes). New fields are carved
+          //!< from here so ::amdsmi_fabric_info_t never changes size again
 } amdsmi_fabric_size_constants_t;
 
 /**
@@ -5866,7 +5869,7 @@ typedef enum {
  * @brief Physical PoD (PPOD) data payload
  *
  * @details Shared data members embedded in both ::amdsmi_fabric_ppod_config_t and
- * ::amdsmi_fabric_info_v1_t
+ * ::amdsmi_fabric_info_v2_t
  *
  * Fields with no data present read back at a sentinel: numeric fields at their maximum
  * representable value (ie: accelerator_id at 0xFFFFFFFF), and the ppod_id byte array at the
@@ -5889,7 +5892,7 @@ typedef struct {
  * @brief Virtual PoD (VPOD) data payload
  *
  * @details Shared data members embedded in both ::amdsmi_fabric_vpod_config_t and
- * ::amdsmi_fabric_info_v1_t
+ * ::amdsmi_fabric_info_v2_t
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -5899,7 +5902,9 @@ typedef struct {
   uint32_t vpod_active_accelerators
       [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
                                                         //!< read UINT32_MAX (UNSET), as with
-                                                        //!< local_accelerators
+                                                        //!< local_accelerators. A longer list than
+                                                        //!< this array holds is reported as absent
+                                                        //!< rather than truncated
   amdsmi_fabric_npa_address_mode_t addr_mode;           //!< Source aliasing or identification mode
 } amdsmi_fabric_vpod_data_t;
 
@@ -5907,13 +5912,15 @@ typedef struct {
  * @brief DF/station data payload
  *
  * @details Shared data members embedded in both ::amdsmi_fabric_station_config_t and
- * ::amdsmi_fabric_info_v1_t
+ * ::amdsmi_fabric_info_v2_t
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t station_flags;                                 //!< DF/station flags
-  uint8_t num_stations;                                   //!< Number of stations
+  uint32_t station_flags;  //!< DF/station flags
+  uint8_t num_stations;    //!< Number of stations (0 to 255). The driver reports this count in 32
+                           //!< bits (ualoe_lib.h, up to 1016 stations); a larger value is reported
+                           //!< as absent rather than truncated
   uint8_t lane_en_bitmap[AMDSMI_FABRIC_MAX_BITMAP_SIZE];  //!< Per-lane enable bitmap (64 bytes =
                                                           //!< 512 bits); reads 0 (lanes disabled)
                                                           //!< when absent
@@ -5922,9 +5929,46 @@ typedef struct {
 /**
  * @brief Fabric device configuration information (version 1)
  *
- * @details Presence/configured-ness is conveyed by the top-level return of
- * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA / NOT_INIT) and
- * by the accel_state field
+ * @details Flat layout. Frozen: the field order and offsets below are relied on by
+ * binaries already linked against this library and must never change
+ *
+ * Presence/configured-ness is conveyed by the top-level return of
+ * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
+ * accel_state field
+ *
+ * Fields with no data are left at their sentinel value
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t accelerator_id;           //!< Accelerator identifier (range 0 to 1023)
+  amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALINK
+  uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
+  uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
+  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
+
+  uint32_t ppod_size;  //!< Physical PoD size
+  uint32_t vpod_id;    //!< Virtual PoD Identifier
+  uint32_t vpod_size;  //!< Virtual PoD size
+  uint32_t vpod_active_accelerators
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
+                                                        //!< read UINT32_MAX (UNSET), as with
+                                                        //!< local_accelerators
+  uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
+  amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
+  amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
+} amdsmi_fabric_info_v1_t;
+
+/**
+ * @brief Fabric device configuration information (version 2)
+ *
+ * @details Groups the version 1 fields into the ppod/vpod/station payloads shared with
+ * ::amdsmi_set_gpu_fabric_ppod_config and friends, and adds the DF/station data that has
+ * no version 1 equivalent
+ *
+ * Presence/configured-ness is conveyed by the top-level return of
+ * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
+ * accel_state field
  *
  * Fields with no data are left at their sentinel value, except lane_en_bitmap,
  * which reads 0 (lanes disabled) when absent
@@ -5934,10 +5978,35 @@ typedef struct {
 typedef struct {
   amdsmi_fabric_type_t fabric_type;                    //!< UALOE or UALINK
   amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
-  amdsmi_fabric_ppod_data_t ppod;                      //!< Physical PoD data (16 bytes)
+  amdsmi_fabric_ppod_data_t ppod;                      //!< Physical PoD data
   amdsmi_fabric_vpod_data_t vpod;                      //!< Virtual PoD data
-  amdsmi_fabric_station_data_t station;                //!< DF/station data (64 bytes)
-} amdsmi_fabric_info_v1_t;
+  amdsmi_fabric_station_data_t station;                //!< DF/station data
+  uint32_t ppod_mask;     //!< ::amdsmi_fabric_ppod_field_t bits actually read into @p ppod; a clear
+                          //!< bit means that field holds its sentinel
+  uint32_t vpod_mask;     //!< ::amdsmi_fabric_vpod_field_t bits actually read into @p vpod
+  uint32_t station_mask;  //!< ::amdsmi_fabric_df_field_t bits actually read into @p station
+  uint32_t reserved[AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS];  //!< Reserved for future use. New
+                                                            //!< fields are carved from here rather
+                                                            //!< than added as a new version
+} amdsmi_fabric_info_v2_t;
+
+/**
+ * @brief Fabric device information layout selector
+ *
+ * @details Written to ::amdsmi_fabric_info_t::fabric_version before calling
+ * ::amdsmi_get_gpu_fabric_info to choose which union member is filled
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_INFO_VERSION_1 = 0x00000000u,  //!< Flat layout. What zero-initialization yields,
+                                               //!< so it is the default for a caller that does not
+                                               //!< set the field
+  AMDSMI_FABRIC_INFO_VERSION_2 = 0xFAB10002u   //!< Nested layout. Deliberately high-entropy: an
+                                               //!< uninitialized fabric_version must not be able
+                                               //!< to select a member larger than the caller
+                                               //!< allocated
+} amdsmi_fabric_info_version_t;
 
 /**
  * @brief Fabric device information structure
@@ -5945,12 +6014,18 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;  //!< BDF (Bus, Device, Function) of the Fabric device
-  uint32_t fabric_version;
+  amdsmi_bdf_t bdf;         //!< BDF (Bus, Device, Function) of the Fabric device
+  uint32_t fabric_version;  //!< IN: ::amdsmi_fabric_info_version_t selecting the union member to
+                            //!< fill. Any value other than ::AMDSMI_FABRIC_INFO_VERSION_2 selects
+                            //!< v1. OUT: the member actually filled
   union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;
+    amdsmi_fabric_info_v1_t v1;  //!< Filled when fabric_version is not
+                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
+    amdsmi_fabric_info_v2_t v2;  //!< Filled when fabric_version is
+                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
   } fabric_info;
-  uint32_t reserved[15];  //!< Reserved for future use
+  uint32_t reserved[15];  //!< Reserved for future use. Not written by
+                          //!< ::amdsmi_get_gpu_fabric_info
 } amdsmi_fabric_info_t;
 
 /**
@@ -5965,27 +6040,40 @@ typedef struct {
  *      - any field that was not updated from sysfs keeps its sentinel value (ie:
  *      numeric fields at their maximum representable value, the ppod_id byte array at
  *      the guard byte 0x99, and unknown enumeration values where documented for
- *      ::amdsmi_fabric_info_v1_t)
+ *      ::amdsmi_fabric_info_v1_t and ::amdsmi_fabric_info_v2_t)
  *      - The device BDF in @p info is always filled when the call completes
  *      successfully or returns ::AMDSMI_STATUS_NO_DATA
  *
+ *  Request the nested layout, which is the only one carrying the DF/station fields:
+ *  @code
+ *    amdsmi_fabric_info_t info = {0};  // C++: amdsmi_fabric_info_t info = {};
+ *    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+ *    amdsmi_get_gpu_fabric_info(handle, &info);
+ *  @endcode
+ *
  *  @param[in] processor_handle - Handle for the target processor
  *
- *  @param[out] info - Pointer to Fabric information structure to be populated
+ *  @param[in,out] info - Pointer to Fabric information structure to be populated
  *  Must be allocated by the caller. Written on every return except errors such
  *  as ::AMDSMI_STATUS_INVAL
+ *
+ *  On input, @p info->fabric_version selects the union member to fill. Any value other
+ *  than ::AMDSMI_FABRIC_INFO_VERSION_2 selects ::amdsmi_fabric_info_v1_t, so a
+ *  zero-initialized structure and one left uninitialized both yield the flat layout and
+ *  no byte past the v1 member is written. An unrecognized value is not an error
+ *
+ *  On output, @p info->fabric_version reports the member filled. The reserved trailing
+ *  words of @p info are never written
  *
  *  @return ::amdsmi_status_t
  *  - ::AMDSMI_STATUS_SUCCESS if at least one attribute yielded usable content
  *  - ::AMDSMI_STATUS_NO_DATA if no attribute yielded usable data (output still
  *    contains BDF and default/sentinel fabric fields)
- *  - ::AMDSMI_STATUS_NOT_INIT if the fabric read succeeded but the accelerator
- *    state is unconfigured or unknown. Despite the name, this is data-bearing and
- *    not a failure: @p info is populated and its accel_state field reports the
- *    unconfigured state. Callers reading fabric data should treat this like
- *    ::AMDSMI_STATUS_SUCCESS
  *  - Other codes (e.g. ::AMDSMI_STATUS_INVAL for an invalid processor handle) on
  *    failure
+ *
+ *  An unconfigured accelerator is not an error: the read returns
+ *  ::AMDSMI_STATUS_SUCCESS and the accel_state field reports the unconfigured state
  *
  */
 amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_handle,
@@ -6047,7 +6135,8 @@ typedef enum {
 typedef struct {
   uint32_t version;  //!< Must be ::AMDSMI_FABRIC_PPOD_CONFIG_V1
   uint32_t mask;     //!< ::AMDSMI_FABRIC_PPOD_FIELD_* bits for parameters to write (32 bits)
-  bool commit;       //!< When true, write setup/commit after masked parameters
+  bool commit;       //!< When true, write the masked parameters then setup/commit; when false,
+                     //!< validate the request and write nothing
   amdsmi_fabric_ppod_data_t data;  //!< PPOD data payload
 } amdsmi_fabric_ppod_config_t;
 
@@ -6082,12 +6171,18 @@ typedef struct {
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Writes setup/accel_id, setup/ppod_id, setup/ppod_size, setup/local_accels,
- *  setup/bandwidth, and setup/latency for each bit set in @p config->mask (fixed order),
- *  then setup/commit when @p config->commit is true
+ *  @details When @p config->commit is true, writes setup/accel_id, setup/ppod_id, setup/ppod_size,
+ *  setup/local_accels, setup/bandwidth, and setup/latency for each bit set in @p config->mask
+ *  (fixed order), then setup/commit. When false, the request is validated and nothing is written:
+ *  the driver ignores the staging files unless a commit follows
+ *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
  *
  *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request; @p config->mask and @p config->commit must not both be false
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
  *
  *  @return ::amdsmi_status_t
  */
@@ -6101,16 +6196,22 @@ amdsmi_status_t amdsmi_set_gpu_fabric_ppod_config(amdsmi_processor_handle proces
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Writes config/vpod_id, config/vpod_size, config/vpod_active_accels, and
- *  config/addr_mode for each bit set in @p config->mask, then config/commit when
- *  @p config->commit is true
+ *  @details When @p config->commit is true, writes config/vpod_id, config/vpod_size,
+ *  config/vpod_active_accels, and config/addr_mode for each bit set in @p config->mask, then
+ *  config/commit. When false, the request is validated and nothing is written: the driver
+ *  ignores the staging files unless a commit follows
  *
  *  @note vpod_active_accelerators has no count field: unused slots hold the UNSET
  *  sentinel (UINT32_MAX). Serialization emits the leading run of IDs and stops at
  *  the first UINT32_MAX. Fill unused slots with UINT32_MAX; 0 is a valid accelerator ID.
  *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
+ *
  *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
  *
  *  @return ::amdsmi_status_t
  */
@@ -6124,12 +6225,18 @@ amdsmi_status_t amdsmi_set_gpu_fabric_vpod_config(amdsmi_processor_handle proces
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Writes stations/station_flags, stations/num_stations, and
- *  stations/lane_en_bitmap for each bit set in @p config->mask, then
- *  stations/commit when @p config->commit is true
+ *  @details When @p config->commit is true, writes stations/station_flags, stations/num_stations,
+ *  and stations/lane_en_bitmap for each bit set in @p config->mask, then stations/commit. When
+ *  false, the request is validated and nothing is written: the driver ignores the staging files
+ *  unless a commit follows
+ *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
  *
  *  @param[in] processor_handle Handle for the target GPU
- *  @param[in] config Non-NULL request
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
  *
  *  @return ::amdsmi_status_t
  */
