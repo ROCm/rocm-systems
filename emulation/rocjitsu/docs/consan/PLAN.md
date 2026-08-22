@@ -31,15 +31,15 @@ rules live in [VALIDATION.md](VALIDATION.md); current evidence lives in
 [STATUS_GFX1250.md](STATUS_GFX1250.md). The Aorta workloads are another source
 of user-relevant behavior that the checked-in suites must cover.
 
-The immediate first action is to integrate the newly fetched `origin/develop`
-and establish a green post-integration baseline. At this checkpoint the ref is
-`550548c58ae9` and is already an ancestor of the branch, so the requested merge
-is expected to be a no-op rather than an artificial empty merge. Recheck this
-fact when execution resumes and at every qualification checkpoint. Whenever
-the ref has advanced, integrate it with a merge commit, repair all resulting
-build and test failures, and protect every behavioral integration fix with a
-focused host-unit or device regression before accepting new validation
-evidence.
+The immediate first execution action, after this planning checkpoint, is to
+integrate the newly fetched `origin/develop` and establish a green
+post-integration baseline. Resolve the fetched ref when execution begins rather
+than baking a transient commit ID into this plan. If it has advanced, integrate
+it with a merge commit; if it is already an ancestor, record the verified no-op
+instead of manufacturing an empty merge. Repair all resulting build and test
+failures, and protect every behavioral integration fix with a focused host-unit
+or device regression before accepting new validation evidence. Repeat this
+check at later qualification checkpoints.
 
 ### Working contract
 
@@ -90,7 +90,10 @@ evidence.
    and ISA details as necessary. Historical `gfx950`-to-`gfx942` ports are
    examples, not a boundary; cross-generation and CDNA/RDNA transports are
    expected for cross-cutting behavior. Record a capability-based reason
-   wherever a port is genuinely not applicable.
+   wherever a port is genuinely not applicable. The audit is not complete if a
+   test merely remains on the architecture where it was first discovered:
+   every host and device contract needs an explicit per-target disposition,
+   and every meaningful missing transport must be implemented.
 6. **Use a two-speed test cadence.** In the inner loop, favor targeted host
    tests and all parallel RocJitsu-emulated configurations. It is acceptable to
    omit the serialized physical `gfx950` tier temporarily when it accounts for
@@ -167,7 +170,9 @@ evidence.
   scenarios retain their exact correct/incorrect behavioral contracts.
 - The existing-test audit is complete. Every cross-cutting contract runs on
   each semantically applicable CDNA3/4/5 and RDNA3/4 target, or has a documented
-  capability-based exclusion.
+  capability-based exclusion; no contract is stranded on its source
+  architecture merely because that is where its motivating E2E failure was
+  first observed.
 - Every applicable cell in the CDNA4 and gfx1250 ledgers is green, followed by
   a fresh global revalidation of all green cells on one reviewed revision;
   this includes every cell tactically deferred because of abnormal latency.
