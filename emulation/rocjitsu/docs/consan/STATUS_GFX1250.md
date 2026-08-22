@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Current-hook RocJitsu execution retains complete 1000/1000 access plus 90/90 barrier instrumentation and a 3,945,440-byte object, remains dispatch-active through 198 observed launches including the final 151,936-cluster output kernel, but has no oracle or teardown verdict within 600 seconds | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
+| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Current-tip B0 RocJitsu A/B reaches the ordinary 30-second bound even in the uninstrumented baseline. Record/Replay patches 1000/1000 accesses plus 92/92 barriers in 106 ms and emits a valid 4,064,224-byte replacement before reaching the same execution bound; no oracle or teardown verdict is available. Longer prior evidence reaches execution, while selected-object history diagnosed 17 generated long-return targets | 🟧 Current-hook RocJitsu execution retains complete 1000/1000 access plus 90/90 barrier instrumentation and a 3,945,440-byte object, remains dispatch-active through 198 observed launches including the final 151,936-cluster output kernel, but has no oracle or teardown verdict within 600 seconds | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -578,6 +578,34 @@ This row is the target-native cooperative LDS/WMMA qualification role, not an
 inherited instruction-site denominator. gfx1250 evidence comes only from the
 gfx1250 binary and its own oracle, inventory, fault campaign, and timings; the
 larger RDNA4 schedule retains its separate target ledger.
+
+### 2026-08-22 Qwen baseline/Record Replay B0 latency check
+
+Artifact
+`/home/ossci/xx/consan-validation/prep-20260822-gfx1250-qwen-rr-rocjitsu-b0-zLDCUC`
+runs an equal 30-second baseline/Record Replay comparison through the checked-in
+`gfx1250_mi455x.json` B0 RocJitsu configuration. Its recorded `ROCM_PATH`,
+`PATH`, and `LD_LIBRARY_PATH` all select
+`/home/ossci/xx/TheRock/build/dist/rocm`; the loaded hook SHA-256 is
+`3eaac597ecd8ad73bd2de95b102005651048ab6250cdaf0e5d86c3326e0cecf6`.
+The uninstrumented baseline remains active until its 30.20-second bound and
+produces neither an error nor an oracle. Record/Replay inventories and patches
+all 1,000/1,000 accesses plus 92/92 barriers, spends 106.23 ms in the patcher,
+and emits a valid 4,064,224-byte replacement before it too remains active until
+the 30.19-second bound. The timeout prevents teardown, so no dynamic or
+diagnostic verdict is claimed.
+
+This A/B rules out ConSan transformation cost as the first current-tip
+boundary: the baseline itself exceeds the ordinary deadline, and the
+instrumented row reaches a statically complete replacement in a small fraction
+of that deadline. It does not promote the orange cell because neither row
+reaches the independent numerical oracle. Per the tactical-latency rule, a
+second long full-model run is deferred; the productive next step is a reduced
+Qwen execution denominator or a RocJitsu throughput investigation, not another
+identical timeout. The existing heterogeneous-framework checked-in
+correct/incorrect pair already owns Qwen's observable multi-kernel publication
+and diagnostic-attribution behavior, so this latency finding does not justify
+a prototype-layout device fixture.
 
 ### 2026-08-20 Qwen current-workspace refresh
 

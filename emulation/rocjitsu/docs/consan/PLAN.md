@@ -45,37 +45,23 @@ choices. The working-loop rules below are binding preparation requirements and
 feed the exit criteria; they are not merely suggested ways of organizing
 prototype fixes.
 
-### Acknowledged directives and working contract
+### Directive checklist and working contract
 
-Section 1 explicitly acknowledges all of the preparation directives:
+Every preparation directive is accepted as a requirement, with the following
+concrete interpretation:
 
-- keep the branch integrated with the freshly fetched `origin/develop`, repair
-  all resulting breakage, and regression-test every behavioral integration
-  defect;
-- treat comprehensive host-unit and checked-in device tests as the primary
-  deliverable because they, rather than the soon-to-be-replaced prototype, are
-  the automatic iteration mechanism for section 2;
-- advance both the CDNA4 and gfx1250 end-to-end ledgers, updating each ledger as
-  its evidence changes;
-- prioritize engine columns in the strict order Record/Replay, Sampled,
-  SuperCollider, Inline Shadow, then lift the floor within the active column in
-  the strict order red, orange, yellow, green;
-- after every applicable cell first becomes green, revalidate the complete set
-  of greens together instead of relying on evidence accumulated across
-  unrelated revisions;
-- remain tactical about long-running tests: investigate abnormal slowness when
-  useful, otherwise record and defer the expensive cell rather than repeatedly
-  waiting without learning, while retaining it as an exit debt;
-- turn every useful end-to-end investigation into a focused host-unit
-  regression, a checked-in correct/incorrect device pair, or both, and regard a
-  prototype fix without that durable behavioral contract as incomplete;
-- audit existing as well as new ConSan tests for meaningful transport across
-  CDNA3/4/5 and RDNA3/4, adapting target-native code instead of limiting
-  transport to the historical `gfx950`-to-`gfx942` pattern; and
-- use fast host and RocJitsu-emulated tests in the tight loop, temporarily omit
-  serialized physical `gfx950` when its latency is disproportionate, and still
-  run the complete simulator/physical matrix periodically and at final
-  qualification.
+| Directive | Plan commitment |
+| --- | --- |
+| Integrate the freshly fetched base | Keep the branch integrated with `origin/develop` through a merge commit whenever it advances; repair all resulting build and test breakage, and regression-test every behavioral integration defect. At this checkpoint `550548c58ae9` is already an ancestor of `HEAD`, so there is no new merge to manufacture. |
+| Make tests the main deliverable | Treat comprehensive host-unit and checked-in device tests as the durable output of preparation. Prototype fixes and status promotions are supporting work because section 2 will replace the implementation. |
+| Grow both test tiers | Expand conventional host units and checked-in device tests together, choosing one or both according to the behavioral boundary under test. |
+| Work both architecture ledgers | Advance both [STATUS_CDNA4.md](STATUS_CDNA4.md) and [STATUS_GFX1250.md](STATUS_GFX1250.md), and update the affected ledger whenever its evidence changes. Preserve the standing CDNA4 catch-up bias without starving gfx1250. |
+| Apply the engine priority globally | Across both ledgers, work Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow. A lower-priority engine does not jump the queue merely because its cell has a worse color. |
+| Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Once every applicable cell is green, revalidate all greens together on one reviewed revision. |
+| Be tactical about latency | When a test is abnormally slow, investigate the slowness if that can produce useful understanding; otherwise record and defer it instead of repeatedly waiting. Deferral changes scheduling, not the exit criteria. |
+| Harvest every end-to-end investigation | Turn each useful E2E finding into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. |
+| Audit and transport existing tests too | Make a suite-wide pass over existing host and device contracts, not just new additions. Generalize behavioral ideas across CDNA3/4/5 and RDNA3/4 wherever equivalent target-native idioms exist; historical `gfx950`-to-`gfx942` ports are examples, not a boundary. |
+| Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, accepting the bounded short-term risk, but run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
 
 Tactical deferral can change the order in which useful evidence is gathered,
 but it never lowers the exit bar. Likewise, the CDNA4 catch-up bias guides time
