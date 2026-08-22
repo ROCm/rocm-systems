@@ -4830,11 +4830,12 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.tensile_inner_timeout_seconds, 900)
         self.assertEqual(workload.tensile_shard_parallelism, 3)
         self.assertEqual(workload.tensile_fault_shard_index, 0)
+        self.assertEqual(workload.tensile_expected_client_passes, 7)
         self.assertEqual(len(commands), 3)
         for index, command in enumerate(commands):
+            self.assertNotIn("--expect-numeric-rows", command)
             self.assertEqual(
-                command[command.index("--expect-numeric-rows") + 1],
-                str((16, 23, 40)[index]),
+                command[command.index("--expect-client-passes") + 1], "7"
             )
             self.assertEqual(
                 command[command.index("--minimum-timed-ms") + 1], "1.0"
@@ -4869,9 +4870,10 @@ class ConSanValidationTest(unittest.TestCase):
             ),
             [expected_sizes[0]],
         )
+        self.assertNotIn("--expect-numeric-rows", fault_command)
         self.assertEqual(
-            fault_command[fault_command.index("--expect-numeric-rows") + 1],
-            "16",
+            fault_command[fault_command.index("--expect-client-passes") + 1],
+            "7",
         )
 
     def test_tensile_fault_shard_requires_a_valid_declared_shard(self) -> None:

@@ -276,16 +276,21 @@ of silently narrowing the 96-row denominator.
 The seven-block `tensile-spmm-f8-ml` row uses the same contract for the three
 Exact sizes repeated identically by every block. The filtered YAML must retain
 all seven blocks and selects one size in each; differing block inventories
-fail closed. The three shards require 16, 23, and 40 exact numeric rows,
-respectively, and execute concurrently with 900-second inner and 960-second
-enclosing bounds. Each leaf process proves a positive one-millisecond timing
-canary, while the parent result aggregates all three processes before
-enforcing the ordinary workload-level timing minimum. Thus sharding cannot
-turn a full-row empirical gate into three artificially equal timing quotas.
+fail closed. Each shard requires all seven generated clients to exit `PASS`,
+every emitted numerical row to pass, and at least one such row. The count of
+printed winning rows is deliberately not frozen because Tensile may reject a
+different subset of generated solutions while retaining the same source
+problem denominator. The three shards execute concurrently with 900-second
+inner and 960-second enclosing bounds. Each leaf process proves a positive
+one-millisecond timing canary, while the parent result aggregates all three
+processes before enforcing the ordinary workload-level timing minimum. Thus
+sharding cannot turn a full-row empirical gate into three artificially equal
+timing quotas.
 
 Fault inventory and contained exact-one mutation use the manifest-selected
-first shard and retain its complete numerical oracle: 16 rows for both current
-sharded workloads. This keeps the fault gate bounded while clean and paired
+first shard and retain its complete numerical oracle: 16 fixed rows for the
+MXF4 workload and all seven generated clients for sparse F8. This keeps the
+fault gate bounded while clean and paired
 overhead continue to cover every declared size, benchmark block, and generated
 row. The representative fault shard is explicit in the executable manifest; a
 missing or out-of-range selection fails closed.

@@ -371,6 +371,21 @@ class TensileValidationTest(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertIn("no result rows", errors[0])
 
+    def test_client_validation_requires_every_declared_pass(self) -> None:
+        output = "\n".join(
+            (
+                "clientExit=0 (PASS) for ['one.yaml']",
+                "clientExit=0 (PASS) for ['two.yaml']",
+            )
+        )
+        self.assertEqual(
+            tensile_validation._client_validation_errors(output, 2),
+            (2, []),
+        )
+        count, errors = tensile_validation._client_validation_errors(output, 3)
+        self.assertEqual(count, 2)
+        self.assertEqual(errors, ["expected 3 passing Tensile clients, found 2"])
+
     def test_numeric_validation_rejects_wrong_hardware_and_malformed_rows(self) -> None:
         output = (
             "WRONG_HARDWARE\n" "run,problem,validation,time-us\n" "0,problem,PASSED\n"

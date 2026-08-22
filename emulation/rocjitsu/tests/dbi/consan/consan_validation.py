@@ -233,6 +233,7 @@ class Workload:
         tuple[tuple[int, ...], ...], ...
     ] = ()
     tensile_expected_numeric_rows_per_shard: tuple[int, ...] = ()
+    tensile_expected_client_passes: int | None = None
     tensile_shard_parallelism: int = 1
     tensile_fault_shard_index: int | None = None
     tensile_streamk_fixed_grid: int | None = None
@@ -1162,7 +1163,9 @@ def _validate_tensile_sharding(workload: Workload) -> None:
         raise RuntimeError(
             f"{workload.id} must declare per-shard rather than aggregate numeric rows"
         )
-    if len(expected_rows) != len(shards) or any(rows <= 0 for rows in expected_rows):
+    if expected_rows and (
+        len(expected_rows) != len(shards) or any(rows <= 0 for rows in expected_rows)
+    ):
         raise RuntimeError(
             f"{workload.id} must declare one positive numeric-row count per shard"
         )
@@ -1198,6 +1201,13 @@ def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
         _validate_tensile_sharding(workload)
+        if workload.tensile_expected_client_passes is not None and (
+            workload.kind != "tensile"
+            or workload.tensile_expected_client_passes <= 0
+        ):
+            raise RuntimeError(
+                f"{workload.id} has an invalid expected Tensile client count"
+            )
         if workload.device_timing_calibration_iterations is not None:
             if workload.device_timing_calibration_iterations <= 0:
                 raise RuntimeError(
@@ -1655,7 +1665,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
                 ((16, 16, 1, 256),),
                 ((128, 128, 1, 128),),
             ),
-            "tensile_expected_numeric_rows_per_shard": (16, 23, 40),
+            "tensile_expected_client_passes": 7,
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
@@ -2703,6 +2713,13 @@ def _workload_command(
                     str(expected_numeric_rows),
                 )
             )
+        if workload.tensile_expected_client_passes is not None:
+            command.extend(
+                (
+                    "--expect-client-passes",
+                    str(workload.tensile_expected_client_passes),
+                )
+            )
         if tensile_exact_problem_sizes is not None:
             source_problem_sizes = tuple(
                 size
@@ -2817,6 +2834,9 @@ def _workload_commands(
                 inner_repetitions_override,
             )
         ]
+    expected_rows = workload.tensile_expected_numeric_rows_per_shard or (
+        None,
+    ) * len(shards)
     return [
         _workload_command(
             workspace,
@@ -2826,11 +2846,11 @@ def _workload_commands(
             output,
             inner_repetitions_override,
             tensile_exact_problem_sizes=shard,
-            tensile_expected_numeric_rows=expected_rows,
+            tensile_expected_numeric_rows=shard_expected_rows,
         )
-        for shard, expected_rows in zip(
+        for shard, shard_expected_rows in zip(
             shards,
-            workload.tensile_expected_numeric_rows_per_shard,
+            expected_rows,
             strict=True,
         )
     ]
@@ -2856,6 +2876,8 @@ def _fault_workload_command(
         tensile_exact_problem_sizes=workload.tensile_exact_problem_size_shards[index],
         tensile_expected_numeric_rows=(
             workload.tensile_expected_numeric_rows_per_shard[index]
+            if workload.tensile_expected_numeric_rows_per_shard
+            else None
         ),
     )
 

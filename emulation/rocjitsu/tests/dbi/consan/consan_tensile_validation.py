@@ -290,6 +290,21 @@ def _numeric_validation_errors(
     return result_count, errors
 
 
+def _client_validation_errors(
+    output: str, expected_pass_count: int | None
+) -> tuple[int, list[str]]:
+    pass_count = len(
+        re.findall(r"^clientExit=0 \(PASS\) for ", output, flags=re.MULTILINE)
+    )
+    errors = []
+    if expected_pass_count is not None and pass_count != expected_pass_count:
+        errors.append(
+            f"expected {expected_pass_count} passing Tensile clients, "
+            f"found {pass_count}"
+        )
+    return pass_count, errors
+
+
 def _timed_aggregate_ms(output: str) -> tuple[float | None, list[str]]:
     """Returns the sum of valid Tensile numeric-row device timings."""
     errors = []
@@ -554,6 +569,7 @@ def main() -> int:
         choices=range(1, 5),
     )
     parser.add_argument("--expect-numeric-rows", type=_positive_int)
+    parser.add_argument("--expect-client-passes", type=_positive_int)
     parser.add_argument("--exact-problem-sizes-json", type=_problem_sizes_json)
     parser.add_argument(
         "--expect-source-exact-problem-sizes-json",
@@ -663,6 +679,9 @@ def main() -> int:
         expected_result_count=args.expect_numeric_rows,
         required_streamk_mode=args.require_streamk_mode,
     )
+    client_pass_count, client_errors = _client_validation_errors(
+        output, args.expect_client_passes
+    )
     timed_aggregate_ms, timing_errors = _timed_aggregate_ms(output)
     if (
         timed_aggregate_ms is not None
@@ -695,6 +714,7 @@ def main() -> int:
             f"Tensile execution exceeded its {args.timeout_seconds}-second budget"
         )
     errors.extend(numeric_errors)
+    errors.extend(client_errors)
     errors.extend(timing_errors)
     errors.extend(artifact_errors)
     detail = {
@@ -703,9 +723,11 @@ def main() -> int:
         "elapsed_seconds": elapsed_seconds,
         "execution_elapsed_seconds": execution_elapsed_seconds,
         "expected_numeric_rows": args.expect_numeric_rows,
+        "expected_client_passes": args.expect_client_passes,
         "label": args.label,
         "minimum_timed_ms": args.minimum_timed_ms,
         "numeric_rows": result_count,
+        "passing_clients": client_pass_count,
         "rocjitsu_config": str(paths.rocjitsu_config),
         "rocjitsu_executable": str(paths.rocjitsu),
         "required_streamk_mode": args.require_streamk_mode,
