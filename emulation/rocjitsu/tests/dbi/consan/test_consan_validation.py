@@ -1885,6 +1885,71 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(environment["FIXED_ITERATIONS"], "1")
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
 
+    def test_gfx950_manifest_registers_exact_hipkittens_rows(self) -> None:
+        workloads = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx950")["workloads"]
+        }
+        expected = {
+            "hipkittens-bf16fp32-16x32": (
+                "hipkittens_gemm_bf16fp32_16x32",
+                ("-m", "256", "-n", "256", "-k", "256"),
+            ),
+            "hipkittens-fp8fp32-4wave": (
+                "hipkittens_gemm_fp8fp32_4wave",
+                (
+                    "-m",
+                    "256",
+                    "-n",
+                    "256",
+                    "-k",
+                    "256",
+                    "--rotating-buffer-count",
+                    "4",
+                ),
+            ),
+            "hipkittens-mxfp8-4wave": (
+                "hipkittens_gemm_mxfp8_4wave",
+                ("-m", "256", "-n", "256", "-k", "256"),
+            ),
+        }
+        for workload_id, (executable, arguments) in expected.items():
+            with self.subTest(workload=workload_id):
+                row = workloads[workload_id]
+                self.assertEqual(
+                    row["relative_path"],
+                    (
+                        "rocjitsu-test-corpus-build/kernels-gfx950-hipkittens/"
+                        f"cases/hipkittens/{executable}"
+                    ),
+                )
+                self.assertEqual(row["command_arguments"], arguments)
+                self.assertEqual(row["fault_families"], ("barrier-drop",))
+                self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
+
+    def test_hipkittens_native_commands_preserve_exact_corpus_arguments(self) -> None:
+        workspace = Path("/workspace")
+        for workload_id in (
+            "hipkittens-bf16fp32-16x32",
+            "hipkittens-fp8fp32-4wave",
+            "hipkittens-mxfp8-4wave",
+        ):
+            with self.subTest(workload=workload_id):
+                workload = validation.WORKLOAD_BY_ID[workload_id]
+                self.assertEqual(
+                    validation._workload_command(
+                        workspace,
+                        "gfx950",
+                        workload,
+                        "fault",
+                        workspace / "unused.json",
+                    ),
+                    [
+                        str(workspace / workload.relative_path),
+                        *workload.command_arguments,
+                    ],
+                )
+
     def test_text_manifest_filters_target_specific_workloads(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

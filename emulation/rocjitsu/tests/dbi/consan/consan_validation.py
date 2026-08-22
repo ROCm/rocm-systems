@@ -528,6 +528,78 @@ WORKLOADS = (
         run_timeout_seconds=120,
     ),
     Workload(
+        id="hipkittens-bf16fp32-16x32",
+        priority="P0",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx950-hipkittens/cases/"
+            "hipkittens/hipkittens_gemm_bf16fp32_16x32"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        command_arguments=("-m", "256", "-n", "256", "-k", "256"),
+        targets=("gfx950",),
+        run_timeout_seconds=60,
+    ),
+    Workload(
+        id="hipkittens-fp8fp32-4wave",
+        priority="P1",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx950-hipkittens/cases/"
+            "hipkittens/hipkittens_gemm_fp8fp32_4wave"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        command_arguments=(
+            "-m",
+            "256",
+            "-n",
+            "256",
+            "-k",
+            "256",
+            "--rotating-buffer-count",
+            "4",
+        ),
+        targets=("gfx950",),
+        run_timeout_seconds=60,
+    ),
+    Workload(
+        id="hipkittens-mxfp8-4wave",
+        priority="P1",
+        corpus="rocjitsu-test-corpus",
+        kind="native-executable",
+        relative_path=(
+            "rocjitsu-test-corpus-build/kernels-gfx950-hipkittens/cases/"
+            "hipkittens/hipkittens_gemm_mxfp8_4wave"
+        ),
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop",),
+        command_arguments=("-m", "256", "-n", "256", "-k", "256"),
+        targets=("gfx950",),
+        run_timeout_seconds=60,
+    ),
+    Workload(
         id="tensile-sk-sgemm-quick",
         priority="P2",
         corpus="rocjitsu-test-corpus",
@@ -1668,6 +1740,18 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # this does not change the production Record/Replay cadence.
         "pytorch-norm-softmax": {
             "run_timeout_seconds": 60,
+        },
+        # Each compact HipKittens validation dispatch misses the production
+        # stride. Select every workgroup for this bounded validation row; the
+        # source workloads and their exact numerical oracles are unchanged.
+        "hipkittens-bf16fp32-16x32": {
+            "record_replay_runtime_sample_stride": 1,
+        },
+        "hipkittens-fp8fp32-4wave": {
+            "record_replay_runtime_sample_stride": 1,
+        },
+        "hipkittens-mxfp8-4wave": {
+            "record_replay_runtime_sample_stride": 1,
         },
     },
     "gfx1250": {
