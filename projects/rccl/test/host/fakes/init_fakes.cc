@@ -134,6 +134,9 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
 // computeBuffSizes seams: rcclSetDefaultBuffSizes fills the per-protocol default
 // buffer sizes; rcclSetP2pNetChunkSize fills the multi-node net chunk size.
 // Deterministic values let tests assert the assignment paths.
+// TODO: real impls live in rccl_wrap.cc, which pulls in ce_coll/dda/sym_kernels/
+// dev_runtime/strongstream (all unstubbed here). Swap these for the real thing
+// once rccl_wrap.cc gets its own microtests and stub floor.
 void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
   defaults[0] = 1 << 18;  // LL
   defaults[1] = 1 << 18;  // LL128
