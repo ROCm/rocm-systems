@@ -779,16 +779,20 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
 // ===========================================================================
 namespace {
 // A comm brought through commAlloc()'s happy path, ready for devCommSetup().
-std::unique_ptr<ncclComm> AllocedComm(int ndev = 8, int rank = 0) {
-  auto comm = std::unique_ptr<ncclComm>(new ncclComm{});
-  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), /*parent=*/nullptr, ndev, rank));
-  return comm;
+// void + out-param (not a return value) so a commAlloc failure -- a broken
+// precondition, not the thing under test -- can ASSERT: gtest's ASSERT_* only
+// unwinds a void-returning function. Callers wrap the call in
+// ASSERT_NO_FATAL_FAILURE so that unwind propagates out of the test too.
+void AllocedComm(std::unique_ptr<ncclComm>& comm, int ndev = 8, int rank = 0) {
+  comm = std::unique_ptr<ncclComm>(new ncclComm{});
+  ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), /*parent=*/nullptr, ndev, rank));
 }
 }  // namespace
 
 TEST_F(InitMicrotest, DevCommSetup_HappyPath_ReturnsSuccessAndSetsDevComm) {
   InstallDevCommSetupSuccess();
-  auto comm = AllocedComm();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
   EXPECT_NE(nullptr, comm->devComm);            // devCommAndChans allocated
   EXPECT_NE(nullptr, comm->workFifoBuf);         // host workFifo arm taken
@@ -796,14 +800,16 @@ TEST_F(InitMicrotest, DevCommSetup_HappyPath_ReturnsSuccessAndSetsDevComm) {
 
 TEST_F(InitMicrotest, DevCommSetup_AsyncOpFails_ReturnsError) {
   InstallDevCommSetupSuccess();
-  auto comm = AllocedComm();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   g_hipAsyncOpsResult = hipErrorInvalidValue;    // first calloc-async capture-mode fails
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }
 
 TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
   InstallDevCommSetupSuccess();
-  auto comm = AllocedComm();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }
