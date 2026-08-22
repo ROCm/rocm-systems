@@ -159,8 +159,12 @@ __hidden ncclResult_t inspectorPluginInit(void** context, uint64_t commHash,
  *
  */
 __hidden ncclResult_t inspectorPluginFinalize(void* context) {
-  inspectorDelComm((struct inspectorCommInfo *)context);
+  // Held so a concurrent teardown cannot delete the dumper mid-dump; the dump itself is
+  // serialized by the dumper's own guard.
   pthread_mutex_lock(&gLock);
+  // Dump before inspectorDelComm(), which clears this communicator's dump flags.
+  inspectorDumpNow();
+  inspectorDelComm((struct inspectorCommInfo *)context);
   if (--gInitialized == 0) {
     inspectorGlobalFinalize();
   }
