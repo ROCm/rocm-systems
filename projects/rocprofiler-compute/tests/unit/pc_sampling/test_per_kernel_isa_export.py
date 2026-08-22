@@ -6,9 +6,13 @@
 import csv
 from pathlib import Path
 
+import pytest
+
 from pc_sampling.per_kernel_isa_export import (
+    MAX_SHORT_NAME_LENGTH,
     _build_isa_header,
     _resolve_isa_export_path,
+    _sanitize_short_name,
     _write_per_kernel_isa_files,
     export_per_kernel_isa_files,
 )
@@ -16,6 +20,7 @@ from pc_sampling.per_kernel_isa_export import (
 
 def make_isa_row(
     kernel_uuid=1,
+    short_name="vecCopy",
     code_object_id=5,
     pid=42,
     offset=0x10,
@@ -33,6 +38,7 @@ def make_isa_row(
         workload_name,
         workload_sub_name,
         kernel_uuid,
+        short_name,
         code_object_id,
         pid,
         offset,
@@ -56,16 +62,55 @@ def read_exported_rows(export_path):
 
 
 def test_resolve_isa_export_path_names_kernel_code_object_and_process():
-    """One kernel's ISA is filed by uuid, then by the code object and process."""
+    """One kernel's ISA is filed by short name and uuid, then by object and process."""
     export_path = _resolve_isa_export_path(
         Path("/results/per_kernel_pc_sampling"),
-        ("vector_copy", "MI300X_A1", 7, 5, 42),
+        ("vector_copy", "MI300X_A1", 7, "vecCopy_2", 5, 42),
     )
 
     assert export_path == Path(
         "/results/per_kernel_pc_sampling/vector_copy/MI300X_A1"
-        "/kernel_7/isa_code_object_id_5_pid_42.csv"
+        "/vecCopy_2_7/isa_code_object_id_5_pid_42.csv"
     )
+
+
+def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
+    """Two overloads truncate to one short name, so the uuid separates them."""
+    export_paths = {
+        _resolve_isa_export_path(
+            Path("/results/per_kernel_pc_sampling"),
+            ("vector_copy", "MI300X_A1", kernel_uuid, "gemm", 5, 42),
+        )
+        for kernel_uuid in (7, 8)
+    }
+
+    assert len(export_paths) == 2
+
+
+@pytest.mark.parametrize(
+    ("short_name", "expected"),
+    [
+        ("vecCopy_2", "vecCopy_2"),
+        ("__amd_rocclr_streamOpsDecrement.kd", "amd_rocclr_streamOpsDecrement"),
+        ("operator/", "operator"),
+        ("cub::DeviceReduceKernel", "cub_DeviceReduceKernel"),
+        ("my kernel", "my_kernel"),
+        ("$_0::__cxx11", "0_cxx11"),
+        ("a" * 100, "a" * MAX_SHORT_NAME_LENGTH),
+    ],
+    ids=[
+        "plain_identifier",
+        "kernel_descriptor_suffix",
+        "operator_slash",
+        "namespace_qualifier",
+        "whitespace",
+        "lambda_spelling",
+        "over_length",
+    ],
+)
+def test_sanitize_short_name(short_name, expected):
+    """A short name reduces to a path component without losing its identity."""
+    assert _sanitize_short_name(short_name) == expected
 
 
 def test_build_isa_header_places_stall_reasons_between_counts_and_source():
@@ -113,10 +158,10 @@ def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
         str(export_path.relative_to(tmp_path))
         for export_path in tmp_path.rglob("*.csv")
     ) == [
-        "vector_copy/MI300X_A1/kernel_1/isa_code_object_id_5_pid_42.csv",
-        "vector_copy/MI300X_A1/kernel_1/isa_code_object_id_6_pid_42.csv",
-        "vector_copy/MI300X_A1/kernel_1/isa_code_object_id_6_pid_43.csv",
-        "vector_copy/MI300X_A1/kernel_2/isa_code_object_id_6_pid_43.csv",
+        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_5_pid_42.csv",
+        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_6_pid_42.csv",
+        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_6_pid_43.csv",
+        "vector_copy/MI300X_A1/vecCopy_2/isa_code_object_id_6_pid_43.csv",
     ]
 
 
@@ -130,7 +175,7 @@ def test_write_per_kernel_isa_files_numbers_instruction_lines_per_file(tmp_path)
 
     _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [])
 
-    workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "kernel_1"
+    workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "vecCopy_1"
     first_rows = read_exported_rows(
         workload_directory / "isa_code_object_id_5_pid_42.csv"
     )
@@ -162,7 +207,7 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
         tmp_path
         / "vector_copy"
         / "MI300X_A1"
-        / "kernel_1"
+        / "vecCopy_1"
         / "isa_code_object_id_5_pid_42.csv"
     )
     assert exported_rows[1] == [
