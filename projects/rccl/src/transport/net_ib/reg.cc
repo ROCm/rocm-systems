@@ -104,38 +104,44 @@ fail:
  * caller (net.cc proxy register) has already exported one dma-buf fd per
  * segment; segAddrs[s]/segLens[s]/segOffsets[s]/segFds[s] describe segment s.
  */
-ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens,
-                                       uint64_t* segOffsets, int* segFds, int type, void** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
+                                       int* segFds, int type, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   if (nSeg < 1 || nSeg > NCCL_IB_MAX_SEGMENTS) {
-    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg, NCCL_IB_MAX_SEGMENTS);
+    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
+         NCCL_IB_MAX_SEGMENTS);
     return ncclInvalidUsage;
   }
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) calloc(1, sizeof(struct ncclIbMrHandle));
-  if (mhandleWrapper == nullptr) { WARN("Failed to allocate IB MR handle wrapper"); return ncclSystemError; }
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)calloc(1, sizeof(struct ncclIbMrHandle));
+  if (mhandleWrapper == nullptr) {
+    WARN("Failed to allocate IB MR handle wrapper");
+    return ncclSystemError;
+  }
   mhandleWrapper->nSegments = nSeg;
   for (int s = 0; s < nSeg; s++) {
-    mhandleWrapper->segStart[s] = (uintptr_t) segAddrs[s];
-    mhandleWrapper->segLen[s]   = segLens[s];
+    mhandleWrapper->segStart[s] = (uintptr_t)segAddrs[s];
+    mhandleWrapper->segLen[s] = segLens[s];
     for (int i = 0; i < base->vProps.ndevs; i++) {
       struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-      NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, segAddrs[s], segLens[s], type, segOffsets[s], segFds[s],
-                                               0ULL, &mhandleWrapper->segMrs[s][i]), ret, fail);
+      NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, segAddrs[s], segLens[s], type, segOffsets[s], segFds[s], 0ULL,
+                                               &mhandleWrapper->segMrs[s][i]),
+                    ret, fail);
     }
   }
   // Alias segment 0 into mrs[] so single-segment consumers keep working.
   for (int i = 0; i < base->vProps.ndevs; i++) mhandleWrapper->mrs[i] = mhandleWrapper->segMrs[0][i];
-  INFO(NCCL_NET|NCCL_REG, "NET/IB: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs",
-       segAddrs[0], (size_t)(mhandleWrapper->segStart[nSeg-1] + mhandleWrapper->segLen[nSeg-1] - mhandleWrapper->segStart[0]), nSeg);
-  *mhandle = (void*) mhandleWrapper;
+  INFO(NCCL_NET | NCCL_REG, "NET/IB: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", segAddrs[0],
+       (size_t)(mhandleWrapper->segStart[nSeg - 1] + mhandleWrapper->segLen[nSeg - 1] - mhandleWrapper->segStart[0]),
+       nSeg);
+  *mhandle = (void*)mhandleWrapper;
   return ncclSuccess;
 fail:
   for (int s = 0; s < nSeg; s++) {
     for (int i = 0; i < base->vProps.ndevs; i++) {
       if (mhandleWrapper->segMrs[s][i]) {
         struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-        (void) ncclIbDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]);
+        (void)ncclIbDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]);
       }
     }
   }
