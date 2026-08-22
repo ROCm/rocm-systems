@@ -4,6 +4,27 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.1.0
+
+### Added
+
+### Changed
+
+### Optimized
+
+### Resolved Issues
+
+- **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
+  - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
+  - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
+
+### Upcoming Changes
+
+- **UUIDs will be replaced by CUIDs in an upcoming version**.  
+  - UUIDs will soon be replaced with Component Unified IDs (CUIDs). These CUIDs will be consistent across various AMD tools and products so users will be able to definitively identify their devices regardless of what tool they're using.
+  - `amdsmi_get_gpu_device_cuid` has been added as an API for this upcoming change but will remain disabled until full support from the amdgpu driver is available.
+  - The CLI `list` output and GPU selection now report the CUID in place of the UUID when a CUID is available, and fall back to the UUID otherwise.
+
 ## amd_smi_lib for ROCm 10.0.0
 
 ### Added
@@ -106,11 +127,6 @@ GPU: 0
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
-### Fixed
-
-- **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
-  - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
-
 ### Optimized
 
 - **Optimized `amdsmi_get_gpu_process_list()` to skip redundant KFD topology discovery**.  
@@ -119,9 +135,8 @@ GPU: 0
 
 ### Resolved Issues
 
-- **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.
-  - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
-  - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
+- **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.  
+  - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
 
 - **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
   - The set path wrote `"1"`/`"0"` to the `ptl/ptl_enable` sysfs node, which only accepts `"enabled"`/`"disabled"`; the driver ignored the numeric write while the API still reported success. The state now changes as expected, and a rejected write returns a real error instead of a generic success.
@@ -141,13 +156,6 @@ GPU: 0
 
 - **Fixed ctypes `DeprecationWarning` from `amdsmi_wrapper.py` on Python 3.14**.  
   - Python 3.14 deprecates the implicit ctypes structure layout when `_pack_` is set (slated to become an error in 3.19). Each packed structure/union in the generated wrapper now sets `_layout_ = 'ms'`, preserving the existing MSVC-compatible layout (no ABI change) while silencing the warning.
-
-### Upcoming Changes
-
-- **UUIDs will be replaced by CUIDs in an upcoming version**.
-  - UUIDs will soon be replaced with Component Unified IDs (CUIDs). These CUIDs will be consistent across various AMD tools and products so users will be able to definitively identify their devices regardless of what tool they're using.
-  - `amdsmi_get_gpu_device_cuid` has been added as an API for this upcoming change but will remain disabled until full support from the amdgpu driver is available.
-  - The CLI `list` output and GPU selection now report the CUID in place of the UUID when a CUID is available, and fall back to the UUID otherwise.
 
 ## amd_smi_lib for ROCm 7.14.0
 
