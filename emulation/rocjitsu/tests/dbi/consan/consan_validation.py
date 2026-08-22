@@ -2683,7 +2683,7 @@ def _setting_metadata(name: str) -> dict:
         "RJ_CONSAN_MOI_TRACK_ATOMICS",
     }:
         category = "instrumentation-selection"
-    elif name in {
+    elif name in ORDINARY_FORBIDDEN_ENVIRONMENT or name in {
         "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
         "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
@@ -7523,16 +7523,22 @@ def _explain_contract(
                 )
         for fault in workload["faults"]:
             for expectation in fault["profile_expectations"]:
-                if expectation["policy_unsets"]:
+                tuned_settings = [
+                    setting["name"]
+                    for setting in expectation["policy_settings"]
+                    if setting["usability_exception"]
+                ]
+                policy_unsets = [
+                    setting["name"] for setting in expectation["policy_unsets"]
+                ]
+                if tuned_settings or policy_unsets:
                     fault_policy_exceptions.append(
                         {
                             "workload": workload["id"],
                             "fault": fault["id"],
                             "profile": expectation["profile"],
-                            "unsets": [
-                                setting["name"]
-                                for setting in expectation["policy_unsets"]
-                            ],
+                            "settings": tuned_settings,
+                            "unsets": policy_unsets,
                         }
                     )
     return {

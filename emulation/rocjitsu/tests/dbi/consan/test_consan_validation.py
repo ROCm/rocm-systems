@@ -3041,6 +3041,12 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(setting["category"], "workload-tuning")
             self.assertTrue(setting["usability_exception"])
 
+    def test_coverage_limiting_controls_are_audited_as_workload_tuning(self) -> None:
+        for name in validation.ORDINARY_FORBIDDEN_ENVIRONMENT:
+            [setting] = validation._audited_settings({name: "fixture-value"})
+            self.assertEqual(setting["category"], "workload-tuning")
+            self.assertTrue(setting["usability_exception"])
+
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         environment = validation._clean_environment(
@@ -5653,6 +5659,23 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", effective)
         self.assertEqual(implicit, validation.ORDINARY_MOI_RUNTIME_DEFAULTS)
         self.assertIn("$FAULT_SPEC", fault["validator_argv_template"])
+
+    def test_explain_discloses_fault_only_kernel_filter_exception(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        audit = validation._explain_contract(
+            Path("/workspace"),
+            "gfx1250",
+            ("qwen-prefill",),
+            ("inline-shadow",),
+            path,
+            allow_reference=False,
+        )
+        [exception] = audit["usability_audit"]["fault_policy_exceptions"]
+        self.assertEqual(exception["workload"], "qwen-prefill")
+        self.assertEqual(exception["fault"], "barrier-drop")
+        self.assertEqual(exception["profile"], "inline-shadow")
+        self.assertEqual(exception["settings"], ["RJ_CONSAN_TEST_KERNEL_FILTER"])
+        self.assertEqual(exception["unsets"], [])
 
     def test_tp1_decode_row_does_not_repeat_prefill(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tp1-decode-combined"]
