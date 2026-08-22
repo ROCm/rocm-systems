@@ -495,7 +495,12 @@ contracts:
   which falsely made clean and paired rows appear to use different artifacts;
   and
 - interrupted validation being unable to resume an already complete matching
-  fault row without rerunning the destructive physical-GPU mutation.
+  fault row without rerunning the destructive physical-GPU mutation; and
+- the CDNA mixed-persistent-state fixture consuming a compiler-generated
+  dynamic-stack scratch-base load in synthetic scalar-pressure assembly before
+  its required scalar-memory wait. The existing correct/incorrect pair now
+  retains the wait, and final-ISA waitcheck plus repeated uninstrumented and
+  SuperCollider physical executions guard the fixture itself.
 
 These implementation findings remain covered by device or focused unit
 regressions. Any future red cell receives the same treatment: fix the owning
