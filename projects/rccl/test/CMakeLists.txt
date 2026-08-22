@@ -689,6 +689,23 @@ if(BUILD_TESTS)
       test_sparse_send_recv.cpp
     )
 
+    # rccl_ep has no library target, so the test binary compiles its C ABI directly.
+    if(ENABLE_RCCL_EP_TESTS)
+      list(APPEND MPI_TEST_SOURCE_FILES
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+      )
+      # The project is declared project(rccl CXX) with no enable_language(HIP), so CMake
+      # silently drops a .hip source from the target unless it is marked as CXX.
+      set_source_files_properties(
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES LANGUAGE CXX)
+      set_source_files_properties(
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+    endif()
+
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
 
     # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
