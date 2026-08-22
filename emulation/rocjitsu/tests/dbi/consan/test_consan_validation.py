@@ -4769,6 +4769,77 @@ class ConSanValidationTest(unittest.TestCase):
                 command[command.index("--expect-numeric-rows") + 1], "16"
             )
             self.assertEqual(
+                command[command.index("--minimum-timed-ms") + 1], "1.0"
+            )
+            self.assertEqual(
+                json.loads(
+                    command[command.index("--exact-problem-sizes-json") + 1]
+                ),
+                [expected_sizes[index]],
+            )
+            self.assertEqual(
+                json.loads(
+                    command[
+                        command.index("--expect-source-exact-problem-sizes-json")
+                        + 1
+                    ]
+                ),
+                expected_sizes,
+            )
+
+        fault_command = validation._fault_workload_command(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            Path("/artifacts/fault.json"),
+        )
+        self.assertEqual(
+            json.loads(
+                fault_command[
+                    fault_command.index("--exact-problem-sizes-json") + 1
+                ]
+            ),
+            [expected_sizes[0]],
+        )
+        self.assertEqual(
+            fault_command[fault_command.index("--expect-numeric-rows") + 1],
+            "16",
+        )
+        self.assertEqual(
+            fault_command[fault_command.index("--minimum-timed-ms") + 1],
+            "1.0",
+        )
+
+    def test_gfx1250_spmm_f8_ml_shards_every_benchmark_block(self) -> None:
+        workload = validation._effective_workload(
+            "gfx1250", validation.WORKLOAD_BY_ID["tensile-spmm-f8-ml"]
+        )
+        commands = validation._workload_commands(
+            Path("/workspace"),
+            "gfx1250",
+            workload,
+            "overhead",
+            Path("/artifacts/benchmark.json"),
+        )
+        expected_sizes = [
+            [16, 16, 1, 64],
+            [16, 16, 1, 256],
+            [128, 128, 1, 128],
+        ]
+        self.assertEqual(workload.run_timeout_seconds, 960)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 900)
+        self.assertEqual(workload.tensile_shard_parallelism, 3)
+        self.assertEqual(workload.tensile_fault_shard_index, 0)
+        self.assertEqual(len(commands), 3)
+        for index, command in enumerate(commands):
+            self.assertEqual(
+                command[command.index("--expect-numeric-rows") + 1],
+                str((16, 23, 40)[index]),
+            )
+            self.assertEqual(
+                command[command.index("--minimum-timed-ms") + 1], "1.0"
+            )
+            self.assertEqual(
                 json.loads(
                     command[command.index("--exact-problem-sizes-json") + 1]
                 ),

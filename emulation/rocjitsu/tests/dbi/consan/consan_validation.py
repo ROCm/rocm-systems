@@ -67,6 +67,7 @@ EMPIRICAL_DEFAULT_ROUNDS = 10
 EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT = 0.05
 EMPIRICAL_MINIMUM_TIMED_MS = 250.0
+TENSILE_SHARD_TIMING_CANARY_MS = 1.0
 EMPIRICAL_MAX_INNER_REPETITIONS = 1_000_000
 PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
@@ -1640,6 +1641,24 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             # The clean and overhead phases still qualify every shard.
             "tensile_fault_shard_index": 0,
         },
+        # The seven sparse benchmark blocks repeat the same three Exact
+        # problem sizes. Give each size an independent all-block numeric
+        # oracle and run the three complete size slices concurrently. This
+        # retains every generated client and solution while replacing the
+        # roughly 20-minute serial Record/Replay traversal with a bounded
+        # maximum-shard latency. Fault qualification uses the smallest slice.
+        "tensile-spmm-f8-ml": {
+            "tensile_inner_timeout_seconds": 900,
+            "run_timeout_seconds": 960,
+            "tensile_exact_problem_size_shards": (
+                ((16, 16, 1, 64),),
+                ((16, 16, 1, 256),),
+                ((128, 128, 1, 128),),
+            ),
+            "tensile_expected_numeric_rows_per_shard": (16, 23, 40),
+            "tensile_shard_parallelism": 3,
+            "tensile_fault_shard_index": 0,
+        },
     },
 }
 
@@ -2640,6 +2659,13 @@ def _workload_command(
             f"{workload.id}-{phase}",
         ]
     if workload.kind == "tensile":
+        minimum_timed_ms = workload.tensile_minimum_timed_ms
+        if tensile_exact_problem_sizes is not None:
+            # Each leaf proves a positive timing canary. The parent result
+            # aggregates all shards and enforces the workload-level minimum.
+            minimum_timed_ms = min(
+                minimum_timed_ms, TENSILE_SHARD_TIMING_CANARY_MS
+            )
         command = [
             str(_tensile_python()),
             str(Path(__file__).with_name("consan_tensile_validation.py")),
@@ -2654,7 +2680,7 @@ def _workload_command(
             "--repetitions",
             "1",
             "--minimum-timed-ms",
-            str(workload.tensile_minimum_timed_ms),
+            str(minimum_timed_ms),
             "--label",
             f"{workload.id}-{phase}",
         ]

@@ -273,11 +273,22 @@ sizes before writing any filtered configuration, so a corpus addition,
 deletion, reorder, duplicate, or non-Exact problem form fails closed instead
 of silently narrowing the 96-row denominator.
 
+The seven-block `tensile-spmm-f8-ml` row uses the same contract for the three
+Exact sizes repeated identically by every block. The filtered YAML must retain
+all seven blocks and selects one size in each; differing block inventories
+fail closed. The three shards require 16, 23, and 40 exact numeric rows,
+respectively, and execute concurrently with 900-second inner and 960-second
+enclosing bounds. Each leaf process proves a positive one-millisecond timing
+canary, while the parent result aggregates all three processes before
+enforcing the ordinary workload-level timing minimum. Thus sharding cannot
+turn a full-row empirical gate into three artificially equal timing quotas.
+
 Fault inventory and contained exact-one mutation use the manifest-selected
-first shard and retain its complete 16-row numerical oracle. This keeps the
-fault gate bounded while the clean and paired-overhead gates continue to cover
-all six sizes and all 96 rows. The representative fault shard is explicit in
-the executable manifest; a missing or out-of-range selection fails closed.
+first shard and retain its complete numerical oracle: 16 rows for both current
+sharded workloads. This keeps the fault gate bounded while clean and paired
+overhead continue to cover every declared size, benchmark block, and generated
+row. The representative fault shard is explicit in the executable manifest; a
+missing or out-of-range selection fails closed.
 
 PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
 the workspace `pytorch/` checkout is for workload discovery and source
