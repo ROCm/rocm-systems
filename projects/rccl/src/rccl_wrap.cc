@@ -601,15 +601,24 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
   return std::max(agThreshold, rsThreshold);
 }
 
+size_t rcclHierarchicalAllGatherThreshold(int nNodes, int64_t configuredThreshold) {
+  if (configuredThreshold >= 0) return static_cast<size_t>(configuredThreshold);
+  return rcclHierarchicalTempBufferSize(nNodes, /*allGather=*/true, /*reduceScatter=*/false);
+}
+
+bool rcclNeedHierarchicalComms(bool allGatherEnabled, size_t allGatherThreshold, bool reduceScatterEnabled) {
+  return (allGatherEnabled && allGatherThreshold > 0) || reduceScatterEnabled;
+}
+
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
+RCCL_PARAM(HierarchicalAllGatherThreshold, "HIERARCHICAL_ALLGATHER_THRESHOLD", -1);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
 
-  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
-  return threshold > 0 && msgSize <= threshold;
+  return comm->hierarchicalAllGatherThreshold > 0 && msgSize <= comm->hierarchicalAllGatherThreshold;
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {

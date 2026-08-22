@@ -1523,6 +1523,8 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
                                    /*nRanks=*/8 * tc.nNodes);
                     mockComm->nNodes                       = tc.nNodes;
                     mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+                    mockComm->hierarchicalAllGatherThreshold =
+                        rcclHierarchicalAllGatherThreshold(tc.nNodes, /*configuredThreshold=*/-1);
 
                     EXPECT_EQ(rcclUseHierarchicalAllGather(mockComm, tc.msgSize),
                               tc.expected)
@@ -1556,6 +1558,39 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         << "One or more rcclUseHierarchicalAllGather tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclHierarchicalAllGatherThresholdTests)
+{
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t HALF    = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL    = HIERARCHICAL_TEMP_BUFFER_SIZE;
+
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(8, /*configuredThreshold=*/-1), QUARTER);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(16, /*configuredThreshold=*/-1), HALF);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, /*configuredThreshold=*/-1), FULL);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, /*configuredThreshold=*/0), 0);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, /*configuredThreshold=*/HALF), HALF);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, /*configuredThreshold=*/2 * FULL), 2 * FULL);
+}
+
+TEST(Rcclwrap, RcclNeedHierarchicalCommsTests)
+{
+    // HAG enabled with threshold zero and HRS disabled: skip all hierarchical setup.
+    EXPECT_FALSE(rcclNeedHierarchicalComms(/*allGatherEnabled=*/true, /*allGatherThreshold=*/0,
+                                           /*reduceScatterEnabled=*/false));
+    // A usable HAG threshold requires hierarchical communicators.
+    EXPECT_TRUE(rcclNeedHierarchicalComms(/*allGatherEnabled=*/true, /*allGatherThreshold=*/1,
+                                          /*reduceScatterEnabled=*/false));
+    // HRS independently requires the same hierarchical communicators.
+    EXPECT_TRUE(rcclNeedHierarchicalComms(/*allGatherEnabled=*/false, /*allGatherThreshold=*/0,
+                                          /*reduceScatterEnabled=*/true));
+    // Both algorithms disabled: skip setup.
+    EXPECT_FALSE(rcclNeedHierarchicalComms(/*allGatherEnabled=*/false, /*allGatherThreshold=*/0,
+                                           /*reduceScatterEnabled=*/false));
+    // Threshold-zero HAG must not suppress setup needed by HRS.
+    EXPECT_TRUE(rcclNeedHierarchicalComms(/*allGatherEnabled=*/true, /*allGatherThreshold=*/0,
+                                          /*reduceScatterEnabled=*/true));
 }
 
 TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)

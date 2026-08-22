@@ -697,6 +697,7 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  size_t hierarchicalAllGatherThreshold;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,

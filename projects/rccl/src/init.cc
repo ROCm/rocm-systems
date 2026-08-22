@@ -706,6 +706,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
+  comm->hierarchicalAllGatherThreshold = 0;
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
@@ -2770,42 +2771,68 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
   
-  // Initialize hierarchical sub-communicators and temp buffers
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
-      (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {
-    if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
-    } else {
-      // Hierarchical Shuffle kernel assumes compact rank ordering.
-      // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
-      const int lr = comm->maxLocalRanks;
-      bool compactRanks = true;
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
-          compactRanks = false;
-          break;
-        }
-      }
-      if (!compactRanks) {
-        INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
+  {
+    // Compute the effective HAG threshold before deciding whether hierarchical resources are needed.
+    const bool hierarchicalAllGatherEnabled = rcclParamHierarchicalAllGather() == 1;
+    const bool hierarchicalReduceScatterEnabled = rcclParamHierarchicalReduceScatter() == 1;
+    const int64_t configuredAllGatherThreshold = rcclParamHierarchicalAllGatherThreshold();
+    if (hierarchicalAllGatherEnabled) {
+      comm->hierarchicalAllGatherThreshold =
+        rcclHierarchicalAllGatherThreshold(comm->nNodes, configuredAllGatherThreshold);
+    }
+    const bool hierarchicalCommsNeeded = rcclNeedHierarchicalComms(
+      hierarchicalAllGatherEnabled, comm->hierarchicalAllGatherThreshold, hierarchicalReduceScatterEnabled);
+    const bool hierarchicalSetupCandidate =
+      !job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1;
+
+    if (hierarchicalSetupCandidate && comm->rank == 0 && hierarchicalAllGatherEnabled &&
+        configuredAllGatherThreshold >= 0) {
+      INFO(NCCL_INIT, "Hierarchical AllGather threshold set to %zu bytes by environment",
+           comm->hierarchicalAllGatherThreshold);
+    }
+    if (hierarchicalSetupCandidate && comm->rank == 0 && !hierarchicalCommsNeeded &&
+        (hierarchicalAllGatherEnabled || hierarchicalReduceScatterEnabled)) {
+      INFO(NCCL_INIT, "Hierarchical collectives: no enabled algorithm has a positive threshold, skipping setup");
+    }
+
+    // Initialize hierarchical sub-communicators and temp buffers only when an algorithm can use them.
+    if (hierarchicalSetupCandidate && hierarchicalCommsNeeded) {
+      if (comm->minLocalRanks != comm->maxLocalRanks) {
+        INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
       } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
-        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-        // honor user input if user explicitly disables PAT
-        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
-        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
-        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-        comm->forcePatEnable = false;
-        // inherit PXN disable from parent comm
-        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
-        comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+        // Hierarchical Shuffle kernel assumes compact rank ordering.
+        // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
+        const int lr = comm->maxLocalRanks;
+        bool compactRanks = true;
+        for (int r = 0; r < comm->nRanks; r++) {
+          if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
+            compactRanks = false;
+            break;
+          }
+        }
+        if (!compactRanks) {
+          INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
+        } else {
+          int node_id = comm->rankToNode[comm->rank];
+          int local_rank = comm->rankToLocalRank[comm->rank];
+          NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
+          // honor user input if user explicitly disables PAT
+          const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+          bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+          comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
+          NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
+          comm->forcePatEnable = false;
+          // inherit PXN disable from parent comm
+          comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+          size_t tempBufSize =
+            std::max(comm->hierarchicalAllGatherThreshold,
+                     rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false,
+                                                    hierarchicalReduceScatterEnabled));
+          NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
+          comm->hierarchicalCommsInitialized = true;
+          INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+               comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+        }
       }
     }
   }
