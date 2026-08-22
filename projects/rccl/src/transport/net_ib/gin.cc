@@ -388,15 +388,14 @@ ncclGin_t ncclGinIbGdaki = {"GIN_IB_GDAKI",
                             ncclGinIbFinalize};
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
-
 struct ncclRmaIbProxyMrHandle {
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs; remote view
   // base_vas/rkeys indexed [rank*nSegments + seg]. See walkthrough doc.
   size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
-  struct ncclIbMrHandle *mrHandle[NCCL_RMA_MAX_SEGMENTS];
-  uintptr_t *base_vas;
-  uint32_t  *rkeys;
+  struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
+  uintptr_t* base_vas;
+  uint32_t* rkeys;
 };
 
 // Return the segment index that contains byte offset off within the buffer.
@@ -429,11 +428,11 @@ static inline bool ncclRmaRangeOk(const struct ncclRmaIbProxyMrHandle* h, uint64
 // landing a single byte in the caller's flush scratch. Passing the whole
 // window thus fences GPUDirect writes across every physical segment (the
 // caller reads its own buffer via base_vas[self]/rkeys[self] on a loopback QP).
-static ncclResult_t ncclRmaBuildSegmentedWrs(
-    struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr, enum ibv_wr_opcode opcode, uint64_t wrId,
-    struct ncclRmaIbProxyMrHandle* localH,  int localRank,  uint64_t localOff,
-    struct ncclRmaIbProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
-    size_t size, const struct ibv_sge* flushSge) {
+static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr,
+                                             enum ibv_wr_opcode opcode, uint64_t wrId,
+                                             struct ncclRmaIbProxyMrHandle* localH, int localRank, uint64_t localOff,
+                                             struct ncclRmaIbProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
+                                             size_t size, const struct ibv_sge* flushSge) {
   int n = 0;
   uint64_t lOff = localOff, rOff = remoteOff;
   size_t rem = size;
@@ -475,7 +474,10 @@ static ncclResult_t ncclRmaBuildSegmentedWrs(
     }
     if (n > 0) wr[n - 1].next = &wr[n];
 
-    lOff += chunk; rOff += chunk; rem -= chunk; n++;
+    lOff += chunk;
+    rOff += chunk;
+    rem -= chunk;
+    n++;
   }
   *nWr = n;
   return ncclSuccess;
@@ -707,11 +709,11 @@ ncclResult_t ncclRmaIbProxyDestroyContext(void* rmaCtx) {
 }
 
 ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
-                                         uint64_t mr_flags, void** mhandle) {
-  struct ncclGinIbCollComm *cComm = (struct ncclGinIbCollComm *)collComm;
-  struct ncclRmaIbProxyMrHandle *rmaMrHandle = NULL;
+                                          uint64_t mr_flags, void** mhandle) {
+  struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
+  struct ncclRmaIbProxyMrHandle* rmaMrHandle = NULL;
   uintptr_t localVas[NCCL_RMA_MAX_SEGMENTS];
-  uint32_t  localRkeys[NCCL_RMA_MAX_SEGMENTS];
+  uint32_t localRkeys[NCCL_RMA_MAX_SEGMENTS];
   ncclResult_t ret = ncclSuccess;
   int nSeg = 1;
   int registered = 0;
@@ -729,8 +731,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
 #endif
   if (nSeg < 1) nSeg = 1;
   if (nSeg > NCCL_RMA_MAX_SEGMENTS) {
-    WARN("NET/IB/RMA: buffer %p (size %zu) spans %d segments, exceeds NCCL_RMA_MAX_SEGMENTS=%d",
-         data, size, nSeg, NCCL_RMA_MAX_SEGMENTS);
+    WARN("NET/IB/RMA: buffer %p (size %zu) spans %d segments, exceeds NCCL_RMA_MAX_SEGMENTS=%d", data, size, nSeg,
+         NCCL_RMA_MAX_SEGMENTS);
     ret = ncclInvalidUsage;
     goto fail;
   }
@@ -739,8 +741,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
 
   if (nSeg == 1) {
     // Single segment: reuse the caller's fd (fd==-1 falls back to ibv_reg_mr).
-    NCCLCHECKGOTO(ncclIbRegMrDmaBuf(cComm->recvComm, data, size, type, offset, fd,
-                                    (void**)&rmaMrHandle->mrHandle[0]), ret, fail);
+    NCCLCHECKGOTO(ncclIbRegMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, (void**)&rmaMrHandle->mrHandle[0]),
+                  ret, fail);
     registered = 1;
     rmaMrHandle->segOff[1] = size;
     localVas[0] = (uintptr_t)data;
@@ -759,7 +761,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
       int segFd = -1;
       // Export this segment alone: one physical allocation, so its fd is complete.
       CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)segPtr, thisLen,
-                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0), ret, fail);
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
+                  ret, fail);
       ret = ncclIbRegMrDmaBuf(cComm->recvComm, (void*)segPtr, thisLen, type, 0ULL, segFd,
                               (void**)&rmaMrHandle->mrHandle[s]);
       (void)close(segFd);
@@ -772,8 +775,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
       segPtr += thisLen;
       remaining -= thisLen;
     }
-    INFO(NCCL_NET|NCCL_REG, "NET/IB/RMA: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs",
-         data, size, nSeg);
+    INFO(NCCL_NET | NCCL_REG, "NET/IB/RMA: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", data, size,
+         nSeg);
 #else
     WARN("NET/IB/RMA: multi-segment (%d) registration requires HIP >= 7.12.60540", nSeg);
     ret = ncclInvalidUsage;
@@ -790,7 +793,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
     for (int r = 0; ret == ncclSuccess && r < cComm->nranks; r++) {
       if (allNSeg[r] != nSeg) {
         WARN("NET/IB/RMA: buffer %p segment-count mismatch (rank %d has %d, local %d); "
-             "symmetric registration required", data, r, allNSeg[r], nSeg);
+             "symmetric registration required",
+             data, r, allNSeg[r], nSeg);
         ret = ncclInternalError;
       }
     }
@@ -895,10 +899,9 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   struct ibv_send_wr wr[2 * NCCL_RMA_MAX_SEGMENTS];
   struct ibv_sge sge[2 * NCCL_RMA_MAX_SEGMENTS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, 2 * NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_WRITE,
-                                     req - comm->base.reqs,
-                                     srcMrHandle, rmaProxyCtx->rank, srcOff,
-                                     dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, 2 * NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_WRITE, req - comm->base.reqs,
+                                     srcMrHandle, rmaProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size,
+                                     /*flushSge=*/NULL));
   // No WR for size==0: complete with the previous request on this comm.
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
@@ -943,10 +946,9 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   struct ibv_send_wr wr[2 * NCCL_RMA_MAX_SEGMENTS];
   struct ibv_sge sge[2 * NCCL_RMA_MAX_SEGMENTS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, 2 * NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ,
-                                     req - comm->base.reqs,
-                                     localMrHandle, rmaProxyCtx->rank, localOffset,
-                                     remoteMrHandle, rank, remoteOffset, size, /*flushSge=*/NULL));
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, 2 * NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ, req - comm->base.reqs,
+                                     localMrHandle, rmaProxyCtx->rank, localOffset, remoteMrHandle, rank, remoteOffset,
+                                     size, /*flushSge=*/NULL));
   // No WR for size==0: complete with the previous request on this comm.
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
@@ -973,12 +975,11 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   struct ncclRmaIbProxyMrHandle* signalMrHandle = (struct ncclRmaIbProxyMrHandle*)signalMhandle;
 
   // Reject out-of-range payload/signal before any WR is posted (signal is an 8-byte atomic).
-  if ((size > 0 && (!srcMrHandle || !dstMrHandle ||
-                    !ncclRmaRangeOk(srcMrHandle, srcOff, size) ||
+  if ((size > 0 && (!srcMrHandle || !dstMrHandle || !ncclRmaRangeOk(srcMrHandle, srcOff, size) ||
                     !ncclRmaRangeOk(dstMrHandle, dstOff, size))) ||
       !signalMrHandle || !ncclRmaRangeOk(signalMrHandle, signalOff, sizeof(uint64_t))) {
-    WARN("NET/IB/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)",
-         srcOff, dstOff, size, signalOff);
+    WARN("NET/IB/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)", srcOff, dstOff, size,
+         signalOff);
     return ncclInvalidArgument;
   }
 
@@ -1009,15 +1010,14 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   if (size > 0 && dstMrHandle) {
     // Same-QP RC ordering lands every PUT slice before the trailing signal.
     NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, 2 * NCCL_RMA_MAX_SEGMENTS, &nPut, IBV_WR_RDMA_WRITE,
-                                       req - comm->base.reqs,
-                                       srcMrHandle, rmaProxyCtx->rank, srcOff,
-                                       dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
+                                       req - comm->base.reqs, srcMrHandle, rmaProxyCtx->rank, srcOff, dstMrHandle, rank,
+                                       dstOff, size, /*flushSge=*/NULL));
   }
 
   // SIGNAL (route to the segment that contains signalOff)
   int sig = ncclRmaSegOf(signalMrHandle, signalOff);
-  void *signalPtr = (void *)(signalMrHandle->base_vas[(size_t)rank * signalMrHandle->nSegments + sig]
-                             + (signalOff - signalMrHandle->segOff[sig]));
+  void* signalPtr = (void*)(signalMrHandle->base_vas[(size_t)rank * signalMrHandle->nSegments + sig] +
+                            (signalOff - signalMrHandle->segOff[sig]));
   uint32_t signalRkey = signalMrHandle->rkeys[(size_t)rank * signalMrHandle->nSegments + sig];
 
   struct ibv_send_wr* signalWr = &wr[nPut];
@@ -1148,8 +1148,7 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   struct ibv_send_wr wr[NCCL_RMA_MAX_SEGMENTS];
   struct ibv_sge sge[NCCL_RMA_MAX_SEGMENTS];
   int nWr = 0;
-  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ,
-                                     req - comm->base.reqs,
+  NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_SEGMENTS, &nWr, IBV_WR_RDMA_READ, req - comm->base.reqs,
                                      /*localH=*/NULL, /*localRank=*/0, /*localOff=*/0,
                                      /*remoteH=*/rmaMrHandle, /*remoteRank=*/rmaProxyCtx->rank, /*remoteOff=*/0,
                                      /*size=*/ncclRmaMrBytes(rmaMrHandle),
