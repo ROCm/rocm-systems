@@ -12,17 +12,19 @@ structure.
 
 ## 1. Preparation work
 
-**Status: active; test-suite expansion and end-to-end qualification remain**
+**Status: active; tests are the deliverable, and end-to-end qualification is
+the test-discovery loop**
 
-At the 2026-08-22 plan checkpoint, the freshly fetched `origin/develop` still
-resolves to `550548c58ae9`. It is already an ancestor of the current branch
-through merge commit `cf1df8ec82`, so the requested integration checkpoint is
-current and Git has no new merge to perform; no empty merge should be
-manufactured. Before execution resumes and again before final qualification,
-recheck this relationship. If `origin/develop` has advanced, integrate it with
-a merge commit. That integration is not complete until every resulting build
-or test failure is repaired and each behavioral integration defect is
-protected by a focused host-unit or device regression.
+After the user-reported 2026-08-22 fetch, `origin/develop` was explicitly
+rechecked and still resolves to `550548c58ae9`. It is already an ancestor of the
+current branch through merge commit `cf1df8ec82`, so this integration checkpoint
+is current and Git has no new merge to perform; no empty merge should be
+manufactured. Recheck this relationship before execution resumes, at later
+qualification checkpoints, and before final qualification. If
+`origin/develop` has advanced, integrate it with a merge commit. That
+integration is not complete until every resulting build or test failure is
+repaired and each behavioral integration defect is protected by a focused
+host-unit or device regression.
 
 The checked-in device-conformance tier, its behavioral coverage, and its
 remaining gaps are tracked in [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
@@ -58,15 +60,15 @@ the next tactical choice, but it cannot erase a deferred cell.
 | Directive | Plan commitment |
 | --- | --- |
 | Integrate the freshly fetched base | Keep the branch integrated with `origin/develop` through a merge commit whenever it advances; repair all resulting build and test breakage, and regression-test every behavioral integration defect. At this checkpoint `550548c58ae9` is already an ancestor of `HEAD`, so there is no new merge to manufacture. |
-| Make tests the main deliverable | Treat comprehensive host-unit and checked-in device tests as the durable output of preparation. Prototype fixes and status promotions are supporting work because section 2 will replace the implementation. |
+| Make tests the main deliverable | Treat comprehensive, implementation-independent host-unit and checked-in device tests as the durable output of preparation and the automatic oracle for the section 2 rewrite. Prototype fixes and status promotions are supporting work because section 2 will replace the implementation. |
 | Grow both test tiers | Expand conventional host units and checked-in device tests together, choosing one or both according to the behavioral boundary under test. |
 | Work both architecture ledgers | Advance both [STATUS_CDNA4.md](STATUS_CDNA4.md) and [STATUS_GFX1250.md](STATUS_GFX1250.md), and update the affected ledger whenever its evidence changes. Preserve the standing CDNA4 catch-up bias without starving gfx1250. |
 | Apply the engine priority globally | Across both ledgers, work Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow. A lower-priority engine does not jump the queue merely because its cell has a worse color. |
 | Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Once every applicable cell is green, revalidate all greens together on one reviewed revision. |
 | Be tactical about latency | When a test is abnormally slow, investigate the slowness if that can produce useful understanding; otherwise record and defer it instead of repeatedly waiting. Deferral changes scheduling, not the exit criteria. |
-| Harvest every end-to-end investigation | Turn each useful E2E finding into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. |
-| Audit and transport existing tests too | Make a suite-wide pass over existing host and device contracts, not just new additions. For every behavioral idea, explicitly consider all five targets--CDNA3/4/5 and RDNA3/4--even when the target-native device code must differ. Historical `gfx950`-to-`gfx942` ports are examples, not a boundary. |
-| Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, accepting the bounded short-term risk, but never disable it, treat an omitted run as passing, or let the omission become permanent. Run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
+| Harvest every end-to-end investigation | Treat E2E study as test discovery, whether the cell initially passes or fails. Turn each useful idiom into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. |
+| Audit and transport existing tests too | Make a deliberate suite-wide pass over all existing host and device contracts, not just new additions. For every behavioral idea, explicitly consider all five targets--CDNA3/4/5 and RDNA3/4--even when the target-native device code must differ. Historical `gfx950`-to-`gfx942` ports are examples, not a boundary; cross-CDNA and CDNA/RDNA transports are expected wherever the idea has a native equivalent. |
+| Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, explicitly accepting that a physical-only regression may remain undetected briefly, but never disable it, treat an omitted run as passing, or let the omission become permanent. Run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
 
 Tactical deferral can change the order in which useful evidence is gathered,
 but it never lowers the exit bar. Likewise, the CDNA4 catch-up bias guides time
@@ -201,13 +203,13 @@ cells repaired.
 
 ### Remaining work
 
-1. As the immediate next execution step, resolve the freshly fetched
-   `origin/develop`; then repeat this at later qualification checkpoints. Merge
-   any newer tip with a merge commit. Repair every resulting build or test
-   failure and add a focused host-unit or device regression for each behavioral
-   defect exposed by the integration before accepting the merge. The freshly
-   fetched `550548c58ae9` checkpoint is already incorporated; do not create an
-   empty merge solely to restate it.
+1. Keep the freshly fetched `origin/develop` resolved against `HEAD`, then
+   repeat this at later qualification checkpoints. Merge any newer tip with a
+   merge commit. Repair every resulting build or test failure and add a focused
+   host-unit or device regression for each behavioral defect exposed by the
+   integration before accepting the merge. The freshly fetched
+   `550548c58ae9` checkpoint has now been explicitly checked and is already
+   incorporated; do not create an empty merge solely to restate it.
 2. Continue making both the conventional host-unit suite and the checked-in
    device suite comprehensive. Close meaningful gaps identified by the
    capability audit, [VALIDATION.md](VALIDATION.md), or Aorta. Device scenarios
