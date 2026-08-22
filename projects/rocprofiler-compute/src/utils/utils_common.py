@@ -1156,6 +1156,7 @@ def reconfigure_stdio_utf8() -> None:
         except (AttributeError, io.UnsupportedOperation):
             pass
 
+
 def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
     """Extract the base workload directory from the (possibly nested) value."""
     if isinstance(workload_dir, list):
@@ -1165,6 +1166,7 @@ def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
             else workload_dir[0]
         )
     return workload_dir
+
 
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
     """

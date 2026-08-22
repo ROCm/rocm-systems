@@ -437,6 +437,7 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
         gfx11_stub,
     )
+
     def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
         calls["gfx1250"] = {
             "mem_data": mem_data,

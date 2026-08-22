@@ -730,7 +730,6 @@ def process_table_data(
     return result_df
 
 
-
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
     """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
     sources = panel.get("data source") or []
