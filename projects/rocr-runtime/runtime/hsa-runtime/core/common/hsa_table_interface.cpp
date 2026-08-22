@@ -1171,6 +1171,11 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs, uint32_t num_descs) {
+  return amdExtTable->hsa_amd_signal_create_v2_fn(descs, num_descs);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_ipc_signal_create(hsa_signal_t signal, hsa_amd_ipc_signal_t* handle) {
   return amdExtTable->hsa_amd_ipc_signal_create_fn(signal, handle);
 }
