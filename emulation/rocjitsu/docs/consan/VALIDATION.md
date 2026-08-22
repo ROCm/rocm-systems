@@ -51,9 +51,11 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 1,540 simulator cases and 353 physical
-cases, for 1,893 total. One whole-matrix CTest qualification on the current
-reference host passes all rows in 120.12 seconds.
+current registered matrix contains 1,798 simulator cases and 417 physical
+cases, for 2,215 total. One whole-matrix CTest qualification on the current
+reference host passes all rows in 139.37 seconds at `-j64`; the simulator-only
+inner-loop filter independently passes all 1,798 rows in 55.89 seconds, while
+the serialized physical filter passes all 417 rows in 134.97 seconds.
 
 The initial target-capability disposition is:
 
