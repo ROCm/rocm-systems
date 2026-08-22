@@ -39,17 +39,17 @@ rules live in [VALIDATION.md](VALIDATION.md); current evidence lives in
 [STATUS_GFX1250.md](STATUS_GFX1250.md). The Aorta workloads are another source
 of user-relevant behavior that the checked-in suites must cover.
 
-The immediate first execution action, after this planning checkpoint, is to
-integrate the newly fetched `origin/develop` and establish a green
-post-integration baseline. Resolve the fetched ref when execution begins rather
-than baking a transient commit ID into this plan. If it has advanced, integrate
-it with a merge commit; if it is already an ancestor, record the verified no-op
-instead of manufacturing an empty merge. Repair all resulting build and test
-failures, and protect every behavioral integration fix with a focused host-unit
-or device regression before accepting new validation evidence. Build failures,
-host-test failures, emulated-device failures, and physical-device failures are
-all integration breakage for this purpose. Repeat this check at later
-qualification checkpoints.
+The requested `origin/develop` integration checkpoint is complete: the fetched
+tip was incorporated with a merge commit, its breakage was repaired, and the
+post-integration host, emulated-device, and physical-device baselines were made
+green. Preserve that discipline at later qualification checkpoints. Resolve
+the freshly fetched ref at each checkpoint rather than baking a transient
+commit ID into this plan. If it has advanced, integrate it with a merge commit;
+if it is already an ancestor, record the verified no-op instead of
+manufacturing an empty merge. Protect every behavioral integration fix with a
+focused host-unit or device regression before accepting new validation
+evidence. Build failures, host-test failures, emulated-device failures, and
+physical-device failures are all integration breakage for this purpose.
 
 ### Working contract
 
@@ -144,13 +144,11 @@ qualification checkpoints.
 
 ### Remaining work
 
-1. As the next execution step, run the requested integration of the freshly
-   fetched `origin/develop` and establish that the post-integration build, host
-   tests, emulated-device tests, and physical-device tests are green. If the
-   fetched ref has advanced, create the requested merge commit; if it is already
-   integrated, verify and record that fact. For every future ref advance,
-   create a merge commit, repair all resulting breakage, and add focused
-   regressions for behavioral integration defects.
+1. At every later qualification checkpoint, fetch and inspect `origin/develop`.
+   If it has advanced, create the requested merge commit, repair all resulting
+   build and test breakage, and add focused regressions for behavioral
+   integration defects. If it is already integrated, verify and record that
+   fact rather than creating an empty merge.
 2. Continue the global E2E loop over both
    [STATUS_CDNA4.md](STATUS_CDNA4.md) and
    [STATUS_GFX1250.md](STATUS_GFX1250.md), following Record/Replay, Sampled,
