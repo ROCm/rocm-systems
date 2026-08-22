@@ -52,8 +52,10 @@ or implementation choices.
 3. Allocate effort by engine importance: Record/Replay first, then Sampled,
    then SuperCollider, then Inline Shadow. Within the active engine priority,
    lift the floor by addressing red before orange, orange before yellow, and
-   yellow before revalidating green. After all applicable cells are green,
-   re-run every green cell on one reviewed revision.
+   yellow before revalidating green. Apply that ordering across both ledgers:
+   keep CDNA4 and gfx1250 moving rather than completing one architecture before
+   returning to the other. After all applicable cells are green, re-run every
+   green cell on one reviewed revision.
 4. Let useful evidence, not waiting time, drive iteration. Debug abnormal
    slowness when that is actionable; otherwise record and defer a slow cell and
    move to the next useful target. A tactically slow higher-priority cell must
@@ -62,11 +64,13 @@ or implementation choices.
    result a focused host-unit test, checked-in device test, or both. Studying an
    end-to-end workload is not finished when its prototype fix works: reduce its
    relevant compiler, ISA, resource-pressure, control-flow, memory, or
-   synchronization behavior into a quick checked-in contract. The prototype
-   fix and a status-cell promotion support that deliverable; neither replaces
-   it. If an investigation genuinely cannot yield a focused checked-in
-   regression, record the concrete reason instead of silently losing the
-   evidence.
+   synchronization behavior into a quick checked-in contract. Use a host unit
+   for isolated analysis, policy, ABI, or runtime semantics; use adjacent
+   correct/incorrect device workloads when transformed device behavior is at
+   issue; use both when the defect crosses that boundary. The prototype fix and
+   a status-cell promotion support that deliverable; neither replaces it. If an
+   investigation genuinely cannot yield a focused checked-in regression,
+   record the concrete reason instead of silently losing the evidence.
 6. Generalize every new and existing test by behavior rather than by its source
    architecture. Translate target-native device code as necessary and cover
    every semantically applicable CDNA3/4/5 and RDNA3/4 target. Historical
@@ -74,7 +78,8 @@ or implementation choices.
 7. Use fast host tests and parallel RocJitsu targets for the tight loop. It is
    acceptable to omit serialized physical `gfx950` temporarily when it
    dominates latency, but run it at regular checkpoints, after relevant native
-   changes, and for final qualification.
+   changes, and for final qualification. Periodically run every host, emulated
+   device, and physical-device test even when the usual inner loop is narrower.
 
 ### Remaining work
 
@@ -93,17 +98,21 @@ or implementation choices.
    [STATUS_GFX1250.md](STATUS_GFX1250.md). Across engine columns, prioritize
    Record/Replay first, then Sampled, then SuperCollider, then Inline Shadow.
    Within that ordering, lift the floor horizontally: resolve red cells before
-   orange, orange before yellow, and yellow before green. Once every applicable
-   cell is green, make a fresh global pass over all green cells rather than
-   relying on accumulated historical evidence.
+   orange, orange before yellow, and yellow before green. Select work across
+   both architectures under those rules rather than serializing the project by
+   architecture. Once every applicable cell is green, make a fresh global pass
+   over all green cells rather than relying on accumulated historical evidence.
 4. Treat every end-to-end investigation as an opportunity to create a fast,
    clean regression. Reduce the relevant compiler, instruction, resource,
    control-flow, or synchronization idiom into a host-unit test, a checked-in
-   device test, or both as appropriate. The test is the preparation-phase
-   deliverable; a prototype fix or ledger improvement without durable test
-   coverage is incomplete, even when the corresponding end-to-end cell passes.
-   When no faithful reduction is possible, leave an explicit rationale in the
-   relevant plan or status ledger.
+   device correct/incorrect pair, or both as appropriate. Host units should
+   isolate analysis, policy, ABI, and runtime contracts; device pairs should
+   exercise transformed code and assert both the clean result and the intended
+   diagnostic. The test is the preparation-phase deliverable; a prototype fix
+   or ledger improvement without durable test coverage is incomplete, even
+   when the corresponding end-to-end cell passes. When no faithful reduction
+   is possible, leave an explicit rationale in the relevant plan or status
+   ledger.
 5. Make a deliberate, suite-wide pass over all existing ConSan host and device
    tests to identify architecture-local tests whose underlying idea is
    cross-cutting. Transport each useful contract to every semantically
