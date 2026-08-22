@@ -697,7 +697,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `016_spmm_tdm_all` | 🟩 1610/1610 accesses; current paired 1.15x | 🟩 1610/1610 accesses; 512/512 barriers; current paired 1.24x | 🟩 1610/1610 accesses; 494/494 barriers; current paired 1.19x | 🟩 1610/1610 accesses; 256/256 barriers; strict-capacity current paired 1.61x | Multi-type transpose matrix; all profiles accepted, including strict-capacity Inline Shadow. |
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
-| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 The four failures in the prior 600-second run are repaired: an all-supported focused rerun passes both formerly failing PGR1 and PGR2 rows with 288/288 accesses and 68/68 barriers patched, 35,184 visible events, and zero diagnostics. That run exposed a 0/8 far-fence routing gap; the checked-in E2E-derived regression now patches 18/18 accesses, 4/4 barrier records, and 2/2 far fences across two independent owners. A fresh full-client run at the fixed tip timed out at 300 seconds before coverage or a numeric verdict, so the cell remains orange | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. The uninstrumented current baseline passes all 75 rows in 232.01 seconds. |
+| P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 The four failures in the prior 600-second run are repaired: an all-supported focused rerun passes both formerly failing PGR1 and PGR2 rows with 288/288 accesses and 68/68 barriers patched, 35,184 visible events, and zero diagnostics. That run exposed a 0/8 far-fence routing gap; the checked-in E2E-derived host regression now patches 18/18 accesses, 4/4 barrier records, and 2/2 far fences across two independent owners. A new adjacent device pair composes target-native workgroup barriers with the workload's cache-mediated LDS publication idiom and passes all 50 simulator plus 10 physical rows. A fresh full-client run at the fixed tip timed out at 300 seconds before coverage or a numeric verdict, so the cell remains orange | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. The uninstrumented current baseline passes all 75 rows in 232.01 seconds. |
 | P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
@@ -730,6 +730,28 @@ runs the full clean client through the explicit RocJitsu `gfx1250_mi455x.json`
 launcher. It timed out after 300.126 seconds before producing either a coverage
 record or a numeric verdict. This proves no E2E promotion, so the matrix cell
 remains orange pending a completed run.
+
+### 2026-08-22 `007_sk_mxf4gemm_tdm` device contract
+
+The checked-in `FenceBarrierPublication` pair distills the device-observable
+part of the E2E failure without encoding the prototype's relay placement. Both
+members execute an independent target-native workgroup barrier beside an LDS
+publication mediated by an addressed VGLOBAL release/acquire sequence. The
+correct member includes the final acquire-side invalidation and requires the
+exact barrier and published values with no diagnostic. The incorrect member
+removes only that final invalidation, preserves the exact barrier/control
+result, and requires the intended conflict diagnostic from every ConSan
+engine.
+
+gfx1201 and gfx1250 use their native adjacent `s_barrier_signal -1` and
+`s_barrier_wait -1`; gfx942, gfx950, and gfx1100 use the target-equivalent
+monolithic `s_barrier`. Baseline and all four engines pass both members on all
+five RocJitsu targets (50 rows), and the same ten rows pass on physical gfx950.
+The original VGLOBAL publication pair plus this composite pair pass together
+as 100 simulator and 20 physical rows. The full 1,386-row simulator matrix also
+passes in 55.82 seconds. This closes the checked-in behavioral-coverage gap but
+does not promote the orange E2E cell, whose complete 75-row client has not yet
+produced a post-fix verdict.
 
 The retained P0 and first P1 artifacts confirm the tensor-data-mover control
 shape used by these configurations: tensor work is followed by

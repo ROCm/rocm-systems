@@ -415,6 +415,7 @@ function(rj_add_consan_device_conformance_cases)
         "MoeRouting|moe_routing|ConSanDeviceMoeRoutingTest|atomics"
         "ContinuousBatching|continuous_batching|ConSanDeviceContinuousBatchingTest"
         "VglobalCachePublication|vglobal_cache_publication|ConSanDeviceVglobalCachePublicationTest|atomics"
+        "FenceBarrierPublication|fence_barrier_publication|ConSanDeviceFenceBarrierPublicationTest|atomics"
         "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
         "SampledMultiRangeBudget|sampled_multi_range_budget|ConSanDeviceSampledMultiRangeBudgetTest|sampled-only"
     )
@@ -812,6 +813,7 @@ function(rj_add_consan_device_fixture_targets target)
         "moe_routing|moe_routing_test.hip"
         "continuous_batching|continuous_batching_test.hip"
         "vglobal_cache_publication|vglobal_cache_publication_test.hip"
+        "fence_barrier_publication|vglobal_cache_publication_test.hip"
         "group_flat_wide|group_flat_wide_test.hip"
         "sampled_multi_range_budget|sampled_multi_range_budget_test.hip"
     )
@@ -873,10 +875,18 @@ function(rj_add_consan_device_fixture_targets target)
         list(GET _workload_fields 0 _workload_name)
         list(GET _workload_fields 1 _workload_source)
         set(_target "hip_consan_device_${_workload_name}_${target}_test")
+        set(_workload_compile_definitions)
+        if(_workload_name STREQUAL "fence_barrier_publication")
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_DEVICE_FENCE_BARRIER_ONLY=1
+            )
+        endif()
         rj_add_hip_test(
             ${_target}
             ARCH ${target}
             SOURCE "dbi/consan/device/${_workload_source}"
+            COMPILE_DEFINITIONS ${_workload_compile_definitions}
         )
         add_dependencies(${_target}_target rocjitsu_dbi_hooks)
     endforeach()
