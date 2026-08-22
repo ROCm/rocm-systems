@@ -49,7 +49,11 @@ prototype fixes.
 
 This checklist explicitly acknowledges every element of the 2026-08-22
 preparation direction. Every row is a binding requirement for section 1, with
-the following concrete interpretation:
+the following concrete interpretation. The ordering is deliberate: select the
+engine column first, then the lowest status color within that column across
+both architecture ledgers, and only then use architecture balance and expected
+iteration latency to choose among otherwise eligible cells. Latency can change
+the next tactical choice, but it cannot erase a deferred cell.
 
 | Directive | Plan commitment |
 | --- | --- |
@@ -61,8 +65,8 @@ the following concrete interpretation:
 | Lift the floor within that engine | Within the active engine, work red before orange, orange before yellow, and yellow before green. Once every applicable cell is green, revalidate all greens together on one reviewed revision. |
 | Be tactical about latency | When a test is abnormally slow, investigate the slowness if that can produce useful understanding; otherwise record and defer it instead of repeatedly waiting. Deferral changes scheduling, not the exit criteria. |
 | Harvest every end-to-end investigation | Turn each useful E2E finding into a clean focused host regression, an adjacent correct/incorrect device pair, or both. A fix without a durable behavioral test is incomplete; if faithful reduction is impossible, record the reason. A clean investigation that exposes no prototype bug or ledger-color change must still yield coverage when it reveals a previously uncovered user idiom. |
-| Audit and transport existing tests too | Make a suite-wide pass over existing host and device contracts, not just new additions. Generalize behavioral ideas across CDNA3/4/5 and RDNA3/4 wherever equivalent target-native idioms exist; historical `gfx950`-to-`gfx942` ports are examples, not a boundary. |
-| Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, accepting the bounded short-term risk, but run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
+| Audit and transport existing tests too | Make a suite-wide pass over existing host and device contracts, not just new additions. For every behavioral idea, explicitly consider all five targets--CDNA3/4/5 and RDNA3/4--even when the target-native device code must differ. Historical `gfx950`-to-`gfx942` ports are examples, not a boundary. |
+| Use a two-speed test cadence | Favor fast host and parallel RocJitsu-emulated tests in the inner loop. Temporarily skip serialized physical `gfx950` when it dominates latency, accepting the bounded short-term risk, but never disable it, treat an omitted run as passing, or let the omission become permanent. Run every emulated and physical tier periodically, after relevant native changes, and at final qualification. |
 
 Tactical deferral can change the order in which useful evidence is gathered,
 but it never lowers the exit bar. Likewise, the CDNA4 catch-up bias guides time
