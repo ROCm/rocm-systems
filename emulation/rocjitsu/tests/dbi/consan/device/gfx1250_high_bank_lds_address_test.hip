@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// gfx1250 high-bank SRC0 addressing distilled from the MXF4 TDM Tensile
-/// kernels. The guest DS instruction names v286 through encoded v30 while the
-/// instrumentation scratch bank remains below v256. Record/Replay must retain
-/// that physical distinction when it captures the LDS byte offset.
+/// gfx1250 high-bank SRC0 addressing and tensor-to-LDS tail synchronization
+/// distilled from the MXF4 TDM Tensile kernels. The guest DS instruction names
+/// v286 through encoded v30 while the instrumentation scratch bank remains
+/// below v256. The correct path also retains the workload's adjacent split
+/// barriers separated by a DS wait. Record/Replay must preserve both the
+/// physical address-bank distinction and the synchronization contract.
 
 #include "consan_device_test_support.h"
 
@@ -58,8 +60,11 @@ __launch_bounds__(kThreadCount) void gfx1250_high_bank_lds_address_for_consan(De
 
   if (tid < kWaveSize)
     store_high_bank_address(address, 0x12500000u | lane);
-  if (state->synchronize != 0u)
+  if (state->synchronize != 0u) {
     __syncthreads();
+    asm volatile("s_wait_dscnt 0" ::: "memory");
+    __syncthreads();
+  }
   if (tid >= kWaveSize)
     state->loaded[lane] = load_high_bank_address(address);
   state->control[tid] = 0x1250c000u | tid;
