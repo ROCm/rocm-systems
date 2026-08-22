@@ -1349,9 +1349,6 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
-    uint32_t local_wg_id = entry.dispatched_wgs;
-    uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
-
     if (entry.has_workgroup_clusters()) {
       assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
       // The SPI interface chooses one WG at a time and cannot reserve all peers
@@ -1362,8 +1359,10 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
              "clustered dispatch advances by whole clusters");
       assert(entry.total_wgs - entry.dispatched_wgs >= cluster_size &&
              "validate_cluster_shape guarantees a complete trailing cluster");
-      uint32_t cluster_ordinal = entry.dispatched_wgs / cluster_size;
-      local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
+      // dispatched_wgs counts workgroups; the chunk here is a whole cluster, so
+      // convert to a cluster index before asking the shard for its ordinal.
+      uint32_t cluster_ordinal = entry.chunk_ordinal_for(entry.dispatched_wgs / cluster_size);
+      uint32_t local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
       std::vector<PlannedWorkgroup> plan;
       size_t planned_next_cu = next_cu_;
       if (!plan_cluster_workgroups(entry, local_wg_id, next_cu_, cus_, plan, planned_next_cu)) {
@@ -1404,6 +1403,12 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
       continue;
     }
+
+    // Unclustered: the chunk is a single workgroup, so dispatched_wgs indexes
+    // the shard's chunks directly and the shard maps that to a grid-wide id.
+    // An unsharded entry maps the ordinal to itself.
+    uint32_t local_wg_id = entry.chunk_ordinal_for(entry.dispatched_wgs);
+    uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
 
     // SPI selects the CU or sibling-CU WGP based on descriptor mode and
     // resource availability.
@@ -1479,7 +1484,7 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  // Retire any non-kernel entries (barriers with total_wgs==0) that are now at
+  // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
     if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
@@ -1630,6 +1635,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
+  dp.kind = DispatchPacketKind::Kernel;
   dp.dispatched_wgs = 0;
   dp.completed_wgs = 0;
   dp.wfs_per_workgroup = wfs_per_wg;
@@ -2031,6 +2037,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           .queue_id = queue.queue_id,
           .process_id = queue.process_id,
           .completion_signal = sig,
+          .kind = DispatchPacketKind::NonKernel,
           .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
       };
 
@@ -2086,6 +2093,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
+            .kind = DispatchPacketKind::NonKernel,
             .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
 
@@ -2146,6 +2154,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = sig,
+            .kind = DispatchPacketKind::NonKernel,
             .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
 
@@ -2307,7 +2316,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   // immediately so host signal waits see completed barriers before returning.
   for (size_t i = 0; i < hw_queues_.size(); ++i)
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
-  // Process any new non-kernel entries (barriers with total_wgs==0).
+  // Process any new non-kernel entries (barrier-kind packets).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
     if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
       continue;
