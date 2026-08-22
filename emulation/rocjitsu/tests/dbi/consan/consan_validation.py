@@ -10,7 +10,7 @@ are resolved from PATH. Run `consan_validation.py doctor` before GPU work and
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
 import hashlib
@@ -3207,6 +3207,7 @@ def _command_identity(
     command: list[str],
     timeout: int = 10,
     environment: dict[str, str] | None = None,
+    output_normalizer: Callable[[str], str] | None = None,
 ) -> dict[str, object]:
     try:
         completed = subprocess.run(
@@ -3221,6 +3222,8 @@ def _command_identity(
     except (OSError, subprocess.TimeoutExpired) as error:
         return {"available": False, "command": command, "reason": str(error)}
     output = completed.stdout or ""
+    if output_normalizer is not None:
+        output = output_normalizer(output)
     limit = 65536
     return {
         "available": completed.returncode == 0,
@@ -3230,6 +3233,16 @@ def _command_identity(
         "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
         "output_truncated": len(output) > limit,
     }
+
+
+_DYNAMIC_LOADER_ADDRESS = re.compile(
+    r"[ \t]+\(0x[0-9a-fA-F]+\)[ \t]*(?=\r?$)", re.MULTILINE
+)
+
+
+def _normalize_dynamic_loader_output(output: str) -> str:
+    """Remove per-process load addresses while retaining the loader closure."""
+    return _DYNAMIC_LOADER_ADDRESS.sub("", output)
 
 
 def _runtime_library_records(paths: dict[str, Path]) -> dict[str, object]:
@@ -3283,7 +3296,10 @@ def _native_runtime_identity(
     if ldd is None:
         raise ValidationError("cannot verify native runtime closure: ldd is missing")
     identity = _command_identity(
-        [ldd, str(executable)], timeout=TIMEOUT_SECONDS, environment=environment
+        [ldd, str(executable)],
+        timeout=TIMEOUT_SECONDS,
+        environment=environment,
+        output_normalizer=_normalize_dynamic_loader_output,
     )
     if not identity.get("available"):
         raise ValidationError(
@@ -3612,14 +3628,20 @@ def _runtime_tool_identities(
     }
     if llvm_readelf is not None:
         commands["llvm-readelf"] = [str(llvm_readelf), "--version"]
-    commands["hook-linkage"] = [shutil.which("ldd") or "ldd", str(hook)]
     rocm_sdk = shutil.which("rocm-sdk")
     if rocm_sdk:
         commands["rocm-sdk"] = [rocm_sdk, "path", "--root"]
     amdclang = shutil.which("amdclang++")
     if amdclang:
         commands["amdclang++"] = [amdclang, "--version"]
-    return {name: _command_identity(command) for name, command in commands.items()}
+    identities = {
+        name: _command_identity(command) for name, command in commands.items()
+    }
+    identities["hook-linkage"] = _command_identity(
+        [shutil.which("ldd") or "ldd", str(hook)],
+        output_normalizer=_normalize_dynamic_loader_output,
+    )
+    return identities
 
 
 def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]:

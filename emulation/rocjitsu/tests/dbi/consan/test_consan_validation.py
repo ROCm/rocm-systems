@@ -3991,6 +3991,44 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(provenance["workload_runtime"]["kind"], "pytorch")
         self.assertEqual(provenance["observations"]["captured_at_utc"], "first")
 
+    def test_hook_linkage_identity_ignores_aslr_load_addresses(self) -> None:
+        stable_outputs = (
+            "Python 3.12.0\n",
+            "gfx950\n",
+        )
+        first_ldd = """\
+\tlinux-vdso.so.1 (0x00007fff021fd000)
+\tlibz.so.1 => /lib/libz.so.1 (0x00007f6fdb0c5000)
+\t/lib64/ld-linux-x86-64.so.2 (0x00007f6fdc56c000)
+"""
+        second_ldd = """\
+\tlinux-vdso.so.1 (0x00007fff9ddfa000)
+\tlibz.so.1 => /lib/libz.so.1 (0x00007f6095618000)
+\t/lib64/ld-linux-x86-64.so.2 (0x00007f6096abf000)
+"""
+        completed = tuple(
+            subprocess.CompletedProcess([], 0, stdout=output)
+            for output in (*stable_outputs, first_ldd, *stable_outputs, second_ldd)
+        )
+
+        def which(name: str) -> str | None:
+            return "/bin/ldd" if name == "ldd" else None
+
+        with (
+            mock.patch.object(validation.shutil, "which", side_effect=which),
+            mock.patch.object(validation.subprocess, "run", side_effect=completed),
+        ):
+            first = validation._runtime_tool_identities(None, Path("/hook.so"))
+            second = validation._runtime_tool_identities(None, Path("/hook.so"))
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first["hook-linkage"]["output"],
+            "\tlinux-vdso.so.1\n"
+            "\tlibz.so.1 => /lib/libz.so.1\n"
+            "\t/lib64/ld-linux-x86-64.so.2\n",
+        )
+
     def test_pytorch_runtime_identity_records_framework_and_generator(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
         package_document = {
