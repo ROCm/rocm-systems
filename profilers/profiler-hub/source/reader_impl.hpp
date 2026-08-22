@@ -138,8 +138,8 @@ struct reader_t::impl
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::event_id_t& id);
 
-    // Unified event detail (collapses the typed detail methods above into one flat,
-    // typed property bag). The typed methods are retained as private helpers reused here.
+    // Unified event detail: combines the typed detail methods above into one flat,
+    // typed property bag. Those methods stay independently callable for single-field needs.
     [[nodiscard]] std::optional<reader_types::event_info_t> get_event_info(
         const reader_types::event_id_t& id);
 

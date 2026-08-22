@@ -22,14 +22,13 @@ namespace profiler_hub::reader_types
 
 using timestamp_t = size_t;
 
-/// Opaque track identifier. Treat as opaque: the only portable operations are equality,
-/// ordering, hashing (so it can key a map), and reading value() — i.e. the public `value`
-/// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB
-/// identity; do not synthesize or do arithmetic on it. The underlying integer is size_t,
-/// not uint32_t, so real DB ids cannot truncate and the consumer's SIZE_MAX invalid
-/// sentinel survives round-trips. Unlike event_id_t/flow_id_t (which fully hide their
-/// value), a track id is a stable DB identity the consumer must serialize, so the integer
-/// stays publicly reachable.
+/// Opaque track identifier: the only portable operations are equality, ordering,
+/// hashing, and reading `value` to serialize/reconstruct it. `value` is a
+/// ProfilerHub-private DB identity; do not synthesize it or do arithmetic on it. It is
+/// size_t (not uint32_t) so real DB ids cannot truncate and the consumer's SIZE_MAX
+/// invalid sentinel survives round-trips. Unlike event_id_t/flow_id_t, which fully hide
+/// their value, a track id must be serializable by the caller, so it stays publicly
+/// reachable.
 struct track_id_t
 {
     size_t value{};
@@ -307,58 +306,51 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  * the caller calls get_interval_track() or get_scalar_track(), and which
  * get_*_details() method applies to event handles drawn from that track.
  */
-// track_type_t is domain-first (cpu_thread, gpu_queue, dma, counter, ...) and is the
-// reader's dispatch key; shape is implied by which accessor applies (get_interval_track
-// vs get_scalar_track).
 enum class track_type_t
 {
     cpu_thread,  ///< thread_info populated. Interval track of region events.
     gpu_queue,   ///< agent_info + queue_info populated. Interval track of kernel
                  ///< dispatches.
     dma,         ///< agent_info populated (stream_info nullopt). Interval track of memory
-          ///< copies only, keyed (nid, pid, queue_id, dst_agent_id) by destination agent
-          ///< to match Optiq's memory-copy swimlanes — a single event table. Stream-level
-          ///< grouping of memory copies lives on the `stream` track type instead.
+                 ///< copies only (a single event table), keyed (nid, pid, queue_id,
+                 ///< dst_agent_id) by destination agent to match Optiq's memory-copy
+                 ///< swimlanes. Stream-level grouping lives on the `stream` track type.
     counter,  ///< thread_info + pmc_info + (optional) agent_info. Scalar track of counter
               ///< samples. pmc_info carries the full PMC metadata panel (name, symbol,
               ///< description, units, block, expression, …) keyed by the real pmc_id.
-    stream,   ///< stream_info populated. Interval track that AGGREGATES three event
-             ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
-             ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
-             ///< stream track's events span multiple per-type tables; each returned
-             ///< interval_entry_t::id encodes its event type so the reader routes it to
-             ///< the correct get_*_details() overload with no companion tag.
+    stream,   ///< stream_info populated. Interval track AGGREGATING kernel_dispatch +
+              ///< memory_copy + memory_allocate events that share a stream, keyed
+              ///< (nid, pid, stream_id). Unlike `dma` (memory-copy only), each returned
+              ///< interval_entry_t::id encodes its own event type so the reader routes
+              ///< it to the correct get_*_details() overload with no companion tag.
     memory,  ///< agent_info + queue_info populated. Interval track of memory-allocate
              ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
-             ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly. Both
-             ///< agent_id and queue_id are nullable; NULL is preserved as a distinct
-             ///< group value, not dropped. Distinct from the `dma` (memory-copy) and
-             ///< `stream` (cross-table aggregate) track types.
+             ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly; both are
+             ///< nullable and NULL is a distinct group value. Distinct from `dma`
+             ///< (memory-copy) and `stream` (cross-table aggregate).
     kernel_dispatch_pmc,  ///< agent_info populated. Interval track of kernel-dispatch PMC
                           ///< events (rocpd_pmc_event JOIN rocpd_kernel_dispatch), keyed
                           ///< (nid, agent_id, pmc_id, pid) to match Optiq's
-                          ///< GetRocprofPerformanceCountersTrackQuery GROUP BY exactly.
-                          ///< Distinct from the `counter` (SMI sample-based) track type.
-                          ///< Use get_interval_track(); scalar read returns empty.
+                          ///< GetRocprofPerformanceCountersTrackQuery GROUP BY. Distinct
+                          ///< from `counter` (SMI sample-based). get_interval_track()
+                          ///< only; scalar read returns empty.
     memory_activity       ///< agent_info populated. Scalar track of cumulative
                           ///< bytes-allocated per agent over time, keyed
-                          ///< (nid, pid, agent_id). Computed from
-                          ///< rocpd_memory_allocate: ALLOC adds size, FREE
-                          ///< subtracts size (agent_id/size recovered from prior
-                          ///< ALLOC via address map), REALLOC/RECLAIM are no-op.
-                          ///< Mirrors Optiq GetRocprofMemoryActivity* (load_id 7).
-                          ///< Use get_scalar_track(); interval read returns empty.
+                          ///< (nid, pid, agent_id). From rocpd_memory_allocate: ALLOC
+                          ///< adds size, FREE subtracts it (agent/size recovered via
+                          ///< address map), REALLOC/RECLAIM are no-ops. Mirrors Optiq
+                          ///< GetRocprofMemoryActivity* (load_id 7). get_scalar_track()
+                          ///< only; interval read returns empty.
 };
 
 /**
  * @brief For v3 synthesized cpu_thread (region) tracks, distinguishes whether the
- *        track carries region events that have an associated rocpd_sample.
+ *        track's region events have an associated rocpd_sample.
  *
- * v3 region tracks are synthesized from rocpd_region (there is no reliable
- * rocpd_track registry for them). A single (nid, pid, tid) thread can produce two
- * tracks: one of regions with no sample (main) and one of regions that do have a
- * sample (sample) — mirroring roc-optiq's region-main / region-sample split. All
- * other track types (and every v4.0 track) are @ref region_track_kind_t::none.
+ * v3 region tracks are synthesized from rocpd_region (v3 has no rocpd_track registry).
+ * One (nid, pid, tid) thread can yield two tracks: `main` (no sample) and `sample`
+ * (has sample), mirroring roc-optiq's region-main / region-sample split. All other
+ * track types, and every v4.0 track, are @ref region_track_kind_t::none.
  */
 enum class region_track_kind_t
 {
@@ -370,18 +362,15 @@ enum class region_track_kind_t
 /**
  * @brief How a track's overlapping intervals should be interpreted vertically.
  *
- * Splits the historically overloaded interval `level` into two concepts: a
- * containment `parent` edge (valid only when a track is a genuine synchronous call
- * stack) and a geometric packing `lane` (always valid). @ref nesting_model_t is the
- * per-track metadata that tells a renderer which applies.
+ * Two concepts apply: a containment `parent` edge (valid only when a track is a
+ * genuine, synchronous call stack) and a geometric packing `lane` (always valid).
+ * This enum, attached per track, tells a renderer which applies.
  */
 enum class nesting_model_t
 {
-    // A track is `stack` only when its overlaps are true synchronous containment
-    // (region = HIP->HSA API call nesting); every concurrency track
-    // (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`, where overlap means
-    // concurrency, not a parent/child edge. Only `stack` tracks populate
-    // interval_entry_t::parent.
+    // `stack` applies only to true synchronous containment (region = HIP->HSA API call
+    // nesting); every concurrency track (gpu_queue/dma/memory/stream/kernel_dispatch_pmc)
+    // is `lane`, where overlap means concurrency, not a parent/child edge.
     stack,  ///< Overlaps are true containment: interval_entry_t::parent is populated and
             ///< `lane` coincides with call depth on real (non-overlapping-sibling) data.
     lane,   ///< Overlaps are concurrency: interval_entry_t::parent is always no-parent;
@@ -403,9 +392,8 @@ struct track_info_t
     std::string extdata{};
 
     // Identity is carried as relational shared_ptr objects
-    // (node/process/thread/agent/queue/stream/pmc), sharing one instance across every
-    // track that references it. There is no flat scalar-id (node_id/process_id/
-    // sub_process_id) or C-ABI form.
+    // (node/process/thread/agent/queue/stream/pmc); the same instance is shared across
+    // every track that references it.
     std::shared_ptr<node_info_t>    node_info;     ///< Always populated.
     std::shared_ptr<process_info_t> process_info;  ///< Always populated.
     std::shared_ptr<thread_info_t>  thread_info;   ///< cpu_thread, counter.
@@ -430,7 +418,7 @@ struct track_info_t
     /// and memory-allocate (rocpd_memory_allocate) discovery sets — an ambiguous schema
     /// state where classification as counter (current precedence) silently drops the
     /// memory-allocate events. Callers should treat ambiguous_classification==true as a
-    /// data-integrity warning. No known real DB triggers this today.
+    /// data-integrity warning.
     bool ambiguous_classification{ false };
 };
 
@@ -496,12 +484,11 @@ struct arg_data_t
 using arg_data_ptr_t  = std::shared_ptr<arg_data_t>;
 using arg_data_list_t = std::vector<arg_data_ptr_t>;
 
-// Detail property values are a typed variant, not stringly. This mirrors the SDK rocpd
-// writer's `struct sql_insert_value`
-// (rocprofiler-sdk/source/lib/output/generateRocpd.cpp) — the exact read/write seam
-// profiler-hub sits opposite — which uses the same alternatives. We define our own copy
-// rather than depend on the SDK header. `monostate` = present-but-empty; `nullptr_t` =
-// explicitly-absent optional. Revisit if the SDK value model changes.
+// Detail property values are a typed variant, not stringly. Mirrors the SDK rocpd
+// writer's `sql_insert_value` (generateRocpd.cpp) — the exact read/write seam
+// profiler-hub sits opposite — with the same alternatives; profiler-hub owns its
+// copy rather than depending on the SDK header. `monostate` = present-but-empty,
+// `nullptr_t` = explicitly-absent. Revisit if the SDK value model changes.
 using arg_value_t =
     std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t>;
 
@@ -689,14 +676,11 @@ struct flow_id_access;
 /**
  * @brief Opaque, ProfilerHub-minted event handle.
  *
- * Uniquely identifies one event within a reader session across every track type
- * and every source table -- no two distinct events ever share a handle. Treat it
- * as opaque: the only supported operations are equality, ordering, and hashing
- * (so it can key a std::map / std::unordered_map). The internal encoding is
- * private and may change; consumers must never depend on it and never need a
- * companion type tag to interpret it. Pass a handle straight back to the
- * get_*_details() accessor of interest; the reader recovers internally which
- * source table and row it names.
+ * Uniquely identifies one event across every track type and source table; no two
+ * distinct events share a handle. The only supported operations are equality,
+ * ordering, and hashing (so it can key a map). The internal encoding is private
+ * and may change -- consumers must never depend on it or need a companion type
+ * tag; pass the handle straight back to the get_*_details() accessor of interest.
  */
 class event_id_t
 {
@@ -747,11 +731,11 @@ struct event_id_access
 /**
  * @brief Unified detail record for any event, keyed by its opaque handle.
  *
- * One collapsed detail path across all six event_type_t cases: a fixed common header
- * plus a generic `properties` bag of named, typed values. Replaces the seven typed
- * get_*_details() accessors. Linked entities (agent, kernel_symbol, code_object, stream,
- * queue, node/process/thread) appear in `properties` as their integer id, NOT as a
- * resolved sub-struct — consumers do a follow-up lookup by id.
+ * One detail shape covers all six event_type_t cases: a fixed common header plus a
+ * generic `properties` bag of named, typed values. Linked entities (agent,
+ * kernel_symbol, code_object, stream, queue, node/process/thread) appear in
+ * `properties` as their integer id, NOT as a resolved sub-struct -- consumers do a
+ * follow-up lookup by id.
  */
 struct event_info_t
 {
@@ -774,11 +758,8 @@ struct interval_entry_t
     std::string display_name;  ///< Human-readable label for the bar.
     std::string category;      ///< Event category display string (e.g. "rocm_hip_api",
                                ///< "timer_sampling"); empty when the event carries none.
-    // `lane` is the geometric packing row and is always valid; `parent_id` is a true
-    // containment edge, populated only on `stack` tracks (track_info_t::nesting == stack)
-    // and carrying the opaque event_id_t, never a raw row id. `level` is retained for
-    // backward compatibility (Optiq reads it for height) — stack tracks: containment
-    // depth; lane tracks: == lane. Height consumers should migrate to
+    // `level` is kept only for Optiq backward compatibility (stack tracks: containment
+    // depth; lane tracks: == lane); height consumers should migrate to
     // track_info_t::max_lane.
     int level{};      ///< Deprecated. Nesting depth on stack tracks; == lane on lane
                       ///< tracks. Prefer `lane` (row) + `parent_id` (containment).
@@ -814,10 +795,10 @@ enum class flow_kind_t
 /**
  * @brief Opaque handle grouping the edges of one flow / chain.
  *
- * All edges derived from a single causal chain share one flow_id_t; a multi-hop chain
- * A -> B -> C is two edges carrying the same flow_id. Treat it as opaque: the only
- * supported operations are equality, ordering, and hashing (so it can key a map). The
- * internal encoding is private and may change; consumers must never depend on it.
+ * Edges from a single causal chain share one flow_id_t (a multi-hop chain A -> B -> C
+ * is two edges with the same flow_id). The only supported operations are equality,
+ * ordering, and hashing (so it can key a map); the internal encoding is private and
+ * may change, and consumers must never depend on it.
  */
 class flow_id_t
 {
@@ -852,8 +833,7 @@ struct flow_id_access
 
 // A flow is a directed, typed, chain-grouped edge. Each unordered clique pair yields
 // one directed edge (source -> dest); `flow_id` groups the edges of one stack lineage;
-// `kind` classifies the edge. Endpoints stay opaque event_id_t. The source/dest field
-// names are kept for backward compatibility.
+// `kind` classifies the edge. Endpoints stay opaque event_id_t.
 struct flow_edge_t
 {
     event_id_t  source{};   ///< Opaque handle of the source event (arrow tail).

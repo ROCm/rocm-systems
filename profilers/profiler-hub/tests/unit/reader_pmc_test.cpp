@@ -18,10 +18,10 @@
 using namespace profiler_hub;
 using namespace profiler_hub::test;
 
-// Mint the handle for a SQL-seeded fixture row by its EXPLICIT id. Unlike the
-// writer's 0-based autoincrementer (see make_event_id above), synthetic SQL
-// fixtures assign explicit 1-based ids (e.g. rocpd_sample.id = 1), so no
-// ordinal->raw shift applies — the db_id passed here IS the raw id (DL-015/069).
+// Mint the handle for a SQL-seeded fixture row by its explicit id. Synthetic SQL
+// fixtures assign explicit 1-based ids (e.g. rocpd_sample.id = 1), unlike the
+// writer's 0-based autoincrementer path, so no ordinal->raw shift applies here --
+// the db_id passed in IS the raw id (DL-015/069).
 reader_types::event_id_t
 make_sql_event_id(reader_types::event_type_t type, size_t db_id)
 {
@@ -30,10 +30,9 @@ make_sql_event_id(reader_types::event_type_t type, size_t db_id)
 
 // ============================================================================
 // kernel_dispatch_pmc track type — v3 synthetic fixture (rocpd_v3_kd_pmc.db)
-// Data: 1 agent, 2 PMC types (SQ_WAVES pmc_id=1, GRBM_COUNT pmc_id=2),
-// 3 dispatches: kd 1+2 on SQ_WAVES (start 1000,2000), kd 3 on GRBM_COUNT
-// (start 3000). Tracks: (nid=1,agent_id=1,pmc_id=1,pid=100) has 2 events;
-// (nid=1,agent_id=1,pmc_id=2,pid=100) has 1 event.
+// 1 agent, 2 PMC types (SQ_WAVES=1, GRBM_COUNT=2); 3 dispatches: kd 1+2 on
+// SQ_WAVES (start 1000,2000), kd 3 on GRBM_COUNT (start 3000). Tracks (all
+// nid=1,agent_id=1,pid=100): pmc_id=1 has 2 events, pmc_id=2 has 1 event.
 // ============================================================================
 
 class reader_v3_kd_pmc_test : public ::testing::Test
@@ -133,12 +132,12 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // A kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its
-    // handle must be typed kernel_dispatch and resolve through the KD detail path -- NOT
-    // the point pmc_event path (WHERE rocpd_pmc_event.id = ?), which keys a different
-    // table. Guard bites: revert interval_event_type_for(kernel_dispatch_pmc) to
-    // pmc_event and this test fails (handle mis-types + KD detail unreachable; the
-    // kd_pmc fixture has no rocpd_sample, so the point path resolves to nullopt).
+    // A kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its handle
+    // must be typed kernel_dispatch and resolve through the KD detail path -- not
+    // the point pmc_event path (WHERE rocpd_pmc_event.id = ?), which keys a
+    // different table. If interval_event_type_for(kernel_dispatch_pmc) is reverted
+    // to pmc_event, the handle mis-types and the point path resolves to nullopt
+    // (the kd_pmc fixture has no rocpd_sample), so this test fails.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -316,10 +315,10 @@ TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // v4 backend: same contract as the v3 test. The v4 kd_pmc interval SQL
-    // also SELECTs K.id (rocpd_kernel_dispatch.id), so the single-site fix in
-    // interval_event_type_for is backend-agnostic and routes this handle through the KD
-    // detail path with the interval extent (te) present.
+    // v4 backend: same contract as the v3 test. The v4 kd_pmc interval SQL also
+    // SELECTs K.id (rocpd_kernel_dispatch.id), so interval_event_type_for routes
+    // this handle through the KD detail path with the interval extent (te)
+    // present, consistently across both backends.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -494,12 +493,11 @@ TEST_F(reader_v4_amb_pmc_test, v4_exactly_one_ambiguous_pmc)
     EXPECT_EQ(ambiguous_count, 1U);
 }
 
-// v4 track-classification ambiguity detection tests
-//
-// Fixture: rocpd_v4_amb_cls.db — a single rocpd_track row (id=1) referenced by
-//   both rocpd_sample/rocpd_pmc_event (counter set) and rocpd_memory_allocate
-//   (memory set). build_v4_tracks() must detect the overlap, log a warning, and
-//   set ambiguous_classification=true on the resulting counter track.
+// v4 track-classification ambiguity detection. Fixture rocpd_v4_amb_cls.db: a
+// single rocpd_track row (id=1) referenced by both rocpd_sample/rocpd_pmc_event
+// (counter set) and rocpd_memory_allocate (memory set). build_v4_tracks() must
+// detect the overlap, log a warning, and set ambiguous_classification=true on
+// the resulting counter track.
 
 class reader_v4_amb_cls_test : public ::testing::Test
 {
@@ -558,9 +556,9 @@ TEST_F(reader_v4_amb_cls_test, v4_non_ambiguous_track_not_flagged)
 
 // ============================================================================
 // Track-scoped API tests — v4.0 synthetic counter fixture (rocpd_v4_counter.db)
-// Built at configure time from committed SQL. Exists solely to exercise the
-// v4.0 scalar/counter path (get_scalar_track / get_event_info), which no
-// real v4.0 capture available to the project contains (no rocpd_sample rows).
+// Built at configure time from committed SQL to exercise the v4.0 scalar/counter
+// path (get_scalar_track / get_event_info); no real v4.0 capture available to
+// the project has rocpd_sample rows, so this fixture is the sole coverage.
 // ============================================================================
 
 class reader_v4_counter_test : public ::testing::Test
@@ -597,12 +595,12 @@ TEST_F(reader_v4_counter_test, v4_counter_track_classified_named_and_agent_scope
     ASSERT_NE(counter->agent_info, nullptr);
     ASSERT_NE(counter->thread_info, nullptr);
 
-    // v4.0 has one pmc per event (no event_id fan-out), so it is unaffected by the
-    // v3-only deterministic disambiguation (005B-4-fix-1-fix-1): the single track must
-    // still resolve to the GRBM_COUNT pmc, with name/agent consistent with the track.
+    // v4.0 has one pmc per event (no event_id fan-out), so it is unaffected by
+    // the v3-only deterministic disambiguation: the single track must still
+    // resolve to the GRBM_COUNT pmc, with name/agent consistent with the track.
     ASSERT_NE(counter->pmc_info, nullptr);
     ASSERT_EQ(counter->pmc_info->name, "GRBM_COUNT");
-    // 005B-4-fix-1-fix-2: numeric pmc_id exposed on pmc_info; GRBM_COUNT is pmc 1 here.
+    // Numeric pmc_id is exposed on pmc_info; GRBM_COUNT is pmc 1 here.
     ASSERT_EQ(counter->pmc_info->pmc_id, 1U);
     ASSERT_EQ(counter->name, counter->pmc_info->name);
     ASSERT_NE(counter->pmc_info->agent_info, nullptr);
@@ -637,9 +635,8 @@ TEST_F(reader_v4_counter_test, v4_get_scalar_track_returns_timestamp_ordered_val
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 {
-    // sample row id 1 -> timestamp 3000. The scalar handle encodes the sample event
-    // type; get_event_info resolves it as a point event (te == nullopt). The counter
-    // name + value payload is asserted separately below.
+    // Sample row id 1 -> timestamp 3000. The scalar handle encodes the sample
+    // event type; get_event_info resolves it as a point event (te == nullopt).
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
     ASSERT_TRUE(details.has_value());
@@ -649,10 +646,9 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and_value)
 {
-    // v4 backend: sample row id 1 -> track 1 "GRBM_COUNT", value 30.5.
-    // Resolved through the unified get_event_info the counter sample carries the counter
-    // name (from the track) + value (as a double property). Pre-052 this arm returned a
-    // bare timestamp, dropping name+value (guard-bite).
+    // v4 backend: sample row id 1 -> track 1 "GRBM_COUNT", value 30.5. Resolved
+    // through the unified get_event_info, the counter sample carries the counter
+    // name (from the track) and value (as a double property).
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
     ASSERT_TRUE(details.has_value());
@@ -666,12 +662,12 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_pmc_event_carries_value)
 {
-    // A pmc_event point handle minted from a known rocpd_pmc_event.id resolves through
-    // the unified detail path: it is a point event (te == nullopt) whose "value" property
-    // carries the counter value as a double. pmc_event id=1 -> event_id=1 -> sample
-    // timestamp 3000, value 30.5. (Reader-minted pmc_event handles on kernel_dispatch_pmc
-    // tracks carry a kernel_dispatch id and route to the interval path, so the point
-    // detail path is exercised here with a directly-minted pmc_event.id handle.)
+    // A pmc_event point handle minted from rocpd_pmc_event.id resolves as a point
+    // event (te == nullopt) via the unified detail path, with "value" carrying the
+    // counter value as a double (id=1 -> event_id=1 -> timestamp 3000, value 30.5).
+    // Reader-minted pmc_event handles on kernel_dispatch_pmc tracks instead carry a
+    // kernel_dispatch id and route to the interval path, so this test exercises the
+    // point path via a directly-minted pmc_event.id handle.
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::pmc_event, 1));
     ASSERT_TRUE(details.has_value());
@@ -722,8 +718,8 @@ TEST_F(reader_v4_counter_test, v4_get_track_stats_counter_matches_scalar_slice)
 
 TEST_F(reader_v4_counter_test, v4_get_track_stats_bare_cpu_thread_is_empty)
 {
-    // The bare cpu_thread track has no region rows: count 0, nullopt bounds — the
-    // honest "empty track" signal (SQL MIN/MAX over an empty set), not an error.
+    // The bare cpu_thread track has no region rows, so MIN/MAX over the empty set
+    // yields count 0 with nullopt bounds -- not an error.
     auto tracks = m_reader->get_tracks();
     auto cpu =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);

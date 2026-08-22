@@ -21,27 +21,18 @@
 namespace profiler_hub::data_storage::schema_v4
 {
 
-// v4.0 read backend. Implements the track-scoped reader subset
-// (get_interval_track / get_scalar_track / get_flows + scalar detail overloads,
-// plus the info tables and counter-name/scalar-track statements the reader
-// needs) against the v4.0 rocpd schema.
-//
-// v4.0 differs from v3 in two structural ways that drive the SQL here:
-//   * rocpd_track is the universal identity anchor — every event table carries a
-//     single track_id FK, so all track-scoped queries reduce to WHERE track_id = ?.
-//   * timestamps are normalized into the rocpd_timestamp spine — interval tables
-//     carry start_id/end_id FKs and rocpd_sample carries timestamp_id, so reading
-//     an actual time requires a JOIN onto rocpd_timestamp.value.
-//
-// The timeline-event and count accessors are implemented here against the v4.0
-// schema (spine JOINs + rocpd_track + rocpd_info_category). The remaining legacy
-// detail/call-stack/correlated/time-range surface is not yet implemented; those
-// accessors inherit the default-empty stubs from read_statements_base and the
-// reader still guards those paths.
-//
-// Table naming: this backend reuses the v3 reader convention `rocpd_<name>_<uuid>`
-// (underscore separator supplied by the reader). The `{{uuid}}` placeholder in the
-// v4.0 DDL template is not substituted here.
+// v4.0 read backend, implementing the read_statements_base accessor surface
+// against the v4.0 rocpd schema. Two structural differences from v3 drive the
+// SQL here: rocpd_track is the universal identity anchor (every event table
+// carries a single track_id FK, so track-scoped queries reduce to
+// WHERE track_id = ?), and timestamps are normalized into the rocpd_timestamp
+// spine (interval tables carry start_id/end_id FKs, rocpd_sample carries
+// timestamp_id, so reading a time requires a JOIN onto rocpd_timestamp.value).
+// A handful of v3-only track-discovery accessors (region/gpu_queue/dma tracks
+// and their NULL-pattern variants, max_track_id) are unimplemented here and
+// fall back to the base class's default-empty result. Table naming reuses the
+// v3 `rocpd_<name>_<uuid>` convention; the v4.0 DDL template's `{{uuid}}`
+// placeholder is not substituted here.
 struct read_statements : public read_statements_base
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -138,21 +129,14 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_sample_track_ids;
     }
-    // Stream tracks are the one v4.0 track type NOT read 1:1 from rocpd_track: multiple
-    // rocpd_track rows can share a stream_id, so stream tracks are synthesized by
-    // distinct (nid, pid, stream_id) with a non-null stream_id.
     [[nodiscard]] const distinct_stream_func_t& distinct_stream_tracks() const override
     {
         return m_distinct_stream_tracks;
     }
-    // v4.0 memory tracks: distinct (nid, agent_id, queue_id, pid) from
-    // rocpd_memory_allocate JOIN rocpd_track (same join pattern as stream interval SQL).
     [[nodiscard]] const distinct_memory_func_t& distinct_memory_tracks() const override
     {
         return m_distinct_memory_tracks;
     }
-    // v4.0: set of rocpd_track.id values referenced by rocpd_memory_allocate, used in
-    // the generic classification loop to disambiguate memory from gpu_queue tracks.
     [[nodiscard]] const memory_alloc_track_ids_func_t& memory_alloc_track_ids()
         const override
     {
@@ -891,13 +875,12 @@ private:
             &interval_row_result::category);
 
         // stream: aggregates kernel_dispatch + memory_copy + memory_allocate sharing a
-        // stream. v4 stream_id is on rocpd_track, so each leg joins its event table to
-        // rocpd_track and filters T.stream_id = ? (bound three times). start/end resolve
-        // through the timestamp spine; category via rocpd_event/rocpd_info_category (LEFT
-        // JOIN, additive — the per-op v4 interval queries above don't carry it). op_kind
-        // literal per leg (kernel_dispatch=1, memory_copy=2, memory_allocate=3) drives
-        // the reader's per-event name lookup and get_*_details() dispatch. Unlike v3,
-        // memory_allocate carries a name_id in v4, so its name_ref is populated.
+        // stream. v4 stream_id lives on rocpd_track, so each leg joins to rocpd_track and
+        // filters T.stream_id = ? (bound three times); start/end resolve via the
+        // timestamp spine. category is added via rocpd_event/rocpd_info_category (LEFT
+        // JOIN, additive) since the per-op queries above don't carry it. op_kind (1/2/3
+        // per leg) drives the reader's name lookup and get_*_details() dispatch; unlike
+        // v3, memory_allocate has a name_id here, so name_ref is populated.
         m_stream_interval_track =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -1219,17 +1202,11 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Build all four timeline variants for one interval table. v4.0 differs
-        // from v3 structurally:
-        //   * start/end resolved through the rocpd_timestamp spine (start_id/end_id).
-        //   * nid/pid/tid come from the rocpd_track identity anchor, not the event
-        //     table (v4 event tables carry only track_id).
-        //   * category resolved to its display string via rocpd_info_category
-        //     (v3 used rocpd_string), keeping the reader version-agnostic.
-        // The track-scoped variants filter on track_id alone (the universal v4
-        // anchor); the three leading nid/pid/tid binds are accepted for signature
-        // parity with v3 and consumed as always-true `? IS NOT NULL` no-ops so the
-        // anonymous-`?` count matches bind_types.
+        // Build all four timeline variants for one interval table. v4.0 resolves
+        // start/end via the rocpd_timestamp spine and nid/pid/tid via the rocpd_track
+        // identity anchor (event tables carry only track_id); category resolves via
+        // rocpd_info_category. track_filtered's three leading binds are unused
+        // `? IS NOT NULL` no-ops kept only for bind-count parity with v3.
         auto make_timeline_set =
             [&](const std::string& table,
                 const std::string& alias,
@@ -1461,15 +1438,13 @@ private:
     {
         const auto& u = m_uuid;
 
-        // v4.0 has no JSON blobs on rocpd_event: call stack and line info are
-        // relational. For each event we run three queries and assemble the
-        // version-neutral event_id_result the reader consumes:
-        //   * meta   — the scalar event row (category/stack/correlation/extdata)
-        //   * frames — rocpd_call_stack -> rocpd_info_pc -> rocpd_info_address_range
-        //   * lines  — rocpd_line_info  -> rocpd_info_source_code / rocpd_info_pc /
-        //              rocpd_info_address_range
-        // A single lazy result_set cannot express the one-to-many frame/line fan-out,
-        // so the accessor materializes and returns a fully-built vector.
+        // v4.0 has no JSON blobs on rocpd_event: call stack and line info are relational,
+        // so each event runs three queries assembled into the version-neutral
+        // event_id_result the reader consumes: meta (the scalar event row), frames
+        // (rocpd_call_stack -> rocpd_info_pc -> rocpd_info_address_range), and lines
+        // (rocpd_line_info -> rocpd_info_source_code / rocpd_info_pc /
+        // rocpd_info_address_range). A single lazy result_set can't express that
+        // one-to-many fan-out, so the accessor materializes a fully-built vector.
         struct meta_row
         {
             std::optional<size_t>      event_id;

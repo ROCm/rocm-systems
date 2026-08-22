@@ -1,4 +1,4 @@
-# Perfetto trace_processor POC — task 024
+# Perfetto trace_processor POC
 # Opt-in; only reached when PROFILER_HUB_ENABLE_TPX=ON.
 # Requires:
 #   PERFETTO_SOURCE_DIR  — root of a google/perfetto checkout

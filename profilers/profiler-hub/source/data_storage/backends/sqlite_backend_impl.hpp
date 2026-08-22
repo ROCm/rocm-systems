@@ -252,24 +252,14 @@ database_backend<SqlitePolicy>::discover_uuids()
         std::string uuid;
     };
 
-    // Recover the node UUID(s) encoded in this database's rocpd table suffixes.
-    //
-    // Preferred path: read the authoritative rocpd_info_node.guid column and
-    // normalize '-'->'_' to match the underscore suffix the reader concatenates as
-    // `rocpd_X_<uuid>`. This replaces the previous query, which used the SQLite
-    // "substring after the last underscore" idiom
-    // (replace(name, rtrim(name, replace(name,'_','')), '')) and truncated a
-    // hyphenated v4 GUID (stored as `..._00001eca_d4de_..._c34ecf8c3a87`) down to
-    // only its final segment (`c34ecf8c3a87`), yielding a UUID that matched no real
-    // table. rocpd_metadata.uuid is deliberately NOT used: it stores a
-    // LEADING-underscore variant (`_00001eca_...`) that would double the separator
-    // when concatenated.
-    //
-    // Fallback path: schema-only databases built from rocpd_tables.sql without
-    // rocpd_views.sql (e.g. some generated unit fixtures) have no unsuffixed
-    // rocpd_info_node view to read guid from. For those, derive the UUID from the
-    // suffixed rocpd_info_node table name by taking everything after the
-    // `rocpd_info_node_` prefix -- the correct parse the old idiom failed to do.
+    // Recover the node UUID(s) from this database's rocpd table suffixes.
+    // Preferred: read rocpd_info_node.guid (hyphenated UUID form) and normalize
+    // '-' to '_' to match the `rocpd_X_<uuid>` suffix convention. rocpd_metadata.uuid
+    // is not used here -- it stores a leading-underscore variant (`_00001eca_...`)
+    // that would double the separator if concatenated.
+    // Fallback: schema-only databases (rocpd_tables.sql without rocpd_views.sql, e.g.
+    // some generated unit fixtures) have no unsuffixed rocpd_info_node view; derive
+    // the UUID from the suffixed table name after the `rocpd_info_node_` prefix.
     // DISTINCT (both paths) preserves multi-node enumeration.
     struct count_result
     {

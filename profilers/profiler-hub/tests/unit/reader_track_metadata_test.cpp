@@ -20,13 +20,11 @@ using namespace profiler_hub;
 using namespace profiler_hub::test;
 
 // =============================================================================
-// v3 track-type x schema switch-arm coverage.
-//   Fixture rocpd_v3_track_shapes.db carries exactly one track of each v3 dma /
-//   memory / cpu_thread shape the other v3 fixtures leave dark in get_track_stats
-//   / get_interval_track: dma queue-only / agent-only / queue+agent, memory
-//   queue+agent / queue-only / neither, and a cpu_thread SAMPLE track. Each test
-//   asserts exact min_ts / max_ts / count and interval start order
-//   (by-construction oracles), not merely that the call did not throw.
+// v3 track-type x schema switch-arm coverage. Fixture rocpd_v3_track_shapes.db
+// carries one track of each v3 dma / memory / cpu_thread shape left dark
+// elsewhere: dma queue-only / agent-only / queue+agent; memory queue+agent /
+// queue-only / neither; and a cpu_thread SAMPLE track. Each test asserts exact
+// min_ts / max_ts / count and interval start order.
 // =============================================================================
 class reader_v3_track_shapes_test : public ::testing::Test
 {
@@ -168,12 +166,9 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
 {
     // The 48 memory copies fully cross two destination agents (id 1, 2) with two
     // streams (12 events per agent/stream cell), all on one queue. Keyed by
-    // (nid,pid,queue_id,dst_agent_id) this MUST yield exactly 2 dma tracks -- one per
+    // (nid,pid,queue_id,dst_agent_id) this yields exactly 2 dma tracks -- one per
     // destination agent, 24 events each -- matching Optiq's
-    // GetRocprofMemoryCopyTrackQuery by-agent swimlane grouping. The old stream-keyed
-    // identity would instead have given 2 tracks of 24 split BY STREAM, each spanning
-    // both agents: the exact inverse. This test pins the by-agent partition and guards
-    // against a regression back to by-stream.
+    // GetRocprofMemoryCopyTrackQuery by-agent swimlane grouping.
     auto tracks = m_reader->get_tracks();
     auto dma    = find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma);
     ASSERT_EQ(dma.size(), 2U);
@@ -221,11 +216,10 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
 }
 
 // =============================================================================
-// Missing-metadata naming fallbacks (v3). The fixture has an unnamed stream, one
-// region whose thread row is entirely absent, one region whose thread has a NULL
-// name, and one agent with a NULL type_index -- so synthesize_derived_tracks()
-// must fall back to the synthetic display names and get_all_agents() must drop the
-// corrupt agent. Each test asserts the EXACT fallback string / dropped-agent count.
+// Missing-metadata naming fallbacks (v3). Fixture: an unnamed stream, a region
+// with no thread row, a region with a NULL thread name, and an agent with a
+// NULL type_index -- synthesize_derived_tracks() falls back to synthetic names
+// for each; get_all_agents() drops the corrupt agent. Tests assert exact values.
 // =============================================================================
 class reader_v3_missing_meta_test : public ::testing::Test
 {
@@ -309,13 +303,12 @@ TEST_F(reader_v3_missing_meta_test, agent_with_null_type_index_is_dropped)
     EXPECT_EQ(agents.front()->name, "Synthetic GPU 0");
 }
 
-// A v3 counter track whose metric name itself contains " [" ("TCC_HIT [sum] [0]")
-// defeats the ordinal strip in ranked_pmc_resolver (the strip cuts at the first
-// " [", yielding "TCC_HIT", matching no pmc name), so the name-match rank collapses
-// and the deterministic pmc_id tiebreaker alone selects the pmc. This fixture puts
-// the correct pmc at the lower id so the tiebreaker still lands on it -- proving the
-// degradation is non-fatal on this shape while documenting that correctness now
-// rides on pmc_id ordering, not the (defeated) name match.
+// A v3 counter track whose metric name contains " [" ("TCC_HIT [sum] [0]") defeats
+// the ordinal strip in ranked_pmc_resolver (cuts at the first " [", yielding
+// "TCC_HIT", which matches no pmc name): the name-match rank collapses and the
+// pmc_id tiebreaker alone selects the pmc. This fixture places the correct pmc at
+// the lower id, so resolution still lands correctly, though it depends on pmc_id
+// ordering rather than the (defeated) name match.
 class reader_v3_bracket_name_test : public ::testing::Test
 {
 protected:
@@ -348,11 +341,8 @@ TEST_F(reader_v3_bracket_name_test, delimiter_in_metric_name_resolves_via_pmc_id
     const auto& counter = counters.front();
     ASSERT_NE(counter->pmc_info, nullptr);
 
-    // The ordinal strip is defeated by the internal " [" (yields "TCC_HIT", matching
-    // neither pmc), so both co-sampled pmcs tie on the name key and the pmc_id
-    // tiebreaker picks the lower id -- pmc 1, which by construction IS the track's own
-    // metric. Correct resolution survives here ONLY because the correct pmc has the
-    // lower id; this is the non-fatal face of that LATENT degradation.
+    // Both co-sampled pmcs tie on the name key here; the pmc_id tiebreaker picks
+    // pmc 1, which by construction is the track's own metric.
     EXPECT_EQ(counter->pmc_info->pmc_id, 1U);
     EXPECT_EQ(counter->pmc_info->name, "TCC_HIT [sum]");
     // Q9 display name is that same resolved pmc's name.

@@ -23,10 +23,6 @@ struct reader_t
      * @brief Construct a reader with the given storage backend
      * @param storage Storage backend to read from (takes ownership)
      */
-    // A reader is constructed directly from a storage_t backend; there is no
-    // format-autodetecting trace_t::open entry point. Multi-format detection is
-    // deferred — the Perfetto trace_processor path exists only as a POC and is not
-    // wired into this API.
     explicit reader_t(std::unique_ptr<profiler_hub::storage_t> storage);
 
     ~reader_t();
@@ -234,21 +230,16 @@ struct reader_t
 
     /**
      * @brief Get the flow edges visible in a viewport, capped for dense views.
-     * @param tracks Track ids in view. An edge is kept iff AT LEAST ONE endpoint sits on
-     * a listed track (so a cross-track arrow with one endpoint just off-screen still
-     * surfaces its visible half). An empty vector applies no track filter (all tracks).
-     * @param window Time range. An edge is kept iff its temporal extent
-     *               [min(src.start,dst.start), max(src.end,dst.end)] intersects
-     *               [window.start or 0, window.end or +inf]. An empty window (both fields
-     *               nullopt) applies no time filter.
-     * @param max_edges Cap on the result. When >0 and the in-window/in-track set exceeds
-     *               it, edges are decimated to the @p max_edges highest
-     * arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
-     * (source, dest) handle order so the kept set is STABLE across pans. 0 = no cap.
-     * @return The kept edges. A returned edge still carries NO timestamps — endpoint
-     *         geometry is used internally only to filter and rank; the emitted
-     * flow_edge_t shape (source, dest, flow_id, kind) is unchanged. Every returned edge
-     * is a member of get_flows({}).
+     * @param tracks Track ids in view; an edge is kept iff at least one endpoint sits on
+     *               a listed track. Empty vector = no track filter.
+     * @param window Time range; an edge is kept iff its full temporal extent
+     *               [min(src.start,dst.start), max(src.end,dst.end)] intersects it.
+     *               Empty window (both fields nullopt) = no time filter.
+     * @param max_edges Cap on the result, 0 = uncapped. Over cap, keeps the highest
+     *               arrow-span-latency (dst.start - src.end, clamped at 0) edges,
+     *               tie-broken by handle order so the kept set is stable across pans.
+     * @return The kept edges; a returned edge carries no timestamps. Every returned
+     *         edge is a member of get_flows({}).
      */
     [[nodiscard]] reader_types::flow_list_t get_flows_in_window(
         const std::vector<reader_types::track_id_t>& tracks,
@@ -257,21 +248,18 @@ struct reader_t
 
     /**
      *@section Event Detail (On-Demand, Unified)
-     * One collapsed detail path for every event type.
+     * A single detail path serves every event type.
      */
 
     /**
      * @brief Get unified detail for any event, by its opaque handle.
-     *
-     * Dispatches on the handle's internal event type across all six event_type_t cases
-     * (region, kernel_dispatch, memory_copy, memory_allocate, sample, pmc_event) and
-     * returns a fixed common header (name, category, ts, te) plus a generic `properties`
-     * bag of named, typed values (see event_info_t / arg_t). Point events (sample,
-     * pmc_event) carry `te == std::nullopt`. Linked entities are emitted as integer-id
-     * properties, not resolved sub-structs. Missing optional fields are omitted.
-     *
      * @param id Opaque event handle (from get_interval_track / get_scalar_track / flows).
-     * @return Unified detail, or nullopt if the handle names no known event.
+     * @return Common header (name, category, ts, te) plus a generic `properties` bag
+     *         (event_info_t / arg_t), or nullopt if the handle names no known event.
+     *         Dispatches across all six event_type_t cases (region, kernel_dispatch,
+     *         memory_copy, memory_allocate, sample, pmc_event). Point events (sample,
+     *         pmc_event) carry `te == std::nullopt`. Linked entities are integer-id
+     *         properties, not resolved sub-structs; missing optional fields are omitted.
      */
     [[nodiscard]] std::optional<reader_types::event_info_t> get_event_info(
         const reader_types::event_id_t& id) const;
@@ -300,13 +288,10 @@ struct reader_t
 
     /**
      * @brief Get call stack for an event, by its opaque handle.
-     *
-     * Overload for consumers that hold only an opaque event_id_t (e.g. from
-     * get_interval_track / get_scalar_track / flows) and never construct a
-     * timeline_event_t. Internally builds a timeline_event_t from the handle and
-     * delegates to the timeline_event_t overload — the decode stays private inside
-     * the reader, so event_id_t opacity is preserved; no public
-     * type/row_id accessor is exposed.
+     * Overload for consumers holding only an event_id_t (e.g. from get_interval_track /
+     * get_scalar_track / flows); builds a timeline_event_t internally and delegates to
+     * that overload, keeping the decode private so event_id_t opacity is preserved (no
+     * public type/row_id accessor).
      * @param id Opaque event handle.
      * @return Call stack data (empty if not available in database).
      */
@@ -315,9 +300,8 @@ struct reader_t
 
     /**
      * @brief Get source code context for an event, by its opaque handle.
-     *
-     * Opaque-handle overload of get_source_context; see get_call_stack(event_id_t)
-     * for the opacity-preserving delegation rationale.
+     * Opaque-handle overload of get_source_context; see get_call_stack(event_id_t) for
+     * the opacity-preserving delegation rationale.
      * @param id Opaque event handle.
      * @return List of source context entries (empty if not available).
      */
@@ -334,11 +318,9 @@ struct reader_t
 
     /**
      * @brief Get function arguments for an event, by its opaque handle.
-     *
-     * Opaque-handle overload of get_arguments; see get_call_stack(event_id_t)
-     * for the opacity-preserving delegation rationale. Unlike the folded
-     * name/value pairs in event_info_t::properties, this preserves each
-     * argument's position and type (arg_data_t).
+     * Opaque-handle overload of get_arguments; see get_call_stack(event_id_t) for the
+     * opacity-preserving delegation rationale. Unlike event_info_t::properties' folded
+     * name/value pairs, this preserves each argument's position and type (arg_data_t).
      * @param id Opaque event handle.
      * @return List of argument data (empty if not available).
      */
