@@ -75,10 +75,11 @@
 
 /* MCContext and createMCAsmParser switched to reference parameters in LLVM 23.
  * LLVM_MAIN_REVISION is AMD-private and absent from upstream builds, so only
- * consult it when defined.
+ * consult it when defined. 578913 is the revision the last of the three API
+ * commits landed under; 577912 predates all of them.
  */
 #if defined(LLVM_MAIN_REVISION)
-#define KFD_LLVM_MC_REF_API (LLVM_MAIN_REVISION >= 577912)
+#define KFD_LLVM_MC_REF_API (LLVM_MAIN_REVISION >= 578913)
 #else
 #define KFD_LLVM_MC_REF_API (LLVM_VERSION_MAJOR >= 23)
 #endif
