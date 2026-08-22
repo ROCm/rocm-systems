@@ -262,6 +262,32 @@ public:
     return qs == nullptr ? 0 : qs->peak_entries;
   }
 
+  /// @brief Hardware queues registered with this CP, including fan-out replicas.
+  ///
+  /// @details Test-only. Whether a queue is present here as an owner or as a
+  /// replica is an internal placement detail, not something production code
+  /// should branch on.
+  [[nodiscard]] size_t registered_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    return hw_queues_.size();
+  }
+
+  /// @brief Host-accessible queues this CP polls, excluding fan-out replicas.
+  ///
+  /// @details Test-only, and the count form of polls_kfd_queues(): replication
+  /// makes every CP hold a host-accessible queue, so this is what says whether a
+  /// CP still has a ring of its own to read after another CP's queue is
+  /// destroyed. Deliberately narrower than "queues this CP owns" -- a queue
+  /// registered directly against this CP by a test is owned by it but is not
+  /// host-accessible, so it is not counted here.
+  [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    size_t polled = 0;
+    for (const auto &q : hw_queues_)
+      polled += (q.host_accessible && !q.fanout_replica) ? 1 : 0;
+    return polled;
+  }
+
   /// @brief Step a dispatch id within one XCD's residue class.
   ///
   /// @details Public and static only so the wrap can be pinned by a test: it is
