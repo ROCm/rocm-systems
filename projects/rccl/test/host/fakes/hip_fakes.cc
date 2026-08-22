@@ -264,6 +264,8 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
 {
     if (pciBusId && len > 0) {
         if (g_hipDeviceGetPCIBusIdResult == hipSuccess)
+            // Same rationale as gcnArchName: bounded/self-terminating, no heap
+            // alloc that fmt::format would need for the intermediate std::string.
             std::snprintf(pciBusId, len, "0000:00:00.0");
         else
             pciBusId[0] = '\0';
