@@ -28,7 +28,9 @@ This phase is judged primarily by the breadth and quality of that automated
 safety net, not by the number of E2E cells promoted or prototype fixes landed.
 The status campaigns are both qualification work and a systematic source of
 real user behavior from which to derive the tests that will make section 2
-safe to iterate on.
+safe to iterate on. A greener status cell with no durable test disposition is
+useful evidence, but it is not by itself completion of a preparation-work
+iteration.
 
 The checked-in device tier and its coverage gaps are tracked in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md). E2E procedures and acceptance
@@ -76,10 +78,12 @@ qualification checkpoints.
 3. **Apply one global priority order.** Across both ledgers, select the engine
    column first: Record/Replay, then Sampled, then SuperCollider, then Inline
    Shadow. Within the active column, lift the floor: red before orange, orange
-   before yellow, and yellow before green. In other words, the ordering is
-   lexicographic: engine priority first, then lowest color across both ledgers
-   for that engine. This is the default selection order, not permission to
-   ignore either ledger. Keep both architectures moving; use
+   before yellow, and yellow before green. Concretely, exhaust or explicitly
+   defer Record/Replay reds across both ledgers before its oranges, then its
+   yellows, and finally its greens; repeat that sequence for Sampled,
+   SuperCollider, and Inline Shadow in that order. This is the default
+   selection order, not permission to ignore either ledger. Keep both
+   architectures moving; use
    the standing approximate 75% CDNA4 / 25% gfx1250 catch-up bias while CDNA4
    remains behind, without starving gfx1250. Once every applicable cell is
    green, make a fresh global pass over every green cell on one reviewed
@@ -156,7 +160,10 @@ qualification checkpoints.
 3. Continue extracting quick, implementation-independent coverage from every
    useful E2E investigation, [VALIDATION.md](VALIDATION.md), and Aorta. Close
    both host-unit and device gaps; do not count a prototype repair alone as
-   progress toward the principal deliverable.
+   progress toward the principal deliverable. Record a test disposition for
+   passing investigations too: existing sufficient coverage, a new host test,
+   a new adjacent correct/incorrect device contract, both, or a specific reason
+   why the behavior cannot be faithfully reduced into a checked-in test.
 4. Make a suite-wide inventory of all existing host and device behavioral
    contracts. For each, record an applicable, transported, or
    capability-based not-applicable disposition on `gfx942`, `gfx950`,
@@ -185,7 +192,9 @@ qualification checkpoints.
 - The host-unit and checked-in device suites comprehensively cover the relevant
   behavior in the current E2E corpus, Aorta, and the target-capability audit.
   Every fixed defect has an implementation-independent regression; device
-  scenarios retain their exact correct/incorrect behavioral contracts.
+  scenarios retain their exact correct/incorrect behavioral contracts. Every
+  investigated E2E cell, including already-green cells in the final pass, has
+  an explicit durable-test disposition.
 - The existing-test audit is complete. Every cross-cutting contract runs on
   each semantically applicable CDNA3/4/5 and RDNA3/4 target, or has a documented
   capability-based exclusion; no contract is stranded on its source
