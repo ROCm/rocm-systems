@@ -1022,7 +1022,7 @@ def show_all(
                     )
                 )
 
-                if is_mem_chart and is_gfx115x(gpu_arch) and len(runs) == 1:
+                if is_mem_chart and len(runs) == 1:
                     has_cols = (
                         "Metric" in processed_df.columns
                         and "Value" in processed_df.columns
