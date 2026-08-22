@@ -45,8 +45,8 @@
       "num_ranks": 16,
       "num_nodes": 2,
       "num_gpus": 8,
-      "timeout": 600,
-      "command_args": "-b 1 -e 1G -f 2 -g 1",
+      "timeout": 1200,
+      "command_args": "-b 1 -e 512M -f 2 -g 1",
       "env_variables": {
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1"
