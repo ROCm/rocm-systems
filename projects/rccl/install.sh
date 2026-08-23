@@ -21,6 +21,7 @@ build_verbose=false
 clean_build=true
 dump_asm=false
 enable_code_coverage=false
+enable_device_coverage=false
 enable_ninja=""
 install_dependencies=false
 install_library=false
@@ -81,7 +82,8 @@ function display_help()
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
     echo "       --disable-kernarg-preload  Disable -mllvm --amdgpu-kernarg-preload-count=16 compile/link flag"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "    -c|--enable-code-coverage  Enable code coverage"
+    echo "    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)"
+    echo "       --enable-device-coverage Enable host + device code coverage (requires --debug and ROCm 7.15+)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
@@ -137,7 +139,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-device-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -165,6 +167,7 @@ while true; do
          --disable-kernarg-preload)  kernarg_preload=false;                                                                            shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
+         --enable-device-coverage)   enable_code_coverage=true; enable_device_coverage=true;                                            shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
@@ -352,9 +355,20 @@ if [[ "${build_address_sanitizer}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_ADDRESS_SANITIZER=ON"
 fi
 
+# Coverage requires the Debug-only symbol visibility contract used by the tests.
+if [[ "${enable_code_coverage}" == true && "${build_release}" == true ]]; then
+    echo "ERROR: code coverage requires --debug. Please re-run with --debug."
+    exit 1
+fi
+
 # Enable code coverage
 if [[ "${enable_code_coverage}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_CODE_COVERAGE=ON"
+fi
+
+# Enable device-side code coverage
+if [[ "${enable_device_coverage}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_COVERAGE=ON"
 fi
 
 # Backtrace support

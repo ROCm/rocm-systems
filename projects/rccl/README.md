@@ -54,7 +54,8 @@ RCCL build & installation helper script
        --disable-roctx         Build without ROCTX logging
        --disable-warp-speed    Disable WARP_SPEED kernel optimizations
        --dump-asm              Disassemble code and dump assembly with inline code
-    -c|--enable-code-coverage  Enable code coverage
+    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)
+       --enable-device-coverage Enable host + device code coverage (requires --debug and ROCm 7.15+)
        --enable_backtrace      Build with custom backtrace support
        --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)

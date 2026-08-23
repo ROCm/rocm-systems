@@ -43,6 +43,8 @@ if(BUILD_TESTS)
   # folded into `run`).
 
   if (ENABLE_CODE_COVERAGE)
+    # Instrument the host test harness only. Device coverage is limited to RCCL
+    # library kernels; test sources are excluded from the generated report.
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
@@ -728,6 +730,7 @@ if(BUILD_TESTS)
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
     endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)

@@ -156,6 +156,13 @@ def extract_device_function(asm_lines):
             continue
         if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
             continue
+        # Drop .no_dead_strip directives that reference a local-only symbol
+        # (.L*). amdclang++ emits these for __llvm_coverage_mapping under
+        # -fcoverage-mapping, but the AMDGPU ELF assembler rejects them with
+        # "non-local symbol required". The directive is advisory; the data
+        # section already carries SHF_ALLOC / SHF_GNU_RETAIN where needed.
+        if re.match(r'\s*\.no_dead_strip\s+\.L', stripped):
+            continue
         if not globl_inserted and mangled in line and '.type' in line and '@function' in line:
             out_lines.append(f'\t.globl\t{mangled}\n')
             globl_inserted = True
@@ -382,6 +389,23 @@ def _normalize_file_directives(lines):
             for line in lines]
 
 
+def _drop_local_no_dead_strip(lines):
+    """Strip '.no_dead_strip .L<local>' directives the AMDGPU assembler rejects.
+
+    Mirrors the per-kernel extractor: amdclang++ emits these for
+    __llvm_coverage_mapping / __llvm_prf_nm under -fcoverage-mapping, but the
+    AMDGPU ELF assembler bails with 'non-local symbol required'. The directive
+    is advisory; coverage data sections already carry SHF_ALLOC/SHF_GNU_RETAIN
+    where needed."""
+    out = []
+    pat = re.compile(r'\s*\.no_dead_strip\s+\.L')
+    for ln in lines:
+        if pat.match(ln):
+            continue
+        out.append(ln)
+    return out
+
+
 def patch_dispatcher(asm_lines, max_res):
     """Patch dispatcher assembly with aggregated resource values.
     Returns patched lines."""
@@ -390,6 +414,7 @@ def patch_dispatcher(asm_lines, max_res):
     lines = _patch_gpr_maximums(lines, max_res)
     lines = _patch_amdgpu_metadata(lines, max_res)
     lines = _normalize_file_directives(lines)
+    lines = _drop_local_no_dead_strip(lines)
     return lines
 
 
@@ -469,6 +494,12 @@ def do_compile(args, forwarded_flags):
     base = os.path.splitext(output)[0]
     json_out = base + '.resources.json'
 
+    # Make sure the output directory exists. With the RCCLDEV custom language
+    # there's no implicit cmake_link_script that pre-creates it, and we write
+    # the .resources.json sibling before make's own .o write would create it.
+    out_dir = os.path.dirname(output) or '.'
+    os.makedirs(out_dir, exist_ok=True)
+
     # Determine temp directory: alongside output if --keep-temps, else truly temp
     if keep_temps:
         asm_file = base + '.full.s'
@@ -546,6 +577,7 @@ def do_link(args, forwarded_flags):
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
+    profile_rt = getattr(args, 'profile_rt', None)
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -587,12 +619,15 @@ def do_link(args, forwarded_flags):
 
     try:
         # Step 2: Compile dispatcher to assembly
+        # Use -gline-tables-only (not -g) so source-line info is present for
+        # llvm-cov mapping without the full-DWARF blow-up that would otherwise
+        # explode every per-arch dispatcher TU under -fcoverage-mapping.
         disp_compile_cmd = [
             clang,
             '-x', 'hip',
             '--offload-device-only',
             f'--offload-arch={arch}',
-            '-g', '-w',
+            '-gline-tables-only', '-w',
         ] + forwarded_flags + [
             '-S', '-o', disp_asm, dispatcher,
         ]
@@ -650,6 +685,26 @@ def do_link(args, forwarded_flags):
             '-o', output,
             f'@{rsp_path}',
         ]
+        # When ENABLE_DEVICE_COVERAGE=ON, CMake passes --profile-rt=<archive>
+        # so lld can resolve __llvm_profile_runtime / __start___llvm_prf_*
+        # symbols from the per-arch libclang_rt.profile.a. lld pulls in only
+        # the members referenced by the instrumented TUs; host-only members
+        # of the archive (fopen, calloc, atexit, ...) stay unreferenced.
+        #
+        # The profile-rt archive ships as LLVM *bitcode* (not native amdgcn
+        # objects), so lld runs LTO codegen on pulled-in members. Without
+        # an explicit --plugin-opt=mcpu, that codegen defaults to the host
+        # triple and lld errors out with "incompatible mach". Pass mcpu so
+        # the LTO backend targets amdgcn-amd-amdhsa for this arch.
+        if profile_rt:
+            if not os.path.exists(profile_rt):
+                print(f"WARNING: --profile-rt={profile_rt} not found, skipping",
+                      file=sys.stderr)
+            else:
+                link_cmd.extend([
+                    f'--plugin-opt=mcpu={arch}',
+                    profile_rt,
+                ])
         run(link_cmd, f"link device.elf for {arch}")
 
         if not keep_temps:
@@ -705,6 +760,11 @@ def parse_compiler_flags(argv):
         elif arg == '--rocshmem-bitcode' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg.startswith('--profile-rt='):
+            our_args.append(arg)
+        elif arg == '--profile-rt' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
@@ -751,6 +811,7 @@ def main():
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
+    parser.add_argument('--profile-rt', default=None, dest='profile_rt')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')
