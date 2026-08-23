@@ -1841,6 +1841,7 @@ class ConSanValidationTest(unittest.TestCase):
             row["command_arguments"], ("-m", "128", "-n", "128", "-k", "128")
         )
         self.assertEqual(row["command_environment"], (("FIXED_ITERATIONS", "1"),))
+        self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
         self.assertEqual(row["fault_families"], ("barrier-drop",))
         self.assertNotIn(
             "hip-matmul-m128-n128-k128",
@@ -1883,6 +1884,7 @@ class ConSanValidationTest(unittest.TestCase):
                 workspace,
             )
         self.assertEqual(environment["FIXED_ITERATIONS"], "1")
+        self.assertEqual(environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1")
         self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
 
     def test_gfx950_manifest_registers_exact_hipkittens_rows(self) -> None:

@@ -1869,6 +1869,15 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 60,
         },
+        # The exact HIP matmul row launches only six compact workgroups.  None
+        # of their current dispatch identities selects a workgroup at the
+        # production stride, so the otherwise complete 739-access/109-barrier
+        # transform terminates without dynamic evidence.  Select the complete
+        # bounded row deterministically for validation; this is the same
+        # stride-one operating point used by its reviewed E2E qualification.
+        "hip-matmul-m128-n128-k128": {
+            "record_replay_runtime_sample_stride": 1,
+        },
         # The exact norm/softmax device interval completes in about 27.5
         # seconds, while the same official PyTorch wheel spends about 4.7
         # seconds in fixed process startup and teardown even without ConSan.
