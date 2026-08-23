@@ -5929,6 +5929,13 @@ class ConSanValidationTest(unittest.TestCase):
             sampled["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
         )
         self.assertEqual(trials, [{}])
+        inline, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(inline["detector"], "detected")
+        self.assertEqual(inline["oracle"], "pass")
+        self.assertEqual(
+            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(trials, [{}])
 
         dpp_fault = validation._load_fault(
             path, "gfx1250", workload, "barrier-drop-dpp-phase"
