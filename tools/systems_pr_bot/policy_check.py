@@ -259,20 +259,31 @@ def iter_pr_files(
         page += 1
 
 
+CHECK_RUNS_PER_PAGE = 100
+# 20 pages = 2000 check-runs. Measured: a rocm-systems PR carries ~300, so this
+# is ~6x headroom. It exists so a server that ignores `page` cannot spin this
+# loop forever -- the bot has no other timeout around it.
+CHECK_RUNS_MAX_PAGES = 20
+
+
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
     """Return every check-run for a commit SHA, transparently paginating.
 
-    PRs here routinely exceed one page (100), and the API returns check-runs
-    newest-id-first, so the earliest-created ones fall off the end. A required
-    check on page 2 is indistinguishable from a missing one, so the caller
-    reports it pending and times out instead of reading its conclusion.
+    PRs here really do exceed one page: measured 308 check-runs on a single
+    rocm-systems PR, with the required `pre-commit` run on page 4. The API
+    returns check-runs newest-id-first, so the earliest-created ones fall off
+    the end, and a required check on page 2+ is indistinguishable from a
+    missing one -- the caller reports it pending and times out instead of
+    reading its conclusion.
+
+    Raises rather than returning a short list: a partial result here reads as
+    "the required check does not exist", which fails open into a green table.
     """
     runs: List[Dict[str, Any]] = []
-    page = 1
-    while True:
+    for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
         data = gh_get(
             f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs"
-            f"?per_page=100&page={page}",
+            f"?per_page={CHECK_RUNS_PER_PAGE}&page={page}",
             token,
         )
         if not isinstance(data, dict):
@@ -284,7 +295,11 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
         total = data.get("total_count")
         if isinstance(total, int) and len(runs) >= total:
             return runs
-        page += 1
+
+    raise RuntimeError(
+        f"check-runs pagination exceeded {CHECK_RUNS_MAX_PAGES} pages for {sha}; "
+        "refusing to report a partial list as the complete set"
+    )
 
 
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:
@@ -512,6 +527,16 @@ def effective_run_by_name(
     `pre-commit` -- so keying a dict on the name lets a passing run mask a
     failing one. Precedence is failure > pending > ok, so a known failure is
     reported immediately rather than waiting out the poll window.
+
+    EVERY consumer of check-runs must collapse through this function. Two
+    collapses that disagree are worse than one that is wrong, because the
+    optimistic one silently wins: the table can say "pending" while the
+    readiness test says "ready".
+
+    Ties (several runs with the same rank) resolve to whichever the API
+    returned first; the check-runs endpoint documents no ordering, so callers
+    must not depend on WHICH failing run they are shown, only that a failing
+    one is.
     """
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for r in check_runs:
@@ -800,11 +825,11 @@ def maybe_comment_precommit_failure(
     if not policy.precommit_failure_comment:
         return
 
-    precommit_run = None
-    for r in check_runs:
-        if r.get("name") == "pre-commit":
-            precommit_run = r
-            break
+    # Same collapse as summarize_required_checks: picking the FIRST run named
+    # `pre-commit` would skip this comment whenever a passing duplicate happens
+    # to be listed before the failing one -- while the caller, which reached
+    # here precisely because that check is failing, prints that it failed.
+    precommit_run = effective_run_by_name(check_runs).get("pre-commit")
     if not precommit_run:
         return
 
@@ -1152,15 +1177,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # --- Poll until pre-commit / CodeQL have a final conclusion so the
         # table updates from ⏳ Pending to a real ✅ Pass or ❌ Fail. ---
         ci_start = time.time()
-        ok_set = {"success", "neutral", "skipped"}
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
-            by_name = {
-                r.get("name"): r
-                for r in poll_runs
-                if isinstance(r, dict) and isinstance(r.get("name"), str)
-            }
-            # Check whether every required CI check has a conclusion yet.
+            by_name = effective_run_by_name(poll_runs)
+            # Check whether every required CI check has a conclusion yet. A
+            # duplicate name that is still running must keep us here, so this
+            # has to use the same worst-wins collapse as the table above.
             all_concluded = all(
                 by_name.get(n) is not None and by_name[n].get("conclusion") is not None
                 for n in policy.required_checks
@@ -1226,12 +1248,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         # If any required checks are missing or still running, keep waiting.
         all_present = not missing
         all_ok = True
-        ok = {"success", "neutral", "skipped"}
-        by_name = {
-            r.get("name"): r
-            for r in runs
-            if isinstance(r, dict) and isinstance(r.get("name"), str)
-        }
+        # This decides "ready for review", so it MUST agree with
+        # summarize_required_checks above. A last-wins collapse here would
+        # declare the PR ready off a passing duplicate while the run that
+        # actually gates it is still in flight.
+        by_name = effective_run_by_name(runs)
         for name in policy.required_checks:
             r = by_name.get(name)
             if not r:
@@ -1240,7 +1261,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             conc = r.get("conclusion")
             if conc is None:
                 all_ok = False
-            elif str(conc) not in ok:
+            elif str(conc) not in OK_CONCLUSIONS:
                 all_ok = False
 
         if all_present and all_ok:

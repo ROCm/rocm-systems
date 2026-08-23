@@ -581,7 +581,9 @@ class CheckRunPaginationTests(unittest.TestCase):
         # required `pre-commit` check lands on page 2.
         page1 = {
             "total_count": 117,
-            "check_runs": [{"name": f"job-{i}", "conclusion": "success"} for i in range(100)],
+            "check_runs": [
+                {"name": f"job-{i}", "conclusion": "success"} for i in range(100)
+            ],
         }
         page2 = {
             "total_count": 117,
@@ -620,6 +622,25 @@ class CheckRunPaginationTests(unittest.TestCase):
             runs = pc.get_check_runs("o", "r", "sha", "tok")
 
         self.assertEqual(len(runs), 1)
+
+    def test_a_server_that_ignores_page_raises_instead_of_looping(self) -> None:
+        # Never empty, total_count always out of reach: the pre-cap loop spun
+        # forever, and nothing else in the bot bounds this call.
+        calls: List[str] = []
+
+        def _get(url: str, token: str) -> Dict[str, Any]:
+            calls.append(url)
+            return {
+                "total_count": 10**9,
+                "check_runs": [{"name": "a", "conclusion": "success"}],
+            }
+
+        with unittest.mock.patch.object(pc, "gh_get", _get):
+            with self.assertRaises(RuntimeError) as ctx:
+                pc.get_check_runs("o", "r", "sha", "tok")
+
+        self.assertIn("pagination exceeded", str(ctx.exception))
+        self.assertEqual(len(calls), pc.CHECK_RUNS_MAX_PAGES)
 
 
 class DuplicateCheckRunNameTests(unittest.TestCase):
@@ -685,6 +706,66 @@ class DuplicateCheckRunNameTests(unittest.TestCase):
         runs = [{"name": "pre-commit", "conclusion": "skipped"}]
         missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
         self.assertEqual((missing, failing), ([], []))
+
+    def test_readiness_and_the_table_agree_on_the_same_run(self) -> None:
+        # The bug this guards: summarize_required_checks collapsed worst-wins
+        # while main()'s readiness test collapsed last-wins, so a stale passing
+        # duplicate declared the PR ready while the gating run was in flight.
+        # Both must resolve to the SAME representative for every ordering.
+        pending = {"name": "pre-commit", "id": 200, "conclusion": None}
+        passing = {"name": "pre-commit", "id": 100, "conclusion": "success"}
+        for runs in ([pending, passing], [passing, pending]):
+            with self.subTest(order=[r["id"] for r in runs]):
+                _, _, conc = pc.summarize_required_checks(self._policy(), runs)
+                chosen = pc.effective_run_by_name(runs)["pre-commit"]
+                self.assertEqual(chosen["id"], 200, "pending must beat success")
+                self.assertEqual(conc["pre-commit"], "null")
+
+    def test_build_check_results_reports_the_failing_duplicate(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": "success"},
+            {"name": "pre-commit", "conclusion": "failure"},
+        ]
+        rows = pc.build_check_results(self._policy(), runs)
+        row = next(r for r in rows if r.name == "pre-commit")
+        self.assertFalse(row.passed)
+
+
+class PrecommitHelpCommentTests(unittest.TestCase):
+    """The remediation comment must key off the same run the table does."""
+
+    def _run(self, runs: List[Dict[str, Any]]) -> List[str]:
+        policy = make_policy(
+            precommit_failure_comment=pc.FailureComment(
+                title="Pre-commit check failed", body="run it locally"
+            )
+        )
+        posted: List[str] = []
+        with unittest.mock.patch.object(
+            pc, "upsert_comment", lambda *a, **k: posted.append(a[-1])
+        ):
+            pc.maybe_comment_precommit_failure("o", "r", 1, "tok", policy, runs)
+        return posted
+
+    def test_a_passing_duplicate_listed_first_does_not_suppress_the_comment(
+        self,
+    ) -> None:
+        # A first-wins scan picked the success and stayed silent, while the
+        # caller -- which only reaches here because the check is failing --
+        # printed "pre-commit=failure". The developer got no remediation text.
+        posted = self._run(
+            [
+                {"name": "pre-commit", "conclusion": "success"},
+                {"name": "pre-commit", "conclusion": "failure"},
+            ]
+        )
+        self.assertEqual(len(posted), 1)
+        self.assertIn("Pre-commit check failed", posted[0])
+
+    def test_all_passing_stays_silent(self) -> None:
+        self.assertEqual(
+            self._run([{"name": "pre-commit", "conclusion": "success"}]), []
+        )
 
 
 if __name__ == "__main__":
