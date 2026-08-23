@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "common.h"
+#include "rccl_ib_multiseg.h"
 
 ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
                                         int fd, uint64_t mrFlags, ibv_mr** mhandle) {
@@ -112,6 +113,15 @@ ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
     WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
          NCCL_IB_MAX_SEGMENTS);
     return ncclInvalidUsage;
+  }
+  if (nSeg > 1) {
+    uint32_t peerCaps =
+      base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
+    if ((peerCaps & NCCL_IB_CAP_MULTISEG) == 0) {
+      INFO(NCCL_NET | NCCL_REG,
+           "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
+      return ncclInvalidUsage;
+    }
   }
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)calloc(1, sizeof(struct ncclIbMrHandle));
   if (mhandleWrapper == nullptr) {
