@@ -83,8 +83,8 @@
           "family": "barrier-drop",
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|kind=barrier|pc=0x00000000000011a4|mnemonic=s_barrier_signal|occurrence=2",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|event=barrier|pc=0x00000000000011a4|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_5_matmul_Dx128x256_f16xf16xf32|event=barrier|pc=0x00000000000011a8|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|kind=barrier|pc=0x00000000000090cc|mnemonic=s_barrier_signal|occurrence=10",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|event=barrier|pc=0x00000000000090cc|mnemonic=s_barrier_signal|occurrence=10|sequence=singleton|associated-with=fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|event=barrier|pc=0x00000000000090d0|mnemonic=s_barrier_wait|occurrence=11|sequence=singleton"
           },
           "profiles": {
             "supercollider": {
@@ -96,8 +96,11 @@
               "oracle": "fail"
             },
             "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
             },
             "inline-shadow": {
               "detector": "detected",

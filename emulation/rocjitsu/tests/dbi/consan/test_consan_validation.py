@@ -5896,6 +5896,34 @@ class ConSanValidationTest(unittest.TestCase):
             policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
         )
 
+    def test_gfx1250_tp2_fault_uses_executed_attention_publication(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        workload = validation.WORKLOAD_BY_ID["tp2-family"]
+        fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
+        environment = fault["environment"]
+        site = environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        sequence = environment["RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"]
+        kernel = "prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD"
+
+        self.assertIn(f"kernel={kernel}", site)
+        self.assertIn("pc=0x00000000000090cc", site)
+        self.assertIn("mnemonic=s_barrier_signal", site)
+        self.assertIn(site.replace("|kind=barrier", "|event=barrier"), sequence)
+        self.assertIn(f"kernel={kernel}", sequence)
+        self.assertIn("pc=0x00000000000090d0", sequence)
+        self.assertIn("mnemonic=s_barrier_wait", sequence)
+        command = validation._workload_command(
+            Path("/workspace"), "gfx1250", workload, "fault", Path("/unused")
+        )
+        self.assertEqual(command[command.index("--mode") + 1], "prefill")
+        sampled, trials = validation._fault_trials(fault, "sampled")
+        self.assertEqual(sampled["detector"], "detected")
+        self.assertEqual(sampled["oracle"], "pass")
+        self.assertEqual(
+            sampled["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]
