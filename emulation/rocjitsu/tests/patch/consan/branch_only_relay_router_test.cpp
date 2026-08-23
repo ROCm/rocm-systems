@@ -78,6 +78,19 @@ public:
 
 constexpr uint32_t kRelayTestDonor = 0x1000u;
 constexpr uint32_t kRelayTestClauseTwo = 0x1041u;
+
+TEST(ConSanBranchOnlyRelayRouter, BoundsPeriodicRelayBankDensity) {
+  constexpr uint64_t kBodyInterval = 64u * 1024u;
+  constexpr size_t kMaximumBankWords = kBodyInterval / (8u * sizeof(uint32_t));
+
+  EXPECT_FALSE(branch_only_periodic_relay_bank_has_bounded_density(0u, 0u));
+  EXPECT_TRUE(
+      branch_only_periodic_relay_bank_has_bounded_density(kMaximumBankWords, kBodyInterval));
+  EXPECT_FALSE(
+      branch_only_periodic_relay_bank_has_bounded_density(kMaximumBankWords + 1u, kBodyInterval));
+  EXPECT_FALSE(branch_only_periodic_relay_bank_has_bounded_density(
+      std::numeric_limits<size_t>::max(), kBodyInterval));
+}
 constexpr uint32_t kRelayTestEnd = 0x2000u;
 
 constexpr BranchOnlyRelayOwnerIdentity lds_relay_owner(uint64_t value) {

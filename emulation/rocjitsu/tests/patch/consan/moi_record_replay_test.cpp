@@ -10942,7 +10942,7 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
 
 TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  constexpr uint32_t kAccessCountPerKernel = 130u;
+  constexpr uint32_t kAccessCountPerKernel = 512u;
   const auto access = build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
                                                /*byte_offset=*/0u, kArch);
   const auto barrier = build_cdna4_s_barrier(kArch);
@@ -10984,6 +10984,8 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
   report_inventory.diagnostic_count = 1u;
   report_inventory.record_replay_access_dispatch_bank_count = 8u;
   report_inventory.record_replay_access_owner_bank_count = 8u;
+  report_inventory.record_replay_bank_count_adaptive = true;
+  report_inventory = fit_consan_moi_record_replay_auto_report_inventory(report_inventory);
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(report_inventory);
   ASSERT_TRUE(report_plan.complete());
   const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
@@ -11026,6 +11028,31 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
             std::ranges::any_of(patch.branch_only_return_relay_offsets,
                                 [&](uint64_t relay) { return relay >= original_text_size; }));
   }));
+
+  const uint64_t relay_bank_bytes = 2u * (kAccessCountPerKernel + 1u) * sizeof(uint32_t);
+  std::vector<std::pair<uint64_t, uint64_t>> relay_banks;
+  std::ranges::copy_if(result.moi_generated_branch_relay_ranges, std::back_inserter(relay_banks),
+                       [&](const auto &range) {
+                         return range.first >= original_text_size &&
+                                range.second - range.first == relay_bank_bytes;
+                       });
+  ASSERT_GE(relay_banks.size(), 2u);
+  std::ranges::sort(relay_banks);
+  uint64_t maximum_reserved_body_bytes = 0u;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) {
+      maximum_reserved_body_bytes = std::max<uint64_t>(
+          maximum_reserved_body_bytes, patch.trampoline_size + 9u * sizeof(uint32_t));
+    }
+  }
+  ASSERT_GT(maximum_reserved_body_bytes, 0u);
+  constexpr uint64_t kRelaySpineSpacing = kSoppBranchMaximumForwardReachBytes / 2u;
+  for (size_t bank = 1u; bank < relay_banks.size(); ++bank) {
+    ASSERT_LE(relay_banks[bank - 1u].second, relay_banks[bank].first);
+    EXPECT_GE(relay_banks[bank].first - relay_banks[bank - 1u].second + maximum_reserved_body_bytes,
+              kRelaySpineSpacing)
+        << "a demand-scaled bank must not consume its own following spacing interval";
+  }
 }
 
 TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountLimit) {

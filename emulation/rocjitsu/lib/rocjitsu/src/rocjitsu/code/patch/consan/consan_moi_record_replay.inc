@@ -753,9 +753,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // fewer words per SOPP window than the later batch has routes. Periodic
   // banks make that cut capacity explicit and scale it with the actual batch.
   constexpr uint64_t kBranchOnlySpineSpacing = kSoppBranchMaximumForwardReachBytes / 2u;
+  const size_t branch_only_spine_bank_word_count =
+      saturated_multiply(2u, branch_only_routing_demand_count);
+  const bool branch_only_spine_has_bounded_density =
+      branch_only_periodic_relay_bank_has_bounded_density(branch_only_spine_bank_word_count,
+                                                          kBranchOnlySpineSpacing);
+  if (branch_only_routing_demand_count != 0u && !branch_only_spine_has_bounded_density) {
+    result.warnings.emplace_back(
+        "ConSan MOI first-light omitted oversized periodic branch-only relay banks");
+  }
   uint64_t branch_only_spine_frontier = indirect_body_begin;
   const auto ensure_branch_only_appended_spine = [&](uint64_t next_body_bytes) {
-    if (branch_only_routing_demand_count == 0u)
+    if (branch_only_routing_demand_count == 0u || !branch_only_spine_has_bounded_density)
       return true;
     if (next_body_bytes > kBranchOnlySpineSpacing) {
       result.errors.emplace_back(
@@ -779,9 +788,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       result.errors.emplace_back("ConSan MOI first-light probe " + reservation_error);
       return false;
     }
-    const size_t bank_word_count = saturated_multiply(2u, branch_only_routing_demand_count);
-    const uint64_t bank_bytes = saturated_multiply(bank_word_count, sizeof(uint32_t));
-    if (bank_word_count == std::numeric_limits<size_t>::max() ||
+    const uint64_t bank_bytes =
+        saturated_multiply(branch_only_spine_bank_word_count, sizeof(uint32_t));
+    if (branch_only_spine_bank_word_count == std::numeric_limits<size_t>::max() ||
         bank_bytes == std::numeric_limits<uint64_t>::max() ||
         !branch_only_placement_planner.reserve_appended_prefix(bank_bytes, &reservation_error)) {
       result.errors.emplace_back(
@@ -790,7 +799,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       return false;
     }
     const uint64_t bank_begin = indirect_body_cursor;
-    for (size_t word = 0u; word < bank_word_count; ++word) {
+    for (size_t word = 0u; word < branch_only_spine_bank_word_count; ++word) {
       const uint64_t relay = bank_begin + word * sizeof(uint32_t);
       if (!branch_router.offer(relay, BranchOnlyRelayProvenance::GeneratedBank)) {
         result.errors.emplace_back(
@@ -800,8 +809,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       branch_relay_offsets.insert(relay);
     }
     generated_branch_relay_ranges.emplace_back(bank_begin, bank_begin + bank_bytes);
-    branch_only_spine_frontier = bank_begin;
     indirect_body_cursor = branch_only_placement_planner.appended_end();
+    // Spacing applies to appended body bytes after the newest complete bank.
+    // Measuring again from bank_begin makes a wide demand-scaled bank consume
+    // its own interval and can trigger another equally wide bank after only a
+    // few body words.
+    branch_only_spine_frontier = indirect_body_cursor;
     return true;
   };
   std::vector<const ConSanMoiCandidate *> planning_candidates = candidates;

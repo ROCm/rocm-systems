@@ -24,6 +24,20 @@ namespace rocjitsu {
 class BasicBlock;
 class Instruction;
 
+/// Periodic banks are a bounded-density routing aid, not an alternate copy of
+/// the transformed text. Keep their payload to at most one eighth of the body
+/// interval they serve. This bounds the bank-induced text-growth multiplier
+/// while leaving ample SOPP reach between corresponding words in adjacent
+/// banks.
+[[nodiscard]] constexpr bool
+branch_only_periodic_relay_bank_has_bounded_density(size_t bank_word_count,
+                                                    uint64_t body_interval_bytes) {
+  constexpr uint64_t kMaximumBankDensityDenominator = 8u;
+  return body_interval_bytes != 0u &&
+         bank_word_count <=
+             body_interval_bytes / (kMaximumBankDensityDenominator * sizeof(uint32_t));
+}
+
 [[nodiscard]] bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction,
                                                                 uint64_t offset,
                                                                 std::span<const uint8_t> text,
