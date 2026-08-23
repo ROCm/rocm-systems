@@ -11,11 +11,35 @@
 namespace rocjitsu {
 namespace {
 
-TEST(ConSan, InventoriesGfx1250GlobalAsyncToLdsAsAnLdsWrite) {
-  constexpr auto direct_b32 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
-                                                   {.saddr = 0, .vdst = 7, .vaddr = 8});
-  const std::array<uint32_t, 4> words = {direct_b32[0], direct_b32[1], direct_b32[2],
-                                         build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {
+  constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB8Vglobal,
+                                                 {.saddr = 0, .vdst = 7, .vaddr = 8});
+  constexpr auto async_b32 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                                  {.saddr = 2, .vdst = 9, .vaddr = 10});
+  constexpr auto async_b64 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB64Vglobal,
+                                                  {.saddr = 4, .vdst = 11, .vaddr = 12});
+  constexpr auto async_b128 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB128Vglobal,
+                                                   {.saddr = 6, .vdst = 13, .vaddr = 14});
+  constexpr auto unsupported_nonzero = cdna5::build_vglobal(
+      cdna5::kGlobalLoadAsyncToLdsB32Vglobal, {.saddr = 8, .vdst = 15, .vaddr = 16, .ioffset = 4});
+  const std::array<uint32_t, 16> words = {
+      async_b8[0],
+      async_b8[1],
+      async_b8[2],
+      async_b32[0],
+      async_b32[1],
+      async_b32[2],
+      async_b64[0],
+      async_b64[1],
+      async_b64[2],
+      async_b128[0],
+      async_b128[1],
+      async_b128[2],
+      unsupported_nonzero[0],
+      unsupported_nonzero[1],
+      unsupported_nonzero[2],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanResult result =
@@ -24,20 +48,25 @@ TEST(ConSan, InventoriesGfx1250GlobalAsyncToLdsAsAnLdsWrite) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
-  EXPECT_EQ(kernel.stats.lds_write_count, 1u);
-  ASSERT_EQ(kernel.lds_sites.size(), 1u);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  const ConSanLdsSite &site = kernel.lds_sites.front();
-  EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
-  EXPECT_TRUE(site.direct_to_lds);
-  EXPECT_TRUE(site.supported_mvp);
-  EXPECT_EQ(site.width_bits, 32u);
-  EXPECT_EQ(site.addr_vgpr, 7u);
-  const ConSanMoiCandidate &candidate = result.moi_candidates.front();
-  EXPECT_TRUE(candidate.direct_to_lds);
-  EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
-  EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
-  EXPECT_EQ(candidate.addr_vgpr, 7u);
+  EXPECT_EQ(kernel.stats.lds_write_count, 4u);
+  ASSERT_EQ(kernel.lds_sites.size(), 4u);
+  ASSERT_EQ(result.moi_candidates.size(), 4u);
+  constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
+  constexpr std::array<uint16_t, 4> expected_addresses = {7u, 9u, 11u, 13u};
+  for (size_t index = 0; index < expected_widths.size(); ++index) {
+    const ConSanLdsSite &site = kernel.lds_sites[index];
+    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
+    EXPECT_TRUE(site.direct_to_lds);
+    EXPECT_TRUE(site.supported_mvp);
+    EXPECT_EQ(site.width_bits, expected_widths[index]);
+    EXPECT_EQ(site.addr_vgpr, expected_addresses[index]);
+    const ConSanMoiCandidate &candidate = result.moi_candidates[index];
+    EXPECT_TRUE(candidate.direct_to_lds);
+    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
+    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
+    EXPECT_EQ(candidate.width_bits, expected_widths[index]);
+    EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
+  }
 }
 
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead) {
