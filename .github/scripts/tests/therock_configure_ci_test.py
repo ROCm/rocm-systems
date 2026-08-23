@@ -351,6 +351,42 @@ class ConfigureCITest(unittest.TestCase):
         projects = json.loads(outputs["projects"])
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+        self.assertEqual(outputs["run_rccl_host_tests"], "false")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_host_tests_triggered_by_own_workflow(self, mock_get_modified):
+        """Editing the host-test workflow runs the host tests, so it stays
+        self-testing -- but must NOT pull in the multi-hour GPU job."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            ".github/workflows/rccl-host-unit-tests.yml"
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        self.assertEqual(outputs["run_rccl_host_tests"], "true")
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_host_tests_triggered_by_rccl_paths(self, mock_get_modified):
+        """An RCCL source change runs the host tests as well as the GPU job."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = ["projects/rccl/rccl.cpp"]
+
+        outputs = therock_configure_ci.run(args)
+        self.assertEqual(outputs["run_rccl_host_tests"], "true")
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_host_tests_not_triggered_by_other_workflow(self, mock_get_modified):
+        """A different workflow file must not trigger the host tests."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [".github/workflows/therock-ci.yml"]
+
+        outputs = therock_configure_ci.run(args)
+        self.assertEqual(outputs["run_rccl_host_tests"], "false")
 
     def test_rccl_ci_triggered_nightly(self):
         """A nightly event should run both regular and RCCL CI."""

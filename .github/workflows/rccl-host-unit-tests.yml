@@ -22,8 +22,13 @@ permissions:
 
 jobs:
   rccl-host-unit-tests:
-    name: Host unit tests (CPU-only)
+    # Caller supplies the "RCCL Host Unit Tests" half of the published check name.
+    name: CPU-only
     runs-on: ubuntu-24.04
+    # Median run is ~3.5 min. Without a cap the job would inherit GitHub's
+    # 6-hour default, and it now feeds a required check -- a hung run would
+    # hold up every RCCL merge.
+    timeout-minutes: 30
     container:
       image: rocm/dev-ubuntu-22.04:7.2
     env:
@@ -69,6 +74,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-unit-test-results
+          # Glob: run_host_tests.sh writes one JUnit XML per binary
+          # (host_tests.xml plus host_tests_micro*.xml), not just the first.
           path: |
             projects/rccl/test/host/host_tests.log
-            projects/rccl/test/host/host_tests.xml
+            projects/rccl/test/host/host_tests*.xml
