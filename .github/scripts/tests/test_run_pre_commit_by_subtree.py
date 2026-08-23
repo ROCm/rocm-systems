@@ -105,7 +105,12 @@ class TestRunGroup:
 
         assert ok is True
         cmd = run.call_args[0][0]
-        assert cmd[:4] == ["pre-commit", "run", "-c", "projects/rccl/.pre-commit-config.yaml"]
+        assert cmd[:4] == [
+            "pre-commit",
+            "run",
+            "-c",
+            "projects/rccl/.pre-commit-config.yaml",
+        ]
         assert "--show-diff-on-failure" in cmd
         assert cmd[-1] == "projects/rccl/src/init.cc"
 
@@ -139,9 +144,7 @@ class TestReadFilesList:
         present = tmp_path / "present.cc"
         present.write_text("int main(){}\n", encoding="utf-8")
         listing = tmp_path / "files.txt"
-        listing.write_text(
-            f"{present}\n\n{tmp_path / 'absent.cc'}\n", encoding="utf-8"
-        )
+        listing.write_text(f"{present}\n\n{tmp_path / 'absent.cc'}\n", encoding="utf-8")
 
         assert read_files_list(str(listing)) == [str(present)]
 
