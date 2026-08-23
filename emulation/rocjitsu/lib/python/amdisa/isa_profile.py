@@ -554,6 +554,26 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def ds_b8_transpose_kind(self) -> int:
+        """Cross-lane routing used by 8-bit B64 DS transpose loads.
+
+        CDNA4 and older targets use the MFMA-oriented B64_TR_B8 routing.
+        Architectures with the 16x16 WMMA routing override this property so
+        opcode aliases cannot acquire different behavior from their spelling.
+        """
+        return 3
+
+    @property
+    def global_b8_transpose_kind(self) -> int:
+        """Cross-lane routing used by 8-bit B64 global transpose loads.
+
+        Current targets use the 16x16 WMMA routing. Keep this selection in
+        the ISA profile so a future architecture can change the global-load
+        routing without making mnemonic aliases disagree.
+        """
+        return 6
+
+    @property
     def cmpx_writes_vcc(self) -> bool:
         """True if V_CMPX instructions write both EXEC and VCC.
 
@@ -1980,6 +2000,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         )
 
     @property
+    def ds_b8_transpose_kind(self) -> int:
+        return 6
+
+    @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # RDNA4 removed S_WAITCNT; this property is unused but kept for
         # completeness. Returns 0x3F as a safe no-op default.
@@ -2153,6 +2177,12 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def cpp_namespace(self) -> str | None:
         return 'cdna5'
+
+    @property
+    def ds_b8_transpose_kind(self) -> int:
+        # gfx1250 opcode 0xfd retains the B64_TR_B8 routing. All of its
+        # mnemonic aliases must resolve through this one profile value.
+        return 3
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:

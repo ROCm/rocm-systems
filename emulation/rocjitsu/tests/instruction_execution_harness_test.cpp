@@ -2597,11 +2597,11 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
     wf->halt();
 }
 
-uint32_t wmma64_ab_lane(uint32_t row_or_col, uint32_t k) {
-  return row_or_col + 16u * ((k >> 3) & 1u);
+uint32_t gfx1250_fp8_ab_lane(uint32_t row_or_col, uint32_t k) {
+  return row_or_col + 16u * ((k >> 4) & 1u);
 }
 
-uint32_t wmma64_ab_index(uint32_t k) { return (k & 7u) + 8u * (k >> 4); }
+uint32_t gfx1250_fp8_ab_index(uint32_t k) { return (k & 15u) + 16u * (k >> 5); }
 
 TEST(Gfx1250WmmaTest, Fp8K128PhysicalLayoutMatchesCdna5Anchors) {
   struct LayoutAnchor {
@@ -2610,8 +2610,8 @@ TEST(Gfx1250WmmaTest, Fp8K128PhysicalLayoutMatchesCdna5Anchors) {
     uint32_t slot;
   };
   constexpr LayoutAnchor anchors[] = {
-      {0, 0, 0},   {7, 0, 7},   {8, 1, 0},   {15, 1, 7},   {16, 0, 8},
-      {63, 1, 31}, {64, 0, 32}, {72, 1, 32}, {127, 1, 63},
+      {0, 0, 0},   {15, 0, 15}, {16, 1, 0},  {31, 1, 15},  {32, 0, 16},
+      {63, 1, 31}, {64, 0, 32}, {80, 1, 32}, {127, 1, 63},
   };
   constexpr uint32_t row_or_col = 3;
 
@@ -2625,8 +2625,8 @@ TEST(Gfx1250WmmaTest, Fp8K128PhysicalLayoutMatchesCdna5Anchors) {
       EXPECT_EQ(loc.sub_element, anchor.slot % 4u);
       EXPECT_EQ(loc.data_bits, 8u);
     }
-    EXPECT_EQ(wmma64_ab_lane(row_or_col, anchor.k), row_or_col + 16u * anchor.lane_half);
-    EXPECT_EQ(wmma64_ab_index(anchor.k), anchor.slot);
+    EXPECT_EQ(gfx1250_fp8_ab_lane(row_or_col, anchor.k), row_or_col + 16u * anchor.lane_half);
+    EXPECT_EQ(gfx1250_fp8_ab_index(anchor.k), anchor.slot);
   }
 }
 
@@ -2699,15 +2699,15 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
 
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t k = 0; k < 64; ++k) {
-      const uint32_t idx = wmma64_ab_index(k);
-      write_packed_byte(*cu, a_base + idx / 4u, wmma64_ab_lane(row, k), idx % 4u,
+      const uint32_t idx = gfx1250_fp8_ab_index(k);
+      write_packed_byte(*cu, a_base + idx / 4u, gfx1250_fp8_ab_lane(row, k), idx % 4u,
                         util::f32_to_fp8_e4m3_rne(wmma_test_a(row, k)));
     }
   }
   for (uint32_t k = 0; k < 64; ++k) {
     for (uint32_t col = 0; col < 16; ++col) {
-      const uint32_t idx = wmma64_ab_index(k);
-      write_packed_byte(*cu, b_base + idx / 4u, wmma64_ab_lane(col, k), idx % 4u,
+      const uint32_t idx = gfx1250_fp8_ab_index(k);
+      write_packed_byte(*cu, b_base + idx / 4u, gfx1250_fp8_ab_lane(col, k), idx % 4u,
                         util::f32_to_fp8_e4m3_rne(wmma_test_b(k, col)));
     }
   }

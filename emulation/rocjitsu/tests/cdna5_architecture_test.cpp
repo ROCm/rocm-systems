@@ -84,6 +84,82 @@ void write_wmma_packed(amdgpu::ComputeUnitCore &cu, uint32_t base, const amdgpu:
   }
 }
 
+uint8_t encode_wmma_value(uint32_t fmt, float value) {
+  switch (fmt) {
+  case 0:
+    return util::f32_to_fp8_e4m3_rne(value);
+  case 1:
+    return util::f32_to_bf8_e5m2_rne(value);
+  case 2:
+    return util::f32_to_fp6_e2m3_rne(value);
+  case 3:
+    return util::f32_to_bf6_e3m2_rne(value);
+  case 4:
+    return util::f32_to_fp4_e2m1_rne(value);
+  default:
+    return 0;
+  }
+}
+
+float decode_wmma_value(uint32_t fmt, uint8_t value) {
+  switch (fmt) {
+  case 0:
+    return util::fp8_e4m3_to_f32(value);
+  case 1:
+    return util::bf8_e5m2_to_f32(value);
+  case 2:
+    return util::fp6_e2m3_to_f32(value);
+  case 3:
+    return util::bf6_e3m2_to_f32(value);
+  case 4:
+    return util::fp4_e2m1_to_f32(value);
+  default:
+    return 0.0f;
+  }
+}
+
+// Independent transcription of the CDNA5 block-scaled WMMA tables. Keeping the
+// physical writer separate from the execution helper makes this an integration
+// check rather than seeding data through the implementation under test.
+amdgpu::InputLoc manual_block_scaled_wmma_loc(uint32_t dim, uint32_t index, uint32_t k,
+                                              uint32_t data_bits) {
+  const uint32_t slice = dim == 32 ? index / 16u : 0u;
+  const uint32_t index_in_slice = index % 16u;
+  const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+  const uint32_t lane = index_in_slice + 16u * ((k / block_elems) & 1u);
+  const uint32_t slot = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+  const uint32_t bit = slot * data_bits;
+  const uint32_t bit_in_word = bit % 32u;
+  const uint32_t sub_element = (32u % data_bits == 0) ? bit_in_word / data_bits : 0u;
+  return {bit / 32u + 8u * slice, lane, sub_element, bit_in_word, data_bits};
+}
+
+std::array<uint32_t, 4> build_scaled_wmma_execution_words(
+    uint32_t M, bool scale16, uint32_t matrix_a_fmt, uint32_t matrix_b_fmt, uint16_t scale_src0,
+    uint16_t scale_src1, uint32_t scale_a_select, uint32_t scale_b_select, uint8_t vdst = 64) {
+  constexpr uint16_t kVgprEncoding = 256;
+  auto prefix =
+      cdna5::build_vop3p(scale16 ? 0x3a : 0x35, {.opsel = static_cast<uint8_t>(scale_a_select),
+                                                 .src0 = scale_src0,
+                                                 .src1 = scale_src1,
+                                                 .src2 = kVgprEncoding,
+                                                 .opsel_hi = static_cast<uint8_t>(scale_b_select)});
+  const uint16_t matrix_op =
+      M == 32 ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128F8f6f4Vop3p;
+  auto matrix =
+      cdna5::build_vop3p(matrix_op, {.vdst = vdst,
+                                     .opsel = static_cast<uint8_t>(matrix_a_fmt),
+                                     .src0 = kVgprEncoding,
+                                     .src1 = kVgprEncoding + 32,
+                                     .src2 = 128,
+                                     .opsel_hi = static_cast<uint8_t>(matrix_b_fmt & 0x3u)});
+  if (M == 32)
+    matrix[0] |= 1u << 14u;
+  else
+    matrix[0] |= (matrix_b_fmt >> 2u) << 14u;
+  return {prefix[0], prefix[1], matrix[0], matrix[1]};
+}
+
 struct ForceScalarGuard {
   bool old = util::force_scalar();
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
@@ -978,6 +1054,147 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
         for (uint32_t reg = 0; reg < 8; ++reg)
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
             EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(expected));
+      }
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBlockScales) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  ForceScalarGuard scalar_guard;
+
+  constexpr uint32_t kMatrixA = 0;
+  constexpr uint32_t kMatrixB = 32;
+  constexpr uint32_t kOutput = 64;
+  constexpr uint32_t kScaleA = 80;
+  constexpr uint32_t kScaleB = 82;
+  constexpr std::array<float, 4> matrix_values = {-1.0f, -0.5f, 0.5f, 1.5f};
+
+  struct TestCase {
+    uint32_t M;
+    uint32_t matrix_a_fmt;
+    uint32_t matrix_b_fmt;
+    bool scale16;
+    uint32_t scale_a_select;
+    uint32_t scale_b_select;
+  };
+  constexpr TestCase cases[] = {
+      {16, 0, 4, false, 1, 0}, // FP8 x FP4, 32 values per scale.
+      {16, 4, 0, true, 0, 1},  // FP4 x FP8, 16 values per scale.
+      {16, 2, 3, false, 1, 1}, // FP6 x BF6, including cross-VGPR packed values.
+      {32, 4, 4, true, 0, 1},  // Two-slice FP4 A matrix and 64-bit scale words.
+  };
+
+  const auto matrix_a_raw = [&](const TestCase &tc, uint32_t row, uint32_t k) {
+    const float value = matrix_values[(3u * row + 5u * k + k / 16u) % matrix_values.size()];
+    return encode_wmma_value(tc.matrix_a_fmt, value);
+  };
+  const auto matrix_b_raw = [&](const TestCase &tc, uint32_t col, uint32_t k) {
+    const float value = matrix_values[(5u * col + 3u * k + k / 32u + 1u) % matrix_values.size()];
+    return encode_wmma_value(tc.matrix_b_fmt, value);
+  };
+  const auto scale_a_raw = [](uint32_t row, uint32_t block) {
+    return static_cast<uint8_t>(0x7eu + ((row + 2u * block) % 3u));
+  };
+  const auto scale_b_raw = [](uint32_t col, uint32_t block) {
+    return static_cast<uint8_t>(0x7eu + ((2u * col + block + 1u) % 3u));
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(::testing::Message() << "M=" << tc.M << " a_fmt=" << tc.matrix_a_fmt
+                                      << " b_fmt=" << tc.matrix_b_fmt << " scale16=" << tc.scale16);
+    const uint32_t N = 16;
+    const uint32_t K = 128;
+    const uint32_t a_bits = wmma_format_bits(tc.matrix_a_fmt);
+    const uint32_t b_bits = wmma_format_bits(tc.matrix_b_fmt);
+    const uint32_t scale_blocks = tc.scale16 ? 8u : 4u;
+
+    auto seed_inputs_and_scales = [&]() {
+      for (uint32_t reg = 0; reg < 84; ++reg)
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          cu->write_vgpr(vgpr_base + reg, lane, 0);
+
+      for (uint32_t row = 0; row < tc.M; ++row)
+        for (uint32_t k = 0; k < K; ++k)
+          write_wmma_packed(*cu, vgpr_base + kMatrixA,
+                            manual_block_scaled_wmma_loc(tc.M, row, k, a_bits),
+                            matrix_a_raw(tc, row, k));
+      for (uint32_t col = 0; col < N; ++col)
+        for (uint32_t k = 0; k < K; ++k)
+          write_wmma_packed(*cu, vgpr_base + kMatrixB,
+                            manual_block_scaled_wmma_loc(N, col, k, b_bits),
+                            matrix_b_raw(tc, col, k));
+
+      for (uint32_t row = 0; row < tc.M; ++row) {
+        uint64_t word = 0;
+        for (uint32_t block = 0; block < scale_blocks; ++block)
+          word |= static_cast<uint64_t>(scale_a_raw(row, block)) << (8u * block);
+        const uint32_t lane = tc.M == 32 ? row : row + 16u * tc.scale_a_select;
+        cu->write_vgpr(vgpr_base + kScaleA, lane, static_cast<uint32_t>(word));
+        if (tc.scale16)
+          cu->write_vgpr(vgpr_base + kScaleA + 1, lane, static_cast<uint32_t>(word >> 32u));
+      }
+      for (uint32_t col = 0; col < N; ++col) {
+        uint64_t word = 0;
+        for (uint32_t block = 0; block < scale_blocks; ++block)
+          word |= static_cast<uint64_t>(scale_b_raw(col, block)) << (8u * block);
+        const uint32_t lane = col + 16u * tc.scale_b_select;
+        cu->write_vgpr(vgpr_base + kScaleB, lane, static_cast<uint32_t>(word));
+        if (tc.scale16)
+          cu->write_vgpr(vgpr_base + kScaleB + 1, lane, static_cast<uint32_t>(word >> 32u));
+      }
+    };
+
+    const auto words = build_scaled_wmma_execution_words(
+        tc.M, tc.scale16, tc.matrix_a_fmt, tc.matrix_b_fmt, 256 + kScaleA, 256 + kScaleB,
+        tc.scale_a_select, tc.scale_b_select, kOutput);
+    auto run = [&](bool force_scalar) {
+      util::set_force_scalar_for_testing(force_scalar);
+      seed_inputs_and_scales();
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      EXPECT_NE(inst, nullptr);
+      if (!inst)
+        return std::vector<uint32_t>{};
+      cu->execute_instruction(inst.get(), *wf);
+      std::vector<uint32_t> output;
+      output.reserve(tc.M * N);
+      for (uint32_t row = 0; row < tc.M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          const auto loc = amdgpu::wmma_output_loc_32(tc.M, N, row, col);
+          output.push_back(cu->read_vgpr(vgpr_base + kOutput + loc.reg, loc.lane));
+        }
+      return output;
+    };
+
+    const auto scalar = run(true);
+    const auto simd = run(false);
+    ASSERT_EQ(scalar.size(), tc.M * N);
+    ASSERT_EQ(simd, scalar);
+
+    const uint32_t block_size = tc.scale16 ? 16u : 32u;
+    for (uint32_t row = 0; row < tc.M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        float expected = 0.0f;
+        for (uint32_t block = 0; block < scale_blocks; ++block) {
+          float block_sum = 0.0f;
+          for (uint32_t k = block * block_size; k < (block + 1u) * block_size; ++k) {
+            const float a = decode_wmma_value(tc.matrix_a_fmt, matrix_a_raw(tc, row, k));
+            const float b = decode_wmma_value(tc.matrix_b_fmt, matrix_b_raw(tc, col, k));
+            block_sum = std::fma(a, b, block_sum);
+          }
+          block_sum *= util::e8m0_to_f32(scale_a_raw(row, block));
+          block_sum *= util::e8m0_to_f32(scale_b_raw(col, block));
+          expected += block_sum;
+        }
+        EXPECT_EQ(scalar[row * N + col], std::bit_cast<uint32_t>(expected))
+            << "row=" << row << " col=" << col;
       }
     }
   }
