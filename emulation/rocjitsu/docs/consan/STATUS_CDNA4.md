@@ -3168,6 +3168,24 @@ ordinary appended bodies, and bank spacing had to be measured after the entire
 bank rather than from its beginning. Focused host tests cover that geometry,
 the semantic AMDHSA entry backup, and the exact bounded-density boundary.
 
+`RecordReplayManyOwnerPressure` now covers the other portable TopK shape that
+was absent from the checked-in tier: eight independently dispatched kernels in
+one object, each with complete ordinary-SGPR and alternating-VGPR pressure.
+Both adjacent members execute every owner and require exact owner-tagged
+warmup, publication, and control values; the incorrect member removes only the
+highest-numbered, first-executed owner's cross-wave publication edge and
+requires the replay conflict.
+All 20 simulator rows pass across gfx942, gfx950, gfx1100, gfx1201, and gfx1250,
+and all four physical-gfx950 rows pass. The dedicated gfx950 simulator object
+instruments all 408/408 accesses and 8/8 barriers across exactly eight kernels
+with complete static and dynamic verdicts. An initial combined-object,
+64-roundtrip-per-owner exploration reached 1,170 sites and reproduced the known
+terminal-cut miss on CDNA3/4/5; it is intentionally not the checked-in contract
+because requiring that prototype relay topology would conflate behavioral
+owner isolation with the still-open E2E layout problem. Isolating the bounded
+pair in its own executable also keeps its eight kernels from changing the
+instrumentation inventory of the adjacent sparse-selection contracts.
+
 Blindly applying that per-route bank layout to TopK's 6,908 branch-only demands
 would create 13,816-word banks every 64 KiB. Artifact
 `/home/ossci/xx/consan-validation/prep-20260823-gfx950-topk-rr-dense-branch-spine-v2`

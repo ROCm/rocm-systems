@@ -449,6 +449,7 @@ function(rj_add_consan_device_conformance_cases)
         "RecordReplaySparseDensePipeline|record_replay_sparse_dense_pipeline|ConSanDeviceRecordReplaySparseDensePipelineTest|record-replay-only"
         "RecordReplaySparseSpillPressure|record_replay_sparse_spill_pressure|ConSanDeviceRecordReplaySparseSpillPressureTest|record-replay-only"
         "RecordReplayDenseBranchOnlyPressure|record_replay_sparse_spill_pressure|ConSanDeviceRecordReplayDenseBranchOnlyPressureTest|record-replay-only"
+        "RecordReplayManyOwnerPressure|record_replay_many_owner_pressure|ConSanDeviceRecordReplayManyOwnerPressureTest|record-replay-only"
         "SuperColliderDenseThreshold|supercollider_dense_threshold|ConSanDeviceSuperColliderDenseThresholdTest|supercollider-only"
         "SampledIndependentScalarProofs|sampled_independent_scalar_proofs|ConSanDeviceSampledIndependentScalarProofsTest|sampled-only"
     )
@@ -1055,6 +1056,7 @@ function(rj_add_consan_device_fixture_targets target)
         "record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
         "record_replay_sparse_dense_pipeline|record_replay_sparse_dense_pipeline_test.hip"
         "record_replay_sparse_spill_pressure|record_replay_sparse_spill_pressure_test.hip"
+        "record_replay_many_owner_pressure|record_replay_sparse_spill_pressure_test.hip"
         "supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         "sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
     )
@@ -1264,7 +1266,10 @@ function(rj_add_consan_device_fixture_targets target)
             )
         endif()
         if(
-            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            (
+                _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+                OR _workload_name STREQUAL "record_replay_many_owner_pressure"
+            )
             AND (
                 target STREQUAL "gfx1100"
                 OR target STREQUAL "gfx1201"
@@ -1277,7 +1282,10 @@ function(rj_add_consan_device_fixture_targets target)
             )
         endif()
         if(
-            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            (
+                _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+                OR _workload_name STREQUAL "record_replay_many_owner_pressure"
+            )
             AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
         )
             list(
@@ -1286,12 +1294,21 @@ function(rj_add_consan_device_fixture_targets target)
             )
         endif()
         if(
-            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            (
+                _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+                OR _workload_name STREQUAL "record_replay_many_owner_pressure"
+            )
             AND target STREQUAL "gfx1250"
         )
             list(
                 APPEND _workload_compile_definitions
                 RJ_CONSAN_SPARSE_SPILL_GFX1250_COMPACT_SCALAR_PRESSURE=1
+            )
+        endif()
+        if(_workload_name STREQUAL "record_replay_many_owner_pressure")
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_MANY_OWNER_ONLY=1
             )
         endif()
         if(

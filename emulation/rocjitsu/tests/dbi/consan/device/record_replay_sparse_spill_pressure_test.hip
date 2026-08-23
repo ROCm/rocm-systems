@@ -19,6 +19,7 @@ constexpr uint32_t kWaveSize = 64u;
 #endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
 constexpr uint32_t kWorkgroupCount = 2u;
+constexpr uint32_t kManyOwnerCount = 8u;
 
 #if defined(RJ_CONSAN_SPARSE_SPILL_MODERN_LDS)
 #define RJ_CONSAN_SPARSE_SPILL_STORE "ds_store_b32"
@@ -131,6 +132,27 @@ full_scalar_pressured_dense_roundtrip(volatile uint32_t *address, uint32_t value
   return observed;
 }
 
+// Preserve the same full-register-pressure contract in several independent
+// owners without turning a checked-in behavioral test into a frozen model of
+// the prototype's current per-site relay layout. TopK's much larger terminal
+// cut remains an E2E placement qualification; this bounded shape exercises
+// owner isolation and code-object-wide planning at device-test latency.
+__device__ __forceinline__ uint32_t many_owner_pressured_dense_roundtrip(volatile uint32_t *address,
+                                                                         uint32_t value) {
+  const uint32_t address_value = lds_address(address);
+  uint32_t observed = 0u;
+  asm volatile(
+      RJ_CONSAN_SPARSE_SPILL_WAIT
+          RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
+      ".rept 24\n\t" RJ_CONSAN_SPARSE_SPILL_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_SPILL_LOAD
+      " %0, %1\n\t" RJ_CONSAN_SPARSE_SPILL_WAIT
+      ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
+      : "=v"(observed)
+      : "v"(address_value), "v"(value)
+      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, "memory");
+  return observed;
+}
+
 __device__ __forceinline__ void store_lds(volatile uint32_t *address, uint32_t value) {
   const uint32_t address_value = lds_address(address);
   asm volatile(RJ_CONSAN_SPARSE_SPILL_STORE " %0, %1\n\t"
@@ -149,7 +171,7 @@ __device__ __forceinline__ uint32_t load_lds(volatile uint32_t *address) {
   return value;
 }
 
-template <bool kFullScalarPressure>
+template <bool kFullScalarPressure, uint32_t kOwner = 0u, bool kManyOwnerShape = false>
 __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_spill_pressure_for_consan(
     DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
@@ -158,21 +180,47 @@ __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_spill_press
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid & (kWaveSize - 1u);
   const uint32_t wave = tid / kWaveSize;
-  const uint32_t warmup_value = 0xe1000000u | (group << 16u) | tid;
+  const uint32_t owner_tag = kOwner << 20u;
+  const uint32_t warmup_value = 0xe1000000u | owner_tag | (group << 16u) | tid;
 
-  if constexpr (kFullScalarPressure) {
+  if constexpr (kManyOwnerShape) {
+    state->warmup[group][tid] = many_owner_pressured_dense_roundtrip(&warmup[tid], warmup_value);
+  } else if constexpr (kFullScalarPressure) {
     state->warmup[group][tid] = full_scalar_pressured_dense_roundtrip(&warmup[tid], warmup_value);
   } else {
     state->warmup[group][tid] = pressured_dense_roundtrip(&warmup[tid], warmup_value);
   }
   if (wave == 0u)
-    store_lds(&tile[lane], 0xe2000000u | (group << 16u) | lane);
+    store_lds(&tile[lane], 0xe2000000u | owner_tag | (group << 16u) | lane);
   if (state->synchronize)
     __syncthreads();
-  if (wave == 1u)
+  if (wave == 1u) {
     state->observed[group][lane] = load_lds(&tile[lane]);
-  state->control[group][tid] = 0xe3000000u | (group << 16u) | tid;
+    if constexpr (kManyOwnerShape)
+      store_lds(&tile[lane], 0xe2800000u | owner_tag | (group << 16u) | lane);
+  }
+  state->control[group][tid] = 0xe3000000u | owner_tag | (group << 16u) | tid;
 }
+
+void check_device_state(const DeviceState &state, bool synchronize, uint32_t owner) {
+  const uint32_t owner_tag = owner << 20u;
+  for (uint32_t group = 0u; group < kWorkgroupCount; ++group) {
+    for (uint32_t tid = 0u; tid < kThreadCount; ++tid) {
+      EXPECT_EQ(state.warmup[group][tid], 0xe1000000u | owner_tag | (group << 16u) | tid)
+          << "owner=" << owner << " group=" << group << " thread=" << tid;
+      EXPECT_EQ(state.control[group][tid], 0xe3000000u | owner_tag | (group << 16u) | tid)
+          << "owner=" << owner << " group=" << group << " thread=" << tid;
+    }
+    if (synchronize) {
+      for (uint32_t lane = 0u; lane < kWaveSize; ++lane) {
+        EXPECT_EQ(state.observed[group][lane], 0xe2000000u | owner_tag | (group << 16u) | lane)
+            << "owner=" << owner << " group=" << group << " lane=" << lane;
+      }
+    }
+  }
+}
+
+#if !defined(RJ_CONSAN_MANY_OWNER_ONLY)
 
 template <bool kFullScalarPressure> void run_record_replay_sparse_spill_pressure(bool synchronize) {
   DeviceState state{};
@@ -187,21 +235,51 @@ template <bool kFullScalarPressure> void run_record_replay_sparse_spill_pressure
   HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_state));
 
-  for (uint32_t group = 0u; group < kWorkgroupCount; ++group) {
-    for (uint32_t tid = 0u; tid < kThreadCount; ++tid) {
-      EXPECT_EQ(state.warmup[group][tid], 0xe1000000u | (group << 16u) | tid)
-          << "group=" << group << " thread=" << tid;
-      EXPECT_EQ(state.control[group][tid], 0xe3000000u | (group << 16u) | tid)
-          << "group=" << group << " thread=" << tid;
-    }
-    if (synchronize) {
-      for (uint32_t lane = 0u; lane < kWaveSize; ++lane) {
-        EXPECT_EQ(state.observed[group][lane], 0xe2000000u | (group << 16u) | lane)
-            << "group=" << group << " lane=" << lane;
-      }
-    }
+  check_device_state(state, synchronize, 0u);
+}
+
+#endif
+
+#if defined(RJ_CONSAN_MANY_OWNER_ONLY)
+
+template <uint32_t kOwner> void launch_many_owner(DeviceState *device_states) {
+  record_replay_sparse_spill_pressure_for_consan<true, kOwner, true>
+      <<<kWorkgroupCount, kThreadCount>>>(device_states + kOwner);
+  HIP_ASSERT(hipGetLastError());
+}
+
+void run_record_replay_many_owner_pressure(bool synchronize_highest_owner) {
+  DeviceState states[kManyOwnerCount]{};
+  for (uint32_t owner = 0u; owner < kManyOwnerCount; ++owner)
+    states[owner].synchronize = owner + 1u != kManyOwnerCount || synchronize_highest_owner;
+
+  DeviceState *device_states = nullptr;
+  HIP_ASSERT(hipMalloc(&device_states, sizeof(states)));
+  HIP_ASSERT(hipMemcpy(device_states, states, sizeof(states), hipMemcpyHostToDevice));
+
+  // Exercise the highest-offset owner first so the missing publication edge
+  // is independent of any report-generation reuse across prior dispatches.
+  launch_many_owner<7u>(device_states);
+  launch_many_owner<0u>(device_states);
+  launch_many_owner<1u>(device_states);
+  launch_many_owner<2u>(device_states);
+  launch_many_owner<3u>(device_states);
+  launch_many_owner<4u>(device_states);
+  launch_many_owner<5u>(device_states);
+  launch_many_owner<6u>(device_states);
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(states, device_states, sizeof(states), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_states));
+
+  for (uint32_t owner = 0u; owner < kManyOwnerCount; ++owner) {
+    const bool synchronized = owner + 1u != kManyOwnerCount || synchronize_highest_owner;
+    check_device_state(states[owner], synchronized, owner);
   }
 }
+
+#endif
+
+#if !defined(RJ_CONSAN_MANY_OWNER_ONLY)
 
 TEST(ConSanDeviceRecordReplaySparseSpillPressureTest, Correct) {
   run_record_replay_sparse_spill_pressure<false>(true);
@@ -218,6 +296,20 @@ TEST(ConSanDeviceRecordReplayDenseBranchOnlyPressureTest, Correct) {
 TEST(ConSanDeviceRecordReplayDenseBranchOnlyPressureTest, Incorrect) {
   run_record_replay_sparse_spill_pressure<true>(false);
 }
+
+#endif
+
+#if defined(RJ_CONSAN_MANY_OWNER_ONLY)
+
+TEST(ConSanDeviceRecordReplayManyOwnerPressureTest, Correct) {
+  run_record_replay_many_owner_pressure(true);
+}
+
+TEST(ConSanDeviceRecordReplayManyOwnerPressureTest, Incorrect) {
+  run_record_replay_many_owner_pressure(false);
+}
+
+#endif
 
 } // namespace
 
