@@ -262,12 +262,10 @@ def iter_pr_files(
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
     """Return every check-run for a commit SHA, transparently paginating.
 
-    Pagination is not optional here. Busy PRs in this repo routinely exceed one
-    page (100), and the API returns check-runs newest-id-first, so the
-    earliest-created checks fall off the end -- which is exactly when formatting
-    and build jobs are created. A required check that lands on page 2 looks
-    *missing* to the caller, which reports it as still-running and then times
-    out, rather than reading its real conclusion.
+    PRs here routinely exceed one page (100), and the API returns check-runs
+    newest-id-first, so the earliest-created ones fall off the end. A required
+    check on page 2 is indistinguishable from a missing one, so the caller
+    reports it pending and times out instead of reading its conclusion.
     """
     runs: List[Dict[str, Any]] = []
     page = 1
@@ -510,15 +508,10 @@ def effective_run_by_name(
 ) -> Dict[str, Dict[str, Any]]:
     """Collapse check-runs to one representative per name, worst outcome first.
 
-    A check-run name is NOT unique: several workflows in this repo publish a job
-    named `pre-commit`, and any PR touching more than one of their trigger paths
-    produces duplicates. Keying a dict on the name and letting the last write win
-    silently discards the others, so a failing required check can be masked by a
-    same-named passing one.
-
-    Precedence is failure > pending > ok, so a known failure is reported
-    immediately rather than waiting out the poll window on a sibling that is
-    still running.
+    Check-run names are not unique -- several workflows publish a job named
+    `pre-commit` -- so keying a dict on the name lets a passing run mask a
+    failing one. Precedence is failure > pending > ok, so a known failure is
+    reported immediately rather than waiting out the poll window.
     """
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for r in check_runs:

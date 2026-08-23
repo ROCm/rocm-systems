@@ -1,23 +1,18 @@
 # Pre-commit formatting for projects/rccl/.
 #
-# projects/rccl/ is listed in the repo-root .pre-commit-config.yaml `exclude:`
-# block, so a bare `pre-commit run` (and the hook installed by
-# `pre-commit install`) checks NOTHING under projects/rccl/. Always pass -c:
+# projects/rccl/ is in the repo-root config's `exclude:` block, so a bare
+# `pre-commit run` (and the hook from `pre-commit install`) checks NOTHING here.
+# Always pass -c:
 #
-#   pip install pre-commit
 #   pre-commit run -c projects/rccl/.pre-commit-config.yaml --all-files
-#   pre-commit run -c projects/rccl/.pre-commit-config.yaml --files <paths...>
 #
-# Every `files:`/`exclude:` regex below is MONOREPO-relative. pre-commit chdirs
-# to the git toplevel and hands hooks toplevel-relative paths regardless of the
-# invoking cwd, so the `^projects/rccl/` prefix is required and is correct from
-# any directory. (Sibling configs that omit the prefix silently match nothing --
-# see projects/amdsmi/.pre-commit-config.yaml.)
+# Regexes below are monorepo-relative: pre-commit chdirs to the git toplevel and
+# hands hooks toplevel-relative paths, so the `^projects/rccl/` prefix is
+# required from any cwd.
 
-# Vendored / externally-owned sources, mirroring the "external" entries in
-# projects/rccl/.clang-format-ignore. That file governs clang-format ONLY, so
-# without this block the whitespace hooks reformat upstream NVTX headers and
-# nccl.h.in and make the next upstream sync conflict gratuitously.
+# Vendored sources, mirroring the "external" entries in .clang-format-ignore.
+# That file governs clang-format only, so without this the whitespace hooks
+# would rewrite upstream NVTX headers and conflict on the next sync.
 exclude: |
   (?x)^projects/rccl/(
     src/include/nvtx3/
@@ -33,9 +28,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
-        # Preserve Markdown hard line breaks (a line ending in two spaces).
-        # Without this the hook silently deletes them from the .md files under
-        # projects/rccl/, changing how the docs render.
+        # Preserve Markdown hard line breaks (trailing double space).
         args: [--markdown-linebreak-ext=md]
         files: ^projects/rccl/
       - id: end-of-file-fixer
@@ -43,26 +36,16 @@ repos:
       - id: check-yaml
         files: ^projects/rccl/
 
-  # clang-format 22 is mandatory, not a preference: projects/rccl/.clang-format
-  # uses clang-format 22 keys (AlignPPAndNotPP, OneLineFormatOffRegex,
-  # KeepEmptyLines, ReflowComments: IndentOnly, BinPackParameters: BinPack) and
-  # clang-format 18 -- the version pinned by the repo-root config -- rejects the
-  # file outright with "unknown key 'AlignPPAndNotPP'" and exits 1. That is why
-  # projects/rccl/ is excluded from the root config instead of folded into it.
-  #
-  # Scope and behaviour match projects/rccl/maint/run-clang-format.sh: same
-  # extensions, same .clang-format + .clang-format-ignore, byte-identical output
-  # over projects/rccl/src. Note the script accepts any clang-format >= 22 while
-  # this pin is exact, so run it with clang-format 22.1.x to match CI.
+  # clang-format 22 is mandatory: .clang-format uses v22 keys and v18 (the
+  # root config's pin) rejects the file outright with
+  # "unknown key 'AlignPPAndNotPP'". Scope and output match
+  # maint/run-clang-format.sh byte-for-byte over projects/rccl/src.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v22.1.0
     hooks:
       - id: clang-format
         files: ^projects/rccl/src/.*\.(h|cc|cu|cuh)$
 
-# TODO(AITESTAUTO-6995): excluding projects/rccl/ from the root config also drops
-# the root's black (95 .py files), gersemi (54 CMake files) and
-# check-added-large-files hooks, which are not replaced here. They are omitted
-# from this first gate because each one is a bulk reformat that rewrites file
-# structure and needs its own review, whereas the whitespace hooks above only
-# produce semantically-null diffs. Adopt them in follow-ups.
+# TODO(AITESTAUTO-6995): the root config's black, gersemi and
+# check-added-large-files are not replaced here. Each is a bulk reformat needing
+# its own review; adopt in follow-ups.

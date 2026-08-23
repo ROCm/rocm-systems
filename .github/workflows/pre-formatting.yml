@@ -1,22 +1,17 @@
 # Shared pre-commit formatting gate.
 #
-# The job below MUST stay named `pre-commit`: that becomes the published
-# check-run name, and therock-pr-bot declares `required_check_runs: [pre-commit]`
-# in tools/systems_pr_bot/policy.yml. Renaming it — or turning this into a
-# matrix, which suffixes the job name — makes the bot wait 900s for a check that
-# never appears. Do not add a `name:` to the job.
+# The job below MUST stay named `pre-commit`: that is the check-run name
+# therock-pr-bot requires (`required_check_runs` in
+# tools/systems_pr_bot/policy.yml). Renaming it, or making it a matrix, makes
+# the bot wait 900s for a check that never appears.
 #
-# Scope is controlled by `paths:` below plus ONBOARDED_SUBTREES in
-# .github/scripts/run_pre_commit_by_subtree.py. Onboarding a project is those
-# two lines; files outside an onboarded subtree are ignored rather than being
-# checked against the repo-root config.
+# To onboard a project: add its path to `paths:` and to ONBOARDED_SUBTREES in
+# .github/scripts/run_pre_commit_by_subtree.py.
 name: "Pre-commit Format & Lint"
 on:
   pull_request:
     branches:
       - develop
-    # Only PRs touching an onboarded subtree (or this job's own machinery) run
-    # the gate. Add a project's path here when it onboards.
     paths:
       - "projects/rccl/**"
       - ".github/workflows/pre-formatting.yml"
@@ -33,8 +28,6 @@ concurrency:
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
-    # Formatting finishes in ~2 minutes; the 360-minute default just burns a
-    # runner if pip or a hook mirror hangs.
     timeout-minutes: 20
     steps:
 #      - name: Generate a token
@@ -95,8 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --depth=1 origin -- "$BASE_REF"
-          # Written to a file, not a space-joined step output: paths may contain
-          # spaces, and joining then re-splitting on IFS corrupts them.
+          # A file, not a space-joined step output: paths may contain spaces.
           git diff --name-only FETCH_HEAD HEAD > "$RUNNER_TEMP/changed-files.txt"
           echo "Changed files:"
           sed 's/^/  /' "$RUNNER_TEMP/changed-files.txt"
@@ -108,15 +100,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Check-only. This job publishes the repo's single required check, so
-          # a formatting failure must fail the job — it previously wrapped the
-          # run in `set +e` and auto-committed fixes instead, which meant the
-          # gate could never go red.
-          #
-          # Each onboarded subtree is checked with its OWN .pre-commit-config.yaml.
-          # The root config cannot be used for them: they are listed in its
-          # `exclude:` block (so it would check nothing and exit 0), and for
-          # projects/rccl its clang-format v18.1.4 pin cannot even parse
-          # projects/rccl/.clang-format.
+          # Check-only: this publishes the repo's single required check, so a
+          # formatting failure must fail the job. Each onboarded subtree is
+          # checked with its own config -- see the script for why the root
+          # config cannot be used.
           python .github/scripts/run_pre_commit_by_subtree.py \
             --files-from "$RUNNER_TEMP/changed-files.txt"

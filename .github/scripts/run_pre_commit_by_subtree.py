@@ -1,40 +1,24 @@
 #!/usr/bin/env python3
 """Run pre-commit over a PR's changed files, one config per onboarded subtree.
 
-The monorepo has no single pre-commit config. Several subtrees carry their own
-`.pre-commit-config.yaml` and are listed in the repo-root config's `exclude:`
-block, which means running the root config over their files silently checks
-nothing (pre-commit applies the top-level `exclude:` before any hook runs, then
-exits 0). Worse, for projects/rccl the root config is actively wrong: it pins
-clang-format v18.1.4, which cannot even parse projects/rccl/.clang-format and
-exits 1 with "unknown key 'AlignPPAndNotPP'".
+The repo-root config cannot be used for these subtrees: they are in its
+`exclude:` block, so it drops their files before any hook runs and exits 0. For
+projects/rccl it is also wrong -- its clang-format v18.1.4 pin cannot parse
+projects/rccl/.clang-format ("unknown key 'AlignPPAndNotPP'", exit 1).
 
-This script therefore groups the changed files by subtree and invokes
-pre-commit once per group with that subtree's own config.
-
-Files that do not belong to an ONBOARDED_SUBTREES entry are IGNORED, not
-checked against the root config. That is deliberate: a root fallback would
-apply root hooks (black, gersemi, clang-format 18) to every not-yet-onboarded
-project the moment this goes live, on a merge-gating check. Onboarding a
-project is a two-line change -- add it here, and add its path to the `paths:`
-filter in .github/workflows/pre-formatting.yml.
-
-Note: paths are always matched monorepo-root-relative. pre-commit chdirs to the
-git toplevel and rewrites both --config and every --files argument before doing
-anything, so a subtree config's `files:`/`exclude:` regexes must be written with
-the full `^projects/<name>/` prefix regardless of how it is invoked.
+Files outside ONBOARDED_SUBTREES are ignored rather than falling back to the
+root config, which would apply root hooks to every not-yet-onboarded project on
+a merge-gating check.
 
 Arguments:
-    --files-from  : Path to a file holding the changed paths, one per line.
-                    A file is used rather than argv so that paths containing
-                    spaces survive intact.
+    --files-from  : File holding the changed paths, one per line (a file, not
+                    argv, so paths containing spaces survive).
     --subtree     : OPTIONAL, repeatable. Override ONBOARDED_SUBTREES (testing).
     --dry-run     : If set, log the pre-commit invocations without running them.
     --debug       : If set, enables detailed debug logging.
 
 Outputs:
-    Exit 0 if every group passed (or nothing onboarded was touched), 1 if any
-    group failed or could not be run.
+    Exit 0 if every group passed or nothing onboarded was touched, else 1.
 
 Example Usage:
     python .github/scripts/run_pre_commit_by_subtree.py --files-from changed.txt --debug
@@ -49,11 +33,10 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Subtrees whose formatting is enforced. Add one line per project as it
-# onboards, and mirror it in the `paths:` filter of pre-formatting.yml.
-#
-# Each entry must contain a .pre-commit-config.yaml whose hook `files:` regexes
-# are written monorepo-relative (see the module docstring).
+# To onboard a project: add it here and to the `paths:` filter in
+# pre-formatting.yml. Its config's hook regexes must be monorepo-relative
+# (`^projects/<name>/`) -- pre-commit chdirs to the git toplevel and rewrites
+# --files to root-relative paths, so subtree-relative regexes never match.
 ONBOARDED_SUBTREES = [
     "projects/rccl",
 ]
@@ -71,8 +54,7 @@ def group_files_by_subtree(
 ) -> Dict[str, List[str]]:
     """Group changed files by the onboarded subtree that owns them.
 
-    Files matching no onboarded subtree are omitted entirely. Longest prefix
-    wins, so a nested subtree takes precedence over its parent.
+    Unowned files are omitted. Longest prefix wins.
     """
     groups: Dict[str, List[str]] = {}
     ordered = sorted(subtrees, key=len, reverse=True)
@@ -89,9 +71,8 @@ def group_files_by_subtree(
 def read_files_list(path: str) -> List[str]:
     """Read newline-separated paths, dropping blanks and anything not on disk.
 
-    The sparse checkout only materialises onboarded subtrees plus .github, so a
-    tree-to-tree diff legitimately names paths that are absent. pre-commit drops
-    those silently; filtering here keeps the logs honest about what was checked.
+    The tree-to-tree diff legitimately names paths the sparse checkout omits.
+    pre-commit drops those silently; filtering here keeps the log honest.
     """
     with open(path, encoding="utf-8") as handle:
         raw = [line.rstrip("\n") for line in handle]
@@ -111,8 +92,6 @@ def run_group(subtree: str, files: List[str], dry_run: bool) -> bool:
     """Run pre-commit for one subtree. Return True on success."""
     config = config_for(subtree)
     if not os.path.isfile(config):
-        # Fail loudly. Falling back to the root config here would silently
-        # check nothing, because onboarded subtrees are in its `exclude:`.
         logger.error(
             "%s is onboarded but %s does not exist; refusing to fall back "
             "to the root config, which would pass without checking anything.",
