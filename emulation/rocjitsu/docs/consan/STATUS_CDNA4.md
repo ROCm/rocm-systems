@@ -1693,12 +1693,14 @@ and 2/2 fence coverage, bounded memory with complete cleanup, and healthy
 pre/post device probes. The numerical oracle does not manifest, exactly as the
 prospective `any` policy allowed. This promotes the Record/Replay cell to green.
 
-The existing adjacent `CdnaStreamkTwoTile` correct/incorrect device pair owns
-the access-heavy CDNA relay and publication behavior on `gfx942` and `gfx950`;
-the portable Stream-K last-arriver pair carries the synchronization idea across
-all five targets. The new defects outside those device-observable contracts are
-covered by the focused host tests above rather than by prototype-layout device
-assertions.
+The portable `AccessHeavyStreamK` correct/incorrect pair owns the 80-access,
+five-phase relay and publication behavior on all five targets and physical
+gfx950. `StridedDualAddressPublication` additionally executes the E2E's native
+adjacent B64 two-range consumer (plus its stride-64 sibling) under a four-value
+exact oracle on that same matrix. The Stream-K last-arriver pair carries the
+atomic completion idiom. The new defects outside those device-observable
+contracts are covered by the focused host tests above rather than by
+prototype-layout device assertions.
 
 ### 2026-08-22 rocBLAS SGEMM Record/Replay qualification
 

@@ -37,8 +37,8 @@ independent graph streams and packed graph/executable parameter updates,
 compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
 control, reusable RCCL-style partial barriers, full-low-bank Stream-K,
 large-text relay pressure, live-SCC subword traffic, tied-address/result LDS
-loads, E2E-derived stride-64 dual-address B64 LDS transfers whose ranges are
-4 KiB apart, and multi-stage selection/reduction shapes. The Top-K reservation
+loads, E2E-derived adjacent and stride-64 dual-address B64 LDS transfers, and
+multi-stage selection/reduction shapes. The Top-K reservation
 contract now spans wave64 and wave32 targets. Target extensions include native
 96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including an
 address/destination alias distilled from framework kernels; native CDNA4
@@ -74,7 +74,7 @@ The initial target-capability disposition is:
 
 | Capability | Device disposition |
 | --- | --- |
-| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms, including the native CDNA3/4 `ds_read2st64_b64`/`ds_write2st64_b64` and gfx11/12 `ds_load_2addr_stride64_b64`/`ds_store_2addr_stride64_b64` spellings under one exact publication contract. CDNA4 additionally executes exact B32/B128 MUBUF direct-to-LDS delivery with implicit M0/physical-lane destinations in simulation and hardware; CDNA3 transports the applicable B32 form. |
+| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms, including adjacent CDNA3/4 `ds_read2_b64`/`ds_write2_b64` and gfx11/12 `ds_load_2addr_b64`/`ds_store_2addr_b64`, plus each family's stride-64 forms, under one four-value exact publication contract. CDNA4 additionally executes exact B32/B128 MUBUF direct-to-LDS delivery with implicit M0/physical-lane destinations in simulation and hardware; CDNA3 transports the applicable B32 form. |
 | Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
 | Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including address/destination aliasing. |
