@@ -79,6 +79,21 @@ improve or isolate instrumented emulator throughput, or introduce a separately
 reviewed reduced E2E denominator, before repeating full qualification.  Do not
 turn this into an unbounded wait.
 
+The current-tip bounded return after the cached Record/Replay selection repair
+is artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-qwen-rr-cached-selection-v1`.
+The unchanged full baseline again passes the 151,936-logit oracle, now in 63.01
+seconds. Record/Replay remains statically complete at 846/846 accesses and
+80/80 barriers, emits a valid 3,442,440-byte replacement, and is still
+compute-active after the same 28 extended dispatches at 180 seconds. It has no
+replay, oracle, or teardown verdict, so this confirms that cached sparse-probe
+selection is not the limiting Qwen cost and leaves the orange cell deferred at
+the same explicit return point. The executable gfx1250 manifest now owns the
+already-established 180-second Qwen bound instead of relying on an ad hoc CLI
+override; focused manifest and runner tests pin that target-resolved timeout.
+The loaded hook SHA-256 is
+`6b6237c222d167d204b06476f141b3ee8766b895ef1b32e1e7a513754d985263`.
+
 A separately bounded Sampled run against that same canonical artifact patches
 all 846 accesses and all 74 applicable barriers, with zero unsupported,
 resource-failed, or placement-failed sites and a 61-ms transform. It remains

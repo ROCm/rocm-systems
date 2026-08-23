@@ -2490,6 +2490,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 90)
         self.assertEqual(workloads["tp1-prefill"]["run_timeout_seconds"], 60)
+        self.assertEqual(workloads["qwen-prefill"]["run_timeout_seconds"], 180)
         self.assertEqual(
             workloads["tp1-prefill"]["record_replay_runtime_sample_stride"],
             256,
@@ -2571,6 +2572,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-prefill", 60),
                 ("gfx950", "tp1-decode-combined", 300),
                 ("gfx1250", "tp1-decode-combined", 180),
+                ("gfx1250", "qwen-prefill", 180),
                 ("gfx950", "tp2-family", 30),
                 ("gfx1250", "tp2-family", 180),
                 ("gfx1250", "tp2-decode", 300),
