@@ -473,6 +473,7 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250ClusterMulticast|gfx1250_cluster|ConSanDeviceGfx1250ClusterMulticastTest"
             "Gfx1250HighBankLdsAddress|gfx1250_high_bank_lds_address|ConSanDeviceGfx1250HighBankLdsAddressTest|record-replay-only"
             "Gfx1250SparseFp8Pipeline|gfx1250_sparse_fp8_pipeline|ConSanDeviceGfx1250SparseFp8PipelineTest"
+            "Gfx1250GlobalAsyncToLds|gfx1250_global_async_to_lds|ConSanDeviceGfx1250GlobalAsyncToLdsTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1201")
@@ -995,6 +996,7 @@ function(rj_add_consan_device_fixture_targets target)
             "gfx1250_topk_prefix|gfx1250_topk_prefix_test.hip"
             "gfx1250_high_bank_lds_address|gfx1250_high_bank_lds_address_test.hip"
             "gfx1250_sparse_fp8_pipeline|gfx1250_sparse_fp8_pipeline_test.hip"
+            "gfx1250_global_async_to_lds|gfx1250_global_async_to_lds_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1201")

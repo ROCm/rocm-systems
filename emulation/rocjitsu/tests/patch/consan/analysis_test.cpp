@@ -11,6 +11,35 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSan, InventoriesGfx1250GlobalAsyncToLdsAsAnLdsWrite) {
+  constexpr auto direct_b32 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                                   {.saddr = 0, .vdst = 7, .vaddr = 8});
+  const std::array<uint32_t, 4> words = {direct_b32[0], direct_b32[1], direct_b32[2],
+                                         build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(words, "global_async_to_lds_inventory"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_write_count, 1u);
+  ASSERT_EQ(kernel.lds_sites.size(), 1u);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  const ConSanLdsSite &site = kernel.lds_sites.front();
+  EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
+  EXPECT_TRUE(site.direct_to_lds);
+  EXPECT_TRUE(site.supported_mvp);
+  EXPECT_EQ(site.width_bits, 32u);
+  EXPECT_EQ(site.addr_vgpr, 7u);
+  const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+  EXPECT_TRUE(candidate.direct_to_lds);
+  EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
+  EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(candidate.addr_vgpr, 7u);
+}
+
 TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   constexpr auto direct_b32 = cdna4::build_mubuf(
       cdna4::kBufferLoadDwordMubuf, {.offen = 1, .lds = 1, .vaddr = 3, .vdata = 0, .srsrc = 2});

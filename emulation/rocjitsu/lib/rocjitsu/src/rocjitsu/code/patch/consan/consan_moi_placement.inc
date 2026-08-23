@@ -1080,10 +1080,21 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                                             uint16_t result_vgpr,
                                                             uint16_t exec_save_sgpr,
                                                             rj_code_arch_t arch) {
-  if (!candidate.direct_to_lds ||
-      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+  if (!candidate.direct_to_lds)
     return false;
+
+  // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
+  // in an ordinary VGPR. Preserve it before relocating the guest instruction.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 256u || result_vgpr >= 256u)
+      return false;
+    words.push_back(
+        build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*candidate.addr_vgpr), arch));
+    return true;
   }
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return false;
+
   const uint16_t lane_stride_shift = candidate.width_bits == 32u    ? 2u
                                      : candidate.width_bits == 96u  ? 4u
                                      : candidate.width_bits == 128u ? 4u

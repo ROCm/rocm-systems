@@ -1623,6 +1623,24 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
                                              uint64_t instruction_text_offset,
                                              rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic == "global_load_async_to_lds_b32" &&
+      instruction_bytes.size() == sizeof(cdna5::VglobalMachineInst)) {
+    ConSanLdsSite site;
+    site.kind = ConSanLdsAccessKind::Write;
+    site.direct_to_lds = true;
+    site.text_offset = instruction_text_offset;
+    site.file_offset = kernel.text_file_offset + instruction_text_offset;
+    site.size = static_cast<uint32_t>(inst.size());
+    site.width_bits = 32u;
+    // Unlike the CDNA3/CDNA4 MUBUF form, CDNA5 names the LDS byte
+    // destination explicitly in the VGLOBAL VDST field.
+    site.addr_vgpr = vgpr_index(inst.src_operand(0));
+    site.supported_mvp = site.addr_vgpr.has_value();
+    site.mnemonic = std::string(mnemonic);
+    kernel.lds_sites.push_back(std::move(site));
+    return true;
+  }
+
   const bool is_supported_load =
       mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
       mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
