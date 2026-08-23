@@ -75,7 +75,8 @@ struct acclProxyOpInfo {
 // Per collective record
 struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
-  int         refCount;
+  int         collStopped;
+  int         finalized;
   pthread_mutex_t mutex;
 
   // Collective metadata
@@ -97,6 +98,8 @@ struct acclCollInfo {
 
   // Proxy ops linked to this collective
   int         nProxyOps;
+  int         nProxyOpsStarted;
+  int         nProxyOpsCompleted;
   struct acclProxyOpInfo proxyOps[ACCL_MAX_PROXY_OPS];
 
   // Comm info backpointer

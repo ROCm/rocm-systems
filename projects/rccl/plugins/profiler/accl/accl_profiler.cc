@@ -261,6 +261,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   for (uint32_t ch = 0; ch < coll->nChannels && ch < ACCL_MAX_CHANNELS; ch++) {
     struct acclKernelChInfo* kch = &coll->kernelCh[ch];
     if (kch->tsStartUs == 0) continue;
+    if (kch->tsStopUs == 0) continue;
 
     double dur;
     if (kch->startGpuClk != 0 && kch->stopGpuClk != 0 && kch->stopGpuClk > kch->startGpuClk) {
@@ -336,22 +337,16 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   acclWriteRecord(ctx, &rec);
 }
 
-// ============================================================================
-// Reference counting for collective records
-// ============================================================================
-static inline void acclCollRef(struct acclCollInfo* coll) {
-  pthread_mutex_lock(&coll->mutex);
-  coll->refCount++;
-  pthread_mutex_unlock(&coll->mutex);
-}
-
-// Returns 1 if refcount hit zero and caller should finalize+free
-static inline int acclCollDeref(struct acclCollInfo* coll) {
-  pthread_mutex_lock(&coll->mutex);
-  coll->refCount--;
-  int done = (coll->refCount == 0);
-  pthread_mutex_unlock(&coll->mutex);
-  return done;
+// Returns 1 (under coll->mutex) if this coll should be finalized now.
+// Sets the finalized flag to prevent double finalization.
+static inline int acclShouldFinalize(struct acclCollInfo* coll) {
+  if (coll->finalized) return 0;
+  if (!coll->collStopped) return 0;
+  if (coll->nKernelChCompleted != coll->nKernelChStarted) return 0;
+  if (coll->nProxyOpsCompleted != coll->nProxyOpsStarted) return 0;
+  if (coll->nChannels > 0 && coll->nKernelChStarted == 0) return 0;
+  coll->finalized = 1;
+  return 1;
 }
 
 // ============================================================================
@@ -417,6 +412,17 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
 
   ACCL_INFO("ACCL Profiler: finalize rank=%d output=%s", ctx->rank, ctx->outputPath);
 
+  // Drain any coll slots still in use (orphaned by teardown).
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    if (ctx->collPoolUsed[i]) {
+      struct acclCollInfo* coll = &ctx->collPool[i];
+      if (!coll->finalized)
+        acclFinalizeCollective(coll);
+      pthread_mutex_destroy(&coll->mutex);
+      ctx->collPoolUsed[i] = 0;
+    }
+  }
+
   if (ctx->outputFile) {
     fclose(ctx->outputFile);
     ctx->outputFile = NULL;
@@ -452,7 +458,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       return ncclSuccess;
     }
     coll->type = ncclProfileColl;
-    coll->refCount = 1; // self-ref
     coll->func = eDescr->coll.func;
     coll->algo = eDescr->coll.algo;
     coll->proto = eDescr->coll.proto;
@@ -462,10 +467,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->msgSizeBytes = msgSize;
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
-
-    // Extra ref if we have channels (kernel completion will deref)
-    if (coll->nChannels > 0)
-      coll->refCount++;
 
     *eHandle = coll;
     return ncclSuccess;
@@ -499,7 +500,6 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     kch->startGpuClk = eDescr->kernelCh.pTimer;
     kch->tsStartUs = acclGetTimeUs();
     coll->nKernelChStarted++;
-    coll->refCount++; // deref'd on KernelCh stop
     pthread_mutex_unlock(&coll->mutex);
 
     *eHandle = kch;
@@ -524,7 +524,11 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
     op->commCtx = ctx;
-    if (parentColl) acclCollRef(parentColl);
+    if (parentColl) {
+      pthread_mutex_lock(&parentColl->mutex);
+      parentColl->nProxyOpsStarted++;
+      pthread_mutex_unlock(&parentColl->mutex);
+    }
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
     op->nSteps = eDescr->proxyOp.nSteps;
@@ -567,7 +571,13 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
     coll->tsCollStopUs = acclGetTimeUs();
-    if (acclCollDeref(coll)) {
+
+    pthread_mutex_lock(&coll->mutex);
+    coll->collStopped = 1;
+    int shouldFinalize = acclShouldFinalize(coll);
+    pthread_mutex_unlock(&coll->mutex);
+
+    if (shouldFinalize) {
       acclFinalizeCollective(coll);
       acclFreeColl(ctx, coll);
     }
@@ -585,12 +595,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     // kernel-completion ref if all channels are done.
     pthread_mutex_lock(&coll->mutex);
     coll->nKernelChCompleted++;
-    int allDone = (coll->nKernelChCompleted == coll->nChannels);
-    // Drop per-channel ref + kernel-completion ref (if all done) under lock
-    coll->refCount--;
-    if (allDone)
-      coll->refCount--;
-    int shouldFinalize = (coll->refCount == 0);
+    int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);
 
     if (shouldFinalize) {
@@ -622,9 +627,15 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     struct acclCommContext* ctx = (struct acclCommContext*)op->commCtx;
     acclFreeProxyOp(ctx, op);
-    if (coll && acclCollDeref(coll)) {
-      acclFinalizeCollective(coll);
-      acclFreeColl(ctx, coll);
+    if (coll) {
+      pthread_mutex_lock(&coll->mutex);
+      coll->nProxyOpsCompleted++;
+      int shouldFinalize = acclShouldFinalize(coll);
+      pthread_mutex_unlock(&coll->mutex);
+      if (shouldFinalize) {
+        acclFinalizeCollective(coll);
+        acclFreeColl(ctx, coll);
+      }
     }
     return ncclSuccess;
   }
