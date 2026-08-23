@@ -47,23 +47,42 @@ jobs:
 
       - name: Run pre-commit on changed rccl files
         run: |
-          set -x  # trace commands so a failing run is easy to diagnose
+          # pipefail matters here: GitHub's default shell is `bash -e {0}`, and
+          # errexit only inspects the LAST stage of a pipeline. Without it a
+          # failing `git diff` yields an empty file list, which this script then
+          # reports as "nothing to check" and exits 0 -- a silent green on the
+          # repo's only required check.
+          set -euo pipefail
+
           # Find the common ancestor between the PR base and head.
           MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          echo "merge-base: $MERGE_BASE"
 
-          # List files that were added, copied, modified, or renamed in
-          # the PR, then keep only those present on disk. HEAD is the
-          # pull-request merge commit in GitHub Actions, so diff against
-          # the PR head SHA directly to avoid checking files that changed
-          # only on the target branch.
-          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" ${{ github.event.pull_request.head.sha }} \
-            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+          # Files added, copied, modified or renamed by the PR. HEAD is the
+          # pull-request merge commit in GitHub Actions, so diff against the PR
+          # head SHA directly to avoid checking files that changed only on the
+          # target branch. Kept as a bare assignment (not a pipeline) so that
+          # `set -e` aborts the job if git fails.
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" ${{ github.event.pull_request.head.sha }})
 
-          if [ -z "$FILES" ]; then
+          # Keep only paths present on disk; the sparse checkout omits the rest.
+          FILES=()
+          while IFS= read -r f; do
+            if [ -n "$f" ] && [ -f "$f" ]; then FILES+=("$f"); fi
+          done <<< "$CHANGED"
+
+          if [ ${#FILES[@]} -eq 0 ]; then
             echo "No checked-in files changed in sparse checkout, skipping."
             exit 0
           fi
 
-          echo "Checking files:"
-          echo "$FILES"
-          pre-commit run -c projects/rccl/.pre-commit-config.yaml --files $FILES
+          echo "Checking ${#FILES[@]} file(s):"
+          printf '  %s\n' "${FILES[@]}"
+
+          # --show-diff-on-failure is required, not cosmetic: every hook in the
+          # rccl config is a fixer, so without it a red run prints only
+          # "files were modified by this hook" -- no filename, no diff -- and
+          # that is the entire signal a contributor gets from the merge gate.
+          pre-commit run -c projects/rccl/.pre-commit-config.yaml \
+            --show-diff-on-failure --color=always \
+            --files "${FILES[@]}"
