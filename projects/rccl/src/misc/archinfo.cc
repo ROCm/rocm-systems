@@ -66,3 +66,12 @@ bool IsArchMatch(char const* arch, char const* target) {
   // helper function to reduce clutter in code elsewhere.  Returns true on match.
   return (strncmp(arch, target, strlen(target)) == 0);
 }
+
+bool IsMi300a(int cudaDev) {
+  char gcn[256];
+  if (GetGcnArchName(cudaDev, gcn) != 0) return false;
+  if (!IsArchMatch(gcn, "gfx942")) return false;
+  int integrated = 0;
+  CUDACHECK(hipDeviceGetAttribute(&integrated, hipDeviceAttributeIntegrated, cudaDev));
+  return integrated != 0;
+}

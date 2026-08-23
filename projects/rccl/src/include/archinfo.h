@@ -37,6 +37,9 @@ int GetGcnArchName(int deviceId, char* out);
 double GetDeviceWallClockRateInKhz(int deviceId);
 bool IsArchMatch(char const* arch, char const* target);
 
+// MI300A is the gfx942 APU (integrated); MI300X is gfx942 discrete.
+bool IsMi300a(int cudaDev);
+
 /* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device
  * code for the same arch. */
 inline int rcclLL128LineElemsFromArch(char const* arch) {

@@ -11,6 +11,7 @@
 #include "nccl.h"
 #include "checks.h"
 #include "bitops.h"
+#include "archinfo.h"
 #include "utils.h"
 #include "p2p.h"
 #include "mem_manager.h"
@@ -356,6 +357,19 @@ ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
+#if !defined(HIP_HOST_UNCACHED_MEMORY)
+    // MI300A (gfx942 APU) needs uncached host memory for abortFlagDev/workFifoBuf
+    // CPU<->GPU coherence; hipHostMallocUncached is only available from ROCm 7.0
+    // onward (HIP_HOST_UNCACHED_MEMORY).
+    int cudaDev = 0;
+    CUDACHECK(hipGetDevice(&cudaDev));
+    if (IsMi300a(cudaDev)) {
+      ERROR("ROCm >= 7.0 with HIP_HOST_UNCACHED_MEMORY is required on MI300A; uncached host memory is unavailable in "
+            "this build");
+      result = ncclSystemError;
+      goto finish;
+    }
+#endif
 #if defined(HIP_HOST_UNCACHED_MEMORY)
     CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped | hipHostMallocUncached), result,
                   finish);
