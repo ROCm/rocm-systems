@@ -49,7 +49,7 @@ scratch before promotion.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟩 Current exact clean and paired rows are complete at 628/628 accesses; clean execution takes 182.176 seconds and paired slowdown is 1.34x. A prospectively reviewed exact-one drop of the final output-store convergence barrier is reached and accepted as `not_detected/pass`, with the exact expected output, zero diagnostics, bounded teardown, containment, health, hook hashing, and current provenance | 🟩 Current clean-source exact oracle, complete 658/658 access plus 46/46 barrier coverage, zero diagnostics, and 2.08x paired slowdown; a prospectively reviewed exact-one reader-retirement barrier drop fails the oracle and emits 120,034 Record/Replay diagnostics with bounded memory, cleanup, containment, health, and clean provenance | 🟩 Current exact clean and paired rows are complete at 628/628 accesses plus 51/51 barrier members; clean execution takes 583.067 seconds and paired slowdown is 1.70x. Current-tip targeted revalidation covers the selected output matmul's 76/76 accesses and 4/4 barriers; a prospectively reviewed exact-one reader-retirement drop preserves the exact oracle, emits 32 Sampled conflicts with 76/76 access and 3/3 surviving-barrier coverage, and passes bounded cleanup, containment, health, hook hashing, and current provenance | 🟨 Current exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero incomplete state; clean execution takes 2364.519 seconds and paired slowdown is 21.75x; current reviewed-fault and containment refresh pending |
+| **P0 Qwen3-0.6B prefill** | 🟩 Current exact full-model oracle with complete 844/844 access coverage; prior paired/fault evidence retained | 🟧 The current exact full-model oracle passes with complete 844/844 access plus 40/40 barrier patches, but the production sampling stride produces zero visible records and leaves the dynamic verdict incomplete | 🟩 Current exact full-model oracle with complete 844/844 access plus 37/37 applicable-barrier coverage; prior paired/fault evidence retained | 🟨 Earlier exact clean and paired rows are complete at 628/628 accesses plus 52/52 barriers with zero incomplete state; current reviewed-fault and containment refresh remains pending |
 | **P1 Sharktank TP1 prefill** | 🟧 The exact oracle passes, but current inventory discovers 176 accesses and supports only 120; the strict final verdict is statically incomplete | 🟩 Current exact oracle with complete 176/176 access plus 31/31 barrier coverage and a complete dynamic verdict; prior paired/fault evidence retained | 🟩 Current exact oracle with complete 176/176 access plus 28/28 applicable-barrier coverage | 🟩 Current exact oracle with complete 176/176 access plus 31/31 barrier coverage |
 | **P1 Sharktank TP1 decode/combined** | 🟧 Both exact oracles pass, but each current object leaves 56 of 176 discovered accesses unsupported; 240/240 supported accesses are patched and the strict verdict is incomplete | 🟩 Current exact oracles with complete 352/352 access plus 62/62 barrier coverage and a complete dynamic verdict; prior paired/fault evidence retained | 🟩 Current exact oracles with complete 352/352 access plus 56/56 applicable-barrier coverage | 🟩 Current exact oracles with complete 352/352 access plus 62/62 barrier coverage |
 | **P2 Sharktank TP2 family** | 🟧 All three exact oracles pass, but the six current objects support only 936 of 1524 discovered accesses; the strict final verdict is statically incomplete | 🟧 All three exact oracles pass with 1524/1524 access and 168/168 barrier patches, but the production sampling stride produces zero visible records and the dynamic verdict is incomplete | 🟩 Current refresh passes all three exact oracles with complete 1524/1524 access plus 150/150 applicable-barrier coverage; prior paired/fault evidence retained | 🟧 Current instrumentation reaches execution but exceeds the manifest's 30-second clean bound before an oracle, coverage, or teardown verdict; the earlier accepted bundle is historical rather than current-tip evidence |
@@ -68,17 +68,23 @@ coverage only; it did not repeat retained timing or fault campaigns. Physical
 gfx950 artifacts are rooted at
 `/home/ossci/xx/consan-validation/final-refresh-20260823-gfx950-v2`.
 CLIP, D128 block, D128 pressure, MFMA attention, and Jakub attention accept all
-four clean profiles. TP1 retains three accepted engines but exposes
+four clean profiles. Qwen accepts SuperCollider and Sampled but exposes a
+Record/Replay production-stride evidence gap. TP1 retains three accepted
+engines but exposes
 SuperCollider's newly unsupported accesses. TP2 retains Sampled, while
 SuperCollider is statically incomplete, Record/Replay produces no dynamic
 records at the production stride, and Inline Shadow exceeds its current clean
 bound. Stream-K and tree atomic-OR expose the current failures recorded in the
 matrix. These are correctness/acceptance results, not overhead measurements.
 
-Qwen was not rerun: the workspace no longer contains its canonical gfx950
-build manifest, so the workload doctor rejects the row before execution. Its
-older frozen evidence remains in the matrix, but it is explicitly not part of
-this current-tip refresh.
+The missing canonical Qwen build manifest was regenerated from the unchanged
+checked-in MLIR with the current IREE O3 pipeline before execution. The exact
+full-model oracle passes under all three previously green profiles.
+SuperCollider is complete at 844/844 accesses and Sampled at 844/844 accesses
+plus 37/37 applicable barriers. Record/Replay is statically complete at
+844/844 accesses plus 40/40 barriers, but emits no visible records at the
+production stride and exits with the strict dynamic-evidence failure. Inline
+Shadow was already yellow and was not part of the green-cell refresh.
 
 ### 2026-08-23 Jakub-attention Inline Shadow qualification
 
