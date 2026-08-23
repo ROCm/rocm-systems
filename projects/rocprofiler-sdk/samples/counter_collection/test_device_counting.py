@@ -155,6 +155,41 @@ def _assert_complete_dimension_coverage(records, counter_name):
     assert len(records) == len(expected_coordinates)
 
 
+def _visibility_environment():
+    return ", ".join(
+        f"{name}={os.environ[name]}"
+        for name in (
+            "HIP_VISIBLE_DEVICES",
+            "ROCR_VISIBLE_DEVICES",
+            "CUDA_VISIBLE_DEVICES",
+            "GPU_DEVICE_ORDINAL",
+        )
+        if name in os.environ
+    )
+
+
+# SQ_WAVES stays flat while GRBM_COUNT advances when the profiled agent never ran a kernel,
+# which happens if HIP device 0 is not the lowest-numbered visible agent. HIP_VISIBLE_DEVICES
+# entries name devices, or index the ROCR_VISIBLE_DEVICES list when that is set as well.
+def _inactive_counter_message(positive_counters):
+    missing = sorted(EXPECTED_COUNTER_NAMES - positive_counters)
+    message = "counters never reported a positive value: " + ", ".join(missing)
+    if missing != ["SQ_WAVES"]:
+        return message
+
+    message += (
+        f". {', '.join(sorted(positive_counters))} advanced, so the profiled agent was"
+        " alive but idle."
+    )
+    visibility = _visibility_environment()
+    if visibility:
+        message += (
+            " The samples profile the lowest-numbered visible agent while the workload"
+            f" runs on HIP device 0. Visibility variables: {visibility}."
+        )
+    return message
+
+
 def _validate_sync_samples(samples):
     sample_ids = sorted(samples)
     assert len(sample_ids) >= 2
@@ -192,7 +227,9 @@ def _validate_sync_samples(samples):
             if record["value"] > 0:
                 positive_counters.add(record["name"])
 
-    assert positive_counters == EXPECTED_COUNTER_NAMES
+    assert positive_counters == EXPECTED_COUNTER_NAMES, _inactive_counter_message(
+        positive_counters
+    )
 
 
 def _validate_sync_output_file():

@@ -203,10 +203,11 @@ set(counter-collection-device-profiling-env
     "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}")
 
-# Iteration count is raised above the default so that machines with few GPUs still run
-# long enough to produce the minimum number of samples the validator requires.
+# Only the first visible agent is configured for device counting, so the workload is
+# pinned to one device. The sampler thread runs on a fixed interval, so the iteration
+# count must keep the run long enough to clear the validator's minimum sample count.
 add_test(NAME counter-collection-device-profiling
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 0)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling
@@ -250,10 +251,11 @@ set(counter-collection-device-profiling-sync-env
     "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}")
 
-# Iteration count is raised above the default so that machines with few GPUs still run
-# long enough to produce the minimum number of samples the validator requires.
+# Only the first visible agent is configured for device counting, so the workload is
+# pinned to one device. The sampler thread runs on a fixed interval, so the iteration
+# count must keep the run long enough to clear the validator's minimum sample count.
 add_test(NAME counter-collection-device-profiling-sync
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 0)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling-sync
