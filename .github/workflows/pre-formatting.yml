@@ -1,17 +1,41 @@
+# Shared pre-commit formatting gate.
+#
+# The job below MUST stay named `pre-commit`: that becomes the published
+# check-run name, and therock-pr-bot declares `required_check_runs: [pre-commit]`
+# in tools/systems_pr_bot/policy.yml. Renaming it — or turning this into a
+# matrix, which suffixes the job name — makes the bot wait 900s for a check that
+# never appears. Do not add a `name:` to the job.
+#
+# Scope is controlled by `paths:` below plus ONBOARDED_SUBTREES in
+# .github/scripts/run_pre_commit_by_subtree.py. Onboarding a project is those
+# two lines; files outside an onboarded subtree are ignored rather than being
+# checked against the repo-root config.
 name: "Pre-commit Format & Lint"
 on:
   pull_request:
     branches:
-      - testbranch
+      - develop
+    # Only PRs touching an onboarded subtree (or this job's own machinery) run
+    # the gate. Add a project's path here when it onboards.
+    paths:
+      - "projects/rccl/**"
+      - ".github/workflows/pre-formatting.yml"
+      - ".github/scripts/run_pre_commit_by_subtree.py"
+      - ".pre-commit-config.yaml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    # Formatting finishes in ~2 minutes; the 360-minute default just burns a
+    # runner if pip or a hook mirror hangs.
+    timeout-minutes: 20
     steps:
 #      - name: Generate a token
 #        id: generate-token
@@ -38,13 +62,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pydantic requests pre-commit
-          sudo apt-get update
-          sudo apt-get install -y clang-format
-
-      - name: Configure Git
-        run: |
-          git config user.name "systems-assistant[bot]"
-          git config user.email "systems-assistant[bot]@users.noreply.github.com"
 
       - name: Detect changed subtrees
         id: detect
@@ -76,41 +93,30 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          set -euo pipefail
           git fetch --depth=1 origin -- "$BASE_REF"
-          changed=$(git diff --name-only FETCH_HEAD HEAD)
-          files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
-          echo "all_modified_files=$files" >> $GITHUB_OUTPUT
-
-      - name: Show changed-files output
-        env:
-          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
-        run: |
-          echo "Changed files are: $ALL_MODIFIED_FILES"
+          # Written to a file, not a space-joined step output: paths may contain
+          # spaces, and joining then re-splitting on IFS corrupts them.
+          git diff --name-only FETCH_HEAD HEAD > "$RUNNER_TEMP/changed-files.txt"
+          echo "Changed files:"
+          sed 's/^/  /' "$RUNNER_TEMP/changed-files.txt"
 
       - name: Disable submodule recursion
         run: git config submodule.recurse false
 
-      - name: Run and auto-commit pre-commit fixes
-        env:
-          GIT_AUTHOR_NAME: "systems-assistant[bot]"
-          GIT_AUTHOR_EMAIL: "systems-assistant[bot]@users.noreply.github.com"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
-          HEAD_REF: ${{ github.head_ref }}
+      - name: Run pre-commit
+        shell: bash
         run: |
-          read -r -a files <<<"$ALL_MODIFIED_FILES"
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No files changed, skipping pre-commit."
-            exit 0
-          fi
-          echo "Running pre-commit on these files:"
-          printf "  %s\n" "${files[@]}"
-          set +e
-          pre-commit run --files "${files[@]}" --show-diff-on-failure
-          set -e
-          git add "${files[@]}"
-          git fetch origin -- "$HEAD_REF"
-          if ! git diff --cached --quiet; then
-            git commit -m "ci: apply pre-commit fixes"
-            git push --force-with-lease origin -- "HEAD:$HEAD_REF"
-          fi
+          set -euo pipefail
+          # Check-only. This job publishes the repo's single required check, so
+          # a formatting failure must fail the job — it previously wrapped the
+          # run in `set +e` and auto-committed fixes instead, which meant the
+          # gate could never go red.
+          #
+          # Each onboarded subtree is checked with its OWN .pre-commit-config.yaml.
+          # The root config cannot be used for them: they are listed in its
+          # `exclude:` block (so it would check nothing and exit 0), and for
+          # projects/rccl its clang-format v18.1.4 pin cannot even parse
+          # projects/rccl/.clang-format.
+          python .github/scripts/run_pre_commit_by_subtree.py \
+            --files-from "$RUNNER_TEMP/changed-files.txt"
