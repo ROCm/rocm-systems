@@ -2859,6 +2859,31 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     plan.reason = ConSanRegisterPlanReason::MissingOwner;
     return plan;
   }
+  const bool owners_have_spill_backed_scalar_state =
+      !plan.owner_descriptor_file_offsets.empty() &&
+      std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
+        const ConSanMoiTransientSgprAssignment *assignment =
+            find_moi_transient_sgpr_assignment(options, descriptor_offset);
+        return assignment != nullptr && assignment->spill_backed;
+      });
+  const bool fixed_lane_scalar_reservoir =
+      ((options.moi_exec_save_sgpr && (options.automatic_moi_inline_sgpr_spill ||
+                                       options.automatic_moi_record_replay_sgpr_spill)) ||
+       owners_have_spill_backed_scalar_state) &&
+      std::ranges::none_of(owners, [](const MoiKernelResourceContext *owner) {
+        return owner->kernel->uses_dynamic_stack.value_or(false);
+      });
+  if (fixed_lane_scalar_reservoir && scratch_count == REGISTER_SET_MAX_VGPRS) {
+    plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+    return plan;
+  }
+  // Fixed-stack spill-backed scalar state lives in one VGPR that the engine
+  // never uses as scratch. Include it in allocation itself so liveness,
+  // persistent-state exclusions, guest operands, and descriptor growth all
+  // cover the real clobber range rather than discovering an adjacent register
+  // after planning.
+  const uint16_t allocation_count =
+      static_cast<uint16_t>(scratch_count + static_cast<uint16_t>(fixed_lane_scalar_reservoir));
   plan.current_vgpr_count = kMaxVgprs;
   plan.ordinary_vgpr_limit = kMaxVgprs;
   plan.current_sgpr_count = kMaxSgprs;
@@ -2919,7 +2944,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   const InstDefUse anchor_def_use(*anchor);
   ConSanRegisterRequest request;
   request.reg_class = RegClass::VGPR;
-  request.count = scratch_count;
+  request.count = allocation_count;
   // Every ConSan engine uses the first two scratch registers as a FLAT
   // address pair. CDNA3/4 require that pair to begin at an even VGPR.
   request.alignment =

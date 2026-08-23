@@ -434,6 +434,19 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     return std::nullopt;
   }
 
+  const bool fixed_lane_scalar_reservoir =
+      !has_dynamic_owner && options.moi_exec_save_sgpr &&
+      (options.automatic_moi_inline_sgpr_spill || options.automatic_moi_record_replay_sgpr_spill);
+  const uint16_t spill_vgpr_count =
+      static_cast<uint16_t>(resources.count + static_cast<uint16_t>(fixed_lane_scalar_reservoir));
+  if (spill_vgpr_count < resources.count ||
+      static_cast<uint32_t>(resources.base) + spill_vgpr_count > REGISTER_SET_MAX_VGPRS ||
+      (fixed_lane_scalar_reservoir &&
+       resources.required_vgpr_count < static_cast<uint32_t>(resources.base) + spill_vgpr_count)) {
+    warnings.emplace_back("ConSan MOI scalar reservoir is outside its planned VGPR allocation");
+    return std::nullopt;
+  }
+
   if (has_dynamic_owner) {
     if (has_fixed_owner) {
       warnings.emplace_back(
@@ -507,7 +520,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     // every owner without overlapping epoch, owner, or sequence state.
     SpillManager shared_manager(
         private_layout_base.value_or(resources.original_private_segment_size), *private_limit);
-    auto spill = build_vgpr_spill_sequence(shared_manager, resources.base, resources.count, arch);
+    auto spill = build_vgpr_spill_sequence(shared_manager, resources.base, spill_vgpr_count, arch);
     if (!spill)
       warnings.emplace_back("ConSan MOI could not encode the shared-owner VGPR spill window");
     return spill;
@@ -518,7 +531,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
       descriptor_offset, private_layout_base.value_or(resources.original_private_segment_size),
       *private_limit);
   (void)inserted;
-  auto spill = build_vgpr_spill_sequence(it->second, resources.base, resources.count, arch);
+  auto spill = build_vgpr_spill_sequence(it->second, resources.base, spill_vgpr_count, arch);
   if (!spill)
     warnings.emplace_back("ConSan MOI could not encode or reserve the planned VGPR spill window");
   return spill;
@@ -587,6 +600,12 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   (void)image;
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
+    // A lane-backed fixed-stack scalar save needs no private-memory backing.
+    // Callers retain a uniform requirement map across lane and memory
+    // representations, so zero is an intentional no-op rather than an
+    // invalid request to the descriptor spill updater.
+    if (required_private_bytes == 0u)
+      continue;
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
     const AmdGpuKernelInfo *active_kernel =
         kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);

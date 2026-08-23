@@ -4775,22 +4775,9 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       continue;
     ASSERT_TRUE(patch.scratch_vgpr);
-    EXPECT_NE(patch.required_private_segment_size, 0u);
-    const std::vector<uint32_t> cave =
-        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    // This fixture starts with no private segment, so the shared scalar spill
-    // allocation begins at byte zero for both mutually exclusive trampolines.
-    const auto first_store = instrumentation::build_private_store_b32(
-        *patch.scratch_vgpr, /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto first_load = instrumentation::build_private_load_b32(
-        *patch.scratch_vgpr, /*byte_offset=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
-    ASSERT_TRUE(first_store && first_load);
-    EXPECT_TRUE(contains_subsequence(cave, *first_store));
-    EXPECT_TRUE(contains_subsequence(cave, *first_load));
-    EXPECT_NE(std::ranges::find(cave, build_v_mov_b32_e32(*patch.scratch_vgpr,
-                                                          *result.resolved_moi_exec_save_sgpr,
-                                                          ROCJITSU_CODE_ARCH_RDNA4)),
-              cave.end());
+    EXPECT_EQ(patch.required_private_segment_size, 0u);
+    expect_lane_backed_scalar_spill(result, patched, patch, *result.resolved_moi_exec_save_sgpr,
+                                    ROCJITSU_CODE_ARCH_RDNA4);
   }
 
   std::vector<uint32_t> atomic_only_words = text_words;
@@ -4819,12 +4806,17 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
                                ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
+  AmdGpuCodeObject atomic_only_patched(atomic_only.elf_bytes.data(), atomic_only.elf_bytes.size());
+  ASSERT_TRUE(atomic_only_patched.is_valid());
   for (const ConSanPatchInfo &patch : atomic_only.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       continue;
-    // Atomic-only Inline probes use scalar slots +0..+21. The access layout
-    // through +29 must not inflate their private spill window.
-    EXPECT_EQ(patch.required_private_segment_size, 22u * sizeof(uint32_t));
+    // Atomic-only Inline probes use the same lane-backed scalar carrier as
+    // access probes without allocating an otherwise unused private segment.
+    EXPECT_EQ(patch.required_private_segment_size, 0u);
+    expect_lane_backed_scalar_spill(atomic_only, atomic_only_patched, patch,
+                                    *atomic_only.resolved_moi_exec_save_sgpr,
+                                    ROCJITSU_CODE_ARCH_RDNA4);
   }
 }
 

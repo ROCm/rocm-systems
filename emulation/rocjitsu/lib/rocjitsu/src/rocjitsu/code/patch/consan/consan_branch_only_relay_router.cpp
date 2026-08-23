@@ -1509,11 +1509,12 @@ BranchOnlyRelaySearchLimits branch_only_relay_greedy_pair_limits(size_t relay_co
   limits.pair.feasibility_scan = {1u, 0u};
   const size_t relay_index_levels = std::max<size_t>(std::bit_width(relay_count), 1u);
   limits.batch.fallback_setup = saturated_multiply(relay_count, relay_index_levels);
-  // Entry and return may each claim the complete inventory. Every ordered-map
-  // query/removal is charged at the current index depth, so a relay-count-only
-  // allowance can reject a small sparse corridor before making one hop.
+  // A pair can claim the complete inventory across its entry and return
+  // routes. Each claim precharges an ordered-map query, removal, and possible
+  // rollback insertion at the current index depth, so a relay-count-only
+  // allowance can reject a long sparse corridor before completing it.
   limits.pair.greedy = std::max<size_t>(
-      saturated_multiply(2u, saturated_multiply(relay_count, relay_index_levels)), 1u);
+      saturated_multiply(3u, saturated_multiply(relay_count, relay_index_levels)), 1u);
   return limits;
 }
 

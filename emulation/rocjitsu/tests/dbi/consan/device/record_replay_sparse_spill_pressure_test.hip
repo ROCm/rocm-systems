@@ -47,6 +47,21 @@ constexpr uint32_t kWorkgroupCount = 2u;
       "s39", "s40", "s41", "s42", "s43", "s44", "s45", "s46", "s47", "s48", "s49", "s50", "s51",   \
       "s52", "s53", "s54", "s55", "s56", "s57", "s58", "s59", "s60", "s61", "s62", "s63"
 
+// The TopK-shaped companion keeps the complete portable ordinary scalar bank
+// live. It owns the distinct many-site branch-only-pressure contract; the
+// sparse-spill pair above deliberately retains the high-bank control window
+// available to Qwen.
+#define RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES                                                    \
+  RJ_CONSAN_SPARSE_SPILL_SCALAR_USES                                                               \
+  ".irp r,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89\n\t"       \
+  "s_mov_b32 s\\r, s\\r\n\t"                                                                       \
+  ".endr\n\t"
+
+#define RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS                                                \
+  RJ_CONSAN_SPARSE_SPILL_SCALAR_CLOBBERS, "s64", "s65", "s66", "s67", "s68", "s69", "s70", "s71",  \
+      "s72", "s73", "s74", "s75", "s76", "s77", "s78", "s79", "s80", "s81", "s82", "s83", "s84",   \
+      "s85", "s86", "s87", "s88", "s89"
+
 // One live value in every adjacent VGPR pair prevents a new contiguous probe
 // window without changing the guest's values. This is target-neutral pressure,
 // not an assertion about which spill representation ConSan must choose.
@@ -86,6 +101,22 @@ __device__ __forceinline__ uint32_t pressured_dense_roundtrip(volatile uint32_t 
   return observed;
 }
 
+__device__ __forceinline__ uint32_t
+full_scalar_pressured_dense_roundtrip(volatile uint32_t *address, uint32_t value) {
+  const uint32_t address_value = lds_address(address);
+  uint32_t observed = 0u;
+  asm volatile(
+      RJ_CONSAN_SPARSE_SPILL_WAIT
+          RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
+      ".rept 64\n\t" RJ_CONSAN_SPARSE_SPILL_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_SPILL_LOAD
+      " %0, %1\n\t" RJ_CONSAN_SPARSE_SPILL_WAIT
+      ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
+      : "=v"(observed)
+      : "v"(address_value), "v"(value)
+      : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, "memory");
+  return observed;
+}
+
 __device__ __forceinline__ void store_lds(volatile uint32_t *address, uint32_t value) {
   const uint32_t address_value = lds_address(address);
   asm volatile(RJ_CONSAN_SPARSE_SPILL_STORE " %0, %1\n\t"
@@ -104,6 +135,7 @@ __device__ __forceinline__ uint32_t load_lds(volatile uint32_t *address) {
   return value;
 }
 
+template <bool kFullScalarPressure>
 __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_spill_pressure_for_consan(
     DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
@@ -114,7 +146,11 @@ __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_spill_press
   const uint32_t wave = tid / kWaveSize;
   const uint32_t warmup_value = 0xe1000000u | (group << 16u) | tid;
 
-  state->warmup[group][tid] = pressured_dense_roundtrip(&warmup[tid], warmup_value);
+  if constexpr (kFullScalarPressure) {
+    state->warmup[group][tid] = full_scalar_pressured_dense_roundtrip(&warmup[tid], warmup_value);
+  } else {
+    state->warmup[group][tid] = pressured_dense_roundtrip(&warmup[tid], warmup_value);
+  }
   if (wave == 0u)
     store_lds(&tile[lane], 0xe2000000u | (group << 16u) | lane);
   if (state->synchronize)
@@ -124,13 +160,14 @@ __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_spill_press
   state->control[group][tid] = 0xe3000000u | (group << 16u) | tid;
 }
 
-void run_record_replay_sparse_spill_pressure(bool synchronize) {
+template <bool kFullScalarPressure> void run_record_replay_sparse_spill_pressure(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  record_replay_sparse_spill_pressure_for_consan<<<kWorkgroupCount, kThreadCount>>>(device_state);
+  record_replay_sparse_spill_pressure_for_consan<kFullScalarPressure>
+      <<<kWorkgroupCount, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
@@ -153,11 +190,19 @@ void run_record_replay_sparse_spill_pressure(bool synchronize) {
 }
 
 TEST(ConSanDeviceRecordReplaySparseSpillPressureTest, Correct) {
-  run_record_replay_sparse_spill_pressure(true);
+  run_record_replay_sparse_spill_pressure<false>(true);
 }
 
 TEST(ConSanDeviceRecordReplaySparseSpillPressureTest, Incorrect) {
-  run_record_replay_sparse_spill_pressure(false);
+  run_record_replay_sparse_spill_pressure<false>(false);
+}
+
+TEST(ConSanDeviceRecordReplayDenseBranchOnlyPressureTest, Correct) {
+  run_record_replay_sparse_spill_pressure<true>(true);
+}
+
+TEST(ConSanDeviceRecordReplayDenseBranchOnlyPressureTest, Incorrect) {
+  run_record_replay_sparse_spill_pressure<true>(false);
 }
 
 } // namespace
@@ -167,4 +212,6 @@ TEST(ConSanDeviceRecordReplaySparseSpillPressureTest, Incorrect) {
 #undef RJ_CONSAN_SPARSE_SPILL_WAIT
 #undef RJ_CONSAN_SPARSE_SPILL_SCALAR_USES
 #undef RJ_CONSAN_SPARSE_SPILL_SCALAR_CLOBBERS
+#undef RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
+#undef RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS
 #undef RJ_CONSAN_SPARSE_SPILL_VECTOR_USES

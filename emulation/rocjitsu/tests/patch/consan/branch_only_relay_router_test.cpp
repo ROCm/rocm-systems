@@ -2333,6 +2333,34 @@ TEST(ConSanBranchOnlyRelayRouter, DefaultFallbackSetupPreservesLargeInventoryWin
   EXPECT_TRUE(plan.work_budget_exhausted());
 }
 
+TEST(ConSanBranchOnlyRelayRouter, GreedyPairLimitsPreserveACompleteLongSparseCorridor) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr size_t kRelayCount = 64u;
+  constexpr uint64_t kTarget = (kRelayCount + 1u) * kSoppBranchMaximumForwardReachBytes;
+  BranchOnlyRelayRouter router;
+  std::vector<uint64_t> relays;
+  relays.reserve(kRelayCount);
+  for (size_t relay = 1u; relay <= kRelayCount; ++relay) {
+    relays.push_back(relay * kSoppBranchMaximumForwardReachBytes);
+    ASSERT_TRUE(router.offer(relays.back(), BranchOnlyRelayProvenance::OwnedReservoir));
+  }
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, kTarget, kTarget + sizeof(uint32_t), kTarget},
+  };
+  DbiPatchPlacementPlanner planner(kArch, kTarget + 2u * sizeof(uint32_t));
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(
+      planner, requests, &error, branch_only_relay_greedy_pair_limits(kRelayCount));
+
+  ASSERT_TRUE(plan.complete()) << error;
+  EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::GreedyPairFallback);
+  EXPECT_EQ(plan.routes[0].entry_relay_offsets, relays);
+  EXPECT_TRUE(plan.routes[0].return_relay_offsets.empty());
+  EXPECT_EQ(plan.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::GreedyPairFallback}));
+  EXPECT_EQ(plan.rejection_reasons, (std::vector{BranchOnlyRelayPairRejection::None}));
+}
+
 TEST(ConSanBranchOnlyRelayRouter, GreedyRemovalPrechargeFailureIsPairAtomic) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;

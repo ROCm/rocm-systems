@@ -46,25 +46,25 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
       warnings.emplace_back("ConSan MOI could not encode the dynamic-stack scalar spill sequence");
     return sequence;
   }
-  const uint32_t layout_base =
-      private_layout_base.value_or(resources.original_private_segment_size);
-  SpillManager planned_manager(layout_base, *private_limit);
-  SpillManager *committed_manager = nullptr;
-  if (resources.owner_descriptor_file_offsets.size() == 1u) {
-    const uint64_t descriptor_offset = resources.owner_descriptor_file_offsets.front();
-    auto [it, inserted] = managers.try_emplace(descriptor_offset, layout_base, *private_limit);
-    (void)inserted;
-    planned_manager = it->second;
-    committed_manager = &it->second;
-  }
-  auto sequence = build_sgpr_spill_sequence(planned_manager, *options.moi_exec_save_sgpr, count,
-                                            resources.base, arch);
-  if (!sequence) {
-    warnings.emplace_back("ConSan MOI could not encode the Inline scalar spill sequence");
+  (void)managers;
+  (void)private_layout_base;
+  const uint32_t reservoir_end = static_cast<uint32_t>(resources.base) + resources.count + 1u;
+  if (reservoir_end > REGISTER_SET_MAX_VGPRS || resources.required_vgpr_count < reservoir_end ||
+      (vgpr_spill && (vgpr_spill->vgpr_base != resources.base ||
+                      vgpr_spill->vgpr_count != resources.count + 1u))) {
+    warnings.emplace_back(
+        "ConSan MOI fixed-stack scalar spill has no planned lane-backed VGPR reservoir");
     return std::nullopt;
   }
-  if (committed_manager)
-    *committed_manager = std::move(planned_manager);
+  const uint16_t reservoir_vgpr = static_cast<uint16_t>(reservoir_end - 1u);
+  const uint32_t total_private_bytes =
+      vgpr_spill ? vgpr_spill->total_private_bytes : resources.original_private_segment_size;
+  auto sequence = build_lane_sgpr_spill_sequence(*options.moi_exec_save_sgpr, count, reservoir_vgpr,
+                                                 total_private_bytes, arch);
+  if (!sequence) {
+    warnings.emplace_back("ConSan MOI could not encode the lane-backed scalar spill sequence");
+    return std::nullopt;
+  }
   return sequence;
 }
 
@@ -1073,7 +1073,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         if (displaced_words.size() >= kIndirectIslandWords &&
             displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max() &&
             moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
-                                              displaced_end - candidate.text_offset) &&
+                                             displaced_end - candidate.text_offset) &&
             !relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
                                                  displaced_end)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);

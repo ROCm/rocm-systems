@@ -316,6 +316,32 @@ bool contains_subsequence(std::span<const uint32_t> haystack, std::span<const ui
          haystack.end();
 }
 
+void expect_lane_backed_scalar_spill(const ConSanResult &result, const AmdGpuCodeObject &patched,
+                                     const ConSanPatchInfo &patch, uint16_t scalar_base,
+                                     rj_code_arch_t arch) {
+  ASSERT_TRUE(patch.scratch_vgpr);
+  const auto plan = std::ranges::find_if(
+      result.resource_plans, [&](const ConSanCandidateResourcePlan &candidate) {
+        return candidate.text_offset == patch.anchor_offset && candidate.scratch_vgpr &&
+               *candidate.scratch_vgpr == *patch.scratch_vgpr;
+      });
+  ASSERT_NE(plan, result.resource_plans.end());
+  const uint32_t reservoir_value =
+      static_cast<uint32_t>(*patch.scratch_vgpr) + plan->scratch_vgpr_count;
+  ASSERT_LT(reservoir_value, REGISTER_SET_MAX_VGPRS);
+  ASSERT_GE(plan->required_vgpr_count, reservoir_value + 1u);
+  const uint16_t reservoir = static_cast<uint16_t>(reservoir_value);
+  const auto save =
+      instrumentation::build_v_writelane_b32(reservoir, scalar_base, /*lane=*/0u, arch);
+  const auto restore =
+      instrumentation::build_v_readlane_b32(scalar_base, reservoir, /*lane=*/0u, arch);
+  ASSERT_TRUE(save && restore);
+  const std::vector<uint32_t> words =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  EXPECT_TRUE(contains_subsequence(words, *save));
+  EXPECT_TRUE(contains_subsequence(words, *restore));
+}
+
 size_t count_subsequence(std::span<const uint32_t> haystack, std::span<const uint32_t> needle) {
   size_t count = 0;
   auto it = haystack.begin();

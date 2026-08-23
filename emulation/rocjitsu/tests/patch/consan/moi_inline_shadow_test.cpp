@@ -3258,15 +3258,19 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
     EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
       return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
     })) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-      return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
-             patch.required_private_segment_size != 0u;
-    }));
+    const auto shadow_patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(shadow_patch, result.patches.end());
     if (uses_dynamic_stack) {
-      EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
-               patch.dynamic_private_segment_addend > 0u;
-      }));
+      EXPECT_GT(shadow_patch->required_private_segment_size, 0u);
+      EXPECT_GT(shadow_patch->dynamic_private_segment_addend, 0u);
+    } else {
+      EXPECT_EQ(shadow_patch->required_private_segment_size, 0u);
+      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      expect_lane_backed_scalar_spill(result, patched, *shadow_patch,
+                                      *result.resolved_moi_exec_save_sgpr,
+                                      ROCJITSU_CODE_ARCH_RDNA4);
     }
   }
 }
@@ -7719,11 +7723,20 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
             plan.site_kind != ConSanResourceSiteKind::Barrier) ||
            plan.source != ConSanRegisterAllocationSource::Unsupported;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier) &&
-           patch.required_private_segment_size > 0u;
-  }));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  bool checked_lane_spill = false;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore ||
+        std::ranges::find(patch.owner_descriptor_file_offsets, assignment.descriptor_file_offset) ==
+            patch.owner_descriptor_file_offsets.end()) {
+      continue;
+    }
+    expect_lane_backed_scalar_spill(result, patched, patch, assignment.exec_save_sgpr,
+                                    ROCJITSU_CODE_ARCH_CDNA5);
+    checked_lane_spill = true;
+  }
+  EXPECT_TRUE(checked_lane_spill);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -7913,11 +7926,20 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
             plan.site_kind != ConSanResourceSiteKind::Barrier) ||
            plan.source != ConSanRegisterAllocationSource::Unsupported;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier) &&
-           patch.required_private_segment_size > 0u;
-  }));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  bool checked_lane_spill = false;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore ||
+        std::ranges::find(patch.owner_descriptor_file_offsets, assignment.descriptor_file_offset) ==
+            patch.owner_descriptor_file_offsets.end()) {
+      continue;
+    }
+    expect_lane_backed_scalar_spill(result, patched, patch, assignment.exec_save_sgpr,
+                                    ROCJITSU_CODE_ARCH_CDNA4);
+    checked_lane_spill = true;
+  }
+  EXPECT_TRUE(checked_lane_spill);
   EXPECT_TRUE(result.final_validation_passed);
 }
 

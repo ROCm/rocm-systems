@@ -1271,12 +1271,17 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-    EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+    const ConSanMoiTransientSgprAssignment &assignment =
+        result.resolved_moi_transient_sgpr_assignments.front();
+    EXPECT_TRUE(assignment.spill_backed);
     const auto access_patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
     ASSERT_NE(access_patch, result.patches.end());
-    constexpr uint32_t kAddressGroupScalarBytes = 14u * sizeof(uint32_t);
-    EXPECT_EQ(access_patch->required_private_segment_size, kAddressGroupScalarBytes);
+    EXPECT_EQ(access_patch->required_private_segment_size, 0u);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    expect_lane_backed_scalar_spill(result, patched, *access_patch, assignment.exec_save_sgpr,
+                                    arch);
     EXPECT_TRUE(result.final_validation_passed);
   }
 }
@@ -3444,7 +3449,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
+TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsDoNotOverlapCapturedState) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint32_t kAccessCount = 9u;
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
@@ -3498,21 +3503,19 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
     ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(patch->scratch_vgpr);
     EXPECT_EQ(patch->persistent_private_state_end, access->persistent_private_state_end);
-    EXPECT_GT(patch->required_private_segment_size, *access->persistent_private_state_end);
+    EXPECT_EQ(patch->required_private_segment_size, *access->persistent_private_state_end);
     const std::vector<uint32_t> cave =
         text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-    bool found_scalar_spill_after_persistent_state = false;
     for (uint32_t offset = 0; offset < patch->required_private_segment_size;
          offset += sizeof(uint32_t)) {
       const auto spill =
           instrumentation::build_private_store_b32(*patch->scratch_vgpr, offset, kArch);
       ASSERT_TRUE(spill);
-      if (offset < *access->persistent_private_state_end)
-        EXPECT_FALSE(contains_subsequence(cave, *spill));
-      else
-        found_scalar_spill_after_persistent_state |= contains_subsequence(cave, *spill);
+      EXPECT_FALSE(contains_subsequence(cave, *spill));
     }
-    EXPECT_TRUE(found_scalar_spill_after_persistent_state);
+    expect_lane_backed_scalar_spill(
+        result, patched, *patch,
+        result.resolved_moi_transient_sgpr_assignments.front().exec_save_sgpr, kArch);
   }
   EXPECT_TRUE(result.final_validation_passed);
 }
@@ -5558,15 +5561,20 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
       EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                    &ConSanPatchInfo::kind),
                 access_count);
-      EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
-               patch.required_private_segment_size > 0u;
-      }));
       if (uses_dynamic_stack) {
         EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
           return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
                  patch.dynamic_private_segment_addend > 0u;
         }));
+      } else {
+        const auto access_patch =
+            std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                              &ConSanPatchInfo::kind);
+        ASSERT_NE(access_patch, result.patches.end());
+        AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(patched.is_valid());
+        expect_lane_backed_scalar_spill(result, patched, *access_patch, assignment.exec_save_sgpr,
+                                        arch);
       }
       EXPECT_TRUE(result.final_validation_passed);
     }
@@ -5915,7 +5923,10 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
                                ConSanPatchKind::TrampolineMoiBarrierRecord}) {
     const auto patch = std::ranges::find(result.patches, kind, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-    EXPECT_GT(patch->required_private_segment_size, 0u);
+    EXPECT_EQ(patch->required_private_segment_size, 0u);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    expect_lane_backed_scalar_spill(result, patched, *patch, assignment.exec_save_sgpr, kArch);
   }
   EXPECT_TRUE(result.final_validation_passed);
 
@@ -5954,13 +5965,15 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
                                ConSanPatchKind::TrampolineMoiBarrierRecord}) {
     const auto patch = std::ranges::find(dense_result.patches, kind, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, dense_result.patches.end()) << testing::PrintToString(dense_result.warnings);
-    // This fixture supplies persistent owner/epoch VGPRs explicitly, so the
-    // private segment contains only the eight transient scalar slots.  Do not
-    // silently replace the caller-owned persistent state with an automatic
-    // private epoch merely to create a leading DBI zone.
-    constexpr uint32_t kTransientScalarBytes = 8u * sizeof(uint32_t);
+    // This fixture supplies persistent owner/epoch VGPRs explicitly. The
+    // transient scalar window remains lane-backed and therefore needs no
+    // private segment or automatic private epoch.
     EXPECT_FALSE(patch->persistent_private_state_end);
-    EXPECT_EQ(patch->required_private_segment_size, kTransientScalarBytes);
+    EXPECT_EQ(patch->required_private_segment_size, 0u);
+    AmdGpuCodeObject patched(dense_result.elf_bytes.data(), dense_result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    expect_lane_backed_scalar_spill(dense_result, patched, *patch, dense_assignment.exec_save_sgpr,
+                                    kArch);
   }
   ASSERT_TRUE(dense_assignment.indirect_pc_sgpr);
   const auto indirect_barrier = std::ranges::find_if(dense_result.patches, [&](const auto &patch) {
@@ -6086,7 +6099,9 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -10789,6 +10804,230 @@ TEST(ConSanMoi, CdnaSparseAccessDenseSpillRetainsEveryAccessAcrossTargets) {
   }
 }
 
+TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
+  constexpr uint32_t kAccessCount = 130u;
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE("arch=" + std::to_string(arch));
+    std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, arch));
+    for (uint32_t index = 0u; index < kAccessCount; ++index) {
+      const auto access = instrumentation::build_ds_store_b32(
+          /*vaddr=*/0u, /*vdata=*/1u, static_cast<uint8_t>((index % 64u) * sizeof(uint32_t)), arch);
+      ASSERT_TRUE(access);
+      text_words.insert(text_words.end(), access->begin(), access->end());
+    }
+    // Keep every ordinary scalar live across every access. This removes the
+    // indirect PC/key window and forces the bounded, branch-only continuation
+    // used by full-pressure TopK-style kernels.
+    for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+      text_words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, arch));
+    text_words.push_back(build_s_endpgm(arch));
+
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_RDNA3
+            ? make_rdna3_lds_code_object(text_words, "rdna3_branch_only_access_pressure",
+                                         /*vgpr_granulated=*/0u, /*wave32=*/false,
+                                         /*uses_dynamic_stack=*/false,
+                                         /*workgroup_id_dimension_mask=*/7u)
+        : arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "cdna3_branch_only_access_pressure")
+            : make_cdna4_lds_code_object(text_words, "cdna4_branch_only_access_pressure");
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+    });
+    AmdGpuCodeObject original(bytes.data(), bytes.size());
+    ASSERT_TRUE(original.is_valid());
+    ASSERT_EQ(original.text_sections().size(), 1u);
+    const uint64_t original_text_size = original.text_sections().front()->size();
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.force_vgpr_spill = true;
+    options.force_private_epoch = true;
+    options.moi_dispatch_id_sgpr = 88u;
+    options.moi_init_owner_epoch = true;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(256u, 0u, 0u, 0u);
+    options.moi_runtime_sample_stride = 2u;
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = kAccessCount;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+    const bool uses_branch_only_scalar_spill = arch != ROCJITSU_CODE_ARCH_RDNA3;
+    EXPECT_EQ(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill,
+              uses_branch_only_scalar_spill);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                                 &ConSanPatchInfo::kind),
+              kAccessCount)
+        << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+    const auto first_access = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(first_access, result.patches.end());
+    ASSERT_TRUE(first_access->scratch_vgpr);
+    const auto first_plan =
+        std::ranges::find_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind == ConSanResourceSiteKind::Access;
+        });
+    ASSERT_NE(first_plan, result.resource_plans.end());
+    ASSERT_EQ(first_access->spilled_vgpr_count,
+              static_cast<uint16_t>(first_plan->scratch_vgpr_count + 1u));
+    const uint16_t reservoir =
+        static_cast<uint16_t>(*first_access->scratch_vgpr + first_access->spilled_vgpr_count - 1u);
+    const auto save_first = instrumentation::build_v_writelane_b32(
+        reservoir, *result.resolved_moi_exec_save_sgpr, /*lane=*/0u, arch);
+    const auto restore_first = instrumentation::build_v_readlane_b32(
+        *result.resolved_moi_exec_save_sgpr, reservoir, /*lane=*/0u, arch);
+    ASSERT_TRUE(save_first && restore_first);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(original.kernels().size(), 1u);
+    ASSERT_EQ(patched.kernels().size(), 1u);
+    KD original_descriptor{};
+    KD patched_descriptor{};
+    std::memcpy(&original_descriptor,
+                bytes.data() + original.kernels().front().descriptor_file_offset,
+                sizeof(original_descriptor));
+    std::memcpy(&patched_descriptor,
+                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                sizeof(patched_descriptor));
+    const std::vector<uint32_t> first_body = text_words_at_offset(
+        patched, first_access->trampoline_offset, first_access->trampoline_size);
+    EXPECT_NE(std::ranges::search(first_body, *save_first).begin(), first_body.end());
+    EXPECT_NE(std::ranges::search(first_body, *restore_first).begin(), first_body.end());
+    const auto entry_prologue =
+        std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                          &ConSanPatchInfo::kind);
+    ASSERT_NE(entry_prologue, result.patches.end());
+    EXPECT_EQ(entry_prologue->spilled_vgpr_count, first_access->spilled_vgpr_count);
+    const std::vector<uint32_t> entry_body = text_words_at_offset(
+        patched, entry_prologue->trampoline_offset, entry_prologue->trampoline_size);
+    EXPECT_NE(std::ranges::search(entry_body, *save_first).begin(), entry_body.end());
+    EXPECT_NE(std::ranges::search(entry_body, *restore_first).begin(), entry_body.end());
+    const uint16_t guest_workgroup_x = static_cast<uint16_t>(AMDHSA_BITS_GET(
+        original_descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT));
+    const uint16_t full_workgroup_x = static_cast<uint16_t>(AMDHSA_BITS_GET(
+        patched_descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT));
+    ASSERT_LE(*result.resolved_moi_exec_save_sgpr, guest_workgroup_x);
+    const uint16_t guest_slot =
+        static_cast<uint16_t>(guest_workgroup_x - *result.resolved_moi_exec_save_sgpr);
+    const auto save_semantic_workgroup_x =
+        instrumentation::build_v_writelane_b32(reservoir, full_workgroup_x, guest_slot, arch);
+    ASSERT_TRUE(save_semantic_workgroup_x);
+    EXPECT_NE(std::ranges::search(entry_body, *save_semantic_workgroup_x).begin(), entry_body.end())
+        << "the private prologue must back up guest-semantic workgroup X, not the raw "
+           "dispatch-preload value occupying its ABI slot";
+    EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
+    EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count,
+              uses_branch_only_scalar_spill ? kAccessCount : 0u);
+    EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count,
+              uses_branch_only_scalar_spill ? 1u : 0u);
+    const auto uses_appended_relay = [&](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+             (std::ranges::any_of(patch.branch_only_entry_relay_offsets,
+                                  [&](uint64_t relay) { return relay >= original_text_size; }) ||
+              std::ranges::any_of(patch.branch_only_return_relay_offsets,
+                                  [&](uint64_t relay) { return relay >= original_text_size; }));
+    };
+    EXPECT_EQ(std::ranges::any_of(result.patches, uses_appended_relay),
+              uses_branch_only_scalar_spill);
+  }
+}
+
+TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCountPerKernel = 130u;
+  const auto access = build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                               /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(access && barrier);
+  const auto make_accesses = [&] {
+    std::vector<uint32_t> words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch));
+    for (uint32_t index = 0u; index < kAccessCountPerKernel; ++index)
+      words.insert(words.end(), access->begin(), access->end());
+    return words;
+  };
+  std::vector<uint32_t> ordinary_words = make_accesses();
+  ordinary_words.push_back(build_s_endpgm(kArch));
+  std::vector<uint32_t> branch_only_words = make_accesses();
+  branch_only_words.push_back(*barrier);
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    branch_only_words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, kArch));
+  branch_only_words.push_back(build_s_endpgm(kArch));
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      ordinary_words, branch_only_words, {}, kCdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
+  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 0u);
+  });
+  mutate_kernel_descriptor(bytes, "lds_helper", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const uint64_t original_text_size = original.text_sections().front()->size();
+  ConSanMoiAutoReportInventory report_inventory;
+  report_inventory.engine = ConSanMoiEngine::RecordReplay;
+  report_inventory.access_range_count = 2u * kAccessCountPerKernel;
+  report_inventory.barrier_event_count = 1u;
+  report_inventory.diagnostic_count = 1u;
+  report_inventory.record_replay_access_dispatch_bank_count = 8u;
+  report_inventory.record_replay_access_owner_bank_count = 8u;
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(report_inventory);
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u * kAccessCountPerKernel + 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            2u * kAccessCountPerKernel)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            1u)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count,
+            kAccessCountPerKernel + 1u);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 2u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+           patch.branch_only_continuation &&
+           (std::ranges::any_of(patch.branch_only_entry_relay_offsets,
+                                [&](uint64_t relay) { return relay >= original_text_size; }) ||
+            std::ranges::any_of(patch.branch_only_return_relay_offsets,
+                                [&](uint64_t relay) { return relay >= original_text_size; }));
+  }));
+}
+
 TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountLimit) {
   // A generated object can strand a small barrier inventory too. Keep this
   // below the count-based compact threshold so branch reach, rather than the
@@ -12126,21 +12365,25 @@ TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             2u);
-  EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind != ConSanPatchKind::TrampolineMoiAtomicRecord ||
-           patch.required_private_segment_size > 0u;
-  }));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind != ConSanPatchKind::TrampolineMoiFenceRecord ||
-           patch.required_private_segment_size > 0u;
-  }));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiAtomicRecord &&
+        patch.kind != ConSanPatchKind::TrampolineMoiFenceRecord)
+      continue;
+    EXPECT_EQ(patch.required_private_segment_size, 0u);
+    expect_lane_backed_scalar_spill(result, patched, patch, assignment.exec_save_sgpr,
+                                    ROCJITSU_CODE_ARCH_RDNA4);
+  }
   EXPECT_TRUE(result.final_validation_passed);
 }
 

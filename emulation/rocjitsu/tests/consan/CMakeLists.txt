@@ -448,6 +448,7 @@ function(rj_add_consan_device_conformance_cases)
         "RecordReplayLongRangeFullPressure|record_replay_long_range_full_pressure|ConSanDeviceRecordReplayLongRangeFullPressureTest|record-replay-only"
         "RecordReplaySparseDensePipeline|record_replay_sparse_dense_pipeline|ConSanDeviceRecordReplaySparseDensePipelineTest|record-replay-only"
         "RecordReplaySparseSpillPressure|record_replay_sparse_spill_pressure|ConSanDeviceRecordReplaySparseSpillPressureTest|record-replay-only"
+        "RecordReplayDenseBranchOnlyPressure|record_replay_sparse_spill_pressure|ConSanDeviceRecordReplayDenseBranchOnlyPressureTest|record-replay-only"
         "SuperColliderDenseThreshold|supercollider_dense_threshold|ConSanDeviceSuperColliderDenseThresholdTest|supercollider-only"
         "SampledIndependentScalarProofs|sampled_independent_scalar_proofs|ConSanDeviceSampledIndependentScalarProofsTest|sampled-only"
     )
@@ -672,6 +673,7 @@ function(rj_add_consan_device_conformance_cases)
                 (
                     _workload_name STREQUAL "RecordReplaySparseDensePipeline"
                     OR _workload_name STREQUAL "RecordReplaySparseSpillPressure"
+                    OR _workload_name STREQUAL "RecordReplayDenseBranchOnlyPressure"
                 )
                 AND _mode_value STREQUAL "record-replay"
             )

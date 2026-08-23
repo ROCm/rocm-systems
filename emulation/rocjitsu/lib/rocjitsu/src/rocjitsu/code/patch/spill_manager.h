@@ -227,6 +227,14 @@ struct SgprSpillSequence {
   std::vector<uint32_t> save_words;
   std::vector<uint32_t> restore_words;
   uint32_t total_private_bytes = 0;
+
+  // Representation metadata used when an entry ABI remap must replace one
+  // logical backup slot after the ordinary save. Exactly one representation
+  // is present for sequences built by this module.
+  std::optional<uint16_t> lane_reservoir_vgpr;
+  std::optional<uint16_t> memory_transfer_vgpr;
+  std::vector<std::vector<uint32_t>> memory_slot_store_words;
+  std::vector<uint32_t> memory_store_wait_words;
 };
 
 /// @brief Reserve slots and encode a CDNA3, CDNA4, RDNA4, or gfx1250 VGPR
@@ -250,6 +258,32 @@ struct SgprSpillSequence {
 [[nodiscard]] std::optional<SgprSpillSequence>
 build_sgpr_spill_sequence(SpillManager &manager, uint16_t sgpr_base, uint16_t sgpr_count,
                           uint16_t transfer_vgpr, rj_code_arch_t arch);
+
+/// @brief Preserve one ordinary SGPR window in fixed lanes of one VGPR.
+///
+/// @details The reservoir VGPR must be dead or already preserved for the
+/// complete lifetime of this sequence. Each scalar occupies the same lane on
+/// every wave, so this representation needs no private-memory slots and does
+/// not repeatedly reuse a transfer VGPR while scratch stores are in flight.
+/// All admitted targets have at least 32 lanes; counts above that portable
+/// bound are rejected. @p total_private_bytes is carried through unchanged so
+/// callers can compose the sequence with an independently established VGPR
+/// spill frame.
+[[nodiscard]] std::optional<SgprSpillSequence>
+build_lane_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count, uint16_t reservoir_vgpr,
+                               uint32_t total_private_bytes, rj_code_arch_t arch);
+
+/// @brief Replace one logical SGPR backup slot with a different entry SGPR.
+///
+/// @details This is used when instrumentation expands a hardware entry ABI:
+/// the raw register occupying a guest slot is no longer the guest-semantic
+/// value that must survive the prologue. The returned sequence targets the
+/// same lane or private-memory slot as @p destination_sgpr and completes any
+/// required store wait before returning.
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_sgpr_spill_slot_override_sequence(const SgprSpillSequence &sequence,
+                                        uint16_t destination_sgpr, uint16_t source_sgpr,
+                                        rj_code_arch_t arch);
 
 /// @brief Encode a site-local dynamic-stack frame around one VGPR spill window.
 ///

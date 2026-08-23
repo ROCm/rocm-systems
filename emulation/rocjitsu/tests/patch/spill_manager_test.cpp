@@ -727,6 +727,76 @@ TEST(SpillManager, ComposesGfx950EntrySgprSpillAfterTemporaryVgprs) {
     EXPECT_TRUE(std::ranges::search(sgprs->restore_words, *load).begin() !=
                 sgprs->restore_words.end());
   }
+
+  const auto semantic_override = build_sgpr_spill_slot_override_sequence(
+      *sgprs, /*destination_sgpr=*/2u, /*source_sgpr=*/7u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(semantic_override);
+  const uint32_t expected_transfer =
+      cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 7u, .vdst = 10u})[0];
+  const auto expected_store = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/10u, /*byte_offset=*/36u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(expected_store);
+  std::vector<uint32_t> expected_override = {expected_transfer};
+  expected_override.insert(expected_override.end(), expected_store->begin(), expected_store->end());
+  expected_override.push_back(*build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(*semantic_override, expected_override);
+  EXPECT_FALSE(build_sgpr_spill_slot_override_sequence(
+      *sgprs, /*destination_sgpr=*/5u, /*source_sgpr=*/7u, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
+TEST(SpillManager, BuildsLaneBackedScalarSpillAcrossEveryConSanArchitecture) {
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array targets = {
+      Target{ROCJITSU_CODE_ARCH_CDNA3, "gfx942"},  Target{ROCJITSU_CODE_ARCH_CDNA4, "gfx950"},
+      Target{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"}, Target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100"},
+      Target{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201"},
+  };
+  constexpr uint16_t kSgprBase = 0u;
+  constexpr uint16_t kSgprCount = 14u;
+  constexpr uint16_t kReservoirVgpr = 90u;
+  constexpr uint32_t kExistingPrivateBytes = 48u;
+
+  for (const Target &target : targets) {
+    SCOPED_TRACE(target.label);
+    const auto sequence = build_lane_sgpr_spill_sequence(kSgprBase, kSgprCount, kReservoirVgpr,
+                                                         kExistingPrivateBytes, target.arch);
+    ASSERT_TRUE(sequence);
+    EXPECT_EQ(sequence->sgpr_base, kSgprBase);
+    EXPECT_EQ(sequence->sgpr_count, kSgprCount);
+    EXPECT_EQ(sequence->total_private_bytes, kExistingPrivateBytes);
+
+    std::vector<uint32_t> expected_save;
+    std::vector<uint32_t> expected_restore;
+    for (uint16_t lane = 0u; lane < kSgprCount; ++lane) {
+      const uint16_t sgpr = static_cast<uint16_t>(kSgprBase + lane);
+      const auto save =
+          instrumentation::build_v_writelane_b32(kReservoirVgpr, sgpr, lane, target.arch);
+      const auto restore =
+          instrumentation::build_v_readlane_b32(sgpr, kReservoirVgpr, lane, target.arch);
+      ASSERT_TRUE(save && restore);
+      expected_save.insert(expected_save.end(), save->begin(), save->end());
+      expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
+    }
+    const auto dependency_wait = instrumentation::build_valu_to_salu_dependency_wait(target.arch);
+    ASSERT_TRUE(dependency_wait);
+    expected_restore.push_back(*dependency_wait);
+    EXPECT_EQ(sequence->save_words, expected_save);
+    EXPECT_EQ(sequence->restore_words, expected_restore);
+
+    const auto semantic_override = build_sgpr_spill_slot_override_sequence(
+        *sequence, /*destination_sgpr=*/2u, /*source_sgpr=*/17u, target.arch);
+    const auto expected_override = instrumentation::build_v_writelane_b32(
+        kReservoirVgpr, /*ssrc=*/17u, /*lane=*/2u, target.arch);
+    ASSERT_TRUE(semantic_override && expected_override);
+    EXPECT_TRUE(std::ranges::equal(*semantic_override, *expected_override));
+  }
+
+  EXPECT_FALSE(build_lane_sgpr_spill_sequence(
+      /*sgpr_base=*/0u, /*sgpr_count=*/33u, kReservoirVgpr, kExistingPrivateBytes,
+      ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(SpillManager, BuildsGfx942VgprSaveRestoreSequence) {

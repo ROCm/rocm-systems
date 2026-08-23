@@ -2910,11 +2910,12 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
       const std::vector<uint32_t> trampoline =
           text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
       EXPECT_TRUE(contains_subsequence(trampoline, return_tail));
+      if (!uses_dynamic_stack) {
+        EXPECT_EQ(patch.required_private_segment_size, 0u);
+        expect_lane_backed_scalar_spill(result, patched, patch, assignment.exec_save_sgpr,
+                                        ROCJITSU_CODE_ARCH_CDNA5);
+      }
     }
-    EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
-      return patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
-             patch.required_private_segment_size > 0u;
-    }));
     if (uses_dynamic_stack) {
       EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
@@ -7521,7 +7522,7 @@ TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Cdna4SampledFarBarrierIslandUsesOwnerLocalScalarRoute) {
+TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint32_t kAccessCount = 58u;
   constexpr uint16_t kGlobalExecSaveSgpr = 80u;
@@ -7588,19 +7589,25 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierIslandUsesOwnerLocalScalarRoute) {
            patch.anchor_offset == barrier_offset;
   });
   ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
-  const auto island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.anchor_offset == barrier_offset && patch.original_size == 0u;
-  });
-  ASSERT_NE(island, result.patches.end()) << testing::PrintToString(result.patches);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> island_words =
-      text_words_at_offset(patched, island->trampoline_offset, island->trampoline_size);
-  EXPECT_NE(std::ranges::find(island_words, build_s_getpc_b64(kLocalIndirectPcSgpr, kArch)),
-            island_words.end());
-  EXPECT_EQ(std::ranges::find(island_words, build_s_getpc_b64(kGlobalExecSaveSgpr, kArch)),
-            island_words.end());
+  const uint32_t local_route = build_s_getpc_b64(kLocalIndirectPcSgpr, kArch);
+  const auto routed_patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    if ((patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+         patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland) ||
+        std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) ==
+            patch.owner_descriptor_file_offsets.end()) {
+      return false;
+    }
+    const std::vector<uint32_t> words =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    return std::ranges::find(words, local_route) != words.end();
+  });
+  ASSERT_NE(routed_patch, result.patches.end()) << testing::PrintToString(result.patches);
+  const std::vector<uint32_t> route_words =
+      text_words_at_offset(patched, routed_patch->trampoline_offset, routed_patch->trampoline_size);
+  EXPECT_EQ(std::ranges::find(route_words, build_s_getpc_b64(kGlobalExecSaveSgpr, kArch)),
+            route_words.end());
   EXPECT_TRUE(result.final_validation_passed);
 }
 

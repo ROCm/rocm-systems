@@ -173,40 +173,74 @@ struct MoiEntryScalarBackup {
   return true;
 }
 
-[[nodiscard]] bool
-append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
-                                           const ConSanMoiWorkgroupSources &sources,
-                                           rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<std::pair<uint16_t, uint16_t>>>
+cdna_guest_workgroup_payload_copies(const ConSanMoiWorkgroupSources &sources, rj_code_arch_t arch) {
   if (!sources.cdna_full_payload_base && !sources.cdna_guest_payload_base &&
       sources.cdna_guest_payload_mask == 0u) {
-    return true;
+    return std::vector<std::pair<uint16_t, uint16_t>>{};
   }
   if (!sources.cdna_full_payload_base || !sources.cdna_guest_payload_base ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
        arch != ROCJITSU_CODE_ARCH_CDNA4)) {
-    errors.emplace_back("ConSan MOI found an incomplete AMDHSA workgroup-ID payload repair");
-    return false;
+    return std::nullopt;
   }
 
+  std::vector<std::pair<uint16_t, uint16_t>> copies;
   uint16_t destination = *sources.cdna_guest_payload_base;
   for (uint16_t dimension = 0; dimension < 3u; ++dimension) {
     if ((sources.cdna_guest_payload_mask & (1u << dimension)) == 0u)
       continue;
     const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + dimension);
-    if (destination != source &&
-        !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
-      errors.emplace_back("ConSan MOI could not restore a guest AMDHSA workgroup-ID SGPR");
-      return false;
-    }
+    copies.emplace_back(destination, source);
     ++destination;
   }
   if ((sources.cdna_guest_payload_mask & (1u << 3u)) != 0u) {
     const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + 3u);
+    copies.emplace_back(destination, source);
+  }
+  return copies;
+}
+
+[[nodiscard]] bool
+append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
+                                           const ConSanMoiWorkgroupSources &sources,
+                                           rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const auto copies = cdna_guest_workgroup_payload_copies(sources, arch);
+  if (!copies) {
+    errors.emplace_back("ConSan MOI found an incomplete AMDHSA workgroup-ID payload repair");
+    return false;
+  }
+  for (const auto &[destination, source] : *copies) {
     if (destination != source &&
         !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
-      errors.emplace_back("ConSan MOI could not restore the guest AMDHSA workgroup-info SGPR");
+      errors.emplace_back("ConSan MOI could not restore a guest AMDHSA workgroup payload SGPR");
       return false;
     }
+  }
+  return true;
+}
+
+[[nodiscard]] bool append_cdna_semantic_entry_scalar_spill_overrides(
+    std::vector<uint32_t> &words, const SgprSpillSequence &spill,
+    const ConSanMoiWorkgroupSources &sources, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
+  const auto copies = cdna_guest_workgroup_payload_copies(sources, arch);
+  if (!copies) {
+    errors.emplace_back("ConSan MOI found an incomplete AMDHSA entry-scalar backup repair");
+    return false;
+  }
+  for (const auto &[destination, source] : *copies) {
+    if (destination == source || destination < spill.sgpr_base ||
+        destination >= static_cast<uint32_t>(spill.sgpr_base) + spill.sgpr_count) {
+      continue;
+    }
+    const auto override = build_sgpr_spill_slot_override_sequence(spill, destination, source, arch);
+    if (!override) {
+      errors.emplace_back(
+          "ConSan MOI could not preserve a semantic AMDHSA entry-scalar backup slot");
+      return false;
+    }
+    words.insert(words.end(), override->begin(), override->end());
   }
   return true;
 }
@@ -1436,6 +1470,10 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   if (entry_scalar_spill) {
     words.insert(words.end(), entry_scalar_spill->save_words.begin(),
                  entry_scalar_spill->save_words.end());
+    if (workgroup_sources && !append_cdna_semantic_entry_scalar_spill_overrides(
+                                 words, *entry_scalar_spill, *workgroup_sources, arch, errors)) {
+      return std::nullopt;
+    }
   }
   if (dispatch_id_offset) {
     if (!dispatch_plan || !dispatch_capture.vgpr || dispatch_capture.sgpr ||
@@ -2010,9 +2048,40 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         return;
       }
     }
-    auto spill = build_vgpr_spill_sequence(
-        manager, *access_patch->scratch_vgpr,
-        has_private_workgroup_key ? 3u : (workgroup_shadow ? 2u : 1u), arch);
+    const uint16_t prologue_temporary_vgpr_count =
+        has_private_workgroup_key ? 3u : (workgroup_shadow ? 2u : 1u);
+    const bool fixed_lane_entry_scalar_reservoir =
+        kernel_options.moi_exec_save_sgpr &&
+        (kernel_options.automatic_moi_inline_sgpr_spill ||
+         kernel_options.automatic_moi_record_replay_sgpr_spill) &&
+        !kernel.uses_dynamic_stack.value_or(false);
+    std::optional<uint16_t> entry_scalar_reservoir_vgpr;
+    uint16_t prologue_spill_vgpr_count = prologue_temporary_vgpr_count;
+    if (fixed_lane_entry_scalar_reservoir) {
+      const auto access_resource_plan =
+          std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+            return plan.site_kind == ConSanResourceSiteKind::Access && plan.scratch_vgpr &&
+                   *plan.scratch_vgpr == *access_patch->scratch_vgpr &&
+                   plan.text_offset == access_patch->anchor_offset &&
+                   std::ranges::find(plan.owner_descriptor_file_offsets,
+                                     kernel.descriptor_file_offset) !=
+                       plan.owner_descriptor_file_offsets.end();
+          });
+      if (access_resource_plan == result.resource_plans.end() ||
+          access_resource_plan->required_vgpr_count <
+              static_cast<uint32_t>(*access_patch->scratch_vgpr) +
+                  access_resource_plan->scratch_vgpr_count + 1u) {
+        result.warnings.emplace_back(
+            "ConSan MOI private-epoch prologue could not resolve its planned scalar reservoir");
+        continue;
+      }
+      prologue_spill_vgpr_count =
+          static_cast<uint16_t>(access_resource_plan->scratch_vgpr_count + 1u);
+      entry_scalar_reservoir_vgpr = static_cast<uint16_t>(*access_patch->scratch_vgpr +
+                                                          access_resource_plan->scratch_vgpr_count);
+    }
+    auto spill = build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr,
+                                           prologue_spill_vgpr_count, arch);
     if (!spill) {
       result.warnings.emplace_back(
           "ConSan MOI private-epoch prologue could not preserve its temporary VGPR");
@@ -2028,9 +2097,14 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
           static_cast<uint32_t>(scalar_base) + moi_exec_save_sgpr_count(kernel_options, arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
-        entry_scalar_spill = build_sgpr_spill_sequence(
-            manager, scalar_base, static_cast<uint16_t>(scalar_end - scalar_base),
-            *access_patch->scratch_vgpr, arch);
+        entry_scalar_spill =
+            entry_scalar_reservoir_vgpr
+                ? build_lane_sgpr_spill_sequence(
+                      scalar_base, static_cast<uint16_t>(scalar_end - scalar_base),
+                      *entry_scalar_reservoir_vgpr, spill->total_private_bytes, arch)
+                : build_sgpr_spill_sequence(manager, scalar_base,
+                                            static_cast<uint16_t>(scalar_end - scalar_base),
+                                            *access_patch->scratch_vgpr, arch);
         if (!entry_scalar_spill) {
           result.warnings.emplace_back(
               "ConSan MOI private-epoch prologue could not preserve its entry ABI SGPRs");

@@ -2436,8 +2436,12 @@
         "ConSan MOI inline-shadow probe scratch VGPR count disagrees with its resource plan");
     return std::nullopt;
   }
+  const uint16_t expected_spill_count = static_cast<uint16_t>(
+      scratch_count + static_cast<uint16_t>(spill != nullptr && !spill->uses_dynamic_stack_frame &&
+                                            (options.automatic_moi_inline_sgpr_spill ||
+                                             options.automatic_moi_record_replay_sgpr_spill)));
   if (spill != nullptr &&
-      (spill->vgpr_base != *options.scratch_vgpr || spill->vgpr_count != scratch_count)) {
+      (spill->vgpr_base != *options.scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe spill window disagrees with its resource plan");
     return std::nullopt;
