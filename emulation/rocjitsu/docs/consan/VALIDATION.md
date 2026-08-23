@@ -31,6 +31,7 @@ shared helpers with multiple kernel owners, three-dimensional workgroup
 identity, dynamic private stacks, adjacent subword writes with overlapping
 reads, fetch-add, atomic-OR, release-CAS publication, language-level
 release-store publication, four-wave mixed-precision backward reduction,
+runtime-computed indexed LDS addressing and zero-stride aliasing,
 deterministic in-place state restore/replay, module load/unload/reload, two
 independent graph streams and packed graph/executable parameter updates,
 compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
@@ -58,8 +59,8 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,342 simulator cases and 517 physical
-cases, for 2,859 total. The current whole-matrix qualification evidence and
+current registered matrix contains 2,392 simulator cases and 527 physical
+cases, for 2,919 total. The current whole-matrix qualification evidence and
 its wall, CPU, and aggregate process-duration accounting are maintained in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
