@@ -64,8 +64,10 @@ suite.
   reserving a guest SGPR pair. This separates loaded-image/report generations;
   it is not a claim of a hardware-unique token for simultaneous launches of
   the same loaded image.
-- Native 96-bit LDS, cluster barriers, and ordered LDS atomics are not claimed
-  for the current gfx1100 subset.
+- Native 96-bit LDS load/store is admitted and covered by the aliasing
+  correct/incorrect device pair plus focused all-engine host admission tests.
+  Native transpose reads, cluster barriers, and ordered LDS atomics are not
+  claimed for the current gfx1100 subset.
 - Register and spill paths use RDNA3 encodings for fixed private frames,
   runtime-selected dynamic frames, scalar composition, and borrowed-register
   bootstrap. Host tests also cross the 33-barrier Record/Replay dense-router

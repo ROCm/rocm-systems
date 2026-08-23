@@ -68,9 +68,9 @@ therefore intentional and are not target-parity gaps.
 
 | Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1100` / RDNA3 | `gfx1201` / RDNA4 | `gfx1250` |
 | --- | --- | --- | --- | --- | --- |
-| Native LDS single-range read/write | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
+| Native LDS single-range read/write | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
 | Native LDS dual-range read/write | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms |
-| Native LDS transpose read | Target-native admitted transpose forms | Target-native admitted transpose forms | Target-native admitted transpose forms | No equivalent claimed | Target-native admitted transpose forms |
+| Native LDS transpose read | Target-native admitted transpose forms | Target-native admitted transpose forms | No equivalent claimed | No equivalent claimed | Target-native admitted transpose forms |
 | Group-FLAT read/write | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms | 16, 32, 64, and 128-bit forms, including the encoded signed immediate |
 | Full workgroup barrier | Singleton `s_barrier` | Singleton `s_barrier` | Singleton `s_barrier` | Qualified signal/wait sequence | Qualified signal/wait sequence |
 | Cluster-scope barrier | No target form claimed | No target form claimed | No target form claimed | No target form claimed | Qualified cluster signal/wait sequence |
@@ -92,8 +92,8 @@ These exclusions are part of the contract:
   used only as synchronization identities for admitted ordering sequences;
 - arbitrary FLAT accesses without group provenance are not treated as LDS;
 - group-FLAT 8-bit and 96-bit ordinary accesses have no cross-target claim;
-- `gfx1201` has no claimed native-LDS 8-bit ordinary form, and the current
-  `gfx1100` subset does not admit native 96-bit ordinary forms;
+- `gfx1201` has no claimed native-LDS 8-bit ordinary form, and `gfx1100` has no
+  claimed native transpose-read form;
 - native transpose and 96-bit forms are target extensions, not parity
   requirements;
 - barrier lifecycle operations with dynamic participant state are inventoried
