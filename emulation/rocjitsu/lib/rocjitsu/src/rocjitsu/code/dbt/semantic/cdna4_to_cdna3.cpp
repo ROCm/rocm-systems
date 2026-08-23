@@ -7,19 +7,19 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -1855,7 +1855,7 @@ ExpandResult expand_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst, uint32
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_cdna3[] = {
     {cdna4::encoding::kVop1, cdna4::kVPermlane16SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane16_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
@@ -1909,6 +1909,9 @@ const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
     {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4Mubuf, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx4_lds_cdna4_to_cdna3, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_cdna3),
+              "the CDNA4-to-CDNA3 rule table must stay sorted by (encoding id, opcode)");
 
 } // namespace
 

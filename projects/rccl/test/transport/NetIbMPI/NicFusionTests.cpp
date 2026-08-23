@@ -1195,7 +1195,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 // =============================================================================
 // Test: SendRecvDifferentMemoryTypes
 //
-// Creates a 2-NIC merged virtual device per rank (CreateMergedDevice(2, rank)).
+// Creates a 2-NIC merged virtual device per rank (CreateMergedDevice(2)).
 // Rank 0 (receiver) and Rank 1 (sender) each use their own merged device.
 // Tests all four memory type combinations: host→host, host→GPU, GPU→host, GPU→GPU.
 //
@@ -1216,9 +1216,9 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(2, rank);
+    int mergedDev = CreateMergedDevice(2);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     ncclNetProperties_t mProps;
@@ -1345,9 +1345,9 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(3, rank);
+    int mergedDev = CreateMergedDevice(3);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // Build test size list
@@ -1470,9 +1470,9 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedSendDev = CreateMergedDevice(4, rank);
+    int mergedSendDev = CreateMergedDevice(4);
     if (mergedSendDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
     int mergedRecvDev = mergedSendDev;
 
@@ -1610,9 +1610,9 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     // --- Init and discover devices ---
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(2, rank);
+    int mergedDev = CreateMergedDevice(2);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // --- Parameters ---
@@ -2080,9 +2080,9 @@ TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int dev = CreateMergedDevice(3, rank);
+    int dev = CreateMergedDevice(3);
     if (dev == -1) {
-        GTEST_SKIP() << "Failed to create 3-NIC merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     {

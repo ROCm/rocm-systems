@@ -249,6 +249,14 @@ ncclResult_t ncclNvlsInit(struct ncclComm* comm) {
   comm->nvlsSupport = 0;
   comm->nvlsChannels = 0;
 
+  if (comm->hasMultiRankNvml) {
+    if (ncclParamNvlsEnable() == 1) {
+      WARN("NCCL_NVLS_ENABLE has been set to \"1\" and communicator has multiple ranks using the same NVML device. "
+           "This is not compatible with NCCL_NVLS_ENABLE=1.");
+      return ncclInvalidUsage;
+    }
+    return ncclSuccess;
+  }
   int gpuCount;
   NCCLCHECK(ncclTopoGetGpuCount(comm->topo, &gpuCount));
   if (!ncclParamNvlsEnable() || gpuCount < 2) return ncclSuccess;
@@ -1117,7 +1125,13 @@ ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskCol
       *recChannels =
         std::max(comm->config.minCTAs, std::min(comm->config.maxCTAs, DIVUP(factor, comm->nvlsResources->nHeads)));
     } else if (info->func == ncclFuncAllReduce) {
-      factor = (comm->compCap >= 100 ? 7 : 6) * 8;
+      if (comm->compCap >= 100 && comm->minNetBw >= 96.0f) {
+        factor = 10 * 8;
+      } else if (comm->compCap >= 100) {
+        factor = 7 * 8;
+      } else {
+        factor = 6 * 8;
+      }
       *recChannels =
         std::max(comm->config.minCTAs, std::min(comm->config.maxCTAs, DIVUP(factor, comm->nvlsResources->nHeads)));
     } else {

@@ -310,6 +310,32 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
     EXPECT_NE(desc.queue->base_address, nullptr) << label;
     EXPECT_NE(desc.queue->doorbell_signal.handle, 0) << label;
 
+    uint64_t read_pointer = 0;
+    uint64_t write_pointer = 0;
+    uint64_t doorbell_pointer = 0;
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_READ_POINTER, &read_pointer));
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_WRITE_POINTER, &write_pointer));
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell_pointer));
+    ASSERT_NE(read_pointer, 0u);
+    ASSERT_NE(write_pointer, 0u);
+    ASSERT_NE(doorbell_pointer, 0u);
+
+    auto* raw_read_pointer = reinterpret_cast<volatile uint64_t*>(read_pointer);
+    auto* raw_write_pointer = reinterpret_cast<volatile uint64_t*>(write_pointer);
+    EXPECT_EQ(hsa_queue_load_read_index_relaxed(desc.queue), *raw_read_pointer);
+
+    hsa_queue_store_write_index_relaxed(desc.queue, 64);
+    EXPECT_EQ(hsa_queue_load_write_index_relaxed(desc.queue), 64u);
+    EXPECT_EQ(*raw_write_pointer, 64u);
+    EXPECT_EQ(hsa_queue_add_write_index_relaxed(desc.queue, 32), 64u);
+    EXPECT_EQ(*raw_write_pointer, 96u);
+    EXPECT_EQ(hsa_queue_cas_write_index_relaxed(desc.queue, 96, 128), 96u);
+    EXPECT_EQ(*raw_write_pointer, 128u);
+    hsa_queue_store_write_index_relaxed(desc.queue, 0);
+
     ASSERT_SUCCESS(hsa_queue_destroy(desc.queue)) << label;
   };
 

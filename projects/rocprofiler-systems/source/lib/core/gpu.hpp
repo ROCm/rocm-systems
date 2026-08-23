@@ -7,6 +7,7 @@
 
 #include <amd_smi/amdsmi.h>
 #include <cstdint>
+#include <vector>
 
 namespace rocprofsys
 {

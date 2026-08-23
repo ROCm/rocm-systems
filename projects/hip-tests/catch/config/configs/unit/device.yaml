@@ -90,6 +90,9 @@ device:
   Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
     <<: *level_2
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported:
+    <<: *level_2
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_2
     tags: [query]
@@ -159,6 +162,15 @@ device:
     disabled: [asan]
     tags: [query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_Negative:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
     <<: *level_2
     tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
@@ -312,6 +324,24 @@ device:
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     # (amd_wsl) Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [init]
+  Unit_hipInitDevice_Positive_Basic:
+    <<: *level_2
+    tags: [init, smoke]
+  Unit_hipInitDevice_Positive_Flags:
+    <<: *level_2
+    tags: [init, config]
+  Unit_hipInitDevice_Positive_DoesNotChangeCurrentDevice:
+    <<: *level_2
+    tags: [init, multigpu]
+  Unit_hipInitDevice_Negative_InvalidDevice:
+    <<: *level_2
+    tags: [init]
+  Unit_hipInitDevice_Negative_InvalidFlags:
+    <<: *level_2
+    tags: [init]
+  Unit_hipInitDevice_Negative_InvalidDeviceFlags:
+    <<: *level_2
     tags: [init]
   Unit_hipDriverGetVersion_Positive:
     <<: *level_2
