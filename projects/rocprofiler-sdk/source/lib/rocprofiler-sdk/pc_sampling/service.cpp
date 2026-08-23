@@ -375,11 +375,6 @@ service_fini()
 void
 stop_all_services()
 {
-    // Stops the HSA-level PC sampling session for every context that currently has one
-    // enabled. `stop_service` is a no-op (via its enabled-flag CAS) for contexts whose
-    // service was never started or was already stopped, so calling it unconditionally
-    // here and letting the normal per-client stop path (context::stop_client_contexts)
-    // run again later is harmless.
     for(const auto* ctx :
         context::get_registered_contexts([](const auto* c) { return c->pc_sampler != nullptr; }))
     {

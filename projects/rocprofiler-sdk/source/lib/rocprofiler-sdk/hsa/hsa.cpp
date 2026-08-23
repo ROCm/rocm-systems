@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -574,6 +575,13 @@ hsa_shut_down_refcnt_impl()
             // thread-trace producer/consumer threads *before* ROCR tears down
             // SDMA engines and signal pools in Runtime::Unload().
             thread_trace::flush_and_stop();
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+            // Similarly, this can't wait until finalize() since finalize() is
+            // an atexit handler which may not be run before HIP's exit
+            // handler and thus may not get the chance to stop PC sampling.
+            ::rocprofiler::pc_sampling::stop_all_services();
+#endif
         }
         return get_core_table()->hsa_shut_down_fn();
     }

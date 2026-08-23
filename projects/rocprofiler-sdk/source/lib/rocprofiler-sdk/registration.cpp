@@ -1015,16 +1015,8 @@ finalize()
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-        // WARNING: this must precede `queue_controller_fini()`. Stopping PC sampling at
-        // the HSA/ROCr level depends on the queue interceptor infrastructure (e.g. the
-        // intercept-marker callbacks registered in
-        // `pc_sampling_service_finish_configuration`) still being alive. Previously this
-        // stop only happened later, inside `invoke_client_finalizers()`, i.e. well after
-        // `queue_controller_fini()` had already torn that infrastructure down. On
-        // processes with many host threads/queues (e.g. JAX/PyTorch training workloads)
-        // this made the HSA-level stop fail ("HSA runtime failed to stop PC sampling on
-        // the agent") and left the subsequent queue/buffer drain waiting on state that
-        // would never settle, hanging at teardown.
+        // one of this or the HIP runtime's exit handler must run before
+        // hsa::queue_controller_fini() since they rely on the queue interceptor
         pc_sampling::stop_all_services();
 #endif
         hsa::queue_controller_fini();
