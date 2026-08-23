@@ -477,6 +477,195 @@ TEST_F(InitMicrotest, SetupChannel_RankNotInRing_SilentlyTreatsIndexZeroAsSelf) 
 }
 
 // ===========================================================================
+// commGetSplitInfo (init.cc:2485) + getParentRanks (init.cc:2528) -- the two
+// helpers that decide who ends up in a split/shrunk communicator. Called
+// together from ncclCommInitRankFunc (init.cc:2607/2611), out of reach
+// host-only.
+//
+// commGetSplitInfo allgathers every parent rank's (color, key), keeps those
+// matching our colour, and INSERTION-SORTS them by key. getParentRanks is pure
+// integer logic with no dependencies at all.
+//
+// Lesson from the round-2 review of the P2P schedule tests: for a computed
+// result, assert the CONTENTS. A return-code oracle here would be blind to a
+// broken comparator, a wrong insert position, or a dropped shift.
+// ===========================================================================
+namespace {
+// Parent comm for commGetSplitInfo: it reads only nRanks, rank and bootstrap.
+std::unique_ptr<ncclComm> MakeParentComm(int nRanks, int rank) {
+  auto parent = std::unique_ptr<ncclComm>(new ncclComm{});
+  parent->nRanks = nRanks;
+  parent->rank = rank;
+  parent->bootstrap = nullptr;  // the allgather seam ignores it
+  return parent;
+}
+
+// Scripts the post-allgather table. Production's allgather returns every rank's
+// contribution INCLUDING our own, so the caller makes entry [parent->rank] agree
+// with the color/key it passes to commGetSplitInfo. Lives here, not in
+// init_fakes.cc: commSplitInfo is a typedef inside init.cc (2481-2484) and only
+// exists in this TU.
+void InstallSplitInfoTable(std::vector<std::pair<int, int>> colorKey) {
+  g_bootstrapAllGather = [colorKey](void*, void* allData, int size) {
+    EXPECT_EQ(static_cast<int>(sizeof(commSplitInfo)), size);
+    auto* info = static_cast<commSplitInfo*>(allData);
+    for (size_t i = 0; i < colorKey.size(); ++i) {
+      info[i].color = colorKey[i].first;
+      info[i].key = colorKey[i].second;
+    }
+    return ncclSuccess;
+  };
+}
+}  // namespace
+
+// --- getParentRanks: filters a sorted exclusion list out of the parent ranks ---
+
+TEST_F(InitMicrotest, GetParentRanks_NoExclusions_KeepsEveryRank) {
+  int out[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/4, /*parentRank=*/2, nullptr,
+                                        /*excludeRanksCount=*/0, &nRanks, &myRank, out));
+  EXPECT_EQ(4, nRanks);
+  EXPECT_EQ(2, myRank);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), std::vector<int>(out, out + 4));
+}
+
+TEST_F(InitMicrotest, GetParentRanks_ExcludesListedRanks_CompactsAndRemapsMyRank) {
+  int exclude[2] = {1, 3};
+  int out[5] = {-1, -1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/5, /*parentRank=*/4, exclude,
+                                        /*excludeRanksCount=*/2, &nRanks, &myRank, out));
+  EXPECT_EQ(3, nRanks);
+  EXPECT_EQ(2, myRank) << "rank 4 is the 3rd survivor, so its new rank is 2";
+  EXPECT_EQ(std::vector<int>({0, 2, 4}), std::vector<int>(out, out + 3));
+}
+
+// LATENT BUG (init.cc:2537): *myRankRet is only written when the loop reaches
+// i == parentRank, so a caller that excludes itself gets its previous value back
+// with no diagnostic. The count is still computed as if nothing were wrong.
+TEST_F(InitMicrotest, GetParentRanks_ExcludingCaller_LeavesMyRankUnwritten) {
+  int exclude[1] = {2};
+  int out[4] = {-1, -1, -1, -1};
+  int nRanks = -1;
+  int myRank = 0x5EED;  // sentinel: must survive untouched
+  ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/4, /*parentRank=*/2, exclude,
+                                        /*excludeRanksCount=*/1, &nRanks, &myRank, out));
+  EXPECT_EQ(3, nRanks);
+  EXPECT_EQ(0x5EED, myRank) << "no validation that the caller survives the exclusion";
+  EXPECT_EQ(std::vector<int>({0, 1, 3}), std::vector<int>(out, out + 3));
+}
+
+TEST_F(InitMicrotest, GetParentRanks_ExcludeAll_ReturnsZeroRanks) {
+  int exclude[3] = {0, 1, 2};
+  int out[3] = {-1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/3, /*parentRank=*/0, exclude,
+                                        /*excludeRanksCount=*/3, &nRanks, &myRank, out));
+  EXPECT_EQ(0, nRanks);
+  EXPECT_EQ(std::vector<int>({-1, -1, -1}), std::vector<int>(out, out + 3))
+      << "nothing should have been written";
+}
+
+// --- commGetSplitInfo: colour filter + insertion sort by key ---
+
+TEST_F(InitMicrotest, CommGetSplitInfo_NoColor_ReturnsEarlyWithoutTouchingOutputs) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = 0x1234, myRank = 0x5678;  // sentinels
+  ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), NCCL_SPLIT_NOCOLOR,
+                                          /*key=*/0, &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(0x1234, nRanks) << "NOCOLOR must leave the outputs alone";
+  EXPECT_EQ(0x5678, myRank);
+}
+
+TEST_F(InitMicrotest, CommGetSplitInfo_SortedKeys_PreservesOrder) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
+                                          &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(4, nRanks);
+  EXPECT_EQ(1, myRank);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), std::vector<int>(parentRanks, parentRanks + 4));
+}
+
+// The one that matters. With already-sorted keys the insert position is always
+// the end, so the shift loop at init.cc:2508 never runs and a broken comparator
+// would go unnoticed -- exactly the blind spot the round-2 review found in the
+// P2P schedule tests.
+//
+// Mutation ceiling for this function: `r > insert` -> `r >= insert` at
+// init.cc:2508 is an EQUIVALENT mutant and no assertion can kill it. The extra
+// iteration writes parentRanksRet[insert] = parentRanksRet[insert-1], which
+// init.cc:2510 immediately overwrites with `i`. (It does add an out-of-bounds
+// read of parentRanksRet[-1] when insert == 0 -- visible to ASan, invisible to
+// any output oracle.) Everything else here is killed: both comparator flips,
+// deleting the shift, append-instead-of-insert, and the colour/myRank/NOCOLOR
+// inversions.
+TEST_F(InitMicrotest, CommGetSplitInfo_UnsortedKeys_InsertionSortsByKey) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  InstallSplitInfoTable({{7, 3}, {7, 1}, {7, 2}, {7, 0}});
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
+                                          &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(4, nRanks);
+  // Parent ranks ordered by key: rank3(key0), rank1(key1), rank2(key2), rank0(key3).
+  EXPECT_EQ(std::vector<int>({3, 1, 2, 0}), std::vector<int>(parentRanks, parentRanks + 4));
+  EXPECT_EQ(1, myRank) << "our parent rank 1 holds key 1, so we sort to position 1";
+}
+
+TEST_F(InitMicrotest, CommGetSplitInfo_MixedColors_SelectsOnlyMatching) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/2);
+  InstallSplitInfoTable({{7, 0}, {9, 1}, {7, 2}, {9, 3}});
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/2,
+                                          &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(2, nRanks);
+  EXPECT_EQ(std::vector<int>({0, 2}), std::vector<int>(parentRanks, parentRanks + 2));
+  EXPECT_EQ(1, myRank);
+  EXPECT_EQ(-1, parentRanks[2]) << "the 0xff memset tail must be untouched";
+}
+
+// The comparator is `<=`, so an equal key inserts AFTER the incumbent: ties break
+// by parent rank. `<` would reverse them.
+TEST_F(InitMicrotest, CommGetSplitInfo_EqualKeys_TieBreaksByParentRank) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/3);
+  InstallSplitInfoTable({{7, 5}, {7, 5}, {7, 5}, {7, 5}});
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/5,
+                                          &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(4, nRanks);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), std::vector<int>(parentRanks, parentRanks + 4));
+  EXPECT_EQ(3, myRank);
+}
+
+TEST_F(InitMicrotest, CommGetSplitInfo_CallocFails_ReturnsSystemError) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  g_callocFailAt = 0;  // the info table
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  EXPECT_EQ(ncclSystemError, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
+                                              &nRanks, &myRank, parentRanks));
+}
+
+TEST_F(InitMicrotest, CommGetSplitInfo_AllGatherFails_PropagatesError) {
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  int parentRanks[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  EXPECT_EQ(ncclInternalError, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
+                                                &nRanks, &myRank, parentRanks));
+  EXPECT_EQ(-1, nRanks) << "outputs untouched on the failure path";
+}
+
+// ===========================================================================
 // ncclP2pSchedule (init.cc:1311) -- builds comm->p2pSchedule, the per-round
 // send/recv rank pairing every P2P collective walks. Its only production caller
 // is initTransportsRank (init.cc:2188), far out of reach host-only; the

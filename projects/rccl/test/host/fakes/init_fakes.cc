@@ -273,6 +273,11 @@ ncclResult_t g_ncclGinInitResult        = ncclSuccess;
 ncclResult_t g_ncclStrongStreamResult   = ncclSuccess;
 ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
 ncclResult_t g_amdSmiInitResult         = ncclSuccess;
+// commGetSplitInfo() seam; the stub itself lives in bootstrap_stubs.cc. Default
+// FAILS -- see init_fakes.h for why this one differs from g_initChannelResult.
+std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather =
+    [](void*, void*, int) { return ncclInternalError; };
+
 // setupChannel() seam; the stub itself lives in nccl_stubs.cc.
 ncclResult_t g_initChannelResult        = ncclSuccess;
 // showVersion() seam; the getROCmVersion stub also lives in nccl_stubs.cc.
@@ -329,6 +334,7 @@ void ResetInitFakes() {
   g_ncclMemManagerInitResult = ncclSuccess;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
   g_getROCmVersionResult = 1;  // != VerSuccess

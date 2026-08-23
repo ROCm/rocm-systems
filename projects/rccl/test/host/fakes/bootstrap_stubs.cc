@@ -10,13 +10,24 @@
 // one of these replaces that individual entry with a real fake.
 
 #include <cstdlib>
+#include <functional>
 
 #include "nccl.h"
 
 struct ncclBootstrapHandle;
 struct ncclComm;
 
-ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) { ::abort(); }
+// Controllable (was a fail-loud abort): commGetSplitInfo (init.cc:2496) needs a
+// test to WRITE the allgathered (color, key) table into allData, so this is a
+// std::function seam rather than a result code. Defined in init_fakes.cc and
+// declared here rather than including init_fakes.h, which would drag the HIP and
+// nccl fake headers into this stub TU. Defaults to failure so the other three
+// bootstrapAllGather call sites in init.cc stay fail-fast.
+extern std::function<ncclResult_t(void* commState, void* allData, int size)>
+    g_bootstrapAllGather;
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  return g_bootstrapAllGather(commState, allData, size);
+}
 ncclResult_t bootstrapClose(void* commState) { ::abort(); }
 ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv) { ::abort(); }
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) { ::abort(); }

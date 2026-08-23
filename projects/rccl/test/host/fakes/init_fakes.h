@@ -81,6 +81,18 @@ extern bool g_bootstrapNetInitFail;
 // alloc.h and ncclCudaCompCap comes from the real utils.cc oracle -- both real,
 // driven via the HIP device model, not faked here.)
 // -------------------------------------------------------------------------
+// commGetSplitInfo() seam. Unlike the result-only seams below this is a
+// std::function, because the ALLGATHERED TABLE IS THE ALGORITHM'S INPUT: a test
+// has to write (color, key) pairs into allData, not merely pick a return code.
+//
+// Defaults to FAILURE, deliberately unlike g_initChannelResult. bootstrapAllGather
+// has four call sites in init.cc (1466 and 1909 inside initTransportsRank, plus
+// 2496); no test reaches the first two, and a failing default keeps them
+// fail-fast per MICROTEST_README's "return failure loudly" rule. Tests that want
+// success install a scripting lambda.
+extern std::function<ncclResult_t(void* commState, void* allData, int size)>
+    g_bootstrapAllGather;
+
 // setupChannel() seam. initChannel() (src/channel.cc:16) is unreachable host-only
 // -- strong streams, memory stacks, ncclCudaCallocAsync -- so it stays faked, but
 // injectable so a test can cover both the NCCLCHECK early-return arm and the
