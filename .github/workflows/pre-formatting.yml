@@ -17,6 +17,8 @@ on:
       - ".github/workflows/pre-formatting.yml"
       - ".github/scripts/run_pre_commit_by_subtree.py"
       - ".github/scripts/tests/test_run_pre_commit_by_subtree.py"
+      # conftest.py puts .github/scripts on sys.path; without it the test step above cannot import.
+      - ".github/scripts/tests/conftest.py"
       # Both feed this job's file list; a change to either can silently empty the gate.
       - ".github/scripts/pr_detect_changed_subtrees.py"
       - ".github/repos-config.json"

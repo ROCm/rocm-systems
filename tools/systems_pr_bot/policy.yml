@@ -162,6 +162,7 @@ checks:
 
         Please run locally:
         - `python -m pip install pre-commit`
+        - `pre-commit install`
         - `pre-commit run --all-files --show-diff-on-failure`
 
         This repo uses `.pre-commit-config.yaml`.

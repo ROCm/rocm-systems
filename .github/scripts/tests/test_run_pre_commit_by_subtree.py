@@ -344,3 +344,58 @@ class TestMain:
                 main(["--files-from", str(listing)])
 
         assert exc.value.code == 1
+
+
+class TestExcludedProjectListsAgree:
+    """The three places that list root-excluded projects must not drift apart.
+
+    A project in the root `exclude:` is invisible to the root config, so the bot's failure comment
+    must name it or its developers get sent to a command that checks nothing and exits 0.
+    """
+
+    @staticmethod
+    def _repo_root():
+        from pathlib import Path
+
+        return Path(__file__).resolve().parents[3]
+
+    def _root_excluded_projects(self):
+        import re
+
+        import yaml
+
+        cfg = yaml.safe_load(
+            (self._repo_root() / ".pre-commit-config.yaml").read_text()
+        )
+        return set(re.findall(r"(projects/[A-Za-z0-9._-]+)/", cfg["exclude"]))
+
+    def _projects_named_in_failure_comment(self):
+        import re
+
+        import yaml
+
+        policy = yaml.safe_load(
+            (self._repo_root() / "tools/systems_pr_bot/policy.yml").read_text()
+        )
+        body = policy["checks"]["failure_comments"]["pre-commit"]["body"]
+        return set(re.findall(r"`(projects/[A-Za-z0-9._-]+)`", body))
+
+    def test_failure_comment_names_every_root_excluded_project(self):
+        excluded = self._root_excluded_projects()
+        named = self._projects_named_in_failure_comment()
+        assert excluded, "parsed no projects out of the root exclude block"
+        assert named == excluded, (
+            "tools/systems_pr_bot/policy.yml's pre-commit failure comment is out of step with "
+            "the root .pre-commit-config.yaml `exclude:` block.\n"
+            f"  excluded but not named: {sorted(excluded - named)}\n"
+            f"  named but not excluded: {sorted(named - excluded)}"
+        )
+
+    def test_every_onboarded_subtree_is_root_excluded(self):
+        from run_pre_commit_by_subtree import ONBOARDED_SUBTREES
+
+        missing = set(ONBOARDED_SUBTREES) - self._root_excluded_projects()
+        assert not missing, (
+            f"{sorted(missing)} are checked by this script but not excluded from the root config, "
+            "so both configs claim their files (onboarding step 4)."
+        )
