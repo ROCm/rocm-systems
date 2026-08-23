@@ -11,6 +11,8 @@ check is worse than a failure, so a missing subtree config must be fatal.
 import os
 from unittest.mock import patch
 
+import pytest
+
 SUBTREES = ["projects/rccl"]
 
 
@@ -114,6 +116,34 @@ class TestRunGroup:
         assert "--show-diff-on-failure" in cmd
         assert cmd[-1] == "projects/rccl/src/init.cc"
 
+    def test_every_file_reaches_pre_commit_after_the_files_flag(self):
+        """The whole list must follow --files, not just the first entry.
+
+        With a single-file list, `*files` and `*files[:1]` are the same
+        command, so a one-file test cannot see the difference. Truncating
+        there checks file #1, skips the rest, and still logs "N file(s)" and
+        exits 0 -- a green gate over unchecked code, which this suite exists
+        to prevent. Three or more files, and an exact tail comparison, is what
+        makes that visible.
+        """
+        from run_pre_commit_by_subtree import run_group
+
+        files = [
+            "projects/rccl/src/init.cc",
+            "projects/rccl/src/misc/argcheck.cc",
+            "projects/rccl/src/include/comm.h",
+        ]
+        with patch("run_pre_commit_by_subtree.os.path.isfile", return_value=True):
+            with patch("run_pre_commit_by_subtree.subprocess.run") as run:
+                run.return_value.returncode = 0
+                assert run_group("projects/rccl", files, dry_run=False) is True
+
+        cmd = run.call_args[0][0]
+        assert "--files" in cmd, "paths must be flagged, not passed as hook ids"
+        # Exact tail: catches truncation, reordering, and dropped entries.
+        assert cmd[cmd.index("--files") + 1 :] == files
+        assert "--all-files" not in cmd, "must stay scoped to the PR's files"
+
     def test_nonzero_exit_is_reported_as_failure(self):
         from run_pre_commit_by_subtree import run_group
 
@@ -159,6 +189,84 @@ class TestReadFilesList:
         assert read_files_list(str(listing)) == [str(spaced)]
 
 
+class TestValidateSubtrees:
+    """Subtree spellings that would silently own nothing."""
+
+    def test_plain_path_is_accepted(self):
+        from run_pre_commit_by_subtree import validate_subtrees
+
+        validate_subtrees(["projects/rccl", "emulation/rocjitsu"])
+
+    def test_the_shipped_list_is_valid(self):
+        from run_pre_commit_by_subtree import ONBOARDED_SUBTREES, validate_subtrees
+
+        validate_subtrees(ONBOARDED_SUBTREES)
+
+    @pytest.mark.parametrize(
+        "bad", ["projects/rccl/", "./projects/rccl", "/projects/rccl", " projects/rccl"]
+    )
+    def test_spellings_that_own_no_files_are_rejected(self, bad):
+        from run_pre_commit_by_subtree import group_files_by_subtree, validate_subtrees
+
+        # Establish the harm first: each of these groups nothing, so without
+        # the guard the gate is permanently green and says nothing about it.
+        assert group_files_by_subtree(["projects/rccl/src/init.cc"], [bad]) == {}
+        with pytest.raises(ValueError):
+            validate_subtrees([bad])
+
+
+class TestCheckSubtreesMaterialised:
+    """The guard against `detect` under-reporting and silently checking nothing."""
+
+    def test_absent_subtree_is_reported(self, tmp_path, monkeypatch):
+        from run_pre_commit_by_subtree import check_subtrees_materialised
+
+        monkeypatch.chdir(tmp_path)  # nothing checked out at all
+        assert check_subtrees_materialised(
+            ["projects/rccl/src/init.cc"], ["projects/rccl"]
+        ) == ["projects/rccl"]
+
+    def test_checked_out_subtree_is_fine(self, tmp_path, monkeypatch):
+        from run_pre_commit_by_subtree import check_subtrees_materialised
+
+        monkeypatch.chdir(tmp_path)
+        cfg = tmp_path / "projects" / "rccl" / ".pre-commit-config.yaml"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("repos: []\n", encoding="utf-8")
+
+        assert (
+            check_subtrees_materialised(
+                ["projects/rccl/src/init.cc"], ["projects/rccl"]
+            )
+            == []
+        )
+
+    def test_deleting_files_is_not_mistaken_for_a_missing_checkout(
+        self, tmp_path, monkeypatch
+    ):
+        # A PR that only deletes rccl files names paths that are correctly
+        # absent. The subtree IS checked out, so this must not hard-fail.
+        from run_pre_commit_by_subtree import check_subtrees_materialised
+
+        monkeypatch.chdir(tmp_path)
+        cfg = tmp_path / "projects" / "rccl" / ".pre-commit-config.yaml"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("repos: []\n", encoding="utf-8")
+
+        assert (
+            check_subtrees_materialised(
+                ["projects/rccl/src/gone.cc"], ["projects/rccl"]
+            )
+            == []
+        )
+
+    def test_untouched_subtrees_are_not_required_on_disk(self, tmp_path, monkeypatch):
+        from run_pre_commit_by_subtree import check_subtrees_materialised
+
+        monkeypatch.chdir(tmp_path)
+        assert check_subtrees_materialised(["docs/readme.md"], ["projects/rccl"]) == []
+
+
 class TestMain:
     """End-to-end wiring, with pre-commit itself mocked out."""
 
@@ -172,6 +280,47 @@ class TestMain:
 
         with patch("run_pre_commit_by_subtree.subprocess.run") as run:
             main(["--files-from", str(listing)])  # must not raise SystemExit
+        run.assert_not_called()
+
+    def test_a_malformed_subtree_stops_the_run_rather_than_matching_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        from run_pre_commit_by_subtree import main
+
+        monkeypatch.chdir(tmp_path)
+        listing = tmp_path / "files.txt"
+        listing.write_text("projects/rccl/src/init.cc\n", encoding="utf-8")
+
+        with patch("run_pre_commit_by_subtree.subprocess.run") as run:
+            with pytest.raises(ValueError):
+                main(["--files-from", str(listing), "--subtree", "projects/rccl/"])
+        run.assert_not_called()
+
+    def test_an_unchecked_out_subtree_fails_instead_of_passing_vacuously(
+        self, tmp_path, monkeypatch
+    ):
+        """The whole silent-green path, end to end.
+
+        `detect` fails to name projects/rccl -- because it is missing from
+        repos-config.json, or get_changed_files returned a partial page -- so
+        the second checkout never widens the sparse cone. The tree diff still
+        names the rccl files, they are all dropped as absent, and the old code
+        logged "nothing to check" and exited 0 on a PR full of rccl changes.
+        """
+        from run_pre_commit_by_subtree import main
+
+        monkeypatch.chdir(tmp_path)  # workspace holds .github and nothing else
+        (tmp_path / ".github").mkdir()
+        listing = tmp_path / "files.txt"
+        listing.write_text(
+            "projects/rccl/src/init.cc\nprojects/rccl/src/comm.h\n", encoding="utf-8"
+        )
+
+        with patch("run_pre_commit_by_subtree.subprocess.run") as run:
+            with pytest.raises(SystemExit) as exc:
+                main(["--files-from", str(listing)])
+
+        assert exc.value.code == 1
         run.assert_not_called()
 
     def test_failing_group_exits_one(self, tmp_path, monkeypatch):
