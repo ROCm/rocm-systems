@@ -36,6 +36,17 @@ __device__ __forceinline__ uint32_t load_lds_word(volatile uint32_t *address) {
   return value;
 }
 
+__device__ __forceinline__ uint32_t load_lds_byte(volatile uint8_t *address) {
+  const uint32_t lds_address =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+  uint32_t value = 0;
+  asm volatile("ds_read_u8 %0, %1\n\t" RJ_CONSAN_GFX1250_CLUSTER_CAVE "s_wait_dscnt 0\n\t"
+               : "=v"(value)
+               : "v"(lds_address)
+               : "memory");
+  return value;
+}
+
 template <bool Synchronize> __device__ __forceinline__ void cluster_barrier() {
   if constexpr (Synchronize) {
     // A cluster barrier records one arrival per workgroup. Synchronize the
@@ -74,14 +85,36 @@ __device__ void local_cluster_publication(uint32_t *observed, uint32_t *control,
   control[group * blockDim.x + tid] = marker_base | (group << 8u) | tid;
 }
 
-__device__ __forceinline__ void cluster_load_async_b32(uint32_t lds_address, uint32_t global_offset,
-                                                       const uint32_t *global_base,
-                                                       uint32_t multicast_mask) {
-  asm volatile("s_mov_b32 m0, %3\n\t"
-               "cluster_load_async_to_lds_b32 %0, %1, %2\n\t"
-               :
-               : "v"(lds_address), "v"(global_offset), "s"(global_base), "s"(multicast_mask)
-               : "memory");
+template <uint32_t Width>
+__device__ __forceinline__ void cluster_load_async(uint32_t lds_address, uint32_t global_offset,
+                                                   const uint32_t *global_base,
+                                                   uint32_t multicast_mask) {
+  static_assert(Width == 8 || Width == 32 || Width == 64 || Width == 128);
+  if constexpr (Width == 8) {
+    asm volatile("s_mov_b32 m0, %3\n\t"
+                 "cluster_load_async_to_lds_b8 %0, %1, %2\n\t"
+                 :
+                 : "v"(lds_address), "v"(global_offset), "s"(global_base), "s"(multicast_mask)
+                 : "memory");
+  } else if constexpr (Width == 32) {
+    asm volatile("s_mov_b32 m0, %3\n\t"
+                 "cluster_load_async_to_lds_b32 %0, %1, %2\n\t"
+                 :
+                 : "v"(lds_address), "v"(global_offset), "s"(global_base), "s"(multicast_mask)
+                 : "memory");
+  } else if constexpr (Width == 64) {
+    asm volatile("s_mov_b32 m0, %3\n\t"
+                 "cluster_load_async_to_lds_b64 %0, %1, %2\n\t"
+                 :
+                 : "v"(lds_address), "v"(global_offset), "s"(global_base), "s"(multicast_mask)
+                 : "memory");
+  } else {
+    asm volatile("s_mov_b32 m0, %3\n\t"
+                 "cluster_load_async_to_lds_b128 %0, %1, %2\n\t"
+                 :
+                 : "v"(lds_address), "v"(global_offset), "s"(global_base), "s"(multicast_mask)
+                 : "memory");
+  }
 }
 
 __device__ __forceinline__ void wait_async_loads() {
@@ -93,21 +126,44 @@ __device__ __forceinline__ void wait_async_loads() {
 template <bool Synchronize>
 __device__ void tdm_publication(const uint32_t *input, uint32_t *observed, uint32_t *control,
                                 bool multicast) {
-  __shared__ uint32_t staged[32];
+  __shared__ uint8_t staged_b8[32];
+  __shared__ uint32_t staged_b32[32] __attribute__((aligned(4)));
+  __shared__ uint32_t staged_b64[32][2] __attribute__((aligned(8)));
+  __shared__ uint32_t staged_b128[32][4] __attribute__((aligned(16)));
   __shared__ uint32_t publication;
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid & 31u;
   const uint32_t group = blockIdx.x;
 
   if (tid < 32u) {
-    const uint32_t lds_address =
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&staged[lane]) & 0xffffu);
-    const uint32_t *source = multicast ? input : input + group * 32u;
-    cluster_load_async_b32(lds_address, lane * sizeof(uint32_t), source, multicast ? 0x3u : 0u);
+    constexpr uint32_t kInputWordsPerLane = 4;
+    constexpr uint32_t kInputWordsPerGroup = 32 * kInputWordsPerLane;
+    constexpr uint32_t kB32ObservedBase = 32;
+    constexpr uint32_t kB64ObservedBase = 64;
+    constexpr uint32_t kB128ObservedBase = 128;
+    constexpr uint32_t kObservedValuesPerGroup = 256;
+    const uint32_t source_offset = lane * kInputWordsPerLane * sizeof(uint32_t);
+    const uint32_t *source = multicast ? input : input + group * kInputWordsPerGroup;
+    const uint32_t mask = multicast ? 0x3u : 0u;
+    const auto lds_address = [](const volatile void *address) {
+      return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+    };
+    cluster_load_async<8>(lds_address(&staged_b8[lane]), source_offset, source, mask);
+    cluster_load_async<32>(lds_address(&staged_b32[lane]), source_offset, source, mask);
+    cluster_load_async<64>(lds_address(&staged_b64[lane][0]), source_offset, source, mask);
+    cluster_load_async<128>(lds_address(&staged_b128[lane][0]), source_offset, source, mask);
     wait_async_loads();
-    // Validate the direct-to-LDS transfer in the issuing wave. The cluster
-    // publication below separately checks cross-wave/CTA ordering.
-    observed[group * 32u + lane] = load_lds_word(&staged[lane]);
+    // Validate every production cluster-load width in the issuing wave. The
+    // cluster publication below separately checks cross-wave/CTA ordering.
+    const uint32_t observed_base = group * kObservedValuesPerGroup;
+    observed[observed_base + lane] = load_lds_byte(&staged_b8[lane]);
+    observed[observed_base + kB32ObservedBase + lane] = load_lds_word(&staged_b32[lane]);
+    for (uint32_t word = 0; word < 2; ++word)
+      observed[observed_base + kB64ObservedBase + lane * 2 + word] =
+          load_lds_word(&staged_b64[lane][word]);
+    for (uint32_t word = 0; word < 4; ++word)
+      observed[observed_base + kB128ObservedBase + lane * 4 + word] =
+          load_lds_word(&staged_b128[lane][word]);
   }
   if (tid == 0u)
     store_lds_word(&publication, 0x7d000000u | group);

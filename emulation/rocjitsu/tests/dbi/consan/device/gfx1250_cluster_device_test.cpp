@@ -27,7 +27,13 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 constexpr uint32_t kWorkgroupSize = 64;
-constexpr uint32_t kValuesPerGroup = 32;
+constexpr uint32_t kLanesPerWave = 32;
+constexpr uint32_t kInputWordsPerLane = 4;
+constexpr uint32_t kInputValuesPerGroup = kLanesPerWave * kInputWordsPerLane;
+constexpr uint32_t kObservedValuesPerGroup = 256;
+constexpr uint32_t kB32ObservedBase = 32;
+constexpr uint32_t kB64ObservedBase = 64;
+constexpr uint32_t kB128ObservedBase = 128;
 
 enum class Workload {
   ClusterSync,
@@ -58,6 +64,28 @@ WorkloadConfig workload_config(Workload workload) {
     return {"consan_gfx1250_cluster_multicast", 1, 2, 0x5c000000u};
   }
   return {};
+}
+
+void expect_cluster_async_transfer(const std::vector<uint32_t> &observed,
+                                   const std::vector<uint32_t> &input, uint32_t group,
+                                   uint32_t input_group) {
+  const uint32_t input_base = input_group * kInputValuesPerGroup;
+  const uint32_t observed_base = group * kObservedValuesPerGroup;
+  for (uint32_t lane = 0; lane < kLanesPerWave; ++lane) {
+    EXPECT_EQ(observed[observed_base + lane], input[input_base + lane * kInputWordsPerLane] & 0xffu)
+        << "B8 group=" << group << " lane=" << lane;
+    EXPECT_EQ(observed[observed_base + kB32ObservedBase + lane],
+              input[input_base + lane * kInputWordsPerLane])
+        << "B32 group=" << group << " lane=" << lane;
+    for (uint32_t word = 0; word < 2; ++word)
+      EXPECT_EQ(observed[observed_base + kB64ObservedBase + lane * 2 + word],
+                input[input_base + lane * kInputWordsPerLane + word])
+          << "B64 group=" << group << " lane=" << lane << " word=" << word;
+    for (uint32_t word = 0; word < 4; ++word)
+      EXPECT_EQ(observed[observed_base + kB128ObservedBase + lane * 4 + word],
+                input[input_base + lane * kInputWordsPerLane + word])
+          << "B128 group=" << group << " lane=" << lane << " word=" << word;
+  }
 }
 
 struct AgentSearch {
@@ -205,8 +233,8 @@ void run_cluster_workload(Workload workload, bool correct) {
   ASSERT_GE(kernarg_bytes, 90u);
 
   const uint32_t group_count = config.cluster_count * config.cluster_size;
-  const size_t input_bytes = group_count * kValuesPerGroup * sizeof(uint32_t);
-  const size_t observed_bytes = group_count * kValuesPerGroup * sizeof(uint32_t);
+  const size_t input_bytes = group_count * kInputValuesPerGroup * sizeof(uint32_t);
+  const size_t observed_bytes = group_count * kObservedValuesPerGroup * sizeof(uint32_t);
   const size_t control_bytes = group_count * kWorkgroupSize * sizeof(uint32_t);
   auto gpu_pool = find_pool(agents.gpu, HSA_AMD_SEGMENT_GLOBAL);
   auto kernarg_pool = find_pool(agents.cpu, HSA_AMD_SEGMENT_GLOBAL, true);
@@ -238,12 +266,15 @@ void run_cluster_workload(Workload workload, bool correct) {
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, observed), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, control), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
-  std::vector<uint32_t> host_input(group_count * kValuesPerGroup);
+  std::vector<uint32_t> host_input(group_count * kInputValuesPerGroup);
   for (uint32_t group = 0; group < group_count; ++group) {
-    for (uint32_t lane = 0; lane < kValuesPerGroup; ++lane)
-      host_input[group * kValuesPerGroup + lane] = 0xa5000000u | (group << 8u) | lane;
+    for (uint32_t lane = 0; lane < kLanesPerWave; ++lane) {
+      for (uint32_t word = 0; word < kInputWordsPerLane; ++word)
+        host_input[group * kInputValuesPerGroup + lane * kInputWordsPerLane + word] =
+            0xa5000000u | (group << 12u) | (lane << 4u) | word;
+    }
   }
-  const std::vector<uint32_t> zero_observed(group_count * kValuesPerGroup, 0);
+  const std::vector<uint32_t> zero_observed(group_count * kObservedValuesPerGroup, 0);
   const std::vector<uint32_t> zero_control(group_count * kWorkgroupSize, 0);
   ASSERT_EQ(hsa_memory_copy(input, host_input.data(), input_bytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(observed, zero_observed.data(), observed_bytes), HSA_STATUS_SUCCESS);
@@ -322,7 +353,7 @@ void run_cluster_workload(Workload workload, bool correct) {
       resources.signal_, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(completion, 0) << "cluster dispatch timed out or failed";
 
-  std::vector<uint32_t> host_observed(group_count * kValuesPerGroup);
+  std::vector<uint32_t> host_observed(group_count * kObservedValuesPerGroup);
   std::vector<uint32_t> host_control(group_count * kWorkgroupSize);
   ASSERT_EQ(hsa_memory_copy(host_observed.data(), observed, observed_bytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(host_control.data(), control, control_bytes), HSA_STATUS_SUCCESS);
@@ -333,17 +364,10 @@ void run_cluster_workload(Workload workload, bool correct) {
       EXPECT_EQ(host_observed[group], 0x52000000u | group) << "group=" << group;
     if (correct && workload == Workload::WideCluster)
       EXPECT_EQ(host_observed[group], 0x53000000u | group) << "group=" << group;
-    if (correct && workload == Workload::TdmWait) {
-      for (uint32_t lane = 0; lane < kValuesPerGroup; ++lane)
-        EXPECT_EQ(host_observed[group * kValuesPerGroup + lane],
-                  host_input[group * kValuesPerGroup + lane])
-            << "group=" << group << " lane=" << lane;
-    }
-    if (correct && workload == Workload::ClusterMulticast) {
-      for (uint32_t lane = 0; lane < kValuesPerGroup; ++lane)
-        EXPECT_EQ(host_observed[group * kValuesPerGroup + lane], host_input[lane])
-            << "group=" << group << " lane=" << lane;
-    }
+    if (correct && workload == Workload::TdmWait)
+      expect_cluster_async_transfer(host_observed, host_input, group, group);
+    if (correct && workload == Workload::ClusterMulticast)
+      expect_cluster_async_transfer(host_observed, host_input, group, 0);
     for (uint32_t tid = 0; tid < kWorkgroupSize; ++tid)
       EXPECT_EQ(host_control[group * kWorkgroupSize + tid],
                 config.marker_base | (group << 8u) | tid)
