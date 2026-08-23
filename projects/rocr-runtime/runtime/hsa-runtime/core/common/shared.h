@@ -144,6 +144,12 @@ class Shared final : private BaseShared {
       shared_object_ = PageAllocator<T>::alloc(agent_node_id, flags);
   }
 
+  /// @brief Tag type selecting the constructor which allocates nothing.
+  struct NoAlloc {};
+
+  /// @brief Construct an empty container; the owner supplies the storage.
+  explicit Shared(NoAlloc) : shared_object_(nullptr), pool_(nullptr) {}
+
   ~Shared() {
     assert(allocate_() != nullptr && free_() != nullptr &&
                                         "Shared object allocator is not set");
