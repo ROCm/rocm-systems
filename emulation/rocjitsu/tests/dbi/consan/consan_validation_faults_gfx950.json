@@ -25,6 +25,28 @@
           }
         }
       ]
+    },
+    "wmma-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop-redundant-score-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected first score-publication barrier is in the unconditional ExactContext attention loop executed by the only launched kernel. The following source-level publication barrier remains, so this exact-one mutation is prospectively expected to be a semantically redundant qualified miss with the exact result preserved."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:4329a1f90ba40311|kernel=_ZN12_GLOBAL__N_127mfma_attention_block_kernelINS_18ExactContextPolicyEEEvPKDv4_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000001f88|mnemonic=s_barrier|occurrence=3"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            }
+          }
+        }
+      ]
     }
   }
 }
