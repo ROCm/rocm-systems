@@ -102,7 +102,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
-  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
+  sgpr_block_owners_.resize(config.num_wf_slots);
+  if (std::has_single_bit(config.sgprs_per_wf))
+    sgpr_block_shift_ = std::countr_zero(config.sgprs_per_wf);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
@@ -220,8 +222,9 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
 
-  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
-  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
+  sgpr_block_owners_[static_cast<uint32_t>(sgpr_base) / config_.sgprs_per_wf] = {
+      wf, static_cast<uint32_t>(sgpr_base) + num_sgprs};
+  set_vgpr_block_owner(static_cast<uint32_t>(vgpr_base), wf);
 
   util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
@@ -242,6 +245,7 @@ size_t ComputeUnitCore::num_wfs() const {
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   if (wf.sgpr_alloc().count > 0) {
+    sgpr_block_owners_[wf.sgpr_alloc().base / config_.sgprs_per_wf] = {};
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
   }
