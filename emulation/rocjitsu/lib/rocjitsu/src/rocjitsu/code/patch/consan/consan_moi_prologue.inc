@@ -877,6 +877,131 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return false;
 }
 
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar_registers,
+                                    ConSanMoiPersistentWorkgroupRegisters vector_registers) {
+  if ((!scalar_registers.empty() && !scalar_registers.complete()) ||
+      (!vector_registers.empty() && !vector_registers.complete()) ||
+      (scalar_registers.complete() && vector_registers.complete())) {
+    return std::nullopt;
+  }
+  const auto scalar_source = [](std::optional<uint16_t> reg) {
+    return reg ? ConSanMoiWorkgroupSource::scalar(*reg) : ConSanMoiWorkgroupSource{};
+  };
+  const auto vector_source = [](std::optional<uint16_t> reg) {
+    return reg ? ConSanMoiWorkgroupSource::vector(*reg) : ConSanMoiWorkgroupSource{};
+  };
+  if (scalar_registers.complete()) {
+    return ConSanMoiWorkgroupSources{
+        .x = scalar_source(scalar_registers.x),
+        .y = scalar_source(scalar_registers.y),
+        .z = scalar_source(scalar_registers.z),
+        .cluster_workgroup_id = scalar_source(scalar_registers.cluster_workgroup_id),
+        .cdna_full_payload_base = std::nullopt,
+        .cdna_guest_payload_base = std::nullopt,
+        .cdna_guest_payload_mask = 0u,
+    };
+  }
+  if (vector_registers.complete()) {
+    return ConSanMoiWorkgroupSources{
+        .x = vector_source(vector_registers.x),
+        .y = vector_source(vector_registers.y),
+        .z = vector_source(vector_registers.z),
+        .cluster_workgroup_id = vector_source(vector_registers.cluster_workgroup_id),
+        .cdna_full_payload_base = std::nullopt,
+        .cdna_guest_payload_base = std::nullopt,
+        .cdna_guest_payload_mask = 0u,
+    };
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool append_runtime_workgroup_selection_initialization(
+    std::vector<uint32_t> &words, const ConSanMoiWorkgroupSource &selection_destination,
+    ConSanMoiDispatchIdCapture dispatch_capture, const ConSanMoiWorkgroupSources &workgroup_sources,
+    uint32_t sample_stride, uint32_t sample_offset, uint64_t report_dispatch_id,
+    uint16_t scratch_sgpr_base, rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (sample_stride <= 1u || (sample_stride & (sample_stride - 1u)) != 0u) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue has an invalid sample stride");
+    return false;
+  }
+  const uint16_t saved_scc = static_cast<uint16_t>(scratch_sgpr_base + 4u);
+  const uint16_t quotient = static_cast<uint16_t>(scratch_sgpr_base + 5u);
+  const uint16_t residue = static_cast<uint16_t>(scratch_sgpr_base + 6u);
+  if (!selection_destination.is_well_formed() || !selection_destination.has_value() ||
+      selection_destination.private_offset) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue has an invalid destination");
+    return false;
+  }
+  const auto save_scc = instrumentation::build_s_cselect_b32(
+      saved_scc, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u), arch);
+  uint16_t dispatch_id_source = 0u;
+  if (dispatch_capture.sgpr) {
+    dispatch_id_source = *dispatch_capture.sgpr;
+  } else if (dispatch_capture.vgpr) {
+    const auto read_dispatch =
+        instrumentation::build_v_readfirstlane_b32(quotient, *dispatch_capture.vgpr, arch);
+    const auto wait_dispatch = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (!read_dispatch || !wait_dispatch) {
+      errors.emplace_back(
+          "ConSan MOI runtime-selection prologue could not read its dispatch identity");
+      return false;
+    }
+    words.push_back(*read_dispatch);
+    words.push_back(*wait_dispatch);
+    dispatch_id_source = quotient;
+  } else {
+    dispatch_id_source =
+        scalar_positive_inline_u32(static_cast<uint32_t>(report_dispatch_id) & 63u);
+  }
+  const auto initialize = instrumentation::build_s_sub_u32(residue, scalar_positive_inline_u32(0u),
+                                                           dispatch_id_source, arch);
+  if (!save_scc || !initialize) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue could not initialize its hash");
+    return false;
+  }
+  words.push_back(*save_scc);
+  words.push_back(*initialize);
+  if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
+                                        residue, arch)) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue could not mix its workgroup tuple");
+    return false;
+  }
+  const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(sample_stride));
+  words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
+  words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
+  const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
+  if (!subtract) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue could not reduce its hash");
+    return false;
+  }
+  words.push_back(*subtract);
+  if (!append_moi_runtime_workgroup_residue_compare(words, residue, quotient,
+                                                    sample_offset & (sample_stride - 1u), arch)) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue could not compare its hash");
+    return false;
+  }
+  const uint16_t scalar_destination = selection_destination.scalar_src.value_or(residue);
+  const auto materialize = instrumentation::build_s_cselect_b32(
+      scalar_destination, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u), arch);
+  const auto restore_scc =
+      instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0u), arch);
+  if (!materialize || !restore_scc) {
+    errors.emplace_back("ConSan MOI runtime-selection prologue could not materialize its result");
+    return false;
+  }
+  words.push_back(*materialize);
+  if (selection_destination.vector_src) {
+    words.push_back(
+        build_v_mov_b32_e32(*selection_destination.vector_src, scalar_destination, arch));
+  }
+  words.push_back(*restore_scc);
+  return true;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_owner_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t owner_vgpr,
     uint16_t epoch_vgpr, std::optional<uint16_t> workgroup_key_vgpr, uint16_t owner_shift_bits,
@@ -887,7 +1012,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     ConSanMoiDispatchIdCapture dispatch_capture,
-    std::optional<uint16_t> runtime_sample_counter_sgpr, std::optional<uint16_t> return_pc_sgpr,
+    std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source,
+    std::optional<uint16_t> return_pc_sgpr, uint32_t runtime_sample_stride,
+    uint32_t runtime_sample_offset, uint64_t runtime_report_dispatch_id,
     std::optional<MoiEntryScalarBackup> entry_scalar_backup,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow, bool has_quad_zero_tuple,
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
@@ -920,15 +1047,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
           !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
           errors)) {
     return std::nullopt;
-  }
-  if (runtime_sample_counter_sgpr) {
-    if (!append_moi_entry_salu_write(
-            words,
-            build_s_mov_b32(*runtime_sample_counter_sgpr, scalar_positive_inline_u32(0), arch),
-            arch)) {
-      errors.emplace_back("ConSan MOI prologue cannot encode its sample-counter dependency delay");
-      return std::nullopt;
-    }
   }
   if (workgroup_shadow && workgroup_shadow->visible_evidence_sgpr &&
       !append_moi_entry_salu_write(words,
@@ -999,6 +1117,18 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                                 record_replay_workgroup_vgprs, *workgroup_sources,
                                                 arch, errors))
       return std::nullopt;
+  }
+  if (runtime_workgroup_selection_source) {
+    const auto persistent_sources = runtime_selection_workgroup_sources(
+        record_replay_workgroup_sgprs, record_replay_workgroup_vgprs);
+    if (!persistent_sources || !return_pc_sgpr ||
+        !append_runtime_workgroup_selection_initialization(
+            words, *runtime_workgroup_selection_source, dispatch_capture, *persistent_sources,
+            runtime_sample_stride, runtime_sample_offset, runtime_report_dispatch_id,
+            *return_pc_sgpr, arch, errors)) {
+      errors.emplace_back("ConSan MOI prologue could not cache its runtime workgroup selection");
+      return std::nullopt;
+    }
   }
   if (persistent_workgroup_key_sgpr) {
     if (!workgroup_sources || !return_pc_sgpr) {
@@ -1215,8 +1345,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     ConSanMoiDispatchIdCapture dispatch_capture,
-    std::optional<uint16_t> runtime_sample_counter_sgpr, std::optional<uint16_t> return_pc_sgpr,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
+    std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source,
+    std::optional<uint16_t> return_pc_sgpr, uint32_t runtime_sample_stride,
+    uint32_t runtime_sample_offset, uint64_t runtime_report_dispatch_id, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
   const auto epoch_store =
       instrumentation::build_private_store_b32(scratch_vgpr, epoch_offset, arch);
   std::optional<std::vector<uint32_t>> owner_store;
@@ -1273,13 +1405,14 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
           errors)) {
     return std::nullopt;
   }
-  if (runtime_sample_counter_sgpr) {
-    if (!append_moi_entry_salu_write(
-            words,
-            build_s_mov_b32(*runtime_sample_counter_sgpr, scalar_positive_inline_u32(0), arch),
-            arch)) {
+  if (runtime_workgroup_selection_source) {
+    if (!workgroup_sources || !return_pc_sgpr ||
+        !append_runtime_workgroup_selection_initialization(
+            words, *runtime_workgroup_selection_source, dispatch_capture, *workgroup_sources,
+            runtime_sample_stride, runtime_sample_offset, runtime_report_dispatch_id,
+            *return_pc_sgpr, arch, errors)) {
       errors.emplace_back(
-          "ConSan MOI private-epoch prologue cannot encode its sample-counter dependency delay");
+          "ConSan MOI private-epoch prologue could not cache its runtime workgroup selection");
       return std::nullopt;
     }
   }
@@ -1954,8 +2087,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
         item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
         item.dispatch_plan, item.dispatch_capture,
-        moi_runtime_sample_counter_sgpr(item.kernel_options),
-        item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
+        moi_runtime_workgroup_selection_source(item.kernel_options, arch),
+        item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
+        item.kernel_options.moi_runtime_sample_offset, item.kernel_options.moi_report_dispatch_id,
+        arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
@@ -1975,8 +2110,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
           item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
           item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
           prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-          item.dispatch_capture, moi_runtime_sample_counter_sgpr(item.kernel_options),
-          item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
+          item.dispatch_capture, moi_runtime_workgroup_selection_source(item.kernel_options, arch),
+          item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
+          item.kernel_options.moi_runtime_sample_offset, item.kernel_options.moi_report_dispatch_id,
+          arch, result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1993,8 +2130,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
             item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
             item.dispatch_plan, item.dispatch_capture,
-            moi_runtime_sample_counter_sgpr(item.kernel_options),
-            item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
+            moi_runtime_workgroup_selection_source(item.kernel_options, arch),
+            item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
+            item.kernel_options.moi_runtime_sample_offset,
+            item.kernel_options.moi_report_dispatch_id, arch, result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
@@ -2004,8 +2143,11 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
             item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
             prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-            item.dispatch_capture, moi_runtime_sample_counter_sgpr(item.kernel_options),
-            item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
+            item.dispatch_capture,
+            moi_runtime_workgroup_selection_source(item.kernel_options, arch),
+            item.kernel_options.moi_exec_save_sgpr, item.kernel_options.moi_runtime_sample_stride,
+            item.kernel_options.moi_runtime_sample_offset,
+            item.kernel_options.moi_report_dispatch_id, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -2757,7 +2899,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         kernel_options.moi_persistent_workgroup_key_sgpr,
         kernel_options.moi_record_replay_workgroup_sgprs,
         kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-        moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
+        moi_runtime_workgroup_selection_source(kernel_options, arch),
+        kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
+        kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
         item.entry_scalar_backup, prologue_workgroup_shadow,
         options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
         item.workgroup_sources, displaced_entry_words, arch, result.errors);
@@ -2843,7 +2987,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           kernel_options.moi_persistent_workgroup_key_sgpr,
           kernel_options.moi_record_replay_workgroup_sgprs,
           kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-          moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
+          moi_runtime_workgroup_selection_source(kernel_options, arch),
+          kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
+          kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
           item.entry_scalar_backup, prologue_workgroup_shadow,
           options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
           item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
@@ -2873,7 +3019,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_persistent_workgroup_key_sgpr,
             kernel_options.moi_record_replay_workgroup_sgprs,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-            moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
+            moi_runtime_workgroup_selection_source(kernel_options, arch),
+            kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
+            kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
             item.entry_scalar_backup, prologue_workgroup_shadow,
             options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
             item.workgroup_sources, displaced_entry_words, arch, result.errors);
@@ -2891,7 +3039,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_persistent_workgroup_key_sgpr,
             kernel_options.moi_record_replay_workgroup_sgprs,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-            moi_runtime_sample_counter_sgpr(kernel_options), kernel_options.moi_exec_save_sgpr,
+            moi_runtime_workgroup_selection_source(kernel_options, arch),
+            kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
+            kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
             item.entry_scalar_backup, prologue_workgroup_shadow,
             options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
             item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);

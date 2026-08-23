@@ -176,10 +176,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options.moi_exec_save_sgpr.has_value() &&
       (options.moi_runtime_sample_stride > 1u || candidates.size() > 8u ||
        has_unreachable_function_candidate || has_spill_backed_scalar_assignment);
-  // The later synchronization passes exclude split-barrier signals and
-  // runtime kernels. Reserve the same barrier and fence candidate sets here;
-  // otherwise the access and barrier passes can consume every reachable
-  // island before a compiler release/acquire fence is lowered.
+  // Compact lowering patches every split-barrier member, while the dense
+  // router shares one entry per logical signal/wait pair. Reserve the same
+  // member-accurate or shared barrier inventory selected by that lowering,
+  // plus every fence candidate; otherwise the access pass can consume every
+  // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
       use_indirect_appended ? moi_reserved_record_replay_sync_island_count(result, options) : 0u;
   const uint64_t reserved_sync_slot_words =
@@ -841,9 +842,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
         record_replay_persistent_workgroup_sources(candidate_options, arch);
-    const bool has_scalar_runtime_workgroup_sources =
-        runtime_workgroup_sources && runtime_workgroup_sources->x.scalar_src &&
-        runtime_workgroup_sources->y.scalar_src && runtime_workgroup_sources->z.scalar_src;
+    const bool has_probe_entry_runtime_workgroup_gate =
+        runtime_workgroup_sources && moi_has_probe_entry_runtime_workgroup_gate(
+                                         candidate_options, *runtime_workgroup_sources, arch);
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
         moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
@@ -1107,7 +1108,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const bool dense_runtime_workgroup_gate =
           use_dense_call && options.moi_runtime_sample_stride > 1u &&
           !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-          has_scalar_runtime_workgroup_sources;
+          has_probe_entry_runtime_workgroup_gate;
       const uint64_t patch_bytes =
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
           spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
@@ -1166,11 +1167,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.runtime_workgroup_gate = uses_reserved_entry_relay &&
                                      options.moi_runtime_sample_stride > 1u &&
                                      !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-                                     has_scalar_runtime_workgroup_sources;
+                                     has_probe_entry_runtime_workgroup_gate;
     planned.dense_runtime_workgroup_gate =
         use_dense_call && options.moi_runtime_sample_stride > 1u &&
         !candidate_options.automatic_moi_record_replay_sgpr_spill &&
-        has_scalar_runtime_workgroup_sources;
+        has_probe_entry_runtime_workgroup_gate;
     if (planned.runtime_workgroup_gate || planned.dense_runtime_workgroup_gate)
       planned.runtime_workgroup_sources = runtime_workgroup_sources;
     if (use_dense_call)

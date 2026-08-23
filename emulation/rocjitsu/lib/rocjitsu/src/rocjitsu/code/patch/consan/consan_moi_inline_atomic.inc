@@ -982,8 +982,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   std::vector<uint32_t> words;
   const bool runtime_workgroup_gate =
       options.moi_runtime_sample_stride > 1u && !already_runtime_workgroup_gated &&
-      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
-      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+      !options.automatic_moi_record_replay_sgpr_spill &&
+      moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
   if (runtime_workgroup_gate) {
     ConSanMoiCandidate atomic_guest;
     atomic_guest.file_offset = candidate.site.file_offset;

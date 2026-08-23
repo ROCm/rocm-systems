@@ -53,12 +53,16 @@ constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
         kernel.name.starts_with("__amd_rocclr_")) {
       continue;
     }
-    count += options.moi_engine == ConSanMoiEngine::RecordReplay ? count_record_replay(kernel)
-                                                                 : count_all(kernel);
+    count += options.moi_engine == ConSanMoiEngine::RecordReplay &&
+                     options.moi_record_replay_dense_barrier_router
+                 ? count_record_replay(kernel)
+                 : count_all(kernel);
   }
   for (const ConSanFunctionInfo &function : result.functions) {
-    count += options.moi_engine == ConSanMoiEngine::RecordReplay ? count_record_replay(function)
-                                                                 : count_all(function);
+    count += options.moi_engine == ConSanMoiEngine::RecordReplay &&
+                     options.moi_record_replay_dense_barrier_router
+                 ? count_record_replay(function)
+                 : count_all(function);
   }
   return std::min<uint64_t>(count, options.max_patches);
 }
@@ -3838,13 +3842,36 @@ static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA5).ordinary_l
          std::ranges::any_of(options.moi_transient_sgpr_assignments, overlaps_assignment);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-moi_runtime_sample_counter_sgpr(const ConSanOptions &options) {
-  // Runtime sampling is a stable hash of dispatch/workgroup identity. The old
-  // per-site scalar counter was removed from the gate because it separated
-  // producer and consumer evidence, so no persistent third SGPR is needed.
-  (void)options;
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSource>
+moi_runtime_workgroup_selection_source(const ConSanOptions &options, rj_code_arch_t arch) {
+  // Record/Replay consumes the persistent workgroup tuple only to make this
+  // stable selection. Once the entry prologue has mixed all exact coordinates,
+  // it can retain the boolean in the tuple's x slot without increasing the
+  // persistent register footprint. Sampled still needs the original tuple for
+  // window-bank selection and therefore retains its probe-local computation.
+  const bool literal_dispatch_identity = moi_permits_literal_dispatch_identity(options, arch);
+  const bool has_dispatch_register = options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
+  const bool automatic_or_literal_dispatch = options.automatic_moi_dispatch_id_sgprs ||
+                                             options.automatic_moi_dispatch_id_vgprs ||
+                                             (!has_dispatch_register && literal_dispatch_identity);
+  if (options.moi_engine != ConSanMoiEngine::RecordReplay || !automatic_or_literal_dispatch ||
+      options.moi_runtime_sample_stride <= 1u) {
+    return std::nullopt;
+  }
+  if (options.moi_record_replay_workgroup_sgprs.complete())
+    return ConSanMoiWorkgroupSource::scalar(*options.moi_record_replay_workgroup_sgprs.x);
+  if (options.moi_record_replay_workgroup_vgprs.complete())
+    return ConSanMoiWorkgroupSource::vector(*options.moi_record_replay_workgroup_vgprs.x);
   return std::nullopt;
+}
+
+[[nodiscard]] bool
+moi_has_probe_entry_runtime_workgroup_gate(const ConSanOptions &options,
+                                           const ConSanMoiWorkgroupSources &workgroup_sources,
+                                           rj_code_arch_t arch) {
+  return moi_runtime_workgroup_selection_source(options, arch).has_value() ||
+         (workgroup_sources.x.scalar_src && workgroup_sources.y.scalar_src &&
+          workgroup_sources.z.scalar_src);
 }
 
 struct MoiSpecialStateSgprs {

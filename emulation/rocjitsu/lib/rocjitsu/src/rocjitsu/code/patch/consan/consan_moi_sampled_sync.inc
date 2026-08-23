@@ -3258,9 +3258,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   }
   const bool runtime_workgroup_gate =
-      options.moi_runtime_sample_stride > 1u && !options.automatic_moi_record_replay_sgpr_spill &&
-      workgroup_sources.x.scalar_src && workgroup_sources.y.scalar_src &&
-      workgroup_sources.z.scalar_src;
+      !candidate.capture_address_before_guest && options.moi_runtime_sample_stride > 1u &&
+      !options.automatic_moi_record_replay_sgpr_spill &&
+      moi_has_probe_entry_runtime_workgroup_gate(options, workgroup_sources, arch);
   if (runtime_workgroup_gate) {
     if (candidate.capture_address_before_guest) {
       errors.emplace_back(

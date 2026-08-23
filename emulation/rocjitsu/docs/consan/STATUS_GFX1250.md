@@ -98,6 +98,37 @@ shape.  The remaining Qwen gap is completion and performance evidence for the
 full gfx1250 emulation row, not an uncovered device-observable synchronization
 contract.
 
+### 2026-08-23 Qwen/TP2 sparse Record/Replay reduction
+
+The bounded Qwen and TP2 runs showed a shared execution-cost defect rather
+than a static coverage gap: automatic Record/Replay recomputed the full
+dispatch/workgroup hash at every probe, and a persistent VGPR workgroup tuple
+did not enable the probe-entry fast gate. Thus all 846 Qwen or 460-per-rank TP2
+access probes executed their full bodies even when the runtime stride selected
+only a sparse dispatch/workgroup subset. The entry prologue now mixes dispatch,
+x/y/z, and the gfx1250 cluster-local coordinate once, caches the exact boolean
+selection in the no-longer-needed tuple x slot, and reuses it at access,
+barrier, atomic, and fence probes without adding persistent registers.
+
+The adjacent checked-in `RecordReplaySparseDensePipeline` pair distills that
+behavior into 128 ordered LDS warmup sites plus a two-wave publication edge.
+It runs at stride two and preserves exact warmup, publication, and control
+oracles; only the incorrect member removes the publication barrier. Baseline
+and Record/Replay pass all 20 simulator rows on gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250 in 3.92 seconds, and all four physical-gfx950 rows in 1.28
+seconds. A five-target host regression requires the cached selection and full
+gfx1250 cluster-coordinate mix.
+
+The portable run also exposed an RDNA4 compact-barrier defect: access growth
+pushed both split-barrier bodies beyond direct branch reach, but reservation
+allocated one entry for the logical pair while lowering required independent
+signal and wait entries. A focused host regression now retains 130 access
+patches and both barrier records, and the corrected gfx1201 correct/incorrect
+device rows pass. All 780 `ConSanMoi.*` host tests pass. Qwen and TP2
+Record/Replay remain orange until fresh full E2E runs prove final oracle,
+replay, and teardown completion; this reduction materially strengthens the
+quick cross-target gate but is not itself an E2E cell promotion.
+
 ### 2026-08-23 TP2 mode-isolation readiness and Record/Replay bound
 
 The earlier current-tip TP2 assessment attributed a greater-than-600-second
