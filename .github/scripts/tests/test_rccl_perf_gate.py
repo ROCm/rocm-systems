@@ -469,6 +469,102 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(len(payload["description"]), gate.MAXIMUM_DESCRIPTION_LENGTH)
 
 
+class FakeResponse:
+    """Minimal stand-in for the context manager urlopen returns."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *exception: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+class GitHubApiContractTest(unittest.TestCase):
+    """Drives the real GitHubApi. FakeApi cannot catch a wrong URL or verb."""
+
+    def setUp(self) -> None:
+        self.api = gate.GitHubApi(REPOSITORY, "tok3n", "https://api.github.com")
+        patcher = mock.patch.object(gate.urllib.request, "urlopen")
+        self.urlopen = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.urlopen.return_value = FakeResponse(b"{}")
+
+    def _request(self) -> object:
+        return self.urlopen.call_args.args[0]
+
+    def _header(self, name: str) -> str:
+        headers = {k.lower(): v for k, v in self._request().headers.items()}
+        return headers[name.lower()]
+
+    def _post_a_status(self) -> None:
+        gate.set_commit_status(
+            self.api, REPOSITORY, "d" * 40, "ctx", "success", "ok", "https://example"
+        )
+
+    def test_status_post_targets_the_statuses_endpoint(self) -> None:
+        self._post_a_status()
+        self.assertEqual(
+            self._request().full_url,
+            f"https://api.github.com/repos/{REPOSITORY}/statuses/{'d' * 40}",
+        )
+        self.assertEqual(self._request().method, "POST")
+
+    def test_status_post_sends_exactly_the_documented_payload_keys(self) -> None:
+        self._post_a_status()
+        payload = json.loads(self._request().data)
+        self.assertEqual(
+            set(payload), {"state", "context", "target_url", "description"}
+        )
+        self.assertEqual(payload["state"], "success")
+        self.assertEqual(payload["context"], "ctx")
+        self.assertEqual(payload["description"], "ok")
+
+    def test_permission_lookup_targets_the_collaborator_endpoint(self) -> None:
+        self.urlopen.return_value = FakeResponse(b'{"permission": "write"}')
+        permission = gate.collaborator_permission(self.api, REPOSITORY, "oct/cat")
+        self.assertEqual(permission, "write")
+        self.assertEqual(
+            self._request().full_url,
+            f"https://api.github.com/repos/{REPOSITORY}"
+            "/collaborators/oct%2Fcat/permission",
+        )
+        self.assertEqual(self._request().method, "GET")
+        self.assertIsNone(self._request().data)
+
+    def test_every_request_is_authenticated_and_version_pinned(self) -> None:
+        self.api.get("/rate_limit")
+        self.assertEqual(self._header("Authorization"), "Bearer tok3n")
+        self.assertEqual(self._header("Accept"), "application/vnd.github+json")
+        self.assertEqual(self._header("X-GitHub-Api-Version"), "2022-11-28")
+
+    def test_requests_cannot_hang_a_job_forever(self) -> None:
+        self.api.get("/rate_limit")
+        self.assertEqual(
+            self.urlopen.call_args.kwargs["timeout"], gate.API_TIMEOUT_SECONDS
+        )
+
+    def test_a_trailing_slash_on_the_api_url_does_not_double_up(self) -> None:
+        gate.GitHubApi(REPOSITORY, "tok3n", "https://api.github.com/").get("/x")
+        self.assertEqual(self._request().full_url, "https://api.github.com/x")
+
+    def test_the_constructor_refuses_unusable_configuration(self) -> None:
+        unusable = [
+            ("not-a-repo", "tok3n", "https://api.github.com"),
+            (REPOSITORY, "", "https://api.github.com"),
+            (REPOSITORY, "tok3n", "http://api.github.com"),
+        ]
+        for repository, token, url in unusable:
+            with self.subTest(repository=repository, token=token, url=url):
+                with self.assertRaises(ValueError):
+                    gate.GitHubApi(repository, token, url)
+
+
 class MainCommandTest(unittest.TestCase):
     """Drives main(): argv, environment, GITHUB_OUTPUT contents and exit code."""
 
