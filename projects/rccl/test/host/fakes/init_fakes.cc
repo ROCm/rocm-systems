@@ -66,17 +66,17 @@ extern "C" char* getenv(const char* name) {
   return const_cast<char*>(micro_getenv(name));
 }
 
+// A null value means "absent", the same as SetMicroEnvAbsent -- NOT "leave
+// unmapped". Silently ignoring it would fall through to the real libc getenv,
+// i.e. the exact opposite of what the caller asked for on a host that exports
+// the name.
 void SetMicroEnv(const char* name, const char* value) {
-  if (name != nullptr && value != nullptr) {
-    microEnvMap()[name] = value;
-  }
+  if (name == nullptr) return;
+  if (value == nullptr) microEnvMap()[name] = std::nullopt;
+  else microEnvMap()[name] = value;
 }
 
-void SetMicroEnvAbsent(const char* name) {
-  if (name != nullptr) {
-    microEnvMap()[name] = std::nullopt;
-  }
-}
+void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
 
 void ClearMicroEnv() { microEnvMap().clear(); }
 

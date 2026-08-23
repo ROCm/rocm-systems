@@ -9,9 +9,10 @@
 // Like p2p-test.cc, this TU compiles the hipified unit-under-test source
 // directly (`#include INIT_CC_PATH`) so static helpers become callable, links
 // NO librccl/HIP, and routes every GPU/environment dependency through the fake
-// seams. This file is at bring-up scope: it establishes the preamble/seam
-// wiring and a smoke test. Tests are added per the completed per-test matrix
-// (see init_coverage_plan.md).
+// seams. Coverage is grown incrementally: pick an uncovered branch out of the
+// llvm-cov/BRDA report for the hipified init.cc, work out the state that
+// reaches it, and add a test (see test/host/MICROTEST_README.md, "Coverage-
+// driven workflow").
 
 #include <gtest/gtest.h>
 
@@ -24,6 +25,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "fakes/init_fakes.h"
@@ -49,6 +51,24 @@
 #undef RCCL_PARAM_NCCL_ALIAS
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
   int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+
+// ncclCalloc redirector: lets a test fail the Nth allocation so the
+// NCCLCHECK(ncclCalloc(...)) early-return arms become reachable. ncclCalloc is a
+// macro (alloc.h), so retargeting it here -- the same trick the PARAM
+// redirectors above use -- intercepts only RCCL's own allocation sites in the
+// UUT. Interposing libc malloc instead would also catch gtest's and
+// libstdc++'s allocations, and they would consume the failure counter before
+// the code under test ever ran. Defaults to fully transparent; armed per test
+// via g_callocFailAt and reset in the fixture TearDown.
+static int g_callocCallIndex = 0;
+static int g_callocFailAt = -1;  // -1 = never fail; otherwise 0-based call index
+template <typename... Args>
+static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args&&... args) {
+  if (g_callocCallIndex++ == g_callocFailAt) return ncclSystemError;
+  return ncclCallocDebug(std::forward<Args>(args)..., file, line, fn, true);
+}
+#undef ncclCalloc
+#define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
 // Neutralize the NVTX3 range macros so init.cc references no roctx_scoped_range_in
 // symbols (empty expansion: init.cc uses them without a trailing ';'). ONLY when
@@ -121,6 +141,24 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 // ===========================================================================
 class InitMicrotest : public ::testing::Test {
  protected:
+  void SetUp() override {
+    // Hermetic entry. micro_getenv falls through to the real libc getenv on a
+    // map miss, so anything the developer exports reaches the unit under test:
+    // envConfigOverride (init.cc:3359, reached from parseCommConfig) reads
+    // NCCL_CTA_POLICY via ncclGetEnv and overwrites comm->config.CTAPolicy.
+    // Worse, onceEnvCtaPolicy (init.cc:3066) is a function-local once_flag no
+    // test can reset, so a host value would be latched by whichever test runs
+    // envConfigOverride first -- an order-dependent failure under
+    // --gtest_shuffle. Mask every name init.cc reads through ncclGetEnv/getenv
+    // so no test depends on the ambient environment.
+    ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
+    for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
+                             "NCCL_COMM_ID", "NCCL_LAUNCH_MODE", "NCCL_NET", "NCCL_PAT_ENABLE",
+                             "NCCL_TOPO_DUMP_FILE", "HSA_FORCE_FINE_GRAIN_PCIE",
+                             "HSA_NO_SCRATCH_RECLAIM", "ROCSHMEM_HEAP_SIZE"}) {
+      SetMicroEnvAbsent(name);
+    }
+  }
   void TearDown() override {
     ResetInitFakes();
     // ctaPolicyEnv (init.cc:143) is file-scope static that getEnvCtaPolicyOnce
@@ -129,6 +167,10 @@ class InitMicrotest : public ::testing::Test {
     // directly are not, and envConfigOverride reads it at init.cc:3068. Reset it
     // here so no test can leak a policy into another under --gtest_shuffle.
     ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
+    // Disarm the ncclCalloc redirector so an injected failure cannot leak into
+    // the next test.
+    g_callocCallIndex = 0;
+    g_callocFailAt = -1;
   }
 };
 
@@ -181,6 +223,210 @@ TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
   EXPECT_FALSE(uniformRanksPerHost(p.comm(), 0));
 }
 
+// ===========================================================================
+// ncclP2pSchedule (init.cc:1311) -- builds comm->p2pSchedule, the per-round
+// send/recv rank pairing every P2P collective walks. Its only production caller
+// is initTransportsRank (init.cc:2188), far out of reach host-only; the
+// #include-the-.cc model lets us call the static helper directly with a
+// hand-built comm. gcd (utils.h), pow2Up (bitops.h) and ncclCalloc (alloc.h)
+// are all real header code here -- nothing about the algorithm is faked.
+// ===========================================================================
+namespace {
+// The minimal comm ncclP2pSchedule() reads: the nodeRanks table, the four
+// scalars it indexes with, and the p2pSchedule output array. Global ranks are
+// handed out node by node, matching how the real topology numbers them.
+class P2pScheduleComm {
+ public:
+  P2pScheduleComm(int nNodes, int node, int localRank, int nRanks, int maxLocalRanks,
+                  std::initializer_list<int> localRanksPerNode)
+      : nodeRanks_(localRanksPerNode.size()), comm_(new ncclComm{}) {
+    rankTables_.reserve(localRanksPerNode.size());  // keep .data() pointers stable
+    int nextRank = 0, i = 0;
+    for (int lr : localRanksPerNode) {
+      rankTables_.emplace_back(lr > 0 ? lr : 0);
+      for (int r = 0; r < lr; ++r) rankTables_.back()[r] = nextRank++;
+      nodeRanks_[i].localRanks = lr;
+      nodeRanks_[i].localRankToRank = rankTables_.back().data();
+      ++i;
+    }
+    schedule_.resize(nRanks > 0 ? nRanks : 0);
+    comm_->nNodes = nNodes;
+    comm_->node = node;
+    comm_->localRank = localRank;
+    comm_->nRanks = nRanks;
+    comm_->maxLocalRanks = maxLocalRanks;
+    comm_->nodeRanks = nodeRanks_.data();
+    comm_->p2pSchedule = schedule_.data();
+  }
+  ncclComm* get() { return comm_.get(); }
+  int sendRank(int round) const { return schedule_[round].sendRank; }
+  int recvRank(int round) const { return schedule_[round].recvRank; }
+
+ private:
+  std::vector<ncclNodeRanks> nodeRanks_;
+  std::vector<std::vector<int>> rankTables_;
+  std::vector<ncclComm::P2pSchedulePair> schedule_;
+  std::unique_ptr<ncclComm> comm_;
+};
+
+// Substring check for captured WARN/INFO text. These targets link GTest::GTest
+// only (no gmock), so ::testing::HasSubstr is unavailable.
+bool LogHas(const std::string& log, const char* needle) {
+  return log.find(needle) != std::string::npos;
+}
+
+// INFO() (debug.h:50) is gated on ncclDebugLevel, which nccl_fakes.cc pins to
+// NCCL_LOG_NONE -- so INFO never reaches the stderr-writing ncclDebugLog fake
+// and CaptureLog would see nothing. Raise the level/mask for the scope of a
+// capture, then put both back. (WARN is ungated, which is why the other
+// log-asserting suites need no such guard.)
+class ScopedInfoLogging {
+ public:
+  ScopedInfoLogging() : level_(ncclDebugLevel), mask_(ncclDebugMask) {
+    ncclDebugLevel = NCCL_LOG_INFO;
+    ncclDebugMask = NCCL_ALL;
+  }
+  ~ScopedInfoLogging() {
+    ncclDebugLevel = level_;
+    ncclDebugMask = mask_;
+  }
+  ScopedInfoLogging(const ScopedInfoLogging&) = delete;
+  ScopedInfoLogging& operator=(const ScopedInfoLogging&) = delete;
+
+ private:
+  int level_;
+  uint64_t mask_;
+};
+}  // namespace
+
+// NOTE -- init.cc:1331 (`if (0 != nodeRanks[n].localRanks % groupSize)`) is DEAD
+// CODE, not a coverage gap. The loop at init.cc:1314-1317 normalizes groupSize
+// first:
+//
+//   if (localRanks % groupSize != 0 || localRanks < groupSize)
+//     groupSize = gcd(groupSize, nodeRanks[node].localRanks);
+//
+// After each node either the condition was false (divisibility already held) or
+// gcd made it hold; and since every new groupSize divides the previous one, it
+// still divides every earlier node's localRanks. So on exit groupSize divides
+// ALL localRanks and the 1331 check can never be true. The only escape is
+// groupSize == 0, which SIGFPEs at line 1316 first. Verified against the Euclid
+// implementation at src/include/utils.h:105 for negative and zero inputs too.
+// Do not try to flip this branch -- reaching it requires a state the function's
+// own preceding loop makes impossible.
+
+TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
+  // nNodes == 1 -> groupSize comes from maxLocalRanks, not the param.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
+                    /*maxLocalRanks=*/4, {4});
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  // groupSize=4, one group: send walks +delta, recv walks -delta (mod 4).
+  const int expectSend[4] = {0, 1, 2, 3};
+  const int expectRecv[4] = {0, 3, 2, 1};
+  for (int r = 0; r < 4; ++r) {
+    EXPECT_EQ(expectSend[r], c.sendRank(r)) << "round " << r;
+    EXPECT_EQ(expectRecv[r], c.recvRank(r)) << "round " << r;
+  }
+}
+
+TEST_F(InitMicrotest, P2pSchedule_MultiNode_UsesGroupSizeParam) {
+  // nNodes > 1 takes the ncclParamGroupSize() arm; comm->node=1 makes the
+  // `n < comm->node` group-offset branch fire on node 0.
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(2) : deft;
+  };
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/1, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4, 4});
+  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
+  // 6 % 4 != 0 -> the first arm of the 1316 disjunction; gcd(4,6)=2 rescues it.
+  // The chosen groupSize is otherwise unobservable from outside the function --
+  // a wrong gcd would still produce a well-formed schedule -- so pin it via the
+  // INFO at init.cc:1348, which is the only place the value is reported.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/6,
+                    /*maxLocalRanks=*/4, {6});
+  std::string log;
+  ncclResult_t res = ncclInternalError;
+  {
+    ScopedInfoLogging info;
+    log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
+  }
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_TRUE(LogHas(log, "group size used is 2")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, P2pSchedule_EmptyNode_TakesLessThanArmAndSkipsGroupLoop) {
+  // localRanks=0 on node 1: 0 % 4 == 0 (first arm false) but 0 < 4 (second arm
+  // true) -- the only way to reach the second disjunct. It also makes
+  // nGroupsInNode 0, so the inner group loop is entered zero times.
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(4) : deft;
+  };
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
+                    /*maxLocalRanks=*/4, {4, 0});
+  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_NonPow2Groups_SkipsOutOfRangeDeltas) {
+  // nGroups=3 but nGroupsPow2=4, so the delta walk visits a value >= nGroups
+  // and takes the false arm of `if (groupDelta < nGroups)`. groupSize divides
+  // cleanly here, so no gcd shrink is involved.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/6,
+                    /*maxLocalRanks=*/2, {6});
+  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_GroupCountMismatch_ReturnsInternalError) {
+  // nRanks=8 with only 4 local ranks -> nGroups=2 but groupCount=1.
+  // NOTE: this path returns before the free() at init.cc:1370-1371 and leaks
+  // both groupToNode and groupToLocal.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4});
+  std::string log;
+  ncclResult_t res = ncclSuccess;
+  log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
+  EXPECT_EQ(ncclInternalError, res);
+  EXPECT_TRUE(LogHas(log, "Group creation failed"));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_RoundMismatch_ReturnsInternalError) {
+  // nRanks=6 with groupSize=4 -> nGroups=1 (integer division), so the schedule
+  // only emits 4 rounds and the final round==nRanks check fails.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/6,
+                    /*maxLocalRanks=*/4, {4});
+  std::string log;
+  ncclResult_t res = ncclSuccess;
+  log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
+  EXPECT_EQ(ncclInternalError, res);
+  EXPECT_TRUE(LogHas(log, "P2p schedule creation has bugs"));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_FirstCallocFails_ReturnsSystemError) {
+  g_callocFailAt = 0;  // groupToNode
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
+                    /*maxLocalRanks=*/4, {4});
+  EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_SecondCallocFails_ReturnsSystemError) {
+  // NOTE: this path returns with groupToNode already allocated and never freed.
+  g_callocFailAt = 1;  // groupToLocal
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
+                    /*maxLocalRanks=*/4, {4});
+  EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
+}
+
+TEST_F(InitMicrotest, P2pSchedule_ZeroNodes_AllocatesNothingAndSucceeds) {
+  // nGroups=0 drives ncclCalloc's nelem==0 arm (returns NULL without malloc),
+  // and both node loops are entered zero times. pow2Up(0)==1 (log2Up returns 0
+  // for 0), so the delta walk terminates after one skipped iteration.
+  P2pScheduleComm c(/*nNodes=*/0, /*node=*/0, /*localRank=*/0, /*nRanks=*/0,
+                    /*maxLocalRanks=*/1, {});
+  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+}
+
 // --- ctaPolicyIsValid (init.cc:132) -- pure; valid range is
 // [0, DEFAULT|EFFICIENCY|ZERO]. -----------------------------------------------
 TEST_F(InitMicrotest, CtaPolicyIsValid_Default_True) {
@@ -209,29 +455,6 @@ TEST_F(InitMicrotest, CtaPolicyIsValid_AboveMax_False) {
 // #include-the-.cc model exists to enable.
 // ===========================================================================
 namespace {
-// INFO() (debug.h:50) is gated on ncclDebugLevel, which nccl_fakes.cc pins to
-// NCCL_LOG_NONE -- so INFO never reaches the stderr-writing ncclDebugLog fake
-// and CaptureLog would see nothing. Raise the level/mask for the scope of a
-// capture, then put both back. (WARN is ungated, which is why the other
-// log-asserting suites need no such guard.)
-class ScopedInfoLogging {
- public:
-  ScopedInfoLogging() : level_(ncclDebugLevel), mask_(ncclDebugMask) {
-    ncclDebugLevel = NCCL_LOG_INFO;
-    ncclDebugMask = NCCL_ALL;
-  }
-  ~ScopedInfoLogging() {
-    ncclDebugLevel = level_;
-    ncclDebugMask = mask_;
-  }
-  ScopedInfoLogging(const ScopedInfoLogging&) = delete;
-  ScopedInfoLogging& operator=(const ScopedInfoLogging&) = delete;
-
- private:
-  int level_;
-  uint64_t mask_;
-};
-
 // Drives the unit from a known-clean ctaPolicyEnv with NCCL_CTA_POLICY set to
 // `value`; nullptr scripts the variable as *absent*. Returns the resulting
 // ctaPolicyEnv. The reset matters because the unit only ever assigns or
@@ -239,7 +462,7 @@ class ScopedInfoLogging {
 int RunCtaPolicyEnv(const char* value) {
   ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
   if (value) SetMicroEnv("NCCL_CTA_POLICY", value);
-  else       SetMicroEnvAbsent("NCCL_CTA_POLICY");
+  else SetMicroEnvAbsent("NCCL_CTA_POLICY");
   getEnvCtaPolicyOnce();
   return ctaPolicyEnv;
 }
@@ -250,10 +473,6 @@ int RunCtaPolicyEnv(const char* value) {
 std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
   ScopedInfoLogging info;
   return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
-}
-
-bool LogHas(const std::string& log, const char* needle) {
-  return log.find(needle) != std::string::npos;
 }
 }  // namespace
 
@@ -282,7 +501,11 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownDigit_LogsDefaultButLeavesUnset) {
   int policy = NCCL_CONFIG_UNDEF_INT;
   const std::string log = RunCtaPolicyEnvCapturingLog("7", &policy);
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);  // pins today's behaviour
-  EXPECT_TRUE(LogHas(log, "Unknown CTA policy"));
+  // "Unknown CTA policy" alone is a shared prefix of the legacy-digit message
+  // (init.cc:161) and the per-token one (init.cc:174), so it cannot tell this
+  // arm from the combine path. "Using DEFAULT instead" occurs exactly once in
+  // init.cc and is the phrase that constitutes the latent bug.
+  EXPECT_TRUE(LogHas(log, "Using DEFAULT instead")) << "actual log:\n" << log;
 
   // WHEN FIXED (assign DEFAULT in the `default:` arm), this is the test:
   // EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, policy);
@@ -296,7 +519,9 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedEfficiency_SelectsEfficiencyAndLogsPa
   int policy = NCCL_CONFIG_UNDEF_INT;
   const std::string log = RunCtaPolicyEnvCapturingLog("EFFICIENCY", &policy);
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, policy);
-  EXPECT_TRUE(LogHas(log, "Parsed environment variable NCCL_CTA_POLICY"));
+  // Assert the interpolated payload too, not just the sentence -- otherwise a
+  // wrong policy value or env string still satisfies the needle.
+  EXPECT_TRUE(LogHas(log, "NCCL_CTA_POLICY=EFFICIENCY to 1")) << "actual log:\n" << log;
 }
 TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedZero_SelectsZero) {
   EXPECT_EQ(NCCL_CTA_POLICY_ZERO, RunCtaPolicyEnv("ZERO"));
@@ -314,18 +539,26 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_MixedCaseModes_AccumulatesBoth) {
 }
 // An unrecognized token is reported and skipped; the recognized ones around it
 // still apply, covering the skip (174-F), first-assign and accumulate arms in
-// a single parse.
+// a single parse. This is the suite's only three-token input, so it is also the
+// only test that can observe strtok's continuation delimiter -- which is why
+// the third token must be EFFICIENCY (0x01) and not DEFAULT: DEFAULT is 0x00,
+// so ZERO|DEFAULT is bit-identical to ZERO alone and the oracle would be blind
+// to the third token being dropped entirely.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownTokenAmongValid_IgnoresOnlyTheUnknown) {
-  EXPECT_EQ(NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_DEFAULT,
-            RunCtaPolicyEnv("ZERO|BOGUS|DEFAULT"));
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY,
+            RunCtaPolicyEnv("ZERO|BOGUS|EFFICIENCY"));
 }
 // Nothing recognized at all -> both the per-token and the summary diagnostic.
-TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndWarnsTwice) {
+// "Logs", not "Warns": getEnvCtaPolicyOnce emits only INFO -- there is no WARN
+// anywhere in init.cc:144-187, and the two are gated differently (debug.h:40
+// vs :50), which is the whole reason ScopedInfoLogging exists.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) {
   int policy = NCCL_CONFIG_UNDEF_INT;
   const std::string log = RunCtaPolicyEnvCapturingLog("BOGUS", &policy);
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
-  EXPECT_TRUE(LogHas(log, "Ignoring"));
-  EXPECT_TRUE(LogHas(log, "No valid CTA policies found"));
+  // Name the offending token, not just the verb.
+  EXPECT_TRUE(LogHas(log, "Unknown CTA policy BOGUS")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
 }
 // Empty string: isdigit('\0') is false so it takes the combine arm, but strtok
 // yields no token at all -- the while loop body never runs.
@@ -333,13 +566,13 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_EmptyString_ParsesNoTokens) {
   int policy = NCCL_CONFIG_UNDEF_INT;
   const std::string log = RunCtaPolicyEnvCapturingLog("", &policy);
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
-  EXPECT_TRUE(LogHas(log, "No valid CTA policies found"));
+  EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
 }
 
 // LATENT BUG (init.cc:149): isdigit(env[0]) short-circuits the ENTIRE combine
 // syntax, so a leading digit makes everything after the first character
 // unreachable -- "0|EFFICIENCY" silently drops EFFICIENCY with no diagnostic.
-TEST_F(InitMicrotest, GetEnvCtaPolicy_LeadingDigitDropsCombinedModes) {
+TEST_F(InitMicrotest, GetEnvCtaPolicy_LeadingDigit_DropsCombinedModes) {
   EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, RunCtaPolicyEnv("0|EFFICIENCY"));  // pins today
 
   // WHEN FIXED (take the legacy arm only for a 1-char value, or parse digits as

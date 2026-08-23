@@ -29,9 +29,14 @@
 // micro_getenv lives here (macro inactive in this TU) and calls the real
 // getenv by default. Tests script values with SetMicroEnv().
 // -------------------------------------------------------------------------
+// Lifetime: micro_getenv returns a pointer into the map's own std::string. The
+// map is node-based so rehashing is safe, but re-scripting a name (SetMicroEnv
+// or SetMicroEnvAbsent on a key already present) invalidates a pointer an
+// earlier caller may still hold -- getEnvCtaPolicyOnce, for one, holds its
+// `env` across the whole parse. Do not re-script a name mid-call.
 const char* micro_getenv(const char* name);
-void SetMicroEnv(const char* name, const char* value);  // scripts one var
-void SetMicroEnvAbsent(const char* name);                // scripts one var as unset
+void SetMicroEnv(const char* name, const char* value);  // nullptr value == absent
+void SetMicroEnvAbsent(const char* name);                // readable alias for the above
 void ClearMicroEnv();                                    // back to real getenv
 
 // Controllable GIN error state: ncclGinQueryLastError() reports this. Tests set
