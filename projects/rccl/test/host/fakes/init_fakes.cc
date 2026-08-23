@@ -311,6 +311,21 @@ unsigned int g_rocmVersionMajor = 0;
 unsigned int g_rocmVersionMinor = 0;
 unsigned int g_rocmVersionPatch = 0;
 
+// initTransportsRank() seams; the stubs live in nccl_stubs.cc / transport_stubs.cc / topo_stubs.cc.
+// ncclOsCpuCount default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
+int g_ncclOsCpuCountValue                = 0;
+int g_ncclOsCpuCountCalls                = 0;
+int g_ncclOsSetAffinityCalls             = 0;
+ncclAffinity g_ncclOsSetAffinityLast     = {};
+ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
+int g_ncclMnnvlCheckCalls                = 0;
+// Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
+std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
+    [](int* level) { *level = 3; return ncclSuccess; };
+// Defaults to FAILURE -- it is the ladder terminator, and both call sites are on untested paths (seams.md 2).
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem =
+    [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
+
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
@@ -372,4 +387,12 @@ void ResetInitFakes() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_ncclOsCpuCountValue = 0;
+  g_ncclOsCpuCountCalls = 0;
+  g_ncclOsSetAffinityCalls = 0;
+  g_ncclOsSetAffinityLast = ncclAffinity{};
+  g_ncclMnnvlCheckResult = ncclSuccess;
+  g_ncclMnnvlCheckCalls = 0;
+  g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
+  g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
 }

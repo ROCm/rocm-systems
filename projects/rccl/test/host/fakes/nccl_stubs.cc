@@ -58,11 +58,35 @@ bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
-ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) { ::abort(); }
+// Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
+// so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
+extern ncclResult_t g_ncclMnnvlCheckResult;
+extern int g_ncclMnnvlCheckCalls;
+ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
+  g_ncclMnnvlCheckCalls++;
+  return g_ncclMnnvlCheckResult;
+}
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
-int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
+// Controllable (was fail-loud). initTransportsRank's exit: block (:2403) calls ncclOsCpuCount on EVERY path, so
+// nothing in that function is testable until this is seamed; the counter distinguishes exit: from the bare return at :1488.
+extern int g_ncclOsCpuCountValue;
+extern int g_ncclOsCpuCountCalls;
+int ncclOsCpuCount(const ncclAffinity& affinity) {
+  g_ncclOsCpuCountCalls++;
+  return g_ncclOsCpuCountValue;
+}
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
-ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
+// Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
+// comm->cpuAffinity vs any other mask is unobservable (seams.md: a fake that ignores an argument untests it).
+// No result knob yet -- exit::2404 discards the return value, and the checked site (:1610) is past
+// ncclTopoGetSystem, so nothing here could turn one. Add it with the phase-4 affinity tests.
+extern int g_ncclOsSetAffinityCalls;
+extern ncclAffinity g_ncclOsSetAffinityLast;
+ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
+  g_ncclOsSetAffinityCalls++;
+  g_ncclOsSetAffinityLast = affinity;
+  return ncclSuccess;
+}
 // Early env/system read reached by ncclInit(). Return a plausible, non-empty,
 // multi-token value: ncclInit() strtok_r()s the /proc/version read and then
 // strstr()s the resulting token, which would segfault on an empty string

@@ -20,6 +20,9 @@
 
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
+#include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
+
+struct ncclTopoSystem;
 
 // -------------------------------------------------------------------------
 // getenv seam. init.cc reads a couple of environment variables via
@@ -129,6 +132,23 @@ extern ncclResult_t g_initChannelResult;
 // the argument entirely, so `initChannel(comm, channelId) -> initChannel(comm, 0)`
 // is unobservable.
 extern int g_initChannelLastId;
+
+// -------------------------------------------------------------------------
+// initTransportsRank() seams (init.cc:1386). All five were fail-loud stubs.
+// ncclOsCpuCount is load-bearing: exit::2403 calls it on EVERY path, so nothing in the function was
+// testable until it was seamed, and its counter is the only way to see that :1488 skips exit:.
+// ncclTopoGetSystem stays defaulted to FAILURE on purpose -- it is the first call after the
+// MNNVL/intra-proc block, so that default is what terminates the ladder and makes :1462-1565
+// reachable. Its dumpXmlFile argument passes through so a test can tell :1573 from :1576.
+// -------------------------------------------------------------------------
+extern int g_ncclOsCpuCountValue;
+extern int g_ncclOsCpuCountCalls;
+extern int g_ncclOsSetAffinityCalls;
+extern ncclAffinity g_ncclOsSetAffinityLast;  // records the mask exit::2404 forwarded
+extern ncclResult_t g_ncclMnnvlCheckResult;
+extern int g_ncclMnnvlCheckCalls;  // the oracle for the :1503-1509 enable/auto/disable logic
+extern std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem;
 
 // Enable the full commAlloc() happy path in one call: flips the HIP deep-path
 // seams (attribute/PCIBusId/event/mempool/stream) to success and resets the
