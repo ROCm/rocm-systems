@@ -260,15 +260,33 @@ def iter_pr_files(
 
 
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
-    """Return the list of check-runs associated with a commit SHA."""
-    data = gh_get(
-        f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100",
-        token,
-    )
-    if not isinstance(data, dict):
-        raise RuntimeError("Unexpected check-runs payload")
-    runs = data.get("check_runs", [])
-    return runs if isinstance(runs, list) else []
+    """Return every check-run for a commit SHA, transparently paginating.
+
+    Pagination is not optional here. Busy PRs in this repo routinely exceed one
+    page (100), and the API returns check-runs newest-id-first, so the
+    earliest-created checks fall off the end -- which is exactly when formatting
+    and build jobs are created. A required check that lands on page 2 looks
+    *missing* to the caller, which reports it as still-running and then times
+    out, rather than reading its real conclusion.
+    """
+    runs: List[Dict[str, Any]] = []
+    page = 1
+    while True:
+        data = gh_get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}/check-runs"
+            f"?per_page=100&page={page}",
+            token,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected check-runs payload")
+        batch = data.get("check_runs", [])
+        if not isinstance(batch, list) or not batch:
+            return runs
+        runs.extend(item for item in batch if isinstance(item, dict))
+        total = data.get("total_count")
+        if isinstance(total, int) and len(runs) >= total:
+            return runs
+        page += 1
 
 
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:
@@ -484,6 +502,41 @@ def pr_has_code_files(policy: Policy, pr_files: Iterable[Dict[str, Any]]) -> boo
     return False
 
 
+OK_CONCLUSIONS = {"success", "neutral", "skipped"}
+
+
+def effective_run_by_name(
+    check_runs: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Collapse check-runs to one representative per name, worst outcome first.
+
+    A check-run name is NOT unique: several workflows in this repo publish a job
+    named `pre-commit`, and any PR touching more than one of their trigger paths
+    produces duplicates. Keying a dict on the name and letting the last write win
+    silently discards the others, so a failing required check can be masked by a
+    same-named passing one.
+
+    Precedence is failure > pending > ok, so a known failure is reported
+    immediately rather than waiting out the poll window on a sibling that is
+    still running.
+    """
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in check_runs:
+        if not isinstance(r, dict):
+            continue
+        name = r.get("name")
+        if isinstance(name, str):
+            grouped.setdefault(name, []).append(r)
+
+    def rank(run: Dict[str, Any]) -> int:
+        conc = run.get("conclusion")
+        if conc is None:
+            return 1  # still running
+        return 0 if str(conc) in OK_CONCLUSIONS else 2  # ok : failed
+
+    return {name: max(runs, key=rank) for name, runs in grouped.items()}
+
+
 def summarize_required_checks(
     policy: Policy,
     check_runs: List[Dict[str, Any]],
@@ -495,11 +548,7 @@ def summarize_required_checks(
       - failing: required checks that concluded not-success
       - conc_by_name: name -> conclusion (string; 'null' if none)
     """
-    by_name: Dict[str, Dict[str, Any]] = {}
-    for r in check_runs:
-        name = r.get("name")
-        if isinstance(name, str):
-            by_name[name] = r
+    by_name = effective_run_by_name(check_runs)
 
     conc_by_name: Dict[str, str] = {}
     for name, r in by_name.items():
@@ -508,7 +557,6 @@ def summarize_required_checks(
 
     missing = [n for n in policy.required_checks if n not in by_name]
 
-    ok = {"success", "neutral", "skipped"}
     failing: List[str] = []
     for n in policy.required_checks:
         r = by_name.get(n)
@@ -517,7 +565,7 @@ def summarize_required_checks(
         conc = r.get("conclusion")
         if conc is None:
             continue  # still running
-        if str(conc) not in ok:
+        if str(conc) not in OK_CONCLUSIONS:
             failing.append(f"{n}={conc}")
 
     return missing, failing, conc_by_name
@@ -715,12 +763,7 @@ def build_check_results(
     pre_commit_security.yml. To gate on such a workflow, add its check-run name
     to `checks.required_check_runs` in policy.yml.
     """
-    ok = {"success", "neutral", "skipped"}
-    by_name = {
-        r.get("name"): r
-        for r in check_runs
-        if isinstance(r, dict) and isinstance(r.get("name"), str)
-    }
+    by_name = effective_run_by_name(check_runs)
 
     def status_of(name: str) -> Tuple[bool, bool, Optional[str]]:
         """Return (passed, pending, conclusion) for one check-run."""
@@ -730,7 +773,7 @@ def build_check_results(
         conc = r.get("conclusion")
         if conc is None:
             return False, True, None
-        return str(conc) in ok, False, str(conc)
+        return str(conc) in OK_CONCLUSIONS, False, str(conc)
 
     results: List[CheckResult] = []
     for name in policy.required_checks:

@@ -15,6 +15,7 @@ Run locally:
 import re
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -559,6 +560,131 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("*_gtest.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
+
+
+class CheckRunPaginationTests(unittest.TestCase):
+    """get_check_runs must read every page, not just the first 100."""
+
+    def _fake_gh_get(self, pages: List[Dict[str, Any]]):
+        calls: List[str] = []
+
+        def _get(url: str, token: str) -> Dict[str, Any]:
+            calls.append(url)
+            # page= is 1-based; return an empty payload past the end.
+            idx = int(url.rsplit("page=", 1)[1]) - 1
+            return pages[idx] if idx < len(pages) else {"check_runs": []}
+
+        return _get, calls
+
+    def test_reads_beyond_the_first_page(self) -> None:
+        # 117 runs is the real shape of a busy rocm-systems PR, and the
+        # required `pre-commit` check lands on page 2.
+        page1 = {
+            "total_count": 117,
+            "check_runs": [{"name": f"job-{i}", "conclusion": "success"} for i in range(100)],
+        }
+        page2 = {
+            "total_count": 117,
+            "check_runs": (
+                [{"name": f"job-{i}", "conclusion": "success"} for i in range(100, 116)]
+                + [{"name": "pre-commit", "conclusion": "success"}]
+            ),
+        }
+        fake, calls = self._fake_gh_get([page1, page2])
+        with unittest.mock.patch.object(pc, "gh_get", fake):
+            runs = pc.get_check_runs("o", "r", "deadbeef", "tok")
+
+        self.assertEqual(len(runs), 117)
+        self.assertIn("pre-commit", {r["name"] for r in runs})
+        self.assertEqual(len(calls), 2)
+
+    def test_stops_once_total_count_is_reached(self) -> None:
+        page1 = {
+            "total_count": 2,
+            "check_runs": [
+                {"name": "a", "conclusion": "success"},
+                {"name": "b", "conclusion": "success"},
+            ],
+        }
+        fake, calls = self._fake_gh_get([page1])
+        with unittest.mock.patch.object(pc, "gh_get", fake):
+            runs = pc.get_check_runs("o", "r", "sha", "tok")
+
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(len(calls), 1, "should not request a page it does not need")
+
+    def test_stops_on_empty_page_without_total_count(self) -> None:
+        pages = [{"check_runs": [{"name": "a", "conclusion": "success"}]}]
+        fake, _ = self._fake_gh_get(pages)
+        with unittest.mock.patch.object(pc, "gh_get", fake):
+            runs = pc.get_check_runs("o", "r", "sha", "tok")
+
+        self.assertEqual(len(runs), 1)
+
+
+class DuplicateCheckRunNameTests(unittest.TestCase):
+    """Several workflows publish a job named `pre-commit`; duplicates must not mask."""
+
+    def _policy(self) -> pc.Policy:
+        # make_policy already defaults required_checks to ["pre-commit"].
+        return make_policy()
+
+    def test_a_failing_duplicate_is_not_masked_by_a_passing_one(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": "failure"},
+            {"name": "pre-commit", "conclusion": "success"},
+        ]
+        missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, ["pre-commit=failure"])
+
+    def test_order_does_not_matter(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": "success"},
+            {"name": "pre-commit", "conclusion": "failure"},
+        ]
+        _, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual(failing, ["pre-commit=failure"])
+
+    def test_failure_wins_over_a_still_running_duplicate(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": None},
+            {"name": "pre-commit", "conclusion": "failure"},
+        ]
+        _, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual(
+            failing,
+            ["pre-commit=failure"],
+            "a known failure should report now, not wait out the poll window",
+        )
+
+    def test_pending_wins_over_success(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": "success"},
+            {"name": "pre-commit", "conclusion": None},
+        ]
+        missing, failing, conc = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual(missing, [])
+        self.assertEqual(failing, [])
+        self.assertEqual(conc["pre-commit"], "null")
+
+    def test_all_passing_duplicates_pass(self) -> None:
+        runs = [
+            {"name": "pre-commit", "conclusion": "success"},
+            {"name": "pre-commit", "conclusion": "skipped"},
+        ]
+        missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual((missing, failing), ([], []))
+
+    def test_missing_required_check_is_reported_missing(self) -> None:
+        missing, failing, _ = pc.summarize_required_checks(self._policy(), [])
+        self.assertEqual(missing, ["pre-commit"])
+        self.assertEqual(failing, [])
+
+    def test_skipped_still_counts_as_a_pass(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": "skipped"}]
+        missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+        self.assertEqual((missing, failing), ([], []))
 
 
 if __name__ == "__main__":
