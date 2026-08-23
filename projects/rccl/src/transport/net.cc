@@ -8,6 +8,7 @@
 
 #include "comm.h"
 #include "net.h"
+#include "rccl_ib_multiseg.h"
 #include "graph.h"
 #include "proxy.h"
 #include "collectives.h"
