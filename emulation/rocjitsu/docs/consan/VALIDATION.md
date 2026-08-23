@@ -292,6 +292,15 @@ sizes before writing any filtered configuration, so a corpus addition,
 deletion, reorder, duplicate, or non-Exact problem form fails closed instead
 of silently narrowing the 96-row denominator.
 
+The two-block `tensile-sk-sgemm-quick` row is likewise sharded by its six
+shared Exact sizes. Every shard retains both distinct solution spaces,
+requires both generated clients and every emitted numerical row to pass, and
+has an independent ConSan coverage and teardown verdict. Three shards execute
+concurrently with 300-second inner and 360-second enclosing bounds. The source
+inventories must remain identical and exactly match the manifest, preventing
+the former execution-bound monolithic process from being replaced by a
+partial first-block claim.
+
 The eight-block `tensile-spmm-f8-ml` row uses the same contract for the three
 Exact sizes repeated identically by every block. The filtered YAML must retain
 all eight blocks and selects one size in each; differing block inventories

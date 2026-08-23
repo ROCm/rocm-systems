@@ -1286,6 +1286,15 @@ function(rj_add_consan_device_fixture_targets target)
             )
         endif()
         if(
+            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            AND target STREQUAL "gfx1250"
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_SPARSE_SPILL_GFX1250_COMPACT_SCALAR_PRESSURE=1
+            )
+        endif()
+        if(
             _workload_name STREQUAL "record_replay_sparse_dense_pipeline"
             AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
         )

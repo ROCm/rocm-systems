@@ -1936,6 +1936,26 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "tp2-combined": {
             "record_replay_runtime_sample_stride": 256,
         },
+        # The two SGEMM benchmark blocks repeat the same six Exact sizes but
+        # have very different solution spaces. Preserve both blocks in every
+        # shard and give each size an independent all-client oracle, teardown
+        # verdict, and coverage gate instead of accepting the old partial
+        # first-block transcript from one execution-bound monolithic process.
+        "tensile-sk-sgemm-quick": {
+            "tensile_inner_timeout_seconds": 300,
+            "run_timeout_seconds": 360,
+            "tensile_exact_problem_size_shards": (
+                ((127, 127, 1, 127),),
+                ((128, 128, 1, 128),),
+                ((129, 129, 1, 129),),
+                ((511, 511, 1, 511),),
+                ((512, 512, 1, 512),),
+                ((513, 513, 1, 513),),
+            ),
+            "tensile_expected_client_passes": 2,
+            "tensile_shard_parallelism": 3,
+            "tensile_fault_shard_index": 0,
+        },
         # Preserve all six exact problems and all 16 generated solutions per
         # problem, but give each exact size an independent numeric oracle,
         # teardown verdict, and coverage gate. Four RocJITsu-backed shards fit

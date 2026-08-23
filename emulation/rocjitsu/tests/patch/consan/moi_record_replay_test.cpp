@@ -5382,6 +5382,174 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
   }));
 }
 
+TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillPreservesKernargPreloadScalarWindow) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint16_t kExecWindowSize = 7u;
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr std::array<uint16_t, 4> kRouterScalars = {66u, 67u, 75u, 76u};
+
+  // This is the compact scalar shape distilled from Stream-K's preloaded
+  // GFX1250 kernels. Every eight-SGPR window is live at the dense LDS sites,
+  // while one PC pair and two independent scalars remain available to route
+  // a spill-backed probe. Sparse workgroup selection also needs that borrowed
+  // window at kernel entry, before any site-local spill can protect it.
+  std::vector<uint32_t> words;
+  for (uint32_t access = 0u; access < kAccessCount; ++access) {
+    words.push_back(0xD8340000u | access * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:access*4
+  }
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(kRouterScalars, sgpr) == kRouterScalars.end())
+      words.push_back(build_s_mov_b32(/*M0=*/125u, sgpr, kArch));
+  }
+  words.push_back(build_s_endpgm(kArch));
+  std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(words, "gfx1250_sparse_spill_kernarg_preload");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 32u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 8u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET, 0u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_runtime_sample_stride = 65'536u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_FALSE(assignment.branch_only_scalar_spill);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto first_save = instrumentation::build_v_writelane_b32(
+      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u, kArch);
+  const auto last_restore = instrumentation::build_v_readlane_b32(
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kExecWindowSize - 1u),
+      *prologue->entry_scalar_backup_vgpr, kExecWindowSize - 1u, kArch);
+  ASSERT_TRUE(first_save);
+  ASSERT_TRUE(last_restore);
+  EXPECT_TRUE(contains_subsequence(prologue_words, *first_save));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, SparseRecordReplaySpillPreservesEntryHashWindowAcrossTargets) {
+  constexpr uint16_t kExecSaveSgpr = 80u;
+  constexpr uint16_t kExecWindowSize = 7u;
+  for (const rj_code_arch_t arch : {
+           ROCJITSU_CODE_ARCH_CDNA3,
+           ROCJITSU_CODE_ARCH_CDNA4,
+           ROCJITSU_CODE_ARCH_CDNA5,
+           ROCJITSU_CODE_ARCH_RDNA3,
+           ROCJITSU_CODE_ARCH_RDNA4,
+       }) {
+    SCOPED_TRACE("arch=" + std::to_string(arch));
+    std::vector<uint32_t> words;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto access = arch == ROCJITSU_CODE_ARCH_CDNA3
+                              ? build_cdna3_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                         /*byte_offset=*/0u, arch)
+                              : build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                         /*byte_offset=*/0u, arch);
+      ASSERT_TRUE(access);
+      words.insert(words.end(), access->begin(), access->end());
+    } else {
+      words.push_back(0xD8340000u);
+      words.push_back(0x00000000u); // ds_store_b32 v0, v0
+    }
+    words.push_back(build_s_endpgm(arch));
+
+    const std::vector<uint8_t> bytes = [&]() {
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_CDNA3:
+        return make_cdna3_lds_code_object(words, "cdna3_sparse_spill_entry_hash");
+      case ROCJITSU_CODE_ARCH_CDNA4:
+        return make_cdna4_lds_code_object(words, "cdna4_sparse_spill_entry_hash");
+      case ROCJITSU_CODE_ARCH_CDNA5:
+        return make_gfx1250_code_object(words, "gfx1250_sparse_spill_entry_hash");
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        return make_rdna3_lds_code_object(words, "rdna3_sparse_spill_entry_hash");
+      case ROCJITSU_CODE_ARCH_RDNA4:
+        return make_rdna4_lds_code_object(words, "rdna4_sparse_spill_entry_hash");
+      default:
+        return std::vector<uint8_t>{};
+      }
+    }();
+    ASSERT_FALSE(bytes.empty());
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.scratch_vgpr = 8u;
+    options.moi_owner_vgpr = 40u;
+    options.moi_epoch_vgpr = 41u;
+    options.moi_init_owner_epoch = true;
+    options.moi_exec_save_sgpr = kExecSaveSgpr;
+    options.automatic_moi_record_replay_sgpr_spill = true;
+    options.moi_dispatch_id_sgpr = 60u;
+    options.moi_record_replay_workgroup_sgprs = {.x = 50u, .y = 51u, .z = 52u};
+    options.moi_runtime_sample_stride = 65'536u;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    const auto prologue = std::ranges::find(
+        result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+    ASSERT_NE(prologue, result.patches.end());
+    ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
+    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, kExecSaveSgpr);
+    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> prologue_words =
+        text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+    const auto first_save = instrumentation::build_v_writelane_b32(
+        *prologue->entry_scalar_backup_vgpr, kExecSaveSgpr, /*lane=*/0u, arch);
+    const auto last_restore = instrumentation::build_v_readlane_b32(
+        kExecSaveSgpr + kExecWindowSize - 1u, *prologue->entry_scalar_backup_vgpr,
+        kExecWindowSize - 1u, arch);
+    ASSERT_TRUE(first_save);
+    ASSERT_TRUE(last_restore);
+    EXPECT_TRUE(contains_subsequence(prologue_words, *first_save));
+    EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
 TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
   std::vector<uint32_t> low_pressure_words(320u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
   low_pressure_words[0] = 0xD8340000u;

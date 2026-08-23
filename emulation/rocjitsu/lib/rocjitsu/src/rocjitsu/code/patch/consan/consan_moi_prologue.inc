@@ -2620,19 +2620,32 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     const bool needs_branch_only_scalar_backup = kernel_options.moi_inline_branch_only_scalar_spill;
     const bool needs_dynamic_stack_scalar_backup =
         kernel_options.moi_inline_dynamic_stack_borrowed_sgpr.has_value();
-    const bool needs_full_entry_scalar_backup =
-        needs_branch_only_scalar_backup || needs_dynamic_stack_scalar_backup;
+    // A spill-backed Record/Replay probe protects its borrowed scalar window
+    // at each access body. Sparse workgroup selection uses that same window
+    // earlier, in the owner/epoch entry prologue, so it needs an independent
+    // entry save before any site-local spill exists. This is equally true for
+    // compact and branch-only routers and for every admitted architecture.
+    const bool needs_record_replay_runtime_scalar_backup =
+        kernel_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        kernel_options.automatic_moi_record_replay_sgpr_spill &&
+        kernel_options.moi_runtime_sample_stride > 1u;
+    const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
+                                                needs_dynamic_stack_scalar_backup ||
+                                                needs_record_replay_runtime_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
         kernel_options.automatic_moi_owner_sgpr &&
         kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
         kernel_options.moi_owner_sgpr.has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
-      if (!is_rdna4_family_arch(arch) || !kernel_options.moi_exec_save_sgpr ||
-          !kernel_options.automatic_moi_inline_sgpr_spill ||
+      const bool entry_backup_arch_supported =
+          instrumentation::is_admitted_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
+      const bool has_scalar_spill_contract = kernel_options.automatic_moi_inline_sgpr_spill ||
+                                             kernel_options.automatic_moi_record_replay_sgpr_spill;
+      if (!entry_backup_arch_supported || !kernel_options.moi_exec_save_sgpr ||
+          !has_scalar_spill_contract ||
           (needs_dynamic_stack_scalar_backup && !kernel_options.moi_dynamic_stack_spill)) {
         if (needs_full_entry_scalar_backup) {
-          result.errors.emplace_back(
-              "ConSan MOI branch-only entry scalar backup has no valid Inline spill contract");
+          result.errors.emplace_back("ConSan MOI entry scalar backup has no valid spill contract");
           return;
         }
       }

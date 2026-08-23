@@ -17,6 +17,7 @@ constexpr uint32_t kWaveSize = 32u;
 constexpr uint32_t kWaveSize = 64u;
 #endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
+constexpr uint32_t kWorkgroupCount = 2u;
 
 #if defined(RJ_CONSAN_SPARSE_DENSE_MODERN_LDS)
 #define RJ_CONSAN_SPARSE_DENSE_STORE "ds_store_b32"
@@ -43,8 +44,9 @@ __device__ __forceinline__ uint32_t dense_ordered_roundtrip(volatile uint32_t *a
                                                             uint32_t value) {
   const uint32_t address_value = lds_address(address);
   uint32_t observed = 0u;
-  asm volatile(".rept 64\n\t" RJ_CONSAN_SPARSE_DENSE_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_DENSE_LOAD
-               " %0, %1\n\t" RJ_CONSAN_SPARSE_DENSE_WAIT ".endr\n\t"
+  asm volatile(".rept 320\n\t" RJ_CONSAN_SPARSE_DENSE_STORE
+               " %1, %2\n\t" RJ_CONSAN_SPARSE_DENSE_LOAD " %0, %1\n\t" RJ_CONSAN_SPARSE_DENSE_WAIT
+               ".endr\n\t"
                : "=v"(observed)
                : "v"(address_value), "v"(value)
                : "memory");
@@ -70,7 +72,8 @@ __device__ __forceinline__ uint32_t load_lds(volatile uint32_t *address) {
 }
 
 __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_dense_pipeline_for_consan(
-    DeviceState *state) {
+    DeviceState *states) {
+  DeviceState *state = &states[blockIdx.x];
   __shared__ uint32_t warmup[kThreadCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -89,24 +92,31 @@ __global__ __launch_bounds__(kThreadCount) void record_replay_sparse_dense_pipel
 }
 
 void run_record_replay_sparse_dense_pipeline(bool synchronize) {
-  DeviceState state{};
-  state.synchronize = synchronize;
-  DeviceState *device_state = nullptr;
-  HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
-  HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  record_replay_sparse_dense_pipeline_for_consan<<<1, kThreadCount>>>(device_state);
+  std::array<DeviceState, kWorkgroupCount> states{};
+  for (DeviceState &state : states)
+    state.synchronize = synchronize;
+  DeviceState *device_states = nullptr;
+  HIP_ASSERT(hipMalloc(&device_states, sizeof(states)));
+  HIP_ASSERT(hipMemcpy(device_states, states.data(), sizeof(states), hipMemcpyHostToDevice));
+  record_replay_sparse_dense_pipeline_for_consan<<<kWorkgroupCount, kThreadCount>>>(device_states);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
-  HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipFree(device_state));
+  HIP_ASSERT(hipMemcpy(states.data(), device_states, sizeof(states), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_states));
 
-  for (uint32_t tid = 0u; tid < kThreadCount; ++tid) {
-    EXPECT_EQ(state.warmup[tid], 0xd1000000u | tid) << "thread=" << tid;
-    EXPECT_EQ(state.control[tid], 0xd3000000u | tid) << "thread=" << tid;
-  }
-  if (synchronize) {
-    for (uint32_t lane = 0u; lane < kWaveSize; ++lane)
-      EXPECT_EQ(state.observed[lane], 0xd2000000u | lane) << "lane=" << lane;
+  for (uint32_t workgroup = 0u; workgroup < kWorkgroupCount; ++workgroup) {
+    const DeviceState &state = states[workgroup];
+    for (uint32_t tid = 0u; tid < kThreadCount; ++tid) {
+      EXPECT_EQ(state.warmup[tid], 0xd1000000u | tid)
+          << "workgroup=" << workgroup << " thread=" << tid;
+      EXPECT_EQ(state.control[tid], 0xd3000000u | tid)
+          << "workgroup=" << workgroup << " thread=" << tid;
+    }
+    if (synchronize) {
+      for (uint32_t lane = 0u; lane < kWaveSize; ++lane)
+        EXPECT_EQ(state.observed[lane], 0xd2000000u | lane)
+            << "workgroup=" << workgroup << " lane=" << lane;
+    }
   }
 }
 

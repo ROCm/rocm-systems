@@ -3723,9 +3723,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
   }
   constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
   const uint16_t runtime_workgroup_gate_count =
-      options.moi_engine == ConSanMoiEngine::RecordReplay &&
-              options.moi_runtime_sample_stride > 1u &&
-              !options.automatic_moi_record_replay_sgpr_spill
+      options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_runtime_sample_stride > 1u
           ? kRuntimeWorkgroupGateSgprCount
           : 0u;
   if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
@@ -3733,8 +3731,14 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
     return std::max<uint16_t>(8u, runtime_workgroup_gate_count);
   if (options.automatic_moi_record_replay_sgpr_spill) {
     // Sampled access transfer and dense routing use slots +0..+7. Compact
-    // Record/Replay access, fence, and atomic bodies use only +0..+3.
-    return options.moi_engine == ConSanMoiEngine::Sampled ? 8u : 4u;
+    // Record/Replay access, fence, and atomic bodies use only +0..+3, but a
+    // sparse owner prologue hashes its workgroup in slots +0..+6 before any
+    // site-local scalar spill exists. Reserve the union so component
+    // placement and entry backup protect every register the complete
+    // transform can touch.
+    return options.moi_engine == ConSanMoiEngine::Sampled
+               ? 8u
+               : std::max<uint16_t>(4u, runtime_workgroup_gate_count);
   }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_dynamic_stack_spill)
     // Preserve the compiler frame base in addition to EXEC, VCC, and SCC.

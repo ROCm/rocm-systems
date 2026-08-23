@@ -128,13 +128,14 @@ selection in the no-longer-needed tuple x slot, and reuses it at access,
 barrier, atomic, and fence probes without adding persistent registers.
 
 The adjacent checked-in `RecordReplaySparseDensePipeline` pair distills that
-behavior into 128 ordered LDS warmup sites plus a two-wave publication edge.
-It runs at stride two and preserves exact warmup, publication, and control
-oracles; only the incorrect member removes the publication barrier. Baseline
-and Record/Replay pass all 20 simulator rows on gfx942, gfx950, gfx1100,
-gfx1201, and gfx1250 in 3.92 seconds, and all four physical-gfx950 rows in 1.28
-seconds. A five-target host regression requires the cached selection and full
-gfx1250 cluster-coordinate mix.
+behavior into 642 static LDS sites, including 640 ordered warmup store/load
+sites, plus a two-wave publication edge. Two workgroups independently retain
+every exact warmup, publication, and control result under the stride-two
+cached selection; only the incorrect member removes the publication barrier.
+Baseline and Record/Replay pass all 20 simulator rows on gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250, and the strengthened pair passes all four
+physical-gfx950 rows. A five-target host regression requires the cached
+selection and full gfx1250 cluster-coordinate mix.
 
 The follow-on `RecordReplaySparseSpillPressure` pair retains the same
 stride-two selected/rejected workgroup behavior, raises the inventory to 130
@@ -988,12 +989,56 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
 | P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟩 All 96/96 exact numerical rows pass with complete 2448/2448 access, 544/544 barrier, and 64/64 fence coverage and lossless replay. The current paired slowdown is 19.47x. A prospectively reviewed exact-one redundant-barrier mutation is reached, preserves the exact oracle, produces the expected qualified miss, and passes containment, health, and cleanup. Focused host regressions plus the adjacent high-bank/double-barrier LDS device pair protect the distilled behavior | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Dense relay hosts may no longer move gfx1250 VGPR-bank transitions. Exact-size sharding replaces the obsolete monolithic timeout path while preserving all six configured problem sizes. |
 | P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
-| P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
+| P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 Exact-size sharding preserves both benchmark blocks. Clean sizes 127/128/129 pass both clients; sizes 511/512/513 pass one client before the bound. After the sparse spill-entry repair, size 128 Record/Replay passes both exact clients with 640/640 accesses, 44/44 barriers, 8/8 fences, zero diagnostics, and a complete verdict. The other five paired shards and reviewed fault are not yet requalified | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | Six fail-closed exact-size shards replace the obsolete monolithic process while retaining both solution spaces. Record/Replay stays yellow until every shard plus paired/fault evidence is accepted. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
 | P2 | `006_sk_hgemm_quick` | 🟧 136 exact numeric passes with zero failures; first 143-solution problem remains active at 300 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.02x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟧 Current tip executes 189 exact rows with zero failures before the fixed 180-second bound | Record/Replay and Sampled are accepted; SuperCollider and Inline Shadow lack a full-client verdict. |
 | P3 | `015_spmm_f8_ml` stress | 🟧 First contraction exact numeric pass; 298/4316 accesses; second orientation active at 120 seconds | 🟨 Current clean E2E accepts all eight generated clients with 172,468/172,468 accesses and 3,060/3,060 barriers. Multi-block exact-size sharding now preserves all eight clients in each of three concurrent size slices, but the large-size baseline's first client remains compute-active beyond five minutes; paired and reviewed-fault bundles remain. A new quick target-native sparse-FP8 behavioral pair covers packed low/D16-high stores, byte/transposed metadata loads, live SWMMAC publication, and the missing-edge diagnostic in all ten baseline/engine rows. | 🟩 All eight generated clients exact; 172,468/172,468 accesses and 6,120/6,120 barriers; paired 4.88x; reviewed fault, containment, and health accepted | 🟧 Exact failing kernel fixed; standard run has 8 passes and zero failures before its bound | Sampled is accepted; Record/Replay lacks paired/fault evidence, and the other profiles remain bounded. |
 | P2 | `019_spmm_f16_sb` closure | 🟧 9,546/9,546 accesses patched; first client exceeds 300 seconds without a numeric row | 🟩 Four exact orientations; 31,265/31,265 accesses; current paired 2.48x | 🟧 9,546/9,546 accesses and 646/646 applicable barriers patched; first client exceeds 300 seconds without a numeric row | 🟧 9,546/9,546 accesses and 323/323 barriers patched; first client exceeds 300 seconds without a numeric row | Sampled is accepted; the other profiles retain the bounded partial results shown in their cells. |
 | Survey | Remaining Tensile configurations | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows, including full `019_spmm_f16_sb` bundle | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | 🟩 Architecture-level decoded opcode union covered by accepted selected rows | Survey complete; selected high-signal rows above define the executable denominator. |
+
+### 2026-08-23 `000_sk_sgemm_quick` sparse Record/Replay scalar preservation
+
+The source has two benchmark blocks with distinct solution spaces and the same
+six Exact sizes: 127, 128, 129, 511, 512, and 513. The executable manifest now
+creates one size shard while retaining both blocks, requires both generated
+clients and every emitted numerical row to pass, and fails closed if either
+source inventory changes. Three shards may run concurrently, but every shard
+keeps its own 300-second client bound, ConSan verdict, coverage gate, and
+teardown evidence. A focused harness regression pins the complete inventory,
+two-client denominator, fault shard, and timeout policy.
+
+Bounded clean runs pass both clients for sizes 127, 128, and 129 in 84--136
+seconds. Sizes 511, 512, and 513 pass their first client before the second
+remains active at the bound. Before the repair, standard sparse Record/Replay
+failed all six shards: the small cases produced zero numerical output or a
+segmentation fault even though the first object was statically complete at
+640/640 accesses, 44/44 barriers, and 8/8 fences. Dense stride-one execution
+passed the first size-128 solution, isolating the failure to sparse entry
+selection rather than Tensile arithmetic or general instrumentation.
+
+The generated wave32 kernels had no dead seven-SGPR window. Record/Replay
+therefore borrowed a compact guest scalar window and protected it at every
+access body, but sparse workgroup selection used seven registers from that
+window earlier in the kernel-entry prologue, before the site-local save. The
+resource planner also reserved only the four access-body registers, omitting
+the last three entry-hash registers. The entry path now preserves the full
+seven-register union on every supported family whenever sparse Record/Replay
+borrows guest scalar state.
+
+The size-128 shard now passes both exact Tensile clients under the unchanged
+standard stride, with lossless replay, 640/640 accesses, 44/44 barriers, 8/8
+fences, zero diagnostics, and a complete final verdict. Evidence is retained
+under
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-sgemm-rr-sharded-v1`.
+The checked-in `RecordReplaySparseSpillPressure` correct/incorrect pair now
+uses the same compact gfx1250 scalar shape while preserving exact
+kernel-argument-dependent results; its 20 portable simulator baseline and
+Record/Replay rows pass, with gfx1250 complete at 260/260 accesses and 4/4
+barrier members. A gfx1250 host reduction retains the motivating
+kernarg-preload shape, and a second host regression requires the seven-register
+entry save/restore encoding on CDNA3/4/5 and RDNA3/4. The remaining five E2E
+shards and reviewed fault evidence are still required before the yellow cell
+can turn green.
 
 ### 2026-08-22 `015_spmm_f8_ml` Record/Replay sharding diagnostic
 
