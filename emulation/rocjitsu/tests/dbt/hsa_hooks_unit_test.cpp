@@ -443,6 +443,7 @@ bool g_fail_core_memory_allocate = false;
 bool g_offer_coarse_report_region = false;
 int g_core_memory_allocate_calls = 0;
 int g_core_memory_free_calls = 0;
+int g_core_memory_runtime_reclaim_calls = 0;
 std::vector<size_t> g_core_memory_allocation_sizes;
 std::vector<uint64_t> g_core_memory_allocation_regions;
 std::vector<void *> g_core_memory_allocations;
@@ -976,6 +977,15 @@ hsa_status_t HSA_API fake_core_memory_free(void *ptr) {
   g_core_memory_allocations.erase(it);
   std::free(ptr);
   return HSA_STATUS_SUCCESS;
+}
+
+void fake_runtime_reclaim_core_memory() {
+  g_core_memory_runtime_reclaim_calls += static_cast<int>(g_core_memory_allocations.size());
+  for (void *allocation : g_core_memory_allocations)
+    std::free(allocation);
+  g_core_memory_allocations.clear();
+  g_core_memory_allocation_sizes.clear();
+  g_core_memory_allocation_regions.clear();
 }
 
 hsa_status_t HSA_API fake_memory_assign_agent(void *, hsa_agent_t agent, hsa_access_permission_t) {
@@ -1664,6 +1674,10 @@ public:
   void unload() {
     if (on_unload_ != nullptr && needs_unload_) {
       on_unload_();
+      // A real HSA runtime reclaims any remaining runtime allocations after
+      // the tool's OnUnload callback returns. Model that separately from the
+      // callable hsa_memory_free API so shutdown tests can detect re-entry.
+      fake_runtime_reclaim_core_memory();
       needs_unload_ = false;
       installed_ = false;
     }
@@ -1789,6 +1803,7 @@ void reset_core_memory_observations() {
   g_offer_coarse_report_region = false;
   g_core_memory_allocate_calls = 0;
   g_core_memory_free_calls = 0;
+  g_core_memory_runtime_reclaim_calls = 0;
   g_core_memory_allocation_sizes.clear();
   g_core_memory_allocation_regions.clear();
   g_core_memory_headers_at_free.clear();
@@ -5338,7 +5353,8 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
     }
 
     EXPECT_TRUE(g_core_memory_allocations.empty());
-    EXPECT_EQ(g_core_memory_free_calls, 1);
+    EXPECT_EQ(g_core_memory_free_calls, 0);
+    EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
   }
 }
 
@@ -5473,6 +5489,56 @@ rocjitsu::ConSanResult auto_sc_transform_result() {
   patch.kind = rocjitsu::ConSanPatchKind::LocalCaveLdsStoreCheckTrap;
   result.patches.push_back(patch);
   return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanOnUnloadDefersLiveReportFreeToRuntime) {
+  struct Case {
+    const char *mode;
+    bool supercollider;
+    bool sampled;
+  };
+  constexpr std::array cases = {
+      Case{"supercollider", true, false},
+      Case{"record-replay", false, false},
+      Case{"sampled", false, true},
+  };
+
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.mode);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", test.mode);
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = test.supercollider ? auto_sc_transform_result()
+                                  : test.sampled     ? auto_report_sampled_transform_result()
+                                                     : auto_report_replay_transform_result();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+      EXPECT_EQ(g_core_memory_free_calls, 0);
+      EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 0);
+    }
+
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+    EXPECT_EQ(g_core_memory_free_calls, 0);
+    EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
+  }
 }
 
 TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallback) {
@@ -6181,7 +6247,8 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 1);
+  EXPECT_EQ(g_core_memory_free_calls, 0);
+  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
   for (std::string_view field :
        {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
         "replay_input_access=2", "conflict=true", "metadata_full=false",
@@ -6240,7 +6307,8 @@ TEST(HsaHooksUnitTest, AutoReplayCompactsSparseFixedCapacityBeforeReplay) {
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 1);
+  EXPECT_EQ(g_core_memory_free_calls, 0);
+  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
   for (std::string_view field :
        {"committed_records=2", "replay_input_access=2", "published_access=2", "processed_access=2",
         "dropped_access=0", "diagnostics=1", "conflict=true"}) {
@@ -6283,7 +6351,8 @@ TEST(HsaHooksUnitTest, AutoReplayBoundsSparseShadowAndFailsClosedForOverlimitRan
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 1);
+  EXPECT_EQ(g_core_memory_free_calls, 0);
+  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
   EXPECT_EQ(log.find(" skipped "), std::string::npos) << log;
   for (std::string_view field :
        {"ConSan MOI replay shadow bounded reader=101", "required_shadow_entries=1048578",
@@ -6377,7 +6446,8 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
       << log;
   EXPECT_EQ(log.find("code_object=missing"), std::string::npos) << log;
   EXPECT_TRUE(g_core_memory_allocations.empty());
-  EXPECT_EQ(g_core_memory_free_calls, 2);
+  EXPECT_EQ(g_core_memory_free_calls, 0);
+  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 2);
 }
 
 TEST(HsaHooksUnitTest, AutoSampledReportLogsPatchProvenance) {

@@ -1692,8 +1692,17 @@ private:
                                    bool allow_runtime_reclaimed) const {
     bool freed = entry.ptr == nullptr;
     hsa_status_t free_status = HSA_STATUS_SUCCESS;
-    if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
-      freed = allow_runtime_reclaimed;
+    if (!freed && allow_runtime_reclaimed) {
+      // OnUnload is a callback from inside ROCR shutdown. Do not re-enter an
+      // HSA allocation API while the runtime may hold its shutdown locks;
+      // ROCR reclaims the allocation after the callback returns.
+      freed = true;
+      log_message(kLogInfo,
+                  "ConSan SC auto report cleanup reader=%llu "
+                  "outcome=runtime-reclaimed",
+                  static_cast<unsigned long long>(entry.reader));
+    } else if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
+      // Non-shutdown cleanup must retain the entry for a later retry.
     } else if (!freed) {
       free_status = core->hsa_memory_free_fn(entry.ptr);
       freed = free_status == HSA_STATUS_SUCCESS ||

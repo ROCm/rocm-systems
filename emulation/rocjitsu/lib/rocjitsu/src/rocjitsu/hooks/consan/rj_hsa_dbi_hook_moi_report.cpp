@@ -459,20 +459,21 @@ private:
   [[nodiscard]] bool release_entry(CoreApiTable *core, Entry &entry, bool allow_runtime_reclaimed) {
     bool freed = entry.ptr == nullptr;
     hsa_status_t free_status = HSA_STATUS_SUCCESS;
-    if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
-      freed = allow_runtime_reclaimed;
-      if (freed) {
-        // ROCR clears its callable API table before invoking a tool's late
-        // OnUnload callback. Allocations from that runtime are no longer live.
-        log_message(kLogInfo,
-                    "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
-                    "outcome=runtime-reclaimed api=unavailable",
-                    static_cast<unsigned long long>(entry.reader), entry.size);
-      }
+    if (!freed && allow_runtime_reclaimed) {
+      // OnUnload runs from inside ROCR shutdown. Even when the API-table entry
+      // remains non-null, re-entering hsa_memory_free can deadlock against the
+      // runtime's shutdown locks. ROCR owns and reclaims these allocations as
+      // shutdown continues after OnUnload returns.
+      freed = true;
+      log_message(kLogInfo,
+                  "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
+                  "outcome=runtime-reclaimed",
+                  static_cast<unsigned long long>(entry.reader), entry.size);
+    } else if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
+      // Non-shutdown cleanup requires a callable free API; keep the entry live
+      // so a later executable-destroy or shutdown path can reclaim it.
     } else if (!freed) {
       free_status = core->hsa_memory_free_fn(entry.ptr);
-      // ROCR may invoke the tool's OnUnload callback after runtime shutdown
-      // has already reclaimed its allocation registry.
       freed = free_status == HSA_STATUS_SUCCESS ||
               free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
               free_status == HSA_STATUS_ERROR_NOT_INITIALIZED;
