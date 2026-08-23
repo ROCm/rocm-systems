@@ -26,12 +26,15 @@ namespace profiler_hub
 
 namespace
 {
-// Per-track nesting_model (see nesting_model_t in reader_types.hpp): cpu_thread is the
-// only `stack` (call-tree) track; every other track type is `lane` (concurrency).
-
+// The per-track nesting_model assignment. Region (cpu_thread) is the ONLY track whose
+// overlapping intervals are a genuine synchronous call tree (HIP->HSA API nesting) ->
+// `stack`, so its events carry a containment parent. Every other track's overlaps are
+// concurrency, not containment (a kernel dispatch overlapping another is not its child;
+// memory copies, streams, PMC/memory-activity samples likewise) -> `lane`, parent always
+// no-parent.
 // schema_version is stored as "3" (v3) or "4.0.0"/"4.1.0" (v4); the leading integer is
-// the major version. Returns -1 when there is no leading digit so the caller falls
-// through to the metadata-less detection path rather than guessing a version.
+// the major version. Returns -1 when there is no leading digit so the caller can fall
+// through to the metadata-less detection path rather than guess a version.
 int
 schema_major_from_version(const std::string& version)
 {
@@ -67,25 +70,26 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 {
-    // The read backend is selected once here, off rocpd_metadata.schema_version, so every
-    // m_read_statements->foo() call site downstream is schema-agnostic with no per-call
-    // schema sniffing. Detection is binary: major version 4 (schema_version "4.0.0" or
-    // "4.1.0") selects the v4 backend, major version 3 selects v3. Reading the stored
-    // version avoids inferring it from the presence of the convention-named
-    // rocpd_timestamp_{uuid} table, which is unreliable when the uuid is truncated and
-    // could misdetect a v4 DB as v3. schema_version_major is not used: it is an
-    // unsubstituted "{{...}}" placeholder on templated captures, whereas schema_version
-    // itself is always concrete.
+    // Version dispatch: the read backend is selected ONCE here, off the AUTHORITATIVE
+    // rocpd_metadata.schema_version VALUE, so every
+    // m_read_statements->foo() call site downstream stays schema-agnostic and there is no
+    // per-call schema sniffing. Detection is binary: major version 4 (covers BOTH v4.0 =
+    // "4.0.0" AND v4.1 = "4.1.0") selects the v4 backend, 3 selects v3. Reading the
+    // stored version rather than inferring it from the presence of the convention-named
+    // rocpd_timestamp_{uuid} table removes a hidden coupling to get_uuid(): a truncated
+    // uuid used to make that existence probe miss and misdetect a real v4 DB as v3.
+    // schema_version_major is NOT used — it is an unsubstituted "{{...}}" placeholder on
+    // templated captures, whereas schema_version itself is always concrete.
     //
-    // Three tiers (mirroring discover_uuids' probe-then-read) cover every input shape;
-    // each SELECT is prepared only after sqlite_master confirms its object exists, since
-    // preparing a read against a missing view/table throws:
+    // Three tiers (mirroring discover_uuids' probe-then-read) keep every input shape
+    // green; each SELECT is prepared only after sqlite_master confirms its object exists,
+    // because preparing a read against a missing view/table throws:
     //   Primary    - unsuffixed rocpd_metadata view (real captures + committed .db
-    //                fixtures).
-    //   Fallback A - suffixed rocpd_metadata_<uuid> table (.sql-generated fixtures load
-    //                rocpd_tables.sql only, so they have no unsuffixed view).
-    //   Fallback B - no rocpd_metadata anywhere (e.g. metadata-less captures): falls back
-    //                to the rocpd_timestamp_<uuid> existence probe.
+    //   fixtures) Fallback A - suffixed rocpd_metadata_<uuid> table (.sql-generated
+    //   fixtures load
+    //                rocpd_tables.sql only, so they have no unsuffixed view)
+    //   Fallback B - no rocpd_metadata anywhere (e.g. metadata-less captures): retain the
+    //                original rocpd_timestamp_<uuid> existence probe, behavior unchanged.
     const auto uuid = m_backend->get_uuid();
 
     auto object_exists = [&](const std::string& name) {
@@ -171,7 +175,8 @@ reader_t::impl::initialize_all_info_lists()
     m_track_info_list         = get_tracks();
 
     // Stamp each track's nesting_model from its type once the full list is built (covers
-    // both v3 synthesis and v4 build_v4_tracks).
+    // both v3 synthesis and v4 build_v4_tracks). max_lane is filled lazily on first
+    // get_interval_track (see below).
     for(auto& t : m_track_info_list)
     {
         if(t) t->nesting = nesting_for(t->type);
@@ -346,13 +351,15 @@ reader_t::impl::get_tracks()
             return m_track_info_list;
         }
 
-        // v3 rocpd_track is not a reliable cpu_thread registry (a grab-bag of activity
-        // rows), so cpu_thread/region tracks are synthesized from rocpd_region in
-        // synthesize_derived_tracks() instead. rocpd_track is used here only to emit
-        // counter tracks: a track is a counter track iff a PMC-backed rocpd_sample
-        // references it (Q10 — v3 counters key on rocpd_track via rocpd_sample.track_id).
-        // Region timer-sample tracks (no rocpd_pmc_event) are excluded by
-        // distinct_sample_track_ids().
+        // v3 rocpd_track is not a reliable cpu_thread registry (it is a grab-bag of
+        // activity rows), so cpu_thread/region tracks are NOT taken from it — they are
+        // synthesized from rocpd_region in synthesize_derived_tracks(). rocpd_track is
+        // used here ONLY to emit counter tracks: a track is a counter track iff at least
+        // one PMC-backed rocpd_sample references it — i.e. a sample row that joins
+        // rocpd_pmc_event (Q10 — v3 counters still key on rocpd_track via
+        // rocpd_sample.track_id). Region timer-sample tracks (samples with no
+        // rocpd_pmc_event) are excluded by distinct_sample_track_ids(). Classify up
+        // front.
         std::unordered_set<size_t> counter_track_ids;
         for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
         {
@@ -374,8 +381,8 @@ reader_t::impl::get_tracks()
         m_track_info_list.reserve(track_info_list.size());
         for(const auto& track_info : track_info_list)
         {
-            // Only counter tracks are sourced from rocpd_track (see above); skip every
-            // non-counter row.
+            // Only counter tracks are sourced from rocpd_track; cpu_thread/region tracks
+            // are synthesized from rocpd_region below. Skip every non-counter row.
             const bool is_counter =
                 counter_track_ids.find(track_info.id) != counter_track_ids.end();
             if(!is_counter) continue;
@@ -866,8 +873,10 @@ reader_t::impl::build_v4_tracks()
         memory_alloc_track_ids.insert(r.track_id);
     }
 
-    // track_ids present in both discovery sets are ambiguous: counter classification
-    // takes precedence (see ambiguous_classification in reader_types.hpp).
+    // Detect track_ids that appear in both counter and memory-allocate discovery sets.
+    // Counter classification takes precedence (is_counter checked before is_memory), so
+    // an overlapping track would silently lose its memory-allocate events. No known DB
+    // triggers this today; this set is telemetry only — no precedence change.
     std::unordered_set<size_t> ambiguous_classification_ids;
     for(const auto& id : counter_track_ids)
     {
@@ -909,9 +918,11 @@ reader_t::impl::build_v4_tracks()
             if(sit != m_string_info_utility.end()) track_name = sit->second;
         }
 
-        // Classification order: counter (a rocpd_sample reference overrides any other
-        // pattern), then memory-allocate (see above), then queue_id -> gpu_queue,
-        // stream_id -> dma, otherwise cpu_thread.
+        // Classify the track from its identity columns. Counter is checked first (a
+        // rocpd_sample reference overrides any other column pattern). Memory-allocate is
+        // checked before gpu_queue because both may carry agent_id + queue_id on their
+        // rocpd_track row; the rocpd_memory_allocate set breaks the ambiguity. Then
+        // queue_id → gpu_queue, stream_id → dma, otherwise cpu_thread.
         const bool is_counter =
             counter_track_ids.find(track_info.id) != counter_track_ids.end();
         const bool is_memory =
@@ -1054,10 +1065,10 @@ reader_t::impl::build_v4_tracks()
     }
 
     // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
-    // memory_copy + memory_allocate events sharing that stream (additive: the same
-    // events also appear in their per-op tracks). Unlike the 1:1 tracks above, a stream
-    // spans multiple rocpd_track rows, so it is synthesized with ids above the max real
-    // rocpd_track id.
+    // memory_copy + memory_allocate events sharing that stream. Unlike the 1:1 tracks
+    // above, a stream spans multiple rocpd_track rows, so these are synthesized with ids
+    // allocated above the max real rocpd_track id — never colliding with a real track.
+    // Additive: the same events also appear in their per-op tracks, matching Optiq.
     size_t next_id = 1;
     for(const auto& track_info : track_info_list)
     {
@@ -1107,9 +1118,11 @@ reader_t::impl::build_v4_tracks()
     }
 
     // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
-    // rocpd_pmc_event JOIN rocpd_kernel_dispatch JOIN rocpd_track (v4 SQL sources
-    // nid/pid/agent_id from rocpd_track; v3 reads them directly from
-    // rocpd_kernel_dispatch). Synthesized with ids above the max real rocpd_track id.
+    // rocpd_pmc_event JOIN rocpd_kernel_dispatch JOIN rocpd_track. Keyed to match
+    // Optiq's GetRocprofPerformanceCountersTrackQuery GROUP BY. The v4 SQL uses
+    // rocpd_track.nid/pid/agent_id (same fields as the v3 SQL, which reads them
+    // directly from rocpd_kernel_dispatch). Synthesized with ids above max real id
+    // so they never collide with the real rocpd_track classification above.
     for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -2018,9 +2031,15 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
     return event_meta->line_info;
 }
 
-// Opaque-handle overloads: build a minimal timeline_event_t from the handle's private
-// {row_id, type} and delegate to the timeline_event_t overloads above. event_id_t
-// opacity is preserved — no public type/row_id accessor is added.
+// Opaque-handle overloads. These build a minimal timeline_event_t from the handle's
+// private {row_id, type} and delegate to the timeline_event_t overloads above -- the
+// exact internal bridge the region case of get_event_info already uses (see the
+// get_arguments call there). The decode lives entirely inside the reader, so event_id_t
+// opacity is preserved: no public type/row_id accessor is added, and the consumer only
+// ever holds the opaque handle. resolve_event_metadata reads only
+// unique_identifier.{id,type}, so this minimal event is sufficient; types with no stack
+// or source context (sample / pmc_event) fall through to the empty-return semantics of
+// the delegates.
 reader_types::call_stack_t
 reader_t::impl::get_call_stack(const reader_types::event_id_t& id)
 {
@@ -2063,7 +2082,14 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
     return args;
 }
 
-// Opaque-handle overload: same bridge as get_call_stack(event_id_t) above.
+// Opaque-handle overload: build a minimal timeline_event_t from the handle's private
+// {row_id, type} and delegate to the timeline_event_t overload above -- the same internal
+// bridge as get_call_stack(event_id_t). The decode lives entirely inside the reader, so
+// event_id_t opacity is preserved: no public type/row_id accessor is added, and the
+// consumer only ever holds the opaque handle. resolve_event_metadata reads only
+// unique_identifier.{id,type}, so this minimal event is sufficient; types with no
+// arguments (sample / pmc_event) fall through to the empty-return semantics of the
+// delegate.
 reader_types::arg_data_list_t
 reader_t::impl::get_arguments(const reader_types::event_id_t& id)
 {
@@ -2276,14 +2302,16 @@ interval_event_type_for(reader_types::track_type_t t)
         case reader_types::track_type_t::memory:
             return reader_types::event_type_t::memory_allocate;
         case reader_types::track_type_t::kernel_dispatch_pmc:
-            // A kd_pmc interval row is identified by the pair (kernel_dispatch_id,
-            // pmc_id): both v3 and v4 kd_pmc interval SQL select K.id (a
+            // A kd_pmc interval row is really identified by the PAIR (kernel_dispatch_id,
+            // pmc_id) -- both v3 and v4 kd_pmc interval SQL SELECT K.id (a
             // rocpd_kernel_dispatch.id), not a rocpd_pmc_event.id. event_id_t carries
-            // only (type, row_id), so the handle is typed as kernel_dispatch and resolves
-            // through the kernel_dispatch detail path. The specific counter value /
-            // pmc_id is not recoverable from the handle alone — an accepted limitation,
-            // since a consumer clicking a specific pmc track already has that pmc
-            // context.
+            // only (type, row_id), so we type the handle as kernel_dispatch and let it
+            // resolve through the kernel_dispatch detail path (correct name/ts/te + KD
+            // props). The specific counter value / pmc_id is NOT recoverable from the
+            // handle alone -- an accepted, documented limitation (a consumer clicking a
+            // specific pmc track already has that pmc context). Returning pmc_event here
+            // was the bug: it routed the K.id to the point pmc_event detail path (WHERE
+            // rocpd_pmc_event.id = ?), resolving wrong.
             return reader_types::event_type_t::kernel_dispatch;
         case reader_types::track_type_t::cpu_thread:
         default: return reader_types::event_type_t::region;
@@ -2537,22 +2565,28 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         events.push_back(std::move(ev));
     }
 
-    // Rows arrive ORDER BY start ascending. Lane packing (all tracks) and containment
-    // (stack tracks only) are computed over the full track so lanes stay stable
-    // regardless of any time-window filter applied afterward; the resulting peak
-    // concurrency is cached on the track (see max_lane in reader_types.hpp).
+    // Rows arrive ORDER BY start ascending. Compute lane packing (all tracks) +
+    // containment (stack tracks only) over the full track so lanes/levels are stable
+    // regardless of any time-window filter applied afterwards. Cache peak concurrency on
+    // the track so height consumers can read it via get_tracks() (Optiq
+    // level->max_lane migration target).
     const auto max_lane = detail::compute_interval_layout(events, nesting_for(qi.type));
     auto       tit      = m_track_info_utility.find(track_id);
     if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
 
-    // Optional time-window filter uses overlap, not containment: a bar is kept iff its
-    // extent [ev.start, ev.end] intersects [lo, hi], boundary-inclusive, and dropped
-    // only when it lies entirely outside the window. This matches the overlap
-    // convention used by get_events_* and get_flows_in_window elsewhere in this reader.
-    //
-    // The window is applied here in C++, after compute_interval_layout runs over the
-    // full track, so lane/parent layout stays stable across pans and zooms regardless
-    // of the active window.
+    // Optional time-window filter uses OVERLAP, not containment. An interval bar is kept
+    // iff its extent [ev.start, ev.end]
+    // intersects the window [lo, hi]; it is dropped only when it lies entirely outside
+    // (ends before lo, or starts after hi). Boundary-inclusive (< / >, so a bar merely
+    // touching an edge is kept). This matches the two existing overlap conventions in
+    // this reader — the get_events_* SQL predicate (read_statements.hpp:808-809
+    // "a.start <= ? AND a.end >= ?") and get_flows_in_window — because a timeline render
+    // must show every bar that crosses the visible viewport, including bars straddling
+    // its edges. Containment (the previous rule) silently dropped straddling bars.
+    // The window is deliberately NOT pushed into SQL: full-track lane/parent layout is
+    // computed above (compute_interval_layout) over the entire track BEFORE this filter,
+    // so lanes stay stable across pans/zooms. Pushing the window into the query would
+    // relayout each windowed read and make lanes jump. C++ post-filter only.
     if(filter.time_window.start.has_value() || filter.time_window.end.has_value())
     {
         const auto&                         lo = filter.time_window.start;
@@ -2715,8 +2749,9 @@ reader_t::impl::get_track_stats(size_t track_id)
         return stats;
     }
 
-    // MIN/MAX/COUNT aggregates whose routing mirrors get_interval_track /
-    // get_scalar_track, so bounds/count agree with a full slice load.
+    // Cheap MIN/MAX/COUNT aggregates over exactly the rows get_interval_track /
+    // get_scalar_track would return for this track. Routing mirrors those methods so
+    // bounds/count agree with a full slice load without materializing event rows.
     std::vector<data_storage::track_stats_result> rows;
 
     if(m_is_v4)
@@ -2871,8 +2906,8 @@ reader_t::impl::get_track_stats(size_t track_id)
     reader_types::track_stats_t stats;
     if(!rows.empty())
     {
-        // Aggregate query yields exactly one row; min_ts/max_ts are nullopt here because
-        // SQL MIN/MAX over an empty set is NULL (matching count == 0).
+        // Aggregate query yields exactly one row. min_ts/max_ts are nullopt when the
+        // track has no events (SQL MIN/MAX over an empty set), matching count == 0.
         stats.min_ts = rows.front().min_ts;
         stats.max_ts = rows.front().max_ts;
         stats.count  = rows.front().count;
@@ -2954,8 +2989,9 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
                 dst = key.second;
             }
 
-            // flow_id groups a causal chain: all edges of one stack_id clique share
-            // flow_id == that stack_id (see get_flows_for_chain). Reversible.
+            // flow_id groups a causal chain. All edges of one stack_id clique share
+            // flow_id = that stack_id, so a multi-hop lineage is recoverable by grouping
+            // on flow_id and sorting by src start. Reversible.
             flows.push_back(reader_types::flow_edge_t{
                 src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
@@ -2997,8 +3033,8 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 reader_types::flow_list_t
 reader_t::impl::get_flows_for_event(const reader_types::event_id_t& id)
 {
-    // Cheap post-filter over the full edge list: the clique join is not indexable by a
-    // single endpoint.
+    // Adjacent edges: those with `id` as either endpoint. Cheap post-filter over the
+    // full built edge list (the clique join is not indexable by a single endpoint).
     reader_types::flow_list_t out;
     for(auto& f : get_flows({}))
         if(f.source == id || f.dest == id) out.push_back(f);
@@ -3008,7 +3044,8 @@ reader_t::impl::get_flows_for_event(const reader_types::event_id_t& id)
 reader_types::flow_list_t
 reader_t::impl::get_flows_for_chain(const reader_types::flow_id_t& flow_id)
 {
-    // Cheap post-filter: flow_id is assigned during the clique build, not a query key.
+    // Chain members: every edge sharing this flow_id. Cheap post-filter over the full
+    // built edge list (flow_id is assigned during the clique build, not a query key).
     reader_types::flow_list_t out;
     for(auto& f : get_flows({}))
         if(f.flow_id == flow_id) out.push_back(f);
@@ -3026,11 +3063,12 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
-    // A flow_edge_t carries no timestamps or track_id, so this selector cannot
-    // post-filter get_flows({}) directly like the adjacency/chain selectors. Instead each
-    // endpoint's (start, end) and track membership are resolved by sweeping the interval
-    // tracks via get_interval_track, which hides the v3/v4 track-id difference so both
-    // backends yield identical selector semantics.
+    // A flow_edge_t carries no timestamps and no track_id, so this selector cannot
+    // post-filter get_flows({}) the way the adjacency/chain selectors do. Flow endpoints
+    // are always interval events (region/kd/mc/ma), so resolve each endpoint's (start,
+    // end) and its track membership by sweeping the interval tracks once. This goes
+    // through get_interval_track, which already hides the v3-synthesized-vs-v4-column
+    // track-id difference, so both backends yield identical selector semantics.
     struct endpoint_geom
     {
         reader_types::timestamp_t start{};
@@ -3075,9 +3113,10 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
         const auto& gs = geom[e.source];
         const auto& gd = geom[e.dest];
 
-        // Full temporal extent per get_flows_in_window's contract; the superset (rather
-        // than just src.end..dst.start) is a conservative bound on the true arrow span.
-        // Reversible.
+        // Window overlap uses the edge's full temporal extent
+        // [min(src.start,dst.start), max(src.end,dst.end)] (conservative superset of the
+        // src.end->dst.start arrow), included iff it intersects the window; empty window
+        // = no filter. Reversible.
         if(has_window)
         {
             const auto elo = std::min(gs.start, gd.start);
@@ -3085,8 +3124,9 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
             if(elo > whi || ehi < wlo) continue;
         }
 
-        // Kept iff at least one endpoint sits on a listed track (see
-        // get_flows_in_window's tracks contract); empty tracks = all. Reversible.
+        // An edge is kept iff AT LEAST ONE endpoint sits on a listed track, so a
+        // cross-track arrow with one endpoint off-screen still surfaces its visible half;
+        // empty tracks = all. Reversible.
         if(!track_set.empty())
         {
             bool touches = false;
@@ -3145,8 +3185,8 @@ reader_t::impl::build_pmc_event_data(const data_storage::scalar_detail_result& r
     auto tit = m_track_info_utility.find(row.track_id);
     if(tit != m_track_info_utility.end()) data.sample.track = tit->second;
 
-    // v3 has no event-by-event_id read statement, so the common event metadata
-    // (data.event) is left null here.
+    // NOTE(v3): no event-by-event_id read statement exists, so the common event
+    // metadata (data.event) is left null here. Flagged as an open question.
     return data;
 }
 
@@ -3216,10 +3256,11 @@ reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
 // Unified event detail
 // ============================================================================
 
-// get_event_info is the single public detail path; the seven typed get_*_details
-// methods remain as private impl helpers, reused here for their SQL + FK resolution
-// only (their public surface is removed). Optiq is the sole consumer. Revisit if a
-// second consumer needs the rich typed structs back on the public API.
+// Full-replace of the seven typed get_*_details public methods with this one collapsed
+// path. The typed methods survive as private impl helpers, reused here to reuse their SQL
+// + FK resolution; only their public surface is gone. Optiq is the sole consumer and
+// migrates to get_event_info. Revisit if a second consumer needs the rich typed structs
+// back on the public API.
 std::optional<reader_types::event_info_t>
 reader_t::impl::get_event_info(const reader_types::event_id_t& id)
 {
@@ -3228,12 +3269,12 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
     reader_types::event_info_t detail;
     detail.id = id;
 
-    // Property keys are the source struct's field name in snake_case (region
-    // call-arguments use the argument's own name). Values are typed: unsigned
-    // counts/ids/addresses -> uint64_t, counter value -> double, args -> string. An
-    // absent optional scalar or a null linked entity is omitted from the bag (not
-    // emitted as monostate/nullptr_t). Revisit if a consumer needs presence-vs-absence
-    // disambiguation.
+    // Property-key naming = the source struct's field name, snake_case; region
+    // call-arguments are keyed by the argument's own name. Values are typed (unsigned
+    // counts/ids/addresses -> uint64_t, counter value -> double, args -> string).
+    // Optional-field policy: an absent std::optional scalar or a null linked entity is
+    // OMITTED from the bag (not emitted as monostate/nullptr_t), applied uniformly.
+    // Revisit if a consumer needs presence-vs-absence disambiguation.
     auto push_u = [&](std::string key, size_t v) {
         detail.properties.push_back({ std::move(key), static_cast<uint64_t>(v) });
     };
@@ -3285,8 +3326,12 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
             push_u("grid_size_z", d->grid_size_z);
             push_opt_u("private_segment_size", d->private_segment_size);
             push_opt_u("group_segment_size", d->group_segment_size);
-            // kernel_dispatch's optional entities (kd agent/stream/queue) that the detail
-            // row doesn't carry are simply absent under the omit policy above.
+            // Linked entities collapse to their integer id (kernel_symbol_id,
+            // code_object_id, node_id, process_id, thread_id, ...), NOT the resolved
+            // sub-struct -- a deliberate collapse loss; the consumer does a follow-up
+            // lookup by id. Entities the detail row does not carry (kd agent/
+            // stream/queue) are simply absent under the omit policy. Revisit if consumers
+            // need the resolved entity inline.
             if(d->kernel_symbol_info)
                 push_u("kernel_symbol_id", d->kernel_symbol_info->id);
             if(d->code_object_info) push_u("code_object_id", d->code_object_info->id);
@@ -3345,9 +3390,11 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
         }
         case event_type_t::sample:
         {
-            // A sample-typed id is always a counter sample: get_scalar_track's counter
-            // arm is the sole mint site. It is a point event (te stays nullopt); name
-            // comes from the track, value from scalar_detail() via build_pmc_event_data.
+            // A sample-typed id is unambiguously a counter sample -- get_scalar_track
+            // (counter arm) is the sole event_type_t::sample mint site. Its detail is
+            // the counter name (from the track) + value (from scalar_detail()); it is a
+            // point event so te stays nullopt. build_pmc_event_data sources value +
+            // timestamp + track from the one scalar_detail row.
             auto rows =
                 m_read_statements
                     ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))

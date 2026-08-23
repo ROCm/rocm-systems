@@ -57,9 +57,11 @@ TEST_F(reader_test, get_events_for_track_returns_empty_for_null_track)
     EXPECT_TRUE(reader->get_events_for_track(nullptr).empty());
 }
 
-// DISABLED: get_tracks() synthesizes tracks from actual event/sample data, so a
-// track registered with no events is not surfaced by this reader (returns 0
-// tracks).
+// DISABLED: renamed get_all_tracks->get_tracks compiles, but the semantics
+// differ — our get_tracks() synthesizes tracks from actual event/sample data, so a track
+// registered with no events is not surfaced (returns 0), whereas develop's
+// get_all_tracks() returned raw registered rocpd_track rows. Semantic collision beyond a
+// mechanical rename; equivalent coverage is a deferred port chunk.
 TEST_F(reader_test, DISABLED_get_events_for_track_returns_events_for_registered_track)
 {
     auto writer = make_writer();
@@ -81,10 +83,13 @@ TEST_F(reader_test, DISABLED_get_events_for_track_returns_events_for_registered_
     EXPECT_TRUE(reader->get_events_for_track(tracks[0]).empty());
 }
 
-// These tests exercise a since-removed API surface (get_region_details,
+// DISABLED: the per-type detail getters (get_region_details,
 // get_kernel_dispatch_details, get_memory_copy_details, get_memory_alloc_details,
-// get_sample_details, get_pmc_event_details) and are commented out rather than
-// DISABLED_-annotated, because DISABLED_ would still require them to compile.
+// get_sample_details, get_pmc_event_details) were consolidated into the single
+// get_event_info(event_id_t). These develop tests exercise the removed
+// surface; re-adding equivalent get_event_info coverage is a deferred port chunk, not
+// this rebase-baseline task. Commented out (not DISABLED_-prefixed) because the removed
+// methods would otherwise fail to compile.
 /*
 TEST_F(reader_test, get_region_details_returns_matching_data)
 {
@@ -263,14 +268,14 @@ TEST_F(reader_test, get_event_counts_reflects_inserted_event)
 }
 
 // ============================================================================
-// Track-scoped API tests — v4.0 real-capture fixture (rocpd_v4.db): cpu_thread,
-// gpu_queue, dma interval tracks and flows. No counter samples here; the scalar
-// path is covered by reader_v4_counter_test. The DB is the original v4.0
-// capture's data (same suffix, agent identities, event distribution),
-// reconstructed at build time from a committed SQL dump
-// (fixtures/rocpd_v4_realcapture_data.sql, DL-017) rather than restored from a
-// captured binary; the rebuild is verified byte-identical (md5
-// 9a6c50152390123d4d9e32ac923e66cf).
+// Track-scoped API tests — v4.0 real-capture fixture (rocpd_v4.db)
+// cpu_thread + gpu_queue + dma interval tracks and flows. This fixture has no
+// counter samples, so the scalar path is covered by reader_v4_counter_test.
+// The DB is the original real v4.0 capture's data -- same table suffix, same
+// agent identities, same event distribution -- reconstructed at build time
+// from a committed SQL dump (fixtures/rocpd_v4_realcapture_data.sql, DL-017)
+// rather than restored from a captured binary file. The rebuild is verified
+// byte-identical to the original capture (md5 9a6c50152390123d4d9e32ac923e66cf).
 // ============================================================================
 
 class reader_v4_test : public ::testing::Test
@@ -293,14 +298,18 @@ protected:
     std::shared_ptr<profiler_hub::reader_t>  m_reader;
 };
 
-// Coverage cell A2 x underscore-joined hyphenated-GUID suffix
-// (`00001eca_d4de_74de_b70e_c34ecf8c3a87`; fixture provenance above).
-// Confirms backend selection via a v4-ONLY oracle a v3 backend cannot
-// reproduce: the cpu_thread interval spine materialized through
-// rocpd_timestamp (384 regions) and the GPU agent resolving to an MI300X.
-// Stream tracks are excluded as the oracle because they exist on both v3
-// and v4 paths and so cannot discriminate the backend. m_is_v4 is private;
-// this is its public behavioral proxy.
+// Coverage cell A2 x underscore-joined hyphenated-GUID suffix.
+// rocpd_v4.db's rocpd table suffix is the realistic underscore-joined hyphenated
+// GUID `00001eca_d4de_74de_b70e_c34ecf8c3a87`, carried
+// unchanged into the committed SQL dump this DB is now rebuilt from (DL-017) --
+// the suffix, agent identities, and event distribution are the original genuine
+// v4.0 capture's, reconstructed from that dump rather than a captured binary
+// file. This asserts the reader selects the v4 read backend on that suffix by
+// checking a v4-ONLY oracle that a v3 backend cannot reproduce on this capture:
+// the cpu_thread interval spine is materialized through rocpd_timestamp
+// (v4-only; 384 regions) AND the GPU agent resolves to an MI300X. Stream tracks are
+// deliberately NOT used here because they exist on BOTH v3 and v4 paths and so cannot
+// discriminate the backend. m_is_v4 is private; this is its public behavioral proxy.
 TEST_F(reader_v4_test, selects_v4_backend_on_underscore_joined_hyphenated_suffix)
 {
     auto tracks = m_reader->get_tracks();
@@ -501,12 +510,15 @@ TEST_F(reader_v4_test, v4_get_interval_track_dma_carries_category)
     }
 }
 
-// These three tests verify get_event_info's full unified header (name/ts/te) and
-// typed properties bag on the v4 backend, which resolves them through
-// rocpd_timestamp + rocpd_string + rocpd_info_category (a different table set than
-// v3). ts/te are checked against a runtime oracle (the interval's own start/end) to
-// stay robust to fixture edits; property values are checked against the confirmed
-// rocpd_v4.db oracle.
+// v4 get_event_info parity for INTERVAL events. The v4 interval tests
+// above assert only .has_value() + .category; the v3 side asserts the full unified header
+// (name/ts/te) AND the typed properties bag (get_event_info_region_header_and_category,
+// _kernel_dispatch_properties, _memory_copy_properties). These three tests close that v4
+// parity gap for the flagship unified-detail API on the v4 read backend, which
+// resolves the header + properties through a different table set than v3 (rocpd_timestamp
+// spine + rocpd_string + rocpd_info_category). ts/te use a runtime oracle (== the
+// interval's own start/end) so they stay robust to fixture edits; property values are the
+// confirmed rocpd_v4.db oracle.
 TEST_F(reader_v4_test, v4_get_event_info_region_header)
 {
     auto tracks = m_reader->get_tracks();
@@ -520,7 +532,8 @@ TEST_F(reader_v4_test, v4_get_event_info_region_header)
 
     auto detail = m_reader->get_event_info(first.id);
     ASSERT_TRUE(detail.has_value());
-    // name resolves from rocpd_string; ts/te resolve from the rocpd_timestamp spine.
+    // Full header, not just category: name resolved from rocpd_string, ts/te from the
+    // rocpd_timestamp spine. Runtime oracle for ts/te == the interval's own extent.
     EXPECT_EQ(detail->name, "hsa_system_get_major_extension_table");
     EXPECT_EQ(detail->category, first.category);
     EXPECT_EQ(detail->ts, first.start);
@@ -548,7 +561,7 @@ TEST_F(reader_v4_test, v4_get_event_info_kernel_dispatch_properties)
     EXPECT_EQ(detail->te.value(), first.end);
 
     // Typed properties bag populated on the v4 path (front dispatch: id=1, wg_x=16,
-    // grid_x=1024).
+    // grid_x=1024). Pre-parity the v4 interval detail arm asserted none of these.
     auto* dispatch_id = find_prop(*detail, "dispatch_id");
     ASSERT_NE(dispatch_id, nullptr);
     ASSERT_TRUE(std::holds_alternative<uint64_t>(*dispatch_id));
@@ -613,8 +626,8 @@ TEST_F(reader_v4_test, v4_get_scalar_track_on_interval_track_returns_empty)
 TEST_F(reader_v4_test, v4_get_flows_links_regions_to_gpu_events)
 {
     // v4 fixture flows: 20 region->kernel_dispatch + 2 region->memory_copy = 22.
-    // Every source is a region; every dest is a GPU-side type, matching the v3
-    // backend's type-tag contract.
+    // Flat clique, so the new categories add nothing; this asserts type-tag parity
+    // with the v3 backend (every source is a region; dest is a GPU-side type).
     using fk   = profiler_hub::reader_types::flow_kind_t;
     auto flows = m_reader->get_flows();
     ASSERT_EQ(flows.size(), 22);
@@ -673,10 +686,11 @@ TEST_F(reader_v4_test, v4_get_interval_track_stream_aggregates_ops_with_op_kind)
     // rocpd_track; each UNION leg JOINs rocpd_track ON stream_id and resolves times
     // through the timestamp spine. This capture's sole stream (stream_id=0) unions
     // 20 kernel_dispatch + 2 memory_copy + 0 memory_allocate = 22 events. The stream
-    // aggregates across ops: its earliest start (a memory_copy at 516609915990946)
-    // precedes the gpu_queue's first dispatch (516609921772013), proving it is not
-    // just the queue track relabeled. Each event's opaque handle encodes its type,
-    // classified via type_of() and resolved through get_event_info().
+    // aggregates ACROSS ops, so its earliest start (a memory_copy at 516609915990946)
+    // precedes the gpu_queue's first dispatch (516609921772013) — proof the stream is
+    // not just the queue track relabeled. The event's opaque handle encodes its type,
+    // so it classifies via type_of() and resolves through get_event_info (op_kind is
+    // retired).
     auto tracks = m_reader->get_tracks();
     auto stream =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::stream);
@@ -717,8 +731,8 @@ TEST_F(reader_v4_test, v4_get_track_stats_stream_matches_interval_slice)
     ASSERT_EQ(stats.count, 22U);
 }
 
-// The windowed count path has a separate v4 SQL implementation
-// (read_statements_v4.hpp).
+// Parity check on the v4.0 backend: the windowed count path uses a
+// separate v4 SQL implementation (read_statements_v4.hpp), so exercise it too.
 TEST_F(reader_v4_test, v4_get_event_counts_time_window_filters)
 {
     using event_type_t    = profiler_hub::reader_types::event_type_t;

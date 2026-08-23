@@ -22,10 +22,10 @@
 namespace profiler_hub::data_storage::schema_v3
 {
 
-// Result structs, func typedefs, and set structs are defined in
-// read_statements_base.hpp (namespace profiler_hub::data_storage) and inherited
-// here. This is the v3 backend, implementing the abstract read_statements_base
-// accessors.
+// All result structs, func typedefs, and set structs are defined in
+// read_statements_base.hpp (namespace profiler_hub::data_storage) and are
+// inherited here. This is the v3 backend: same SQL as before, now overriding
+// the abstract read_statements_base accessors.
 struct read_statements : public read_statements_base
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -1350,14 +1350,15 @@ private:
             make_summary_time_filtered_stmt("rocpd_region", "name_id");
     }
 
-    // Ranks per-track pmc candidates for v3 counter tracks. One AMD-SMI poll co-samples
-    // all of an agent's metrics under a single rocpd_sample.event_id, so a plain
-    // sample->pmc_event join fans a track out to every co-sampled pmc. rn=1 is the
-    // track's own pmc: the candidate whose ip.name matches the track's name_id string
-    // (agent ordinal " [N]" stripped) ranks first, with pmc_id as tiebreaker.
-    // rocpd_string is LEFT-joined so a NULL name_id falls back to the tiebreaker instead
-    // of dropping the track. Shared by counter_track_names and the four scalar
-    // value/detail queries so all five resolve each track to the same pmc.
+    // Ranked per-track pmc candidates for v3 counter tracks. One AMD-SMI poll
+    // co-samples all of an agent's metrics under a single rocpd_sample.event_id, so a
+    // plain sample->pmc_event join on event_id fans a track out to every co-sampled
+    // pmc. rn=1 is the track's own pmc: rank the candidate whose ip.name matches the
+    // track's name_id string (agent ordinal " [N]" stripped, exact match) first, with
+    // pmc_id as the deterministic tiebreaker for non-per-metric tracks. rocpd_string is
+    // LEFT-joined so a NULL name_id degrades to the tiebreaker rather than dropping the
+    // track. Shared verbatim by the counter metadata query (counter_track_names) and the
+    // four scalar value/detail queries so all five resolve each track to the same pmc.
     static std::string ranked_pmc_resolver(const std::string& u)
     {
         return fmt::format(
@@ -1484,12 +1485,13 @@ private:
                 &distinct_region_result::tid,
                 &distinct_region_result::is_sample);
 
-        // Stream tracks aggregate events sharing a stream across three event tables. v3
-        // stream_id is inline on each, so union the distinct non-null identities
-        // (kernel_dispatch.stream_id is NOT NULL; memory_copy / memory_allocate are
-        // nullable). NULL stream_id is excluded: a stream track needs a concrete
-        // identity (stream_info_t.stream_id is non-optional). See the stream interval
-        // query below for the three-table union.
+        // Stream tracks aggregate events sharing a stream across three event tables.
+        // v3 stream_id is inline on each, so union the distinct non-null stream
+        // identities (kernel_dispatch.stream_id is NOT NULL; memory_copy /
+        // memory_allocate are nullable). NULL stream_id is excluded: a stream track
+        // requires a concrete stream identity (stream_info_t.stream_id is non-optional).
+        // See the stream interval query below for how the three tables are unioned per
+        // stream.
         m_distinct_stream_tracks =
             m_backend->create_read_statement_executor<distinct_stream_result>(
                 fmt::format(
@@ -1509,9 +1511,10 @@ private:
         // Counter tracks are the sample tracks that are actually PMC-backed: a track_id
         // is a counter iff at least one of its rocpd_sample rows joins rocpd_pmc_event on
         // event_id. Region timer-sample tracks (rocpd_sample -> rocpd_region, zero
-        // rocpd_pmc_event) are NOT counters; a bare "DISTINCT track_id FROM rocpd_sample"
-        // would over-include them. The join mirrors resolved_pmc_join /
-        // counter_track_names so discovery and value resolution agree on the same set.
+        // rocpd_pmc_event) share the sample table but are NOT counters; a bare
+        // "DISTINCT track_id FROM rocpd_sample" over-includes them. The event_id join
+        // mirrors resolved_pmc_join / counter_track_names so discovery and value
+        // resolution agree on the same counter set.
         m_distinct_sample_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
                 fmt::format("SELECT DISTINCT s.track_id FROM rocpd_sample_{u} s "
@@ -1542,14 +1545,15 @@ private:
     {
         const auto& u = m_uuid;
 
-        // cpu_thread: region events keyed on (nid, pid, tid), split main vs. sample. main
-        // = regions whose event has no rocpd_sample; sample = regions whose event does.
-        // Together they partition the thread's regions, matching the two synthesized
-        // region tracks (region_track_kind_t main / sample). Category resolves in-SQL to
-        // its display string (rocpd_string via rocpd_event.category_id), mirroring the
-        // timeline-event category_name pattern; rocpd_event / rocpd_string are LEFT
-        // JOINed so the row set stays identical to the pre-category query (and to
-        // get_track_stats' count) — category is additive, NULL when absent.
+        // cpu_thread: region events keyed on (nid, pid, tid), split main vs. sample.
+        // main = regions whose event has no rocpd_sample; sample = regions whose event
+        // does. Together they partition the thread's regions, matching the two
+        // synthesized region tracks (region_track_kind_t main / sample).
+        // Category is resolved in-SQL to its display string (rocpd_string via
+        // rocpd_event.category_id), mirroring the timeline-event category_name pattern.
+        // rocpd_event / rocpd_string are LEFT JOINed so the returned row set stays
+        // identical to the pre-category query (and to get_track_stats' count) — category
+        // is purely additive, NULL when an event or category is absent.
         m_region_interval_track_main =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -1606,12 +1610,13 @@ private:
             &interval_row_result::name_ref,
             &interval_row_result::category);
 
-        // dma: memory copies keyed on (nid, pid, queue_id, dst_agent_id), matching
-        // Optiq's GetRocprofMemoryCopyTrackQuery by-destination-agent grouping. NULL
-        // queue_id / dst_agent_id are distinct group values, so one variant is prepared
-        // per NULL pattern. Category resolves in-SQL via rocpd_event/rocpd_string (LEFT
-        // JOIN, additive, mirroring the region/kernel_dispatch/stream interval queries);
-        // the row set matches get_track_stats' count, with category NULL when absent.
+        // dma: memory copies keyed on (nid, pid, queue_id, dst_agent_id) to match Optiq's
+        // GetRocprofMemoryCopyTrackQuery by-destination-agent swimlane grouping. NULL
+        // queue_id / dst_agent_id are distinct group values, so prepare one variant per
+        // NULL pattern. Category is resolved in-SQL via rocpd_event/rocpd_string (LEFT
+        // JOIN, additive — mirrors the region/kernel_dispatch/stream interval queries);
+        // the row set stays identical to get_track_stats' count, category NULL when
+        // event/category absent.
         auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
@@ -1699,14 +1704,14 @@ private:
 
         // stream: a single track aggregates kernel_dispatch + memory_copy +
         // memory_allocate events sharing a stream_id (inline on each table in v3). A
-        // 3-way UNION ALL, one WHERE stream_id = ? per leg (bound three times). Each leg
-        // carries an op_kind literal (kernel_dispatch=1, memory_copy=2,
-        // memory_allocate=3) so the reader picks the right name lookup and
-        // get_*_details() overload.
-        // Category resolves per leg via rocpd_event/rocpd_string (LEFT JOIN, additive,
-        // added here since the per-op interval queries above don't carry it).
-        // memory_allocate has no name column (Optiq labels it by category), so its
-        // name_ref is NULL. Ordered by start for the reader's nesting pass.
+        // 3-way UNION ALL, one WHERE stream_id = ? per leg (stream_id bound three times).
+        // Each leg carries an op_kind literal (kernel_dispatch=1, memory_copy=2,
+        // memory_allocate=3) so the reader can pick the right name lookup and
+        // get_*_details() overload per event. Category is resolved in-SQL per leg via
+        // rocpd_event/rocpd_string (LEFT JOIN, additive) — the per-op interval queries
+        // above don't carry it, so it is added here. memory_allocate has no name column
+        // (Optiq labels it by category), so its name_ref is NULL. Ordered by start so the
+        // reader's nesting pass sees ascending events.
         m_stream_interval_track =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -1854,7 +1859,8 @@ private:
             &track_stats_result::count);
 
         // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the stream
-        // interval query (stream_id bound three times).
+        // interval query (stream_id bound three times), so bounds/count agree with a full
+        // slice load.
         m_stream_stats_track =
             m_backend->create_read_statement_executor<track_stats_result,
                                                       bind_types<size_t, size_t, size_t>>(

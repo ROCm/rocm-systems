@@ -541,19 +541,23 @@ struct scalar_detail_result
 };
 
 // ---------------------------------------------------------------------------
-// Abstract read-statements interface: the version-dispatch seam. reader_impl
-// holds a shared_ptr<read_statements_base>, selected once at construction
-// based on the detected schema version; schema_v3::read_statements and
+// Abstract read-statements interface.
+//
+// This is the version-dispatch seam: reader_impl holds a
+// shared_ptr<read_statements_base>, selected once at construction based on the
+// detected schema version. Both schema_v3::read_statements and
 // schema_v4::read_statements derive from this and provide their own SQL.
 //
 // Accessors split into two groups:
-//   * PURE VIRTUAL — the shared subset both backends implement (info tables,
+//   * PURE VIRTUAL  — the shared subset both backends implement (info tables,
 //     track info, counter/scalar/flow track-scoped queries).
-//   * VIRTUAL with a default-empty body — backend-specific statements. v3
-//     overrides the legacy timeline/detail/synthesis/multi-column interval
-//     accessors; v4.0 overrides the track_id-anchored interval accessors.
-//     Each backend inherits empty stubs for accessors it doesn't implement;
-//     the reader guards those paths, so the stubs are never invoked.
+//   * VIRTUAL with a default-empty body — backend-specific statements. The v3
+//     backend overrides the legacy timeline/detail/synthesis/multi-column
+//     interval accessors; the v4.0 backend overrides the track_id-anchored
+//     interval accessors. Each backend inherits empty stubs for the accessors
+//     it does not implement. The reader guards those paths (never invokes an
+//     unimplemented accessor), so the empty std::function objects returned here
+//     are never called.
 // ---------------------------------------------------------------------------
 struct read_statements_base
 {
@@ -757,8 +761,9 @@ struct read_statements_base
         const = 0;
 
     // ======================================================================
-    // Backend-specific — default-empty. Unimplemented accessors are guarded
-    // in the reader and never invoked.
+    // Backend-specific — default-empty. Overridden by whichever backend
+    // implements them; the other backend inherits the empty stub (never
+    // invoked, guarded in the reader).
     // ======================================================================
 
     // Legacy timeline event statement sets (v3).
@@ -915,8 +920,8 @@ struct read_statements_base
         return e;
     }
 
-    // GROUP-BY-name aggregates for get_kernel_summary / get_region_summary; both
-    // backends override.
+    // GROUP-BY-name aggregates for get_kernel_summary / get_region_summary. Both
+    // backends override; the default static-empty function is never called.
     [[nodiscard]] virtual const summary_func_t& kernel_summary() const
     {
         static const summary_func_t e{};
@@ -1128,10 +1133,11 @@ struct read_statements_base
     }
 
     // ----- Track-stats aggregates (MIN/MAX/COUNT) -----
-    // Shape-matched to the interval/scalar track statements above, so each aggregate
+    // Shape-matched to the interval/scalar track statements above so the aggregate
     // scopes to exactly the events that track would return. v3 overrides the
     // multi-column variants; v4.0 overrides the track_id-anchored *_v4 variants; both
-    // override scalar_stats. Other combinations inherit the empty stub (never invoked).
+    // override scalar_stats. Unimplemented variants inherit these empty stubs (the
+    // reader routes only to the ones its backend implements).
     [[nodiscard]] virtual const stats_track_3_func_t& region_stats_track_main() const
     {
         static const stats_track_3_func_t e{};
