@@ -877,10 +877,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // emission can bypass the save/probe/restore sequence and continue with
     // the displaced guest instruction (which is itself inert under EXEC=0).
     const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
-    const uint64_t vgpr_msb_bytes =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-            ? (spill ? 4u : 2u) * sizeof(uint32_t)
+    const bool capture_high_bank_address =
+        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+    const uint64_t high_bank_capture_bytes =
+        capture_high_bank_address
+            ? (1u + (spill                                                          ? 2u
+                     : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                    : 0u)) *
+                  sizeof(uint32_t)
             : 0u;
+    const uint64_t vgpr_msb_bytes =
+        (arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
+             ? (spill ? 4u : 2u) * sizeof(uint32_t)
+             : 0u) +
+        high_bank_capture_bytes;
     const uint32_t required_private_bytes =
         std::max({private_layout ? private_layout->ephemeral_base : 0u,
                   spill ? spill->total_private_bytes : 0u,
@@ -1128,10 +1138,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       placement_request.anchor_offset = candidate.text_offset;
       placement_request.original_size = candidate.size;
       placement_request.body_size = patch_bytes;
-      placement_request.inline_capacity =
-          spill || scalar_spill || private_layout || workgroup_shadow || needs_chainable_entry_patch
-              ? 0u
-              : available_bytes;
+      placement_request.inline_capacity = spill || scalar_spill || private_layout ||
+                                                  workgroup_shadow || needs_chainable_entry_patch ||
+                                                  capture_high_bank_address
+                                              ? 0u
+                                              : available_bytes;
       std::string placement_error;
       placement = placement_planner.plan(placement_request, &placement_error);
       if (!placement) {
@@ -1825,6 +1836,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                 ? planned_patch.scalar_spill->restore_words
                                                 : std::span<const uint32_t>{};
         body_options.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
+        if (moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) {
+          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_destination = static_cast<uint16_t>(
+              consan_detail::inline_shadow_loop_counter_vgpr(
+                  planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),
+                  candidate_options.moi_track_atomics) +
+              inline_shadow_loop_scratch_count(candidate_options, candidate));
+        }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "inline-shadow probe",
                                                      result.errors, body_options);
         if (!cave_words)
@@ -2694,15 +2713,22 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   if (derived_owner_word)
     words.push_back(*derived_owner_word);
   if (relocate_instruction) {
-    const bool select_guest_vgpr_bank =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+    const bool capture_high_bank_address =
+        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+    const bool select_guest_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                        candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u &&
+                                        !capture_high_bank_address;
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    // Metadata consumes the low-bank captured address, while the guest still
+    // names its original encoded SRC0 under the restored application mode.
+    const uint16_t guest_address_vgpr =
+        capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
-        bytes, candidate, arch, *lds_byte_offset_vgpr,
+        bytes, candidate, arch, guest_address_vgpr,
         reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
                                                  *options.scratch_vgpr + scratch_count - 1u))
                                            : std::nullopt,
@@ -3257,6 +3283,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank =
       arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  const bool capture_high_bank_address =
+      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
   const bool spill_backed_operand_recovery = options.moi_sampled_spill_backed_operand_recovery;
   if (spill_backed_operand_recovery &&
       (spill == nullptr ||
@@ -3269,7 +3297,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
         "ConSan MOI sampled spill-backed operand recovery cannot change the guest VGPR bank");
     return std::nullopt;
   }
-  if (select_guest_vgpr_bank)
+  // A high SRC0 bank is captured by the appended-body wrapper before it
+  // selects bank zero for instrumentation scratch. Other banked operands keep
+  // the older self-contained transition sequence.
+  if (select_guest_vgpr_bank && !capture_high_bank_address)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
@@ -3283,6 +3314,14 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+  if (capture_high_bank_address) {
+    if (!options.scratch_vgpr) {
+      errors.emplace_back("ConSan MOI sampled high-bank LDS address requires scratch VGPRs");
+      return std::nullopt;
+    }
+    preserved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
+  }
   if (spill_backed_operand_recovery) {
     if (!options.scratch_vgpr) {
       errors.emplace_back(
@@ -3424,7 +3463,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       *guest_instruction_word_count = range_guest_instruction_word_count;
     words.insert(words.end(), range_words->begin(), range_words->end());
   }
-  if (select_guest_vgpr_bank)
+  if (select_guest_vgpr_bank && !capture_high_bank_address)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
   return words;

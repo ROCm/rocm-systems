@@ -620,6 +620,64 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
   EXPECT_EQ(checked, kAccessCount);
 }
 
+TEST(ConSanMoi, Gfx1250SampledCapturesHighBankLdsAddressBeforeSelectingScratchBank) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kGuestVgprMsbMode = 0x01u;
+  constexpr uint16_t kEncodedAddressVgpr = 30u;
+  constexpr uint16_t kScratchVgpr = 8u;
+  constexpr auto store =
+      cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = kEncodedAddressVgpr, .data0 = 20u});
+  std::vector<uint32_t> text_words = {*build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+                                      store[0], store[1]};
+  text_words.resize(512u, build_s_nop(0u, kArch));
+  text_words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = kScratchVgpr;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1u);
+  options.moi_runtime_sample_stride = 1u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_sampled_high_bank_address"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t captured_address_vgpr =
+      static_cast<uint16_t>(kScratchVgpr + (options.moi_sampled_check ? 7u : 5u));
+  const uint32_t capture =
+      build_v_mov_b32_e32(captured_address_vgpr, vector_source_vgpr(kEncodedAddressVgpr), kArch);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, kArch);
+  ASSERT_GE(cave.size(), 4u);
+  EXPECT_EQ(cave[0], capture);
+  EXPECT_EQ(cave[1], select_low);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  const size_t guest_word = static_cast<size_t>(
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t));
+  ASSERT_GT(guest_word, 0u);
+  ASSERT_LT(guest_word + store.size(), cave.size());
+  EXPECT_EQ(cave[guest_word - 1u], restore_guest);
+  EXPECT_TRUE(std::equal(store.begin(), store.end(), cave.begin() + guest_word));
+  EXPECT_EQ(cave[guest_word + store.size()], select_low);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   std::vector<uint32_t> text_words(600, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;

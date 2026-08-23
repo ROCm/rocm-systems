@@ -1259,7 +1259,8 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
-      ((candidate.direct_to_lds || moi_load_clobbers_address(candidate)) &&
+      ((candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
+        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) &&
                flat_offset_address_count == 0u
            ? 1u
            : 0u) +
@@ -1297,8 +1298,10 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
       // mode, and the persistent owner/epoch tail must not alias the bank.
       base_scratch_count + 1u +
       (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
-       : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ? 1u
-                                                                         : 0u) +
+       : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
+               moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
+           ? 1u
+           : 0u) +
       (options.automatic_moi_private_epoch
            ? (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId ? 2u : 1u)
        : moi_uses_scalar_persistent_state(options) ? 2u

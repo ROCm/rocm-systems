@@ -6311,6 +6311,61 @@ TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
   EXPECT_LT(restore_guest, guest_load);
 }
 
+TEST(ConSanMoi, Gfx1250InlineShadowCapturesHighBankLdsAddressBeforeScratchUse) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint8_t kGuestVgprMsbMode = 0x01u;
+  constexpr uint16_t kEncodedAddressVgpr = 30u;
+  constexpr uint16_t kScratchVgpr = 82u;
+  constexpr auto store =
+      cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = kEncodedAddressVgpr, .data0 = 20u});
+  std::vector<uint32_t> text_words = {*build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+                                      store[0], store[1]};
+  text_words.resize(64u, build_s_nop(0u, kArch));
+  text_words.back() = build_s_endpgm(kArch);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = kScratchVgpr;
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  options.moi_exec_save_sgpr = 60u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_inline_high_bank_address"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t captured_address_vgpr =
+      static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
+                                kScratchVgpr, /*has_exec_save=*/true, options.moi_track_atomics) +
+                            consan_detail::inline_shadow_loop_scratch_count(
+                                /*width_bits=*/32u, consan_moi_exact_shadow::granule_bytes));
+  const uint32_t capture =
+      build_v_mov_b32_e32(captured_address_vgpr, vector_source_vgpr(kEncodedAddressVgpr), kArch);
+  const uint32_t select_low =
+      *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, kArch);
+  const uint32_t restore_guest =
+      *build_gfx1250_s_set_vgpr_msb_transition(0u, kGuestVgprMsbMode, kArch);
+  ASSERT_GE(cave.size(), 4u);
+  EXPECT_EQ(cave[0], capture);
+  EXPECT_EQ(cave[1], select_low);
+  const auto guest = std::search(cave.begin(), cave.end(), store.begin(), store.end());
+  ASSERT_NE(guest, cave.end());
+  ASSERT_NE(guest, cave.begin());
+  EXPECT_EQ(*std::prev(guest), restore_guest);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   constexpr uint32_t kAccessCount = 9u;
   std::vector<uint32_t> text_words(

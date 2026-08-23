@@ -27,7 +27,8 @@ __device__ __forceinline__ void store_high_bank_address(uint32_t address, uint32
                "v_mov_b32 v30, %0\n\t"
                "s_set_vgpr_msb 0x4000\n\t"
                "s_set_vgpr_msb 0x1\n\t"
-               "ds_store_b32 v30, %1\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_set_vgpr_msb 0x100\n\t"
+               "ds_store_b32 v30, %1\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
+               "s_set_vgpr_msb 0x100\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :
                : "v"(address), "v"(value_low)
                : "memory");
@@ -40,7 +41,7 @@ __device__ __forceinline__ uint32_t load_high_bank_address(uint32_t address) {
                "s_set_vgpr_msb 0x4000\n\t"
                "s_set_vgpr_msb 0x1\n\t"
                "ds_load_b32 %0, v30\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_wait_dscnt 0\n\t"
-               "s_set_vgpr_msb 0x100\n\t"
+               "s_set_vgpr_msb 0x100\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                : "+v"(value_low)
                : "v"(address)
                : "memory");

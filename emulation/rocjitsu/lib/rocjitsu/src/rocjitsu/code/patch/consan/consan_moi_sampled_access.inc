@@ -811,14 +811,24 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                            sizeof(uint32_t)
                      : 0u;
     const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
-    const bool wrap_embedded_guest_vgpr_bank = use_indirect_appended &&
-                                               arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                               candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
-    const uint64_t vgpr_msb_bytes = use_indirect_appended
+    const bool capture_high_bank_address =
+        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+    const bool wrap_embedded_guest_vgpr_bank =
+        (use_indirect_appended || capture_high_bank_address) && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+    const uint64_t high_bank_capture_bytes =
+        capture_high_bank_address
+            ? (1u + (spill                                                          ? 2u
+                     : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                    : 0u)) *
+                  sizeof(uint32_t)
+            : 0u;
+    const uint64_t vgpr_msb_bytes = (use_indirect_appended || capture_high_bank_address)
                                         ? moi_appended_body_vgpr_msb_transition_word_count(
                                               arch, candidate.gfx1250_vgpr_msb_mode,
                                               spill.has_value(), wrap_embedded_guest_vgpr_bank) *
-                                              sizeof(uint32_t)
+                                                  sizeof(uint32_t) +
+                                              high_bank_capture_bytes
                                         : 0u;
     const uint64_t patch_bytes =
         static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
@@ -911,7 +921,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       placement_request.original_size = candidate.size;
       placement_request.body_size = patch_bytes;
       placement_request.inline_capacity =
-          spill || scalar_spill || private_layout ? 0u : available_bytes;
+          spill || scalar_spill || private_layout || capture_high_bank_address ? 0u
+                                                                               : available_bytes;
       std::string placement_error;
       placement = placement_planner.plan(placement_request, &placement_error);
       if (!placement) {
@@ -1412,11 +1423,21 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               : 0u;
       const uint64_t displaced_tail_bytes =
           planned_patch.displaced_tail_words.size() * sizeof(uint32_t);
+      const bool capture_high_bank_address =
+          moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+      const uint64_t high_bank_capture_bytes =
+          capture_high_bank_address
+              ? (1u + (planned_patch.spill                                                ? 2u
+                       : (planned_patch.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                          : 0u)) *
+                    sizeof(uint32_t)
+              : 0u;
       const uint64_t vgpr_msb_bytes =
           moi_appended_body_vgpr_msb_transition_word_count(
               arch, planned_patch.gfx1250_vgpr_msb_mode, planned_patch.spill.has_value(),
               planned_patch.wrap_embedded_guest_vgpr_bank) *
-          sizeof(uint32_t);
+              sizeof(uint32_t) +
+          high_bank_capture_bytes;
       const uint64_t dense_gate_bytes =
           planned_patch.dense_runtime_fast_gate ? access_island_word_count * sizeof(uint32_t) : 0u;
       const uint64_t scalar_spill_guard_bytes = planned_patch.scalar_spill ? sizeof(uint32_t) : 0u;
@@ -1571,6 +1592,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
         body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
         body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
+        if (capture_high_bank_address) {
+          const uint16_t base_scratch_count = static_cast<uint16_t>(
+              (candidate_options.moi_sampled_check ? 7u : 5u) +
+              (candidate_options.moi_runtime_sample_stride > 1u || window_bank_count > 1u ? 1u
+                                                                                          : 0u));
+          body_options.gfx1250_high_bank_address_source = candidate.addr_vgpr;
+          body_options.gfx1250_high_bank_address_destination =
+              static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
+        }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "sampled probe",
                                                      result.errors, body_options);
         if (!cave_words)

@@ -2486,6 +2486,8 @@
   }
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const bool capture_high_bank_address =
+      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
   const auto source_is_spilled = [&](uint16_t source) {
     return spill != nullptr && source >= spill->vgpr_base &&
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
@@ -2515,7 +2517,7 @@
     // spill slot reloads the offset again before diagnostics. This phase
     // sharing keeps the minimum native CDNA access window at 16 VGPRs.
     saved_lds_byte_offset_vgpr = cas_expected_vgpr;
-  } else if (moi_load_clobbers_address(candidate) &&
+  } else if ((moi_load_clobbers_address(candidate) || capture_high_bank_address) &&
              !compact_spill_keeps_disjoint_clobbered_address) {
     saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
@@ -2611,7 +2613,7 @@
                               "direct-to-LDS destination");
           return std::nullopt;
         }
-      } else {
+      } else if (!capture_high_bank_address) {
         words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
                                             vector_source_vgpr(*lds_byte_offset_vgpr), arch));
       }
@@ -3230,8 +3232,10 @@
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+  const uint16_t guest_address_vgpr =
+      capture_high_bank_address ? *candidate.addr_vgpr : *lds_byte_offset_vgpr;
   const auto guest_words = build_moi_relocated_guest_access_words(
-      bytes, candidate, arch, *lds_byte_offset_vgpr,
+      bytes, candidate, arch, guest_address_vgpr,
       reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
                                                *options.scratch_vgpr + scratch_count - 1u))
                                          : std::nullopt,
