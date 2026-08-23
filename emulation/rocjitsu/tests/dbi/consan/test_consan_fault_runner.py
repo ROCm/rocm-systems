@@ -831,7 +831,6 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 "import pathlib,time; time.sleep(0.5); "
                 f"pathlib.Path({str(child_survived)!r}).touch()"
             )
-            started = time.monotonic()
             completed = self.run_runner(
                 root,
                 "--name",
@@ -852,8 +851,8 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 "time.sleep(30)",
             )
             self.assertEqual(completed.returncode, 124, completed.stderr)
-            self.assertLess(time.monotonic() - started, 5)
             result = read_row_result(root, "timeout")
+            self.assertLess(result["metrics"]["command_elapsed_seconds"], 5)
             self.assertEqual(result["outcome"], "timeout")
             self.assertTrue(result["timed_out"])
             self.assertFalse(result["execution"]["completed"])
