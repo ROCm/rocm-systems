@@ -8,6 +8,12 @@
 
 namespace rocjitsu {
 
+namespace {
+
+thread_local std::unique_ptr<Decoder::Pool> worker_decoder_pool;
+
+} // namespace
+
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          std::string_view target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
@@ -19,13 +25,22 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_c
   return target == nullptr ? nullptr : target->decoder_factory();
 }
 
-Decoder::~Decoder() {
-  // Clear direct and temporarily suppressed references to this pool so no
-  // later allocation scope can restore a pointer into a destroyed decoder.
-  Instruction::invalidate_allocator_pool(&pool_);
+void Decoder::enable_thread_pool() {
+  if (!worker_decoder_pool)
+    worker_decoder_pool = std::make_unique<Pool>();
+  if (Instruction::alloc_pool_ == worker_decoder_pool.get())
+    return;
+  activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
+                [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); },
+                worker_decoder_pool.get());
 }
 
-void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
+void Decoder::disable_thread_pool() {
+  if (!worker_decoder_pool)
+    return;
+  Instruction::invalidate_allocator_pool(worker_decoder_pool.get());
+  worker_decoder_pool.reset();
+}
 
 DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                              const DecodeErrorEmitter &emit_error) {

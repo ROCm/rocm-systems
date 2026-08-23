@@ -95,11 +95,6 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
-  // Enable pool allocation for the hot decode-execute path.
-  // Instructions decoded during step() are always deleted before the CU
-  // (and its decoder) are destroyed, so pool allocation is safe here.
-  decoder_->enable_pool();
-
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
   sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);

@@ -299,6 +299,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   simdojo::SimulationEngine::Config engine_config{};
   engine_config.max_ticks = fb_config->max_ticks();
   engine_config.num_threads = fb_config->num_threads();
+  bind_decoder_worker_pool(engine_config);
 
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
   auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);

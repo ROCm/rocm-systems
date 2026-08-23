@@ -125,6 +125,12 @@ public:
     bool await_primaries = false; ///< If true, don't terminate on quiescence until at least one
                                   ///< primary has registered. Used by the KFD driver to keep the
                                   ///< engine alive while waiting for external stimuli (doorbells).
+    /// Optional hook that initializes thread-local resources before a worker processes events.
+    std::function<void()> worker_start = {};
+    /// Optional hook that releases worker-local resources when the event loop exits.
+    /// @details Runs on normal or exceptional exit and before component shutdown.
+    /// Components must not use worker-local resources from their shutdown hooks.
+    std::function<void()> worker_stop = {};
   };
 
   /// @brief Construct with config. Caller populates topology(), then calls create().
@@ -297,6 +303,10 @@ private:
   /// @brief Worker loop executed by each partition thread.
   void worker_loop(PartitionID partition_id);
 
+  /// @brief Start and stop the worker lifecycle used by single-threaded step().
+  void start_inline_worker();
+  void stop_inline_worker();
+
   /// @brief Process a single heap entry: execute its event handler if present.
   /// @param ctx The partition context that owns the event queue.
   /// @param entry The heap entry to process.
@@ -399,6 +409,7 @@ private:
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
   bool created_ = false; ///< Whether create() has completed (components initialized).
   bool running_ = false; ///< True while running; also guards step() first-call startup.
+  bool inline_worker_active_ = false; ///< Whether step() has an active worker lifecycle.
 
   /// @brief Global lower bound on time stamp, updated by barrier completion.
   std::atomic<Tick> global_lbts_{0};

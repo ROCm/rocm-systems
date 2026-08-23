@@ -29,6 +29,10 @@ class Xcd;
 
 namespace config {
 
+/// @brief Compose the worker-local decoder pool into an engine configuration.
+/// @details Preserves existing hooks and releases the decoder pool first on stop.
+void bind_decoder_worker_pool(simdojo::SimulationEngine::Config &config);
+
 /// @brief Result of building a declarative topology.
 ///
 /// Provides convenience accessors for navigating the GPU component hierarchy.

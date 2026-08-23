@@ -24,18 +24,20 @@ class Instruction;
 class IsaTargetRegistry;
 struct IsaExecutionBackend;
 
-/// @brief Instruction decoder with optional pool allocator.
+/// @brief Instruction decoder with optional worker-local pool allocation.
 ///
-/// By default, decoded instructions are heap-allocated.  Call
-/// ``enable_pool()`` to route Instruction::operator new/delete through
-/// the decoder's O(1) free-list pool.  Only enable the pool when all
-/// decoded instructions will be deleted before the decoder is destroyed
-/// (e.g., the ComputeUnit simulation loop).
+/// By default, decoded instructions are heap-allocated. Simulation workers
+/// enable one shared grow-on-demand pool for all decoders on that worker. Every
+/// pool-backed instruction must be destroyed on the allocating worker before
+/// the worker pool is disabled.
 class Decoder {
 public:
-  using Pool = util::ArenaAlloc<512, 128>;
+  // CDNA5 carry instructions with five inline operands are 672 bytes. Grow in
+  // slabs so the many CUs sharing a simulation thread can cover peak in-flight
+  // demand without reserving a large fixed buffer in every decoder.
+  using Pool = util::GrowingArenaAlloc<768, 128>;
 
-  virtual ~Decoder();
+  virtual ~Decoder() = default;
 
   /// @brief Decode a binary instruction.
   /// @param[in] inst Pointer to the binary instruction encoding.
@@ -77,19 +79,24 @@ public:
   /// @brief Create a decoder from a built-in architecture in a scoped registry.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
 
-  /// @brief Enable pool allocation for decoded instructions.
-  ///
-  /// When active, Instruction::operator new/delete route through the
-  /// decoder's pool for O(1) alloc/free.  Only enable when the caller
-  /// guarantees all instructions will be deleted before the decoder
-  /// is destroyed (e.g., the ComputeUnit hot path).
-  void enable_pool() {
-    activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
-                  [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, &pool_);
-  }
+  /// @brief Enable the current worker thread's shared decoder pool.
+  /// @details Compatibility wrapper for enable_thread_pool(). The pool belongs
+  /// to the thread rather than this Decoder instance.
+  void enable_pool() { enable_thread_pool(); }
 
-  /// @brief Disable pool allocation; future allocations use the heap.
-  void disable_pool();
+  /// @brief Enable the pool shared by decoders on the current worker thread.
+  ///
+  /// Compute units are constructed before the simulation worker starts. All
+  /// CUs assigned to one worker therefore share this pool, allowing decoded
+  /// instructions to remain live while other CUs or deferred pipelines run.
+  static void enable_thread_pool();
+
+  /// @brief Disable and release the current worker thread's shared pool.
+  /// @warning Every instruction allocated from the pool must already be destroyed.
+  static void disable_thread_pool();
+
+  /// @brief Compatibility wrapper for disable_thread_pool().
+  void disable_pool() { disable_thread_pool(); }
 
 protected:
   using AllocFn = void *(*)(void *, size_t);
@@ -98,8 +105,6 @@ protected:
   static void activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool);
   static Result validate_instruction_operands(const Instruction &inst,
                                               const DecodeErrorEmitter &emit_error);
-
-  Pool pool_;
 };
 
 /// @brief ISA-parameterized decoder.

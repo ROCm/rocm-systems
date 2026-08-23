@@ -177,6 +177,20 @@ private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
 };
 
+/// Component whose first event propagates an execution failure from step().
+class ThrowingComponent : public Component {
+public:
+  ThrowingComponent() : Component("throwing") {
+    timer_event_.set_handler(
+        [](Tick, Message *) { throw std::runtime_error("event handler failed"); });
+  }
+
+  void startup() override { schedule_event(&timer_event_, 1); }
+
+private:
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
 /// Helper: build engine with manual partition assignment.
 /// assigner maps component name → partition ID.
 void build_with_manual_partitions(SimulationEngine &engine, uint32_t num_partitions,
@@ -727,6 +741,49 @@ TEST(TerminationTest, StepModeConsistency) {
 
   EXPECT_EQ(static_cast<CounterComponent *>(c)->count, 10u);
   EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
+}
+
+TEST(TerminationTest, StepModeWorkerHooksSpanExecution) {
+  uint32_t starts = 0;
+  uint32_t stops = 0;
+  SimulationEngine::Config config{.num_threads = 1};
+  config.worker_start = [&] { ++starts; };
+  config.worker_stop = [&] { ++stops; };
+  SimulationEngine engine(config);
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<CounterComponent>("c0", 3));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  EXPECT_TRUE(engine.step());
+  EXPECT_EQ(starts, 1u);
+  EXPECT_EQ(stops, 0u);
+  while (engine.step())
+    ;
+
+  EXPECT_EQ(starts, 1u);
+  EXPECT_EQ(stops, 1u);
+  engine.shutdown();
+  EXPECT_EQ(stops, 1u);
+}
+
+TEST(TerminationTest, StepModeWorkerHooksStopOnException) {
+  uint32_t starts = 0;
+  uint32_t stops = 0;
+  SimulationEngine::Config config{.num_threads = 1};
+  config.worker_start = [&] { ++starts; };
+  config.worker_stop = [&] { ++stops; };
+  SimulationEngine engine(config);
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<ThrowingComponent>());
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  EXPECT_THROW(engine.step(), std::runtime_error);
+  EXPECT_EQ(starts, 1u);
+  EXPECT_EQ(stops, 1u);
+  engine.shutdown();
+  EXPECT_EQ(stops, 1u);
 }
 
 // ============================================================================

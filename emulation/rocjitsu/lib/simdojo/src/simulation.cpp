@@ -16,6 +16,26 @@ std::string link_endpoints(const Link &link) {
   return link.src()->full_path() + " -> " + link.dst()->full_path();
 }
 
+class WorkerLifecycleGuard {
+public:
+  WorkerLifecycleGuard(const std::function<void()> &start, const std::function<void()> &stop)
+      : stop_(stop) {
+    if (start)
+      start();
+  }
+
+  ~WorkerLifecycleGuard() {
+    if (stop_)
+      stop_();
+  }
+
+  WorkerLifecycleGuard(const WorkerLifecycleGuard &) = delete;
+  WorkerLifecycleGuard &operator=(const WorkerLifecycleGuard &) = delete;
+
+private:
+  const std::function<void()> &stop_;
+};
+
 } // namespace
 
 void PartitionContext::drain_incoming() {
@@ -52,6 +72,7 @@ void SimulationEngine::create() {
   exit_set_ = false;
   current_time_.store(0, std::memory_order_release);
   global_lbts_.store(0, std::memory_order_release);
+  inline_worker_active_ = false;
 
   initialize_components();
   created_ = true;
@@ -70,6 +91,7 @@ void SimulationEngine::shutdown() {
 
   workers_.clear();
   barrier_.reset();
+  stop_inline_worker();
   shutdown_components();
 
   running_ = false;
@@ -162,51 +184,80 @@ bool SimulationEngine::step() {
   assert(created_ && "step() called before create()");
   assert(config_.num_threads == 1 && "step() requires single-threaded mode");
 
-  if (!running_) {
-    startup_components();
-    running_ = true;
+  try {
+    if (!running_) {
+      startup_components();
+      start_inline_worker();
+      running_ = true;
 
-    if (config_.max_ticks > 0) {
-      max_ticks_event_.set_handler([this](Tick ts, Message *) {
-        set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
-        done_.store(true, std::memory_order_release);
-      });
-      contexts_[0]->event_queue.push(
-          EventQueueEntry{config_.max_ticks, 0, &max_ticks_event_, nullptr});
+      if (config_.max_ticks > 0) {
+        max_ticks_event_.set_handler([this](Tick ts, Message *) {
+          set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
+          done_.store(true, std::memory_order_release);
+        });
+        contexts_[0]->event_queue.push(
+            EventQueueEntry{config_.max_ticks, 0, &max_ticks_event_, nullptr});
+      }
     }
-  }
 
-  if (done_.load(std::memory_order_acquire))
-    return false;
-
-  drain_async_events();
-
-  PartitionContext &ctx = *contexts_[0];
-
-  if (ctx.event_queue.empty()) {
-    if (check_termination(TICK_MAX)) {
-      running_ = false;
-      return false;
-    }
-    return true;
-  }
-
-  Tick step_tick = ctx.event_queue.next_event_time();
-  while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() == step_tick) {
-    auto entry = ctx.event_queue.pop();
-    process_event(ctx, entry);
     if (done_.load(std::memory_order_acquire)) {
-      current_time_.store(step_tick, std::memory_order_release);
       running_ = false;
+      stop_inline_worker();
       return false;
     }
-  }
 
-  current_time_.store(step_tick, std::memory_order_release);
-  return true;
+    drain_async_events();
+
+    PartitionContext &ctx = *contexts_[0];
+
+    if (ctx.event_queue.empty()) {
+      if (check_termination(TICK_MAX)) {
+        running_ = false;
+        stop_inline_worker();
+        return false;
+      }
+      return true;
+    }
+
+    Tick step_tick = ctx.event_queue.next_event_time();
+    while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() == step_tick) {
+      auto entry = ctx.event_queue.pop();
+      process_event(ctx, entry);
+      if (done_.load(std::memory_order_acquire)) {
+        current_time_.store(step_tick, std::memory_order_release);
+        running_ = false;
+        stop_inline_worker();
+        return false;
+      }
+    }
+
+    current_time_.store(step_tick, std::memory_order_release);
+    return true;
+  } catch (...) {
+    running_ = false;
+    stop_inline_worker();
+    throw;
+  }
+}
+
+void SimulationEngine::start_inline_worker() {
+  if (inline_worker_active_)
+    return;
+  if (config_.worker_start)
+    config_.worker_start();
+  inline_worker_active_ = true;
+}
+
+void SimulationEngine::stop_inline_worker() {
+  if (!inline_worker_active_)
+    return;
+  inline_worker_active_ = false;
+  if (config_.worker_stop)
+    config_.worker_stop();
 }
 
 void SimulationEngine::worker_loop(PartitionID partition_id) {
+  WorkerLifecycleGuard worker_lifecycle(config_.worker_start, config_.worker_stop);
   PartitionContext &ctx = *contexts_[partition_id];
   uint32_t num_threads = config_.num_threads;
 

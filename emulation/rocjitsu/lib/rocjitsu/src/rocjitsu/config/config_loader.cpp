@@ -4,6 +4,7 @@
 #include "rocjitsu/config/config_loader.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -36,6 +37,21 @@ namespace config {
 
 SoC *LoadedConfig::soc() { return dynamic_cast<SoC *>(build_result.root.get()); }
 
+void bind_decoder_worker_pool(simdojo::SimulationEngine::Config &config) {
+  auto previous_start = std::move(config.worker_start);
+  auto previous_stop = std::move(config.worker_stop);
+  config.worker_start = [previous = std::move(previous_start)]() mutable {
+    if (previous)
+      previous();
+    Decoder::enable_thread_pool();
+  };
+  config.worker_stop = [previous = std::move(previous_stop)]() mutable {
+    Decoder::disable_thread_pool();
+    if (previous)
+      previous();
+  };
+}
+
 namespace {
 
 simdojo::SimulationEngine::Config
@@ -43,6 +59,7 @@ engine_config_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   simdojo::SimulationEngine::Config cfg{};
   cfg.max_ticks = fb_config->max_ticks();
   cfg.num_threads = fb_config->num_threads();
+  bind_decoder_worker_pool(cfg);
   return cfg;
 }
 

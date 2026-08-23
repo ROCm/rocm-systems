@@ -100,10 +100,10 @@ public:
       : execute(exec), src_loc_(src_loc), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
-  /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// Thread-local because each CU partition thread has its own decoder/pool.
-  /// Instructions are wholly owned by their CU and always allocated/freed
-  /// on the same thread.
+  /// @brief Pool allocator hooks for the active simulation worker.
+  /// Thread-local because each partition worker has one pool shared by all of
+  /// its decoders. Instructions may span CUs and deferred pipelines, but they
+  /// are allocated and freed on the same worker.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
