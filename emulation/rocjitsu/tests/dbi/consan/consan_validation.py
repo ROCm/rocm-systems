@@ -8731,7 +8731,7 @@ def _empirical_config(
 ) -> dict[str, object]:
     return {
         "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
-        "protocol": "consan-gfx1201-empirical-v3",
+        "protocol": f"consan-{target}-empirical-v3",
         "target": target,
         "workload": workload.id,
         "profiles": list(profiles),
@@ -8784,9 +8784,9 @@ def _write_or_verify_empirical_config(path: Path, config: dict[str, object]) -> 
 def _empirical_campaign(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
-    if target != "gfx1201":
+    if target not in {"gfx950", "gfx1201"}:
         raise ValidationError(
-            "the empirical study command currently requires physical gfx1201"
+            "the empirical study command requires physical gfx950 or gfx1201"
         )
     workload = _resolved_workload(target, selection.require_workload())
     workspace = _workspace_from_environment()

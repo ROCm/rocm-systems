@@ -6695,6 +6695,64 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(slowdown["count"], 2)
         self.assertEqual(slowdown["median"], 2.5)
 
+    def test_empirical_campaign_config_supports_physical_gfx950(self) -> None:
+        workload = validation._resolved_workload(
+            "gfx950", validation.WORKLOAD_BY_ID["d128-block"]
+        )
+        args = validation._parse_args(
+            [
+                "--target",
+                "gfx950",
+                "study",
+                "--workload",
+                workload.id,
+                "--rounds",
+                "1",
+                "--artifact-root",
+                "/artifacts",
+            ]
+        )
+
+        config = validation._empirical_config(
+            args,
+            "gfx950",
+            workload,
+            validation.PROFILE_IDS,
+            2,
+            workload.run_timeout_seconds,
+        )
+
+        self.assertEqual(config["protocol"], "consan-gfx950-empirical-v3")
+        self.assertEqual(config["target"], "gfx950")
+        with (
+            mock.patch.object(
+                validation, "_workspace_from_environment", return_value=Path("/workspace")
+            ),
+            mock.patch.object(validation, "_doctor", return_value={"ok": False}),
+            self.assertRaisesRegex(
+                validation.ValidationError, "workspace doctor failed"
+            ),
+        ):
+            validation._empirical_campaign(args)
+
+        unsupported_args = validation._parse_args(
+            [
+                "--target",
+                "gfx1250",
+                "study",
+                "--workload",
+                workload.id,
+                "--rounds",
+                "1",
+                "--artifact-root",
+                "/artifacts",
+            ]
+        )
+        with self.assertRaisesRegex(
+            validation.ValidationError, "physical gfx950 or gfx1201"
+        ):
+            validation._empirical_campaign(unsupported_args)
+
     def test_empirical_campaign_wires_admission_fixed_warm_and_structural_rows(
         self,
     ) -> None:
