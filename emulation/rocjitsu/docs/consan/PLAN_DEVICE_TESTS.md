@@ -480,6 +480,15 @@ contracts:
   overflow on four emulated targets and physical gfx950; a focused host test
   now requires diagnostic capacity to scale with the selected dispatch-bank
   count;
+- adaptive auto-report fitting consulting only the engine-wide safety ceiling
+  before allocation enforced a smaller explicit caller cap. A one-cell Inline
+  contract therefore requested 16,384 dispatch-banked diagnostic slots, fit
+  under the 128-MiB engine ceiling, and was rejected later by the fixture's
+  still-sufficient 1-MiB cap instead of reducing diagnostic headroom. The
+  planner now carries the bounded caller ceiling through Record/Replay,
+  Sampled, and Inline fitting. Focused host tests cover all three engines, and
+  the eleven multidimensional/forced-spill simulator rows retain the complete
+  runtime regression without raising their cap;
 - physical `gfx950` Record/Replay, Sampled, and Inline Shadow failures;
 - non-returning DS-atomic emulation and Sampled atomic-watchpoint decoding;
 - CDNA3/CDNA4 Inline Shadow recovery of a clobbered wide-load address outside

@@ -535,6 +535,58 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksFitWithoutDroppingLogicalRange
             8u * kLogicalRanges);
 }
 
+TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksHonorExplicitCallerCap) {
+  constexpr uint64_t kCallerCap = 1024u * 1024u;
+  constexpr uint64_t kLogicalRanges = 4096u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::Sampled,
+      .access_range_count = kLogicalRanges,
+      .diagnostic_count = kLogicalRanges,
+      .sampled_range_bank_count = 8u * kLogicalRanges,
+      .sampled_watchpoint_count = 8u * kLogicalRanges,
+      .sampled_bank_count_adaptive = true,
+  };
+  ASSERT_TRUE(plan_consan_moi_auto_report(requested).complete());
+  ASSERT_EQ(plan_consan_moi_auto_report(requested, kCallerCap).outcome,
+            ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+
+  const auto fitted = fit_consan_moi_sampled_auto_report_inventory(requested, kCallerCap);
+  EXPECT_EQ(fitted.access_range_count, kLogicalRanges);
+  EXPECT_EQ(fitted.diagnostic_count, kLogicalRanges);
+  EXPECT_LT(fitted.sampled_range_bank_count, requested.sampled_range_bank_count);
+  EXPECT_GE(fitted.sampled_range_bank_count, kLogicalRanges);
+  const auto accepted = plan_consan_moi_auto_report(fitted, kCallerCap);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_LE(accepted.required_bytes, kCallerCap);
+}
+
+TEST(ConSanMoiAutoReportPlan, AdaptiveRecordReplayBanksHonorExplicitCallerCap) {
+  constexpr uint64_t kCallerCap = 1024u * 1024u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::RecordReplay,
+      .access_range_count = 128u,
+      .barrier_event_count = 16u,
+      .atomic_event_count = 16u,
+      .fence_event_count = 16u,
+      .diagnostic_count = 128u,
+      .record_replay_bank_count_adaptive = true,
+  };
+  const auto default_fitted = fit_consan_moi_record_replay_auto_report_inventory(requested);
+  ASSERT_TRUE(plan_consan_moi_auto_report(default_fitted).complete());
+  ASSERT_EQ(plan_consan_moi_auto_report(default_fitted, kCallerCap).outcome,
+            ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+
+  const auto fitted = fit_consan_moi_record_replay_auto_report_inventory(requested, kCallerCap);
+  EXPECT_EQ(fitted.access_range_count, requested.access_range_count);
+  EXPECT_LT(fitted.record_replay_access_dispatch_bank_count,
+            default_fitted.record_replay_access_dispatch_bank_count);
+  EXPECT_LE(fitted.record_replay_access_owner_bank_count,
+            default_fitted.record_replay_access_owner_bank_count);
+  const auto accepted = plan_consan_moi_auto_report(fitted, kCallerCap);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_LE(accepted.required_bytes, kCallerCap);
+}
+
 TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
   constexpr uint64_t kLogicalRanges = 135718u;
   const ConSanMoiAutoReportInventory requested{
@@ -570,6 +622,40 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
   exact.inline_diagnostic_count_adaptive = false;
   EXPECT_EQ(fit_consan_moi_inline_auto_report_inventory(exact).diagnostic_count,
             requested.diagnostic_count);
+}
+
+TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsHonorExplicitCallerCap) {
+  constexpr uint64_t kCallerCap = 1024u * 1024u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .access_range_count = 1u,
+      .diagnostic_count = 16u * 1024u,
+      // Match the one-cell native-LDS integration cases: their 256 dispatch
+      // banks need 16K diagnostic slots but only 1K exact-shadow slots.
+      .inline_lds_bytes = 4u,
+      .inline_atomic_release_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_causal_snapshot_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_acquired_epoch_token_count = kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+      .inline_diagnostic_count_adaptive = true,
+  };
+  ASSERT_TRUE(plan_consan_moi_auto_report(requested).complete());
+  const auto rejected = plan_consan_moi_auto_report(requested, kCallerCap);
+  ASSERT_EQ(rejected.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
+  EXPECT_EQ(rejected.ceiling_bytes, kCallerCap);
+
+  const auto fitted = fit_consan_moi_inline_auto_report_inventory(requested, kCallerCap);
+  EXPECT_GE(fitted.diagnostic_count,
+            static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
+  EXPECT_LT(fitted.diagnostic_count, requested.diagnostic_count);
+  const auto accepted = plan_consan_moi_auto_report(fitted, kCallerCap);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_LE(accepted.required_bytes, kCallerCap);
+
+  auto one_more = fitted;
+  ++one_more.diagnostic_count;
+  EXPECT_EQ(plan_consan_moi_auto_report(one_more, kCallerCap).outcome,
+            ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
 }
 
 TEST(ConSanMoiAutoReportPlan, InlineCapacityChangesAtEveryLdsByte) {

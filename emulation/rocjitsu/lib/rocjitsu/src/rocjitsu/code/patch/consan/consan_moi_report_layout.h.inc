@@ -334,9 +334,12 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
 /// reading code-object bytes, or consulting environment state. Counts that do
 /// not fit the ABI produce `overflow`; a representable plan above the ordinary
 /// per-buffer ceiling produces `insufficient_report_capacity` while retaining
-/// required bytes and capacities for telemetry.
+/// required bytes and capacities for telemetry. A nonzero caller ceiling is
+/// bounded by the engine safety ceiling and lets an explicit runtime cap
+/// participate in adaptive planning.
 [[nodiscard]] ConSanMoiAutoReportPlan
-plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
+plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory,
+                            uint64_t caller_ceiling_bytes = 0);
 
 /// Expands static Record/Replay synchronization counts by the largest
 /// power-of-two dynamic headroom that fits the ordinary per-buffer ceiling.
@@ -344,23 +347,27 @@ plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory);
 /// static site with smaller dispatch, owner, address-group, and event
 /// headroom. Runtime saturation remains explicit and fail-closed.
 [[nodiscard]] ConSanMoiAutoReportInventory
-fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
+fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                                   uint64_t caller_ceiling_bytes = 0);
 
 /// Reduces only an explicitly adaptive Sampled inventory by powers of two
 /// until its complete logical-range population fits the report ceiling or one
 /// bank per range remains. All other inventory dimensions remain exact.
 [[nodiscard]] ConSanMoiAutoReportInventory
-fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
+fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                             uint64_t caller_ceiling_bytes = 0);
 
 /// Reduces only an explicitly adaptive Inline Shadow diagnostic inventory to
 /// the largest capacity that fits the ordinary report ceiling. Exact-shadow
 /// and causal-metadata capacities remain unchanged.
 [[nodiscard]] ConSanMoiAutoReportInventory
-fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory);
+fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                            uint64_t caller_ceiling_bytes = 0);
 
 /// Extracts the bounded ordinary report requirements from one completed
 /// inventory transform. This does not allocate and deliberately does not try
 /// to predict expert dynamic per-lane replay volume.
 [[nodiscard]] ConSanMoiAutoReportInventory
 inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions &options,
-                                 std::span<const uint8_t> code_object_bytes);
+                                 std::span<const uint8_t> code_object_bytes,
+                                 uint64_t caller_ceiling_bytes = 0);

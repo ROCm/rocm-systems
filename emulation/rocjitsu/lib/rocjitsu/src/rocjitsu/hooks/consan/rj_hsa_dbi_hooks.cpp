@@ -4041,10 +4041,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else if (inventory_requires_report_buffer && !patch_result_storage) {
         const rocjitsu::ConSanMoiAutoReportInventory report_inventory =
             rocjitsu::inventory_consan_moi_auto_report(inventory, inventory_options,
-                                                       std::span<const uint8_t>(bytes, size));
+                                                       std::span<const uint8_t>(bytes, size),
+                                                       config->moi_auto_report_buffer_size);
         planned_report_inventory = report_inventory;
-        const rocjitsu::ConSanMoiAutoReportPlan report_plan =
-            rocjitsu::plan_consan_moi_auto_report(report_inventory);
+        const rocjitsu::ConSanMoiAutoReportPlan report_plan = rocjitsu::plan_consan_moi_auto_report(
+            report_inventory, config->moi_auto_report_buffer_size);
         required_report_size = report_plan.required_bytes;
         requested_report_size = report_plan.required_bytes;
         report_layout = report_plan.layout;
@@ -4127,7 +4128,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (live_fault_auto_report_capacity_inventory) {
       const rocjitsu::ConSanMoiAutoReportInventory live_requirement =
           rocjitsu::inventory_consan_moi_auto_report(patch_result, patch_options,
-                                                     std::span<const uint8_t>(bytes, size));
+                                                     std::span<const uint8_t>(bytes, size),
+                                                     config->moi_auto_report_buffer_size);
       if (!rocjitsu::consan_moi_auto_report_inventory_covers(
               *live_fault_auto_report_capacity_inventory, live_requirement)) {
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan internal invariant violation: live fault "

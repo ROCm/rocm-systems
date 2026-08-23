@@ -1034,7 +1034,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
 
 ConSanMoiAutoReportInventory
 inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions &options,
-                                 std::span<const uint8_t> code_object_bytes) {
+                                 std::span<const uint8_t> code_object_bytes,
+                                 uint64_t caller_ceiling_bytes) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
   const rj_code_arch_t arch = result.arch;
@@ -1232,10 +1233,10 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.inline_diagnostic_count_adaptive = true;
   }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay)
-    return fit_consan_moi_record_replay_auto_report_inventory(inventory);
+    return fit_consan_moi_record_replay_auto_report_inventory(inventory, caller_ceiling_bytes);
   if (options.moi_engine == ConSanMoiEngine::Sampled)
-    return fit_consan_moi_sampled_auto_report_inventory(inventory);
-  return fit_consan_moi_inline_auto_report_inventory(inventory);
+    return fit_consan_moi_sampled_auto_report_inventory(inventory, caller_ceiling_bytes);
+  return fit_consan_moi_inline_auto_report_inventory(inventory, caller_ceiling_bytes);
 }
 
 } // namespace rocjitsu

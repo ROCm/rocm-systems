@@ -377,10 +377,13 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 
 } // namespace
 
-ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory) {
+ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory,
+                                                    uint64_t caller_ceiling_bytes) {
   ConSanMoiAutoReportPlan plan;
   plan.engine = inventory.engine;
-  plan.ceiling_bytes = consan_moi_auto_report_buffer_ceiling_bytes(inventory.engine);
+  const uint64_t engine_ceiling = consan_moi_auto_report_buffer_ceiling_bytes(inventory.engine);
+  plan.ceiling_bytes =
+      caller_ceiling_bytes == 0u ? engine_ceiling : std::min(caller_ceiling_bytes, engine_ceiling);
   alias_unused_regions(plan.layout, sizeof(ConSanMoiReportHeader));
   uint64_t cursor = sizeof(ConSanMoiReportHeader);
 
@@ -442,7 +445,8 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
 }
 
 ConSanMoiAutoReportInventory
-fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                                   uint64_t caller_ceiling_bytes) {
   if (inventory.engine != ConSanMoiEngine::RecordReplay)
     return inventory;
 
@@ -474,7 +478,8 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
     uint64_t headroom = kConSanMoiRecordReplayDynamicLaneEventHeadroom;
     for (;;) {
       ConSanMoiAutoReportInventory candidate = expanded_candidate(headroom);
-      const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(candidate);
+      const ConSanMoiAutoReportPlan plan =
+          plan_consan_moi_auto_report(candidate, caller_ceiling_bytes);
       if (plan.complete())
         return candidate;
       const bool capacity_limited =
@@ -513,7 +518,8 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
 }
 
 ConSanMoiAutoReportInventory
-fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                             uint64_t caller_ceiling_bytes) {
   if (inventory.engine != ConSanMoiEngine::Sampled || !inventory.sampled_bank_count_adaptive ||
       inventory.access_range_count == 0u ||
       inventory.sampled_watchpoint_count < inventory.sampled_range_bank_count ||
@@ -531,7 +537,8 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
     return inventory;
 
   while (bank_count > 1u) {
-    const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+    const ConSanMoiAutoReportPlan plan =
+        plan_consan_moi_auto_report(inventory, caller_ceiling_bytes);
     if (plan.complete() ||
         plan.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
         plan.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
@@ -548,13 +555,15 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
 }
 
 ConSanMoiAutoReportInventory
-fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
+fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
+                                            uint64_t caller_ceiling_bytes) {
   if (inventory.engine != ConSanMoiEngine::InlineShadow ||
       !inventory.inline_diagnostic_count_adaptive) {
     return inventory;
   }
 
-  const ConSanMoiAutoReportPlan requested = plan_consan_moi_auto_report(inventory);
+  const ConSanMoiAutoReportPlan requested =
+      plan_consan_moi_auto_report(inventory, caller_ceiling_bytes);
   if (requested.complete() ||
       requested.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
       requested.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
@@ -566,7 +575,7 @@ fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory invento
                                            kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
   ConSanMoiAutoReportInventory candidate = inventory;
   candidate.diagnostic_count = minimum;
-  if (!plan_consan_moi_auto_report(candidate).complete())
+  if (!plan_consan_moi_auto_report(candidate, caller_ceiling_bytes).complete())
     return candidate;
 
   uint64_t fitting = minimum;
@@ -574,7 +583,7 @@ fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory invento
   while (fitting < rejected) {
     const uint64_t midpoint = fitting + (rejected - fitting + 1u) / 2u;
     candidate.diagnostic_count = midpoint;
-    if (plan_consan_moi_auto_report(candidate).complete())
+    if (plan_consan_moi_auto_report(candidate, caller_ceiling_bytes).complete())
       fitting = midpoint;
     else
       rejected = midpoint - 1u;
