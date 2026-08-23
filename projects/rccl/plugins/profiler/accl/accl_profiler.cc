@@ -248,8 +248,10 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   rec.nRanks = ctx->nRanks;
 
   // Kernel timing
-  uint64_t firstKernelStart = UINT64_MAX;
-  uint64_t lastKernelStop = 0;
+  uint64_t firstCpuStart = UINT64_MAX;
+  uint64_t lastCpuStop = 0;
+  uint64_t firstGpuClk = UINT64_MAX;
+  uint64_t lastGpuClk = 0;
   double kernelDurSum = 0;
   double kernelDurMin = 1e18;
   double kernelDurMax = 0;
@@ -265,12 +267,14 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
       // AMD wall_clock64() runs at 100 MHz (10 ns/tick)
       dur = (double)(kch->stopGpuClk - kch->startGpuClk) / 100.0;
       hasGpuTiming = 1;
+      if (kch->startGpuClk < firstGpuClk) firstGpuClk = kch->startGpuClk;
+      if (kch->stopGpuClk > lastGpuClk) lastGpuClk = kch->stopGpuClk;
     } else {
       dur = (double)(kch->tsStopUs - kch->tsStartUs);
     }
 
-    if (kch->tsStartUs < firstKernelStart) firstKernelStart = kch->tsStartUs;
-    if (kch->tsStopUs > lastKernelStop) lastKernelStop = kch->tsStopUs;
+    if (kch->tsStartUs < firstCpuStart) firstCpuStart = kch->tsStartUs;
+    if (kch->tsStopUs > lastCpuStop) lastCpuStop = kch->tsStopUs;
 
     kernelDurSum += dur;
     if (dur < kernelDurMin) kernelDurMin = dur;
@@ -292,9 +296,13 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
     rec.gpuKernelUs = kernelDurSum / nKernelEvents;
     rec.gpuKernelMinUs = kernelDurMin;
     rec.gpuKernelMaxUs = kernelDurMax;
-    rec.totalExecUs = (double)(lastKernelStop - firstKernelStart);
-    rec.launchOverheadUs = (firstKernelStart > coll->tsCollStartUs)
-      ? (double)(firstKernelStart - coll->tsCollStartUs) : 0;
+    if (hasGpuTiming && lastGpuClk > firstGpuClk) {
+      rec.totalExecUs = (double)(lastGpuClk - firstGpuClk) / 100.0;
+    } else {
+      rec.totalExecUs = (double)(lastCpuStop - firstCpuStart);
+    }
+    rec.launchOverheadUs = (firstCpuStart > coll->tsCollStartUs)
+      ? (double)(firstCpuStart - coll->tsCollStartUs) : 0;
   } else {
     rec.totalExecUs = (coll->tsCollStopUs > coll->tsCollStartUs)
       ? (double)(coll->tsCollStopUs - coll->tsCollStartUs) : 0;
