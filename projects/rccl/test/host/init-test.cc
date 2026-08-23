@@ -224,6 +224,126 @@ TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
 }
 
 // ===========================================================================
+// setupChannel (init.cc:1183) -- rotates a channel's ring so it starts at the
+// local rank, and builds the forward (userRanks) and inverse (rankToIndex) maps
+// every ring collective indexes through. Only called from initTransportsRank
+// (init.cc:2207/2215), out of reach host-only.
+//
+// initChannel() is faked (g_initChannelResult) because the real one needs strong
+// streams, memory stacks and device allocations. It therefore does NOT allocate
+// ring->userRanks/rankToIndex the way production does (channel.cc:61-62), so the
+// builder below owns that storage -- which also keeps it leak-free.
+// ===========================================================================
+namespace {
+// comm->channels is a fixed inline array (comm.h:610), so a value-initialised
+// ncclComm already has the channel; only the two ring arrays need backing.
+class SetupChannelComm {
+ public:
+  SetupChannelComm(int nranks, int channelId)
+      : userRanks_(nranks > 0 ? nranks : 0, -1),
+        rankToIndex_(nranks > 0 ? nranks : 0, -1),
+        channelId_(channelId),
+        comm_(new ncclComm{}) {
+    comm_->channels[channelId].ring.userRanks = userRanks_.data();
+    comm_->channels[channelId].ring.rankToIndex = rankToIndex_.data();
+  }
+  ncclComm* get() { return comm_.get(); }
+  const ncclRing& ring() const { return comm_->channels[channelId_].ring; }
+  const std::vector<int>& userRanks() const { return userRanks_; }
+  const std::vector<int>& rankToIndex() const { return rankToIndex_; }
+
+ private:
+  std::vector<int> userRanks_;
+  std::vector<int> rankToIndex_;
+  int channelId_;
+  std::unique_ptr<ncclComm> comm_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, SetupChannel_RotatedRing_ReindexesFromLocalRank) {
+  // ring {2,0,3,1} as seen by rank 3: rank 0 sits at index 1, rank 3 at index 2,
+  // so our ring distance from rank 0 is (2-1+4)%4 == 1, and userRanks is the ring
+  // rotated to start at us.
+  int ringRanks[4] = {2, 0, 3, 1};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/3, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(1, c.ring().index);
+  EXPECT_EQ(std::vector<int>({3, 1, 2, 0}), c.userRanks());
+  EXPECT_EQ(3, c.userRanks()[0]) << "userRanks must start at the local rank";
+  // rankToIndex is the exact inverse of userRanks.
+  for (int i = 0; i < 4; ++i) EXPECT_EQ(i, c.rankToIndex()[c.userRanks()[i]]) << "i=" << i;
+}
+
+TEST_F(InitMicrotest, SetupChannel_IdentityRing_Rank0_IsIdentity) {
+  // Both `if`s inside the scan hit true at the SAME index (i==0).
+  int ringRanks[4] = {0, 1, 2, 3};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/0, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(0, c.ring().index);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), c.userRanks());
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), c.rankToIndex());
+}
+
+TEST_F(InitMicrotest, SetupChannel_RotatedRing_Rank0_IndexIsZero) {
+  // Invariant: rank 0's ring distance from rank 0 is 0 whatever the rotation,
+  // because ixRank and ixZero are then the same index.
+  int ringRanks[4] = {2, 3, 0, 1};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/0, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(0, c.ring().index);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), c.userRanks());
+}
+
+TEST_F(InitMicrotest, SetupChannel_SingleRank_TrivialRing) {
+  int ringRanks[1] = {0};
+  SetupChannelComm c(/*nranks=*/1, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/0, /*nranks=*/1, ringRanks));
+
+  EXPECT_EQ(0, c.ring().index);
+  EXPECT_EQ(std::vector<int>({0}), c.userRanks());
+  EXPECT_EQ(std::vector<int>({0}), c.rankToIndex());
+}
+
+TEST_F(InitMicrotest, SetupChannel_InitChannelFails_PropagatesAndLeavesRingUntouched) {
+  g_initChannelResult = ncclInternalError;
+  int ringRanks[4] = {2, 0, 3, 1};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  EXPECT_EQ(ncclInternalError, setupChannel(c.get(), 0, /*rank=*/3, /*nranks=*/4, ringRanks));
+  // NCCLCHECK returned before the scan, so the builder's -1 fill survives.
+  EXPECT_EQ(std::vector<int>({-1, -1, -1, -1}), c.userRanks());
+}
+
+TEST_F(InitMicrotest, SetupChannel_InitChannelInProgress_ContinuesAndSucceeds) {
+  // NCCLCHECK (checks.h) returns only when the result is neither ncclSuccess NOR
+  // ncclInProgress, so ncclInProgress falls through and the ring is still built.
+  // That arm is invisible to a plain success/failure pair.
+  g_initChannelResult = ncclInProgress;
+  int ringRanks[4] = {2, 0, 3, 1};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  EXPECT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/3, /*nranks=*/4, ringRanks));
+  EXPECT_EQ(std::vector<int>({3, 1, 2, 0}), c.userRanks());
+}
+
+// setupChannel does not validate that `rank` is actually a member of the ring:
+// ixRank keeps its 0 initialiser, so the ring is silently left unrotated and
+// userRanks[0] is whatever happened to be first -- a well-formed but wrong ring,
+// with no diagnostic. (The mirror case, rank 0 missing from the ring, is not
+// safely constructible: rankToIndex is indexed by rank value and sized nranks,
+// so every entry must be < nranks, and nranks distinct such values must include 0.)
+TEST_F(InitMicrotest, SetupChannel_RankNotInRing_SilentlyTreatsIndexZeroAsSelf) {
+  int ringRanks[4] = {1, 2, 3, 0};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/7, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(1, c.ring().index);                              // (0 - 3 + 4) % 4
+  EXPECT_EQ(std::vector<int>({1, 2, 3, 0}), c.userRanks());   // unrotated
+  EXPECT_NE(7, c.userRanks()[0]) << "no validation that rank is in the ring";
+}
+
+// ===========================================================================
 // ncclP2pSchedule (init.cc:1311) -- builds comm->p2pSchedule, the per-round
 // send/recv rank pairing every P2P collective walks. Its only production caller
 // is initTransportsRank (init.cc:2188), far out of reach host-only; the

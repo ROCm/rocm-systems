@@ -66,6 +66,14 @@ extern bool g_bootstrapNetInitFail;
 // alloc.h and ncclCudaCompCap comes from the real utils.cc oracle -- both real,
 // driven via the HIP device model, not faked here.)
 // -------------------------------------------------------------------------
+// setupChannel() seam. initChannel() (src/channel.cc:16) is unreachable host-only
+// -- strong streams, memory stacks, ncclCudaCallocAsync -- so it stays faked, but
+// injectable so a test can cover both the NCCLCHECK early-return arm and the
+// ncclInProgress fall-through. NOTE: the real initChannel allocates
+// ring->userRanks/rankToIndex (channel.cc:61-62); the fake does not, so a test
+// calling setupChannel must point the ring at storage it owns.
+extern ncclResult_t g_initChannelResult;
+
 extern ncclResult_t g_ncclNetInitResult;
 extern ncclResult_t g_ncclGinInitResult;
 extern ncclResult_t g_ncclStrongStreamResult;

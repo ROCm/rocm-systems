@@ -238,6 +238,8 @@ ncclResult_t g_ncclGinInitResult        = ncclSuccess;
 ncclResult_t g_ncclStrongStreamResult   = ncclSuccess;
 ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
 ncclResult_t g_amdSmiInitResult         = ncclSuccess;
+// setupChannel() seam; the stub itself lives in nccl_stubs.cc.
+ncclResult_t g_initChannelResult        = ncclSuccess;
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
@@ -285,4 +287,5 @@ void ResetInitFakes() {
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclMemManagerInitResult = ncclSuccess;
   g_amdSmiInitResult = ncclSuccess;
+  g_initChannelResult = ncclSuccess;
 }

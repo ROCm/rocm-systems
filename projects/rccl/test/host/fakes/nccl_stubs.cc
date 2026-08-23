@@ -30,7 +30,14 @@ struct ncclStrongStream;
 struct ncclTopoGraph;
 
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
-ncclResult_t initChannel(struct ncclComm* comm, int channelid) { ::abort(); }
+// Controllable (was a fail-loud abort): setupChannel()'s first statement is
+// NCCLCHECK(initChannel(...)). Defined in init_fakes.cc alongside the other
+// injectable seams; declared here rather than including init_fakes.h, which
+// would drag the HIP/nccl fake headers into this stub TU. The fake deliberately
+// does NOT allocate ring->userRanks/rankToIndex the way the real one does
+// (channel.cc:61-62), so callers supply that storage.
+extern ncclResult_t g_initChannelResult;
+ncclResult_t initChannel(struct ncclComm* comm, int channelid) { return g_initChannelResult; }
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
