@@ -714,6 +714,27 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
+                _workload_name STREQUAL "ModuleLifecycle"
+                AND NOT _mode_value STREQUAL "supercollider"
+            )
+                # Four initial objects plus alternating odd/even reloads must
+                # all contribute complete dynamic evidence. This count is the
+                # workload's lifecycle contract, not a patch-layout detail.
+                set(
+                    _module_lifecycle_coverage_regex
+                    "applicable_code_objects=8 incomplete_code_objects=0 access=32/32"
+                )
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "${_module_lifecycle_coverage_regex}"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "${_module_lifecycle_coverage_regex}"
+                )
+            endif()
+
+            if(
                 _workload_name STREQUAL "CdnaClobberingLdsReduction"
                 AND _mode_value STREQUAL "inline-shadow"
             )
@@ -882,7 +903,7 @@ function(rj_add_consan_device_module_lifecycle_fixture target)
     endif()
 
     set(_module_hsacos)
-    foreach(_variant IN ITEMS 1 2)
+    foreach(_variant IN ITEMS 1 2 3 4)
         set(_module_bundle
             "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_module_lifecycle_${target}_${_variant}.bundle"
         )
@@ -916,6 +937,8 @@ function(rj_add_consan_device_module_lifecycle_fixture target)
     endforeach()
     list(GET _module_hsacos 0 _module_hsaco_a)
     list(GET _module_hsacos 1 _module_hsaco_b)
+    list(GET _module_hsacos 2 _module_hsaco_c)
+    list(GET _module_hsacos 3 _module_hsaco_d)
     add_custom_target(
         hip_consan_device_module_lifecycle_${target}_kernels_target
         ALL
@@ -928,6 +951,8 @@ function(rj_add_consan_device_module_lifecycle_fixture target)
         COMPILE_DEFINITIONS
             "RJ_CONSAN_MODULE_LIFECYCLE_HSACO_A=\"${_module_hsaco_a}\""
             "RJ_CONSAN_MODULE_LIFECYCLE_HSACO_B=\"${_module_hsaco_b}\""
+            "RJ_CONSAN_MODULE_LIFECYCLE_HSACO_C=\"${_module_hsaco_c}\""
+            "RJ_CONSAN_MODULE_LIFECYCLE_HSACO_D=\"${_module_hsaco_d}\""
         EXTRA_DEPENDS "${_module_hsacos}"
     )
     add_dependencies(
