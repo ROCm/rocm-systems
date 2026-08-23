@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Cross-wave prefix allocation distilled from PyTorch's BF16 top-k gather.
+/// Wave32 cross-wave prefix allocation distilled from PyTorch's BF16 top-k gather.
 
 #include "consan_device_test_support.h"
 
@@ -42,12 +42,17 @@ __host__ __device__ constexpr bool topk_candidate(uint32_t tid) {
   return ((tid * 73u) % kThreadCount) > kTopKThreshold;
 }
 
+#if defined(__gfx1100__)
+#define WAVE32_LDS_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#else
+#define WAVE32_LDS_WAIT "s_wait_dscnt 0\n\t"
+#endif
+
 __device__ __forceinline__ uint32_t lds_add_return(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t result = 0u;
-  asm volatile("ds_add_rtn_u32 %0, %1, %2\n\t"
-               "s_wait_dscnt 0\n\t"
+  asm volatile("ds_add_rtn_u32 %0, %1, %2\n\t" WAVE32_LDS_WAIT
                : "=v"(result)
                : "v"(lds_address), "v"(value)
                : "memory");
@@ -56,8 +61,7 @@ __device__ __forceinline__ uint32_t lds_add_return(volatile uint32_t *address, u
 
 __device__ __forceinline__ uint32_t wave_broadcast(uint32_t source_lane, uint32_t value) {
   uint32_t result = 0u;
-  asm volatile("ds_bpermute_b32 %0, %1, %2\n\t"
-               "s_wait_dscnt 0\n\t"
+  asm volatile("ds_bpermute_b32 %0, %1, %2\n\t" WAVE32_LDS_WAIT
                : "=v"(result)
                : "v"(source_lane << 2u), "v"(value)
                : "memory");
@@ -82,7 +86,7 @@ __device__ __forceinline__ void reserve_warp_space(bool candidate, uint32_t &cou
     register uint32_t value0 asm("v20") = 0u;                                                      \
     register uint32_t value1 asm("v21") = 0u;                                                      \
     asm volatile("ds_load_2addr_b32 v[20:21], %2 offset0:" #offset0 " offset1:" #offset1           \
-                 "\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_wait_dscnt 0\n\t"                           \
+                 "\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE WAVE32_LDS_WAIT                                \
                  : "+v"(value0), "+v"(value1)                                                      \
                  : "v"(address)                                                                    \
                  : "memory");                                                                      \
@@ -96,7 +100,7 @@ DEFINE_LDS_LOAD_PAIR(load_pair_48_56, 48, 56)
 
 #undef DEFINE_LDS_LOAD_PAIR
 
-__global__ __launch_bounds__(kThreadCount) void gfx1250_topk_prefix_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(kThreadCount) void wave32_topk_prefix_for_consan(DeviceState *state) {
   __shared__ uint32_t counter;
   __shared__ uint32_t builtin_counter;
   __shared__ uint32_t payload[kThreadCount];
@@ -112,7 +116,7 @@ __global__ __launch_bounds__(kThreadCount) void gfx1250_topk_prefix_for_consan(D
   // is not one of the selected candidates, then broadcasts the returned base.
   constexpr uint32_t source_lane = 0u;
 
-  state->control[tid] = 0x12500000u | tid;
+  state->control[tid] = 0x32000000u | tid;
   state->observed_rank[tid] = local_rank;
   if (tid == 0u) {
     counter = 0u;
@@ -172,13 +176,13 @@ __global__ __launch_bounds__(kThreadCount) void gfx1250_topk_prefix_for_consan(D
   }
 }
 
-void run_gfx1250_topk_prefix(bool synchronize) {
+void run_wave32_topk_prefix(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  gfx1250_topk_prefix_for_consan<<<1, kThreadCount>>>(device_state);
+  wave32_topk_prefix_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   HIP_ASSERT(hipMemcpy(&state, device_state, sizeof(state), hipMemcpyDeviceToHost));
@@ -253,11 +257,13 @@ void run_gfx1250_topk_prefix(bool synchronize) {
     EXPECT_EQ(all_observed_builtin_payload, expected_payload);
   }
   for (uint32_t tid = 0; tid < kThreadCount; ++tid)
-    EXPECT_EQ(state.control[tid], 0x12500000u | tid) << "thread=" << tid;
+    EXPECT_EQ(state.control[tid], 0x32000000u | tid) << "thread=" << tid;
 }
 
-TEST(ConSanDeviceGfx1250TopKPrefixTest, Correct) { run_gfx1250_topk_prefix(true); }
+TEST(ConSanDeviceWave32TopKPrefixTest, Correct) { run_wave32_topk_prefix(true); }
 
-TEST(ConSanDeviceGfx1250TopKPrefixTest, Incorrect) { run_gfx1250_topk_prefix(false); }
+TEST(ConSanDeviceWave32TopKPrefixTest, Incorrect) { run_wave32_topk_prefix(false); }
 
 } // namespace
+
+#undef WAVE32_LDS_WAIT

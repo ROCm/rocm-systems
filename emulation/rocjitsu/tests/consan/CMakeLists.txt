@@ -465,10 +465,19 @@ function(rj_add_consan_device_conformance_cases)
             "OrderedAtomicScope|ordered_atomic_scope|ConSanDeviceOrderedAtomicScopeTest|atomics"
         )
     endif()
+    if(
+        _device_TARGET STREQUAL "gfx1100"
+        OR _device_TARGET STREQUAL "gfx1201"
+        OR _device_TARGET STREQUAL "gfx1250"
+    )
+        list(
+            APPEND _device_workloads
+            "Wave32TopKPrefix|wave32_topk_prefix|ConSanDeviceWave32TopKPrefixTest|atomics"
+        )
+    endif()
     if(_device_TARGET STREQUAL "gfx1250")
         list(
             APPEND _device_workloads
-            "Gfx1250TopKPrefix|gfx1250_topk_prefix|ConSanDeviceGfx1250TopKPrefixTest|atomics"
             "Gfx1250ClusterSync|gfx1250_cluster|ConSanDeviceGfx1250ClusterSyncTest"
             "Gfx1250MultiCluster|gfx1250_cluster|ConSanDeviceGfx1250MultiClusterTest"
             "Gfx1250TdmWait|gfx1250_cluster|ConSanDeviceGfx1250TdmWaitTest"
@@ -994,10 +1003,12 @@ function(rj_add_consan_device_fixture_targets target)
             "ordered_atomic_scope|ordered_atomic_scope_test.hip"
         )
     endif()
+    if(target STREQUAL "gfx1100" OR target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        list(APPEND _device_workload_sources "wave32_topk_prefix|wave32_topk_prefix_test.hip")
+    endif()
     if(target STREQUAL "gfx1250")
         list(
             APPEND _device_workload_sources
-            "gfx1250_topk_prefix|gfx1250_topk_prefix_test.hip"
             "gfx1250_high_bank_lds_address|gfx1250_high_bank_lds_address_test.hip"
             "gfx1250_sparse_fp8_pipeline|gfx1250_sparse_fp8_pipeline_test.hip"
             "gfx1250_global_async_to_lds|gfx1250_global_async_to_lds_test.hip"
