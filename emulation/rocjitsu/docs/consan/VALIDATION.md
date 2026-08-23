@@ -30,9 +30,12 @@ cover cross-wave LDS handoff, barrier and fence publication, shared helpers
 with multiple kernel owners, three-dimensional workgroup identity, dynamic
 private stacks, adjacent subword writes with overlapping reads, fetch-add,
 atomic-OR, release-CAS publication, language-level release-store publication,
-and multi-stage selection/reduction shapes. Target extensions include native 96-bit LDS tuple publication on
+module load/unload/reload, compiler-generated kernarg preloads, mixed private
+owners, long-range live-SCC control, and multi-stage selection/reduction
+shapes. Target extensions include native 96-bit LDS tuple publication on
 CDNA3/CDNA4 and RDNA4/CDNA5, including an address/destination alias distilled
-from framework kernels. Every semantic scenario has adjacent correct and
+from framework kernels; wave32 Top-K prefix exchange; native CDNA4 b64-to-b16
+transpose reads; and CDNA5 sparse and scaled matrix pipelines. Every semantic scenario has adjacent correct and
 incorrect workloads: the correct member checks exact host-computed output and
 forbids diagnostics, while the incorrect member changes the intended ordering
 property and requires the applicable sanitizer evidence while retaining an
@@ -51,11 +54,10 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 1,806 simulator cases and 421 physical
-cases, for 2,227 total. One whole-matrix CTest qualification on the current
-reference host passes all rows in 140.75 seconds at `-j64`; the simulator-only
-inner-loop filter independently passes all 1,806 rows in 57.38 seconds, while
-the serialized physical filter passes all 421 rows in 136.04 seconds.
+current registered matrix contains 2,192 simulator cases and 487 physical
+cases, for 2,679 total. The 2026-08-23 whole-matrix CTest qualification on the
+current reference host passes every row in 157.71 seconds at `-j64`, with
+3,003.90 seconds of aggregate CTest process duration.
 
 The initial target-capability disposition is:
 
@@ -65,10 +67,12 @@ The initial target-capability disposition is:
 | Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
 | Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA4/CDNA5, including address/destination aliasing. |
-| Multi-owner helpers, multidimensional dispatch identity, and dynamic private stacks | Covered on all five targets. |
+| Multi-owner helpers, multidimensional dispatch identity, dynamic private stacks, and module lifecycle | Covered on all five targets and physical CDNA4, including compiler-generated kernarg-preload and mixed-owner variants. |
 | Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, and language-level release store plus acquire-CAS workloads. |
-| CDNA5 clustered dispatch and transfer | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, and multicast. Store-from-LDS, wider fragments, scale-WMMA, and larger clusters remain extensions. |
-| Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are now covered on every architecture where ConSan admits them. |
+| Wave32 prefix and permutation | Covered on RDNA3/RDNA4/CDNA5 by atomic-return reservation, `ds_bpermute`, paired LDS loads, and exact prefix/payload oracles. |
+| Native CDNA4 transpose publication | Covered in gfx950 simulation and on the physical GPU by `ds_read_b64_tr_b16` with the exact 16-lane transpose oracle. The instruction is not native gfx942. |
+| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, multicast, sparse SWMMAC, and scaled WMMA. Store-from-LDS, wider fragments, and larger clusters remain extensions. |
+| Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are covered on every architecture where ConSan admits them. |
 
 “Tracked gap” is preferable to a fixture that merely recognizes the current
 patcher. Add an extension when its program can state a portable workload or
