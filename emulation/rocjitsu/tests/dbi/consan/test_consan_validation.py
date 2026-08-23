@@ -6025,6 +6025,39 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(policy["oracle"], "pass")
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_tree_inline_fault_weakens_only_producer_release(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["tree-atomic-or"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "atomic-weaken-producer-release",
+        )
+
+        environment = fault["environment"]
+        self.assertEqual(
+            environment["RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE"], "release"
+        )
+        self.assertEqual(
+            environment["RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER"], "1"
+        )
+        site = environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        self.assertIn("atomic_memory_orderE2E", site)
+        self.assertIn("pc=0x00000000000185c8", site)
+        self.assertIn("mnemonic=global_atomic_or", site)
+        self.assertIn("occurrence=208", site)
+
+        policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "pass")
+        self.assertEqual(
+            policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]

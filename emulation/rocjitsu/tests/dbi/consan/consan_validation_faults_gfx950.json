@@ -47,6 +47,28 @@
           }
         }
       ]
+    },
+    "tree-atomic-or": {
+      "faults": [
+        {
+          "id": "atomic-weaken-producer-release",
+          "family": "atomic-weaken-order",
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE": "release",
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:59f4280a6d20c4de|kernel=_ZN12_GLOBAL__N_134mfma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv4_DF16_S7_PiPf|kind=atomic|pc=0x00000000000185c8|mnemonic=global_atomic_or|occurrence=208"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }
