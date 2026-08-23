@@ -541,6 +541,7 @@ set(SRC_FILES
   transport/generic.cc
   transport/net.cc
   transport/net_telemetry.cc
+  transport/rccl_ib_multiseg.h
   transport/net_ib/common.cc
   transport/net_ib/common.h
   transport/net_ib/connect.cc
