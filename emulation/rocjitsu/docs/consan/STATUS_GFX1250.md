@@ -620,6 +620,14 @@ inherited instruction-site denominator. gfx1250 evidence comes only from the
 gfx1250 binary and its own oracle, inventory, fault campaign, and timings; the
 larger RDNA4 schedule retains its separate target ledger.
 
+The checked-in `Gfx1250Fp16WmmaPipeline` pair now owns the quick durable
+reduction of this row. It publishes one native 32-byte K=32 FP16 fragment per
+lane from one wave to another, keeps an earlier WMMA result live across the
+handoff, and checks all eight exact 64.0 accumulator elements. Its adjacent
+incorrect member removes only the publication barrier. Baseline and all four
+engines pass all ten RocJitsu-gfx1250 rows, so the target-native fragment and
+matrix behavior is no longer protected only by the external E2E artifact.
+
 ### 2026-08-22 Qwen baseline/Record Replay B0 latency check
 
 Artifact
