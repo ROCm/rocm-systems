@@ -196,9 +196,11 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
                 static_cast<ncclProfilerEventState_v5_t>(22),  // kernelChStop
                 &stateArgs), 0);
 
-            // Stop KernelCh then Coll
-            ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
+            // Stop Coll first, then KernelCh — matches RCCL teardown ordering
+            // where the enqueue thread fires Coll stop while the profiler
+            // transport is still draining kernel channel events.
             ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
 
             // Finalize and check output file exists with content
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
