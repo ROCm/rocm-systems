@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
 """Run pre-commit over a PR's changed files, one config per onboarded subtree.
 
-The repo-root config cannot be used for these subtrees: they are in its
-`exclude:` block, so it drops their files before any hook runs and exits 0. For
-projects/rccl it is also wrong -- its clang-format v18.1.4 pin cannot parse
-projects/rccl/.clang-format ("unknown key 'AlignPPAndNotPP'", exit 1).
-
-Files outside ONBOARDED_SUBTREES are ignored rather than falling back to the
-root config, which would apply root hooks to every not-yet-onboarded project on
-a merge-gating check.
+The repo-root config is in `exclude:` for these subtrees, so it checks nothing and exits 0; for
+rccl its clang-format v18.1.4 also cannot parse projects/rccl/.clang-format.
 
 Arguments:
-    --files-from  : File holding the changed paths, one per line (a file, not
-                    argv, so paths containing spaces survive).
+    --files-from  : File holding the changed paths, one per line.
     --subtree     : OPTIONAL, repeatable. Override ONBOARDED_SUBTREES (testing).
     --dry-run     : If set, log the pre-commit invocations without running them.
     --debug       : If set, enables detailed debug logging.
 
 Outputs:
     Exit 0 if every group passed or nothing onboarded was touched, else 1.
-    Exit 1 without running any hook if an onboarded subtree has changed files
-    but was never checked out -- see check_subtrees_materialised.
 
 Example Usage:
     python .github/scripts/run_pre_commit_by_subtree.py --files-from changed.txt --debug
@@ -35,25 +26,9 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# To onboard a project, ALL FOUR of these are required:
-#
-#   1. Add its path here, as `category/name` with no trailing slash.
-#   2. Add its path to the `paths:` filter in pre-formatting.yml, or the gate
-#      never runs on its PRs.
-#   3. Make sure it is a `category/name` entry in .github/repos-config.json.
-#      That file is the ONLY thing pr_detect_changed_subtrees.py can emit, and
-#      its output is what puts the subtree's files on disk via the workflow's
-#      sparse-checkout. Every entry there is currently `category: projects`, so
-#      a subtree under emulation/, shared/ or python/ needs a repos-config
-#      entry adding first. Skipping this used to produce a silent green;
-#      check_subtrees_materialised below now makes it a hard failure.
-#   4. Add it to the repo-root .pre-commit-config.yaml `exclude:` block, so the
-#      root config stops claiming files that this script checks with a
-#      different one.
-#
-# Its config's hook regexes must be monorepo-relative (`^projects/<name>/`) --
-# pre-commit chdirs to the git toplevel and rewrites --files to root-relative
-# paths, so subtree-relative regexes never match.
+# Onboarding needs all four: here; `paths:` in pre-formatting.yml; a category/name entry in
+# .github/repos-config.json (the only source the checkout can materialise from); and the root
+# .pre-commit-config.yaml `exclude:`. Hook regexes must be monorepo-relative (`^projects/<name>/`).
 ONBOARDED_SUBTREES = [
     "projects/rccl",
 ]
@@ -67,13 +42,8 @@ def config_for(subtree: str) -> str:
 
 
 def validate_subtrees(subtrees: List[str]) -> None:
-    """Reject subtree spellings that would silently match nothing.
-
-    group_files_by_subtree compares against `subtree` and `subtree + "/"`, so
-    "projects/rccl/" or "./projects/rccl" own no files at all -- yielding an
-    empty group set, "nothing to check", and a permanently green gate with no
-    diagnostic. Fail at startup instead.
-    """
+    """Reject spellings that match nothing: it is a literal prefix compare, so a trailing slash or
+    a "./" prefix owns no files and silently greens the gate."""
     for subtree in subtrees:
         if not subtree or subtree != subtree.strip():
             raise ValueError(f"onboarded subtree {subtree!r} is empty or padded")
@@ -109,19 +79,10 @@ def group_files_by_subtree(
 
 
 def check_subtrees_materialised(raw_files: List[str], subtrees: List[str]) -> List[str]:
-    """Return onboarded subtrees that own changed files but are not on disk.
+    """Return onboarded subtrees that own changed files but were never checked out -- otherwise
+    every path is dropped as absent and the job exits 0 having checked nothing.
 
-    The gate's file list is a git tree diff, which sparse-checkout does not
-    filter; the files themselves arrive only if pr_detect_changed_subtrees.py
-    named the subtree. When it does not -- the subtree is missing from
-    repos-config.json, or get_changed_files returned a partial page and the
-    caller could not tell -- every path is dropped as "not present in sparse
-    checkout" and the job exits 0 having checked nothing.
-
-    A subtree's own config is the cheapest proof that its cone was checked
-    out. Keying off it rather than the changed files means a PR that only
-    DELETES files here is not mistaken for a missing checkout: the config is
-    present, and those files are legitimately absent.
+    Keyed off the subtree's config, not its changed files, so a delete-only PR is not a false red.
     """
     missing: List[str] = []
     for subtree in sorted(group_files_by_subtree(raw_files, subtrees)):
@@ -137,15 +98,9 @@ def read_paths(path: str) -> List[str]:
 
 
 def read_files_list(path: str) -> List[str]:
-    """Read newline-separated paths, dropping blanks and anything not on disk.
-
-    The tree-to-tree diff legitimately names paths the sparse checkout omits.
-    pre-commit drops those silently; filtering here keeps the log honest.
-
-    This filter is also the only thing between an under-reporting `detect`
-    step and a green gate, so callers MUST run check_subtrees_materialised
-    over the unfiltered list before trusting a small result.
-    """
+    """Read paths, dropping blanks and anything not on disk (the tree diff names files the sparse
+    checkout omits). Callers MUST run check_subtrees_materialised first -- this filter hides an
+    under-reporting `detect` step."""
     files: List[str] = []
     for entry in read_paths(path):
         if not os.path.isfile(entry):
@@ -235,11 +190,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     if unmaterialised:
         for subtree in unmaterialised:
             logger.error(
-                "%s has changed files but %s is not on disk: its sparse "
-                "checkout never happened. Check that it is a category/name "
-                "entry in .github/repos-config.json and that the detect step "
-                "listed it. Refusing to report a green check for files that "
-                "were never looked at.",
+                "%s has changed files but %s is not on disk, so it was never checked out. "
+                "Confirm it is a category/name entry in .github/repos-config.json.",
                 subtree,
                 config_for(subtree),
             )

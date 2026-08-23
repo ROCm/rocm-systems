@@ -1,20 +1,13 @@
-# Pre-commit formatting for projects/rccl/.
-#
-# projects/rccl/ is in the repo-root config's `exclude:` block, so a bare
-# `pre-commit run` (and the hook from `pre-commit install`) checks NOTHING here.
-# Always pass -c:
+# Pre-commit formatting for projects/rccl/. rccl is in the root config's `exclude:`, so a bare
+# `pre-commit run` checks nothing here -- always pass -c:
 #
 #   pre-commit run -c projects/rccl/.pre-commit-config.yaml --all-files
 #
-# Regexes below are monorepo-relative: pre-commit chdirs to the git toplevel and
-# hands hooks toplevel-relative paths, so the `^projects/rccl/` prefix is
+# Regexes are monorepo-relative: pre-commit chdirs to the git toplevel, so `^projects/rccl/` is
 # required from any cwd.
 
-# Files .clang-format-ignore already protects, re-stated here because that file
-# governs clang-format only -- without this the whitespace hooks would rewrite
-# them. Five are its "external" entries (upstream NVTX, DOCA GPUNetIO and
-# friends), which would conflict on the next sync; src/nccl.h.in is its
-# "special files" entry, a template the build generates src/nccl.h from.
+# Re-states .clang-format-ignore, which governs clang-format only -- without this the whitespace
+# hooks rewrite vendored sources and conflict on the next upstream sync.
 exclude: |
   (?x)^projects/rccl/(
     src/include/nvtx3/
@@ -38,9 +31,7 @@ repos:
       - id: check-yaml
         files: ^projects/rccl/
 
-  # clang-format 22 is mandatory: .clang-format uses v22 keys and v18 (the
-  # root config's pin) rejects the file outright with
-  # "unknown key 'AlignPPAndNotPP'". Scope and output match
+  # v22 is mandatory: .clang-format uses v22 keys that v18 rejects outright. Output matches
   # maint/run-clang-format.sh byte-for-byte over projects/rccl/src.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v22.1.0
@@ -48,6 +39,5 @@ repos:
       - id: clang-format
         files: ^projects/rccl/src/.*\.(h|cc|cu|cuh)$
 
-# TODO(AITESTAUTO-6995): the root config's black, gersemi and
-# check-added-large-files are not replaced here. Each is a bulk reformat needing
-# its own review; adopt in follow-ups.
+# TODO(AITESTAUTO-6995): black, gersemi and check-added-large-files are not replaced here -- each
+# is a bulk reformat needing its own review.

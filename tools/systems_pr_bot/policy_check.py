@@ -260,24 +260,16 @@ def iter_pr_files(
 
 
 CHECK_RUNS_PER_PAGE = 100
-# 20 pages = 2000 check-runs. Measured: a rocm-systems PR carries ~300, so this
-# is ~6x headroom. It exists so a server that ignores `page` cannot spin this
-# loop forever -- the bot has no other timeout around it.
+# 2000 runs, ~6x the ~300 a real PR carries. Bounds a server that ignores `page`; nothing else does.
 CHECK_RUNS_MAX_PAGES = 20
 
 
 def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str, Any]]:
     """Return every check-run for a commit SHA, transparently paginating.
 
-    PRs here really do exceed one page: measured 308 check-runs on a single
-    rocm-systems PR, with the required `pre-commit` run on page 4. The API
-    returns check-runs newest-id-first, so the earliest-created ones fall off
-    the end, and a required check on page 2+ is indistinguishable from a
-    missing one -- the caller reports it pending and times out instead of
-    reading its conclusion.
-
-    Raises rather than returning a short list: a partial result here reads as
-    "the required check does not exist", which fails open into a green table.
+    Measured 308 runs on one PR with `pre-commit` on page 4; a required check past page 1 is
+    indistinguishable from a missing one, so the caller reports it pending and times out.
+    Raises rather than returning a short list, which would read as "the check does not exist".
     """
     runs: List[Dict[str, Any]] = []
     for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
@@ -528,15 +520,9 @@ def effective_run_by_name(
     failing one. Precedence is failure > pending > ok, so a known failure is
     reported immediately rather than waiting out the poll window.
 
-    EVERY consumer of check-runs must collapse through this function. Two
-    collapses that disagree are worse than one that is wrong, because the
-    optimistic one silently wins: the table can say "pending" while the
-    readiness test says "ready".
-
-    Ties (several runs with the same rank) resolve to whichever the API
-    returned first; the check-runs endpoint documents no ordering, so callers
-    must not depend on WHICH failing run they are shown, only that a failing
-    one is.
+    EVERY consumer must collapse through this: two collapses that disagree let the optimistic one
+    win silently. Ties resolve to whatever the API returned first, so callers must not depend on
+    WHICH failing run they are shown.
     """
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for r in check_runs:
@@ -825,10 +811,8 @@ def maybe_comment_precommit_failure(
     if not policy.precommit_failure_comment:
         return
 
-    # Same collapse as summarize_required_checks: picking the FIRST run named
-    # `pre-commit` would skip this comment whenever a passing duplicate happens
-    # to be listed before the failing one -- while the caller, which reached
-    # here precisely because that check is failing, prints that it failed.
+    # First-wins here would skip the comment when a passing duplicate is listed before the
+    # failing run the caller already reported.
     precommit_run = effective_run_by_name(check_runs).get("pre-commit")
     if not precommit_run:
         return
@@ -1180,9 +1164,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
             by_name = effective_run_by_name(poll_runs)
-            # Check whether every required CI check has a conclusion yet. A
-            # duplicate name that is still running must keep us here, so this
-            # has to use the same worst-wins collapse as the table above.
+            # Worst-wins, so a still-running duplicate keeps us polling.
             all_concluded = all(
                 by_name.get(n) is not None and by_name[n].get("conclusion") is not None
                 for n in policy.required_checks
@@ -1248,10 +1230,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # If any required checks are missing or still running, keep waiting.
         all_present = not missing
         all_ok = True
-        # This decides "ready for review", so it MUST agree with
-        # summarize_required_checks above. A last-wins collapse here would
-        # declare the PR ready off a passing duplicate while the run that
-        # actually gates it is still in flight.
+        # Decides "ready for review", so it MUST agree with summarize_required_checks above.
         by_name = effective_run_by_name(runs)
         for name in policy.required_checks:
             r = by_name.get(name)

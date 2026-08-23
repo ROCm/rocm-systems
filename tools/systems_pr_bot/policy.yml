@@ -153,11 +153,8 @@ checks:
     - pre-commit
 
   failure_comments:
-    # KEEP THIS IN STEP WITH THE ROOT .pre-commit-config.yaml `exclude:` BLOCK.
-    # Every project listed there is skipped by the root config, so telling its
-    # developers to run the root config gives them "(no files to check)
-    # Skipped", exit 0, and no way to reproduce the failure they were sent
-    # here for. Adding a project to that exclude means adding it below.
+    # Keep the project list below in step with the root .pre-commit-config.yaml `exclude:` block:
+    # for anything listed there the root config checks nothing and exits 0.
     pre-commit:
       title: "Pre-commit check failed"
       body: |

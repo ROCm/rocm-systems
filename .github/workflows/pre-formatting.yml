@@ -17,16 +17,12 @@ on:
       - ".github/workflows/pre-formatting.yml"
       - ".github/scripts/run_pre_commit_by_subtree.py"
       - ".github/scripts/tests/test_run_pre_commit_by_subtree.py"
-      # This job's file list comes from pr_detect_changed_subtrees.py reading
-      # repos-config.json, so a change to either can silently empty the gate.
-      # Both are listed here so such a PR is checked by the gate it changes.
+      # Both feed this job's file list; a change to either can silently empty the gate.
       - ".github/scripts/pr_detect_changed_subtrees.py"
       - ".github/repos-config.json"
       - ".pre-commit-config.yaml"
-      # Do NOT add '!**/*.md'-style negations here. rccl's hooks genuinely
-      # check Markdown, and because this workflow publishes the only check-run
-      # the bot requires, a paths: miss means no check-run at all and a 900s
-      # bot timeout -- not a skipped check.
+      # No '!**/*.md'-style negations: a paths: miss publishes no check-run at all, which the bot
+      # waits 900s for. Skipping is not an option here, only not-running.
 
 permissions:
   contents: read
@@ -46,9 +42,7 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
-          # 2 commits: the merge ref plus its first parent, which is the base
-          # commit the merge was computed against. See "Get list of changed
-          # files" below.
+          # Merge ref plus its first parent, which is the base it was computed against.
           fetch-depth: 2
 
       - name: Set up Python
@@ -62,8 +56,7 @@ jobs:
           pip install pydantic pytest requests pre-commit
 
       - name: Unit-test the subtree runner
-        # This job's verdict is only as trustworthy as the script that decides
-        # which files get checked, so test it before believing its green.
+        # This verdict is only as good as the script that picks the files.
         run: python -m pytest .github/scripts/tests/test_run_pre_commit_by_subtree.py
 
       - name: Detect changed subtrees
@@ -94,17 +87,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # HEAD is refs/pull/N/merge. Its first parent is the base commit that
-          # merge was computed against, so `HEAD^ HEAD` is exactly this PR's
-          # own change -- the same idiom therock-ci.yml uses.
-          #
-          # Do NOT diff against a freshly fetched base tip instead. The merge
-          # ref is recomputed asynchronously, so once develop moves the diff
-          # also contains the REVERSE of everything merged in the window, and
-          # this job would fail a contributor for files they never touched.
-          #
-          # --diff-filter=ACMR drops deletions: they are not on disk, and
-          # pre-commit cannot check a file that no longer exists.
+          # HEAD^1 is the base the merge ref was built on. Do NOT diff a freshly fetched base tip:
+          # the merge ref is recomputed lazily, so a moved develop makes this red for other
+          # people's files. ACMR drops deletions, which pre-commit cannot check.
           git diff --name-only --diff-filter=ACMR HEAD^1 HEAD \
             > "$RUNNER_TEMP/changed-files.txt"
           echo "Changed files:"
@@ -114,9 +99,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Check-only: this publishes the check-run the bot requires, so a
-          # formatting failure must fail the job. Each onboarded subtree is
-          # checked with its own config -- see the script for why the root
-          # config cannot be used.
+          # Check-only: this publishes the check-run the bot requires, so a failure must fail here.
           python .github/scripts/run_pre_commit_by_subtree.py \
             --files-from "$RUNNER_TEMP/changed-files.txt"
