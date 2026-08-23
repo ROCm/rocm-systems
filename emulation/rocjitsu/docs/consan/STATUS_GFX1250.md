@@ -49,7 +49,7 @@ preserve an earlier green claim.
 | **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Recompiling the unchanged source with the current O3 pipeline removes obsolete giant runtime transpose initializers: the exact full 151,936-logit baseline now passes in 64.49 seconds with the original 2.9-GB parameters. Record/Replay is statically complete at 846/846 accesses plus 80/80 barriers, transforms in 90 ms, and reaches execution, but remains dispatch-active after 28 launches at the bounded 180-second limit and therefore has no final replay/oracle verdict. Preserve this as an explicit emulator-throughput deferral rather than repeatedly extending the wait | 🟧 The canonical O3 artifact is statically complete at 846/846 accesses plus 74/74 applicable barriers and transforms in 61 ms. It remains compute-active through 310 launches, including the final 2,374-cluster output kernel, at the bounded 180-second limit; no final oracle or teardown verdict is available | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
-| **P2 Sharktank TP2 family** | 🟩 Prefill, decode, and combined pass their exact oracles in 19.00, 67.75, and 50.74 seconds with complete 920/920 access coverage apiece and at most 1.12x paired slowdown. A prospectively frozen publication-edge detection hypothesis remains rejected without relabeling; a distinct reviewed exact-one DPP-phase drop is reached and accepted as `not_detected/pass`, with complete containment, health, cleanup, and provenance | 🟧 The canonical split prefill baseline is accepted in 17.35 seconds. Record/Replay completely instruments both rank objects at 460/460 accesses and 48/48 barriers each, with no unsupported or resource-failed sites, but remains in execution at the 180-second bound. Decode and combined clean/fault qualification remain; the cell stays orange at the isolated instrumented-throughput frontier | 🟩 Prefill, decode, and combined pass their exact oracles in 21.82, 70.17, and 55.08 seconds with complete 920/920 access and 84/84 barrier coverage apiece; current paired slowdown is at most 1.38x. A reviewed exact-one reached attention-publication drop produces seven required conflicts while preserving the exact prefill result, with complete containment, health, cleanup, and provenance | 🟩 Prefill, decode, and combined pass their exact oracles in 51.35, 91.57, and 94.77 seconds with complete 920/920 access and 48/48 barrier coverage apiece; current paired slowdown is at most 3.57x. A precommitted exact-one reached attention-publication drop produces the required Inline diagnosis while preserving the exact prefill result, with complete containment, health, cleanup, and provenance |
+| **P2 Sharktank TP2 family** | 🟩 Prefill, decode, and combined pass their exact oracles in 19.00, 67.75, and 50.74 seconds with complete 920/920 access coverage apiece and at most 1.12x paired slowdown. A prospectively frozen publication-edge detection hypothesis remains rejected without relabeling; a distinct reviewed exact-one DPP-phase drop is reached and accepted as `not_detected/pass`, with complete containment, health, cleanup, and provenance | 🟩 Prefill, decode, and combined pass their exact oracles in 26.41, 164.72, and 58.12 seconds with complete 920/920 access and 96/96 barrier coverage apiece, zero diagnostics, and at most 5.61x paired slowdown. The reviewed exact-one DPP-phase drop is reached and accepted as `not_detected/pass`, with complete containment, health, cleanup, and provenance | 🟩 Prefill, decode, and combined pass their exact oracles in 21.82, 70.17, and 55.08 seconds with complete 920/920 access and 84/84 barrier coverage apiece; current paired slowdown is at most 1.38x. A reviewed exact-one reached attention-publication drop produces seven required conflicts while preserving the exact prefill result, with complete containment, health, cleanup, and provenance | 🟩 Prefill, decode, and combined pass their exact oracles in 51.35, 91.57, and 94.77 seconds with complete 920/920 access and 48/48 barrier coverage apiece; current paired slowdown is at most 3.57x. A precommitted exact-one reached attention-publication drop produces the required Inline diagnosis while preserving the exact prefill result, with complete containment, health, cleanup, and provenance |
 | **P4 hip-moi D128 block attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 19.85 seconds with complete 18/18 access coverage; prior paired 1.56x retained | 🟩 Current clean-revision row passes both exact oracles in 21.98 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.11x retained | 🟩 Current clean-revision row passes both exact oracles in 20.37 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.13x retained | 🟩 Current clean-revision row passes both exact oracles in 33.57 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.09x retained |
 | **P4 hip-moi D128 pressure attention** | 🟩 Current clean-revision row passes all four exact host-reference oracles in 60.15 seconds with complete 24/24 access coverage; prior paired 1.84x retained | 🟩 Current clean-revision row passes all four exact oracles in 73.84 seconds with complete 24/24 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.33x and reviewed-fault bundle retained | 🟩 Current clean-revision row passes all four exact oracles in 61.22 seconds with complete 24/24 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.12x retained | 🟩 Current clean-revision row passes all four exact oracles in 117.48 seconds with complete 24/24 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.29x retained |
 | **P4 hip-moi WMMA attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 15.46 seconds with complete 18/18 access coverage; prior paired 1.78x retained | 🟩 Current clean-revision row passes both exact oracles in 16.91 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.17x retained | 🟩 Current clean-revision row passes both exact oracles in 15.22 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.15x retained | 🟩 Current clean-revision row passes both exact oracles in 19.91 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.17x retained |
@@ -144,8 +144,9 @@ The executable gfx1250 manifest now gives those modes independent bounded
 rows. `tp2-family` retains the reviewed prefill fault identity, while
 `tp2-decode` and `tp2-combined` retain the other two exact oracles. Other
 targets keep the existing all-mode row. A focused host regression proves the
-target scoping, the exact prefill/decode/combined partition, and each
-180-second bound, so a future edit cannot silently drop a mode or recreate the
+target scoping, the exact prefill/decode/combined partition, and their
+180/300/180-second bounds, so a future edit cannot silently drop a mode,
+restore the decode row's flaky former 180-second limit, or recreate the
 single-process denominator.
 
 Canonical artifact
@@ -218,6 +219,58 @@ multi-object attribution and teardown. The host manifest/fault regressions are
 therefore the faithful durable tests for the process-mode and selected-site
 contracts; manufacturing another device race solely around Python process
 lifetime would not add behavioral coverage.
+
+### 2026-08-23 TP2 Record/Replay completion and dispatch identity
+
+Fresh current-workspace runs supersede the earlier bounded throughput result.
+Prefill artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-prefill-rr-cached-selection-v3`,
+decode artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-decode-rr-owner-scope-v3`,
+and combined artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-combined-rr-cached-selection-v1`
+accept the unchanged exact cross-entropy oracles in 26.41, 164.72, and 58.12
+seconds. Each mode is statically and dynamically complete across both rank
+objects at 920/920 accesses and 96/96 barriers, with no unsupported,
+resource-failed, placement-failed, expert-omitted, overflowed, or diagnostic
+evidence. Both replay reports complete and cleanup returns every report and
+patched-image allocation to zero live bytes.
+
+The independently bracketed prefill and combined campaigns record 1.2736x and
+1.1090x slowdown. Decode artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-decode-rr-overhead-dispatch-id-v2`
+accepts baseline-before, Record/Replay, and baseline-after at 30,865.13,
+172,825.96, and 30,779.02 ms, yielding a 5.6072x slowdown against the mean
+paired baseline. The instrumented decode leg took 184.74 wall seconds, so its
+former 180-second process limit was not a sound bound. The target manifest now
+uses 300 seconds only for gfx1250 TP2 decode and omits only its redundant
+untimed warmup; the measured exact oracle remains. Focused runner and
+Sharktank-lifecycle tests pin the mode partition, target scope, 180/300/180
+bounds, single measured invocation, and exact result check.
+
+The accepted reviewed fault artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-prefill-rr-fault-cached-selection-v1`
+applies the reached DPP-phase signal/wait drop exactly once and preserves its
+precommitted `not_detected/pass` outcome. It retains complete 920/920 access
+and 94/94 surviving-barrier coverage, exact oracle, mutation accounting,
+bounded cleanup, and pre/post discovery and dispatch health.
+
+The underlying simulator correction is architectural rather than TP2-specific:
+AMDHSA dispatch-ID preloads now use each pending packet's full-width AQL packet
+ID instead of rereading the queue producer frontier after a batch has already
+been submitted. A focused VM test submits two packets before execution and
+requires preloaded IDs zero and one. Record/Replay reporting additionally
+uses complete static kernel-owner provenance as a conservative backstop for
+queue-local ID reuse: same-owner and incomplete-provenance conflicts remain
+fail-closed, while complete disjoint owner sets cannot describe one dispatch.
+The adjacent `CrossKernelDispatchIdentity` correct/incorrect pair launches the
+two owners on separate streams and passes all 24 baseline/RecordReplay rows
+across gfx942, gfx950, gfx1100, gfx1201, gfx1250, and physical gfx950. The
+correct member forbids a cross-kernel false positive; the incorrect member
+removes only the consumer's own publication edge and still requires its
+same-owner conflict. These quick contracts retain the E2E result independently
+of the current prototype implementation. The qualifying hook SHA-256 is
+`6b6237c222d167d204b06476f141b3ee8766b895ef1b32e1e7a513754d985263`.
 
 ### 2026-08-21 fixed-stack Inline scalar-route regression
 

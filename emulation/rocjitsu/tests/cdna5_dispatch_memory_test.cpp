@@ -280,6 +280,31 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(wf.sgpr(3), args[2]);
 }
 
+TEST(Gfx1250SimulationTest, BatchedDispatchesPreloadTheirOwnAqlPacketIds) {
+  using namespace rocr::llvm::amdhsa;
+
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID, 1);
+
+  Gfx1250Sim sim;
+  const uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
+                                                  false, false, kernel_code_properties);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32);
+  queue.dispatch(kernel_object, 32, 32);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+  std::array<uint64_t, 2> preloaded_dispatch_ids{};
+  for (const auto &wf : sim.snapshot->snapshots()) {
+    ASSERT_GE(wf.dispatch_id, 1u);
+    ASSERT_LE(wf.dispatch_id, 2u);
+    preloaded_dispatch_ids[wf.dispatch_id - 1u] = wf.sgpr64(0u);
+  }
+  EXPECT_EQ(preloaded_dispatch_ids, (std::array<uint64_t, 2>{0u, 1u}));
+}
+
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 

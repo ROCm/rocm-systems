@@ -28,7 +28,8 @@ The fixtures reduce device-level properties observed in attention, reduction,
 training, framework state machines, generated-model, and Stream-K-style
 workloads. They cover cross-wave LDS handoff, barrier and fence publication,
 shared helpers with multiple kernel owners, three-dimensional workgroup
-identity, dynamic private stacks, adjacent subword writes with overlapping
+identity, queue-local dispatch identity across independent streams, dynamic
+private stacks, adjacent subword writes with overlapping
 reads, fetch-add, atomic-OR, release-CAS publication, language-level
 release-store publication, four-wave mixed-precision backward reduction,
 runtime-computed indexed LDS addressing and zero-stride aliasing,
@@ -66,8 +67,8 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,778 simulator cases and 567 physical
-cases, for 3,345 total. The current whole-matrix qualification evidence and
+current registered matrix contains 2,818 simulator cases and 575 physical
+cases, for 3,393 total. The current whole-matrix qualification evidence and
 its wall, CPU, and aggregate process-duration accounting are maintained in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 

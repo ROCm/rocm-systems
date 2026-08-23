@@ -208,6 +208,7 @@ public:
                                        inline_shadow,
                                        search.fine_grained,
                                        {},
+                                       {},
                                        {}};
     }
     *address = reinterpret_cast<uint64_t>(ptr);
@@ -262,13 +263,45 @@ public:
       return;
 
     entry->input_fingerprint = result.input_fingerprint;
+    entry->record_replay_patch_mappings.clear();
+    entry->record_replay_patch_mapping_malformed = false;
     entry->sampled_patch_mappings.clear();
     entry->sampled_patch_mapping_malformed = false;
     auto *mappings = reinterpret_cast<rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
         static_cast<uint8_t *>(entry->ptr) + entry->layout.inline_compact_token_mappings_offset);
     size_t compact_patch_count = 0;
+    size_t record_replay_patch_count = 0;
     size_t sampled_patch_count = 0;
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
+      if (patch.kind == rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore ||
+          patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore) {
+        ++record_replay_patch_count;
+        if (patch.anchor_offset > std::numeric_limits<uint32_t>::max()) {
+          entry->record_replay_patch_mapping_malformed = true;
+        } else {
+          const uint32_t instruction_offset = static_cast<uint32_t>(patch.anchor_offset);
+          auto mapping = std::ranges::find_if(
+              entry->record_replay_patch_mappings,
+              [instruction_offset](const Entry::RecordReplayPatchMapping &candidate) {
+                return candidate.instruction_offset == instruction_offset;
+              });
+          if (mapping == entry->record_replay_patch_mappings.end()) {
+            entry->record_replay_patch_mappings.push_back({
+                .instruction_offset = instruction_offset,
+                .owner_descriptor_file_offsets = patch.owner_descriptor_file_offsets,
+                .owner_provenance_complete = !patch.owner_descriptor_file_offsets.empty(),
+            });
+          } else {
+            mapping->owner_provenance_complete &= !patch.owner_descriptor_file_offsets.empty();
+            for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+              if (std::ranges::find(mapping->owner_descriptor_file_offsets, owner) ==
+                  mapping->owner_descriptor_file_offsets.end()) {
+                mapping->owner_descriptor_file_offsets.push_back(owner);
+              }
+            }
+          }
+        }
+      }
       if (patch.sampled_access_range_count != 0u && patch.sampled_window_bank_count != 0u) {
         ++sampled_patch_count;
         const uint64_t slot_count = static_cast<uint64_t>(patch.sampled_access_range_count) *
@@ -305,6 +338,14 @@ public:
               .instruction_offset = static_cast<uint32_t>(patch.anchor_offset),
               .token = patch.workgroup_shadow_compact_token,
           };
+    }
+    if (record_replay_patch_count != 0u) {
+      log_message(kLogInfo,
+                  "ConSan MOI record-replay diagnostic map reader=%llu patches=%zu mappings=%zu "
+                  "malformed=%s",
+                  static_cast<unsigned long long>(reader), record_replay_patch_count,
+                  entry->record_replay_patch_mappings.size(),
+                  entry->record_replay_patch_mapping_malformed ? "true" : "false");
     }
     if (sampled_patch_count != 0u) {
       log_message(kLogInfo,
@@ -411,6 +452,12 @@ private:
   };
 
   struct Entry {
+    struct RecordReplayPatchMapping {
+      uint32_t instruction_offset = 0;
+      std::vector<uint64_t> owner_descriptor_file_offsets;
+      bool owner_provenance_complete = false;
+    };
+
     struct SampledPatchMapping {
       uint32_t first_slot = 0;
       uint32_t range_count = 0;
@@ -442,9 +489,11 @@ private:
     bool inline_shadow = false;
     bool fine_grained = false;
     std::string input_fingerprint;
+    std::vector<RecordReplayPatchMapping> record_replay_patch_mappings;
     std::vector<SampledPatchMapping> sampled_patch_mappings;
     uint32_t compact_token_mapping_count = 0;
     bool compact_token_mapping_malformed = false;
+    bool record_replay_patch_mapping_malformed = false;
     bool sampled_patch_mapping_malformed = false;
     uint64_t executable = 0;
     bool executable_bound = false;
@@ -1700,14 +1749,60 @@ private:
                                                                             visible_atomics),
                 std::span<const rocjitsu::ConSanMoiRecordReplayFenceEvent>(fences, visible_fences),
                 diagnostics, exact_shadow_entries);
-        const uint32_t replay_visible_diagnostics =
+        const uint32_t raw_replay_visible_diagnostics =
             std::min<uint32_t>(replay.emitted_diagnostic_count, diagnostics.size());
         const rocjitsu::ConSanMoiReplayProvenanceRepair provenance =
             rocjitsu::repair_consan_moi_record_replay_provenance(
                 replay_access_records, std::span<rocjitsu::ConSanMoiDiagnosticRecord>(
-                                           diagnostics.data(), replay_visible_diagnostics));
-        summary.replay_conflict_count = replay.conflict ? 1u : 0u;
-        summary.replay_diagnostic_count = replay.emitted_diagnostic_count;
+                                           diagnostics.data(), raw_replay_visible_diagnostics));
+        const auto patch_mapping_for_instruction = [&](uint32_t instruction_offset) {
+          const auto mapping = std::ranges::find_if(
+              entry.record_replay_patch_mappings,
+              [instruction_offset](const Entry::RecordReplayPatchMapping &candidate) {
+                return candidate.instruction_offset == instruction_offset;
+              });
+          return mapping == entry.record_replay_patch_mappings.end() ? nullptr : &*mapping;
+        };
+        const auto has_disjoint_kernel_owners = [&](const auto &diagnostic) {
+          if (diagnostic.kind !=
+              static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict)) {
+            return false;
+          }
+          const Entry::RecordReplayPatchMapping *first =
+              patch_mapping_for_instruction(diagnostic.first_instruction_offset);
+          const Entry::RecordReplayPatchMapping *second =
+              patch_mapping_for_instruction(diagnostic.second_instruction_offset);
+          if (first == nullptr || second == nullptr || !first->owner_provenance_complete ||
+              !second->owner_provenance_complete || entry.record_replay_patch_mapping_malformed) {
+            return false;
+          }
+          // A dispatch enters exactly one kernel descriptor. Queue-local AQL
+          // packet IDs can coincide across queues, but two access sites whose
+          // complete static owner sets are disjoint still cannot belong to one
+          // dispatch. Missing or malformed provenance remains conservative.
+          return std::ranges::none_of(first->owner_descriptor_file_offsets, [&](uint64_t owner) {
+            return std::ranges::find(second->owner_descriptor_file_offsets, owner) !=
+                   second->owner_descriptor_file_offsets.end();
+          });
+        };
+        const auto unsuppressed_end = std::remove_if(
+            diagnostics.begin(), diagnostics.begin() + raw_replay_visible_diagnostics,
+            has_disjoint_kernel_owners);
+        const uint32_t replay_visible_diagnostics =
+            static_cast<uint32_t>(unsuppressed_end - diagnostics.begin());
+        const uint32_t disjoint_owner_suppressed =
+            raw_replay_visible_diagnostics - replay_visible_diagnostics;
+        const uint32_t effective_diagnostic_count =
+            replay.emitted_diagnostic_count >= disjoint_owner_suppressed
+                ? replay.emitted_diagnostic_count - disjoint_owner_suppressed
+                : 0u;
+        const bool effective_conflict =
+            effective_diagnostic_count != 0u || replay.metadata_full ||
+            replay.diagnostic_capacity_exhausted || replay.dropped_access_count != 0u ||
+            replay.dropped_barrier_count != 0u || replay.unsupported_access_count != 0u ||
+            replay.unsupported_atomic_count != 0u || replay.unsupported_fence_count != 0u;
+        summary.replay_conflict_count = effective_conflict ? 1u : 0u;
+        summary.replay_diagnostic_count = effective_diagnostic_count;
         summary.replay_dropped_access_count = replay.dropped_access_count;
         summary.replay_dropped_barrier_count = replay.dropped_barrier_count;
         summary.replay_unsupported_access_count = replay.unsupported_access_count;
@@ -1727,6 +1822,7 @@ private:
                     "release_metadata_max=%u acquired_metadata_max=%u "
                     "diagnostic_capacity=%u replay_scratch_diagnostic_capacity=%u "
                     "provenance_repaired=%u provenance_unresolved=%u "
+                    "disjoint_owner_suppressed=%u "
                     "shadow_entries=%zu",
                     static_cast<unsigned long long>(entry.reader),
                     static_cast<unsigned long long>(replay_header.generation),
@@ -1736,13 +1832,14 @@ private:
                     replay.processed_atomic_count, replay.processed_fence_count,
                     replay.dropped_access_count, replay.dropped_barrier_count,
                     replay.unsupported_access_count, replay.unsupported_atomic_count,
-                    replay.unsupported_fence_count, replay.emitted_diagnostic_count,
-                    replay.conflict ? "true" : "false", replay.metadata_full ? "true" : "false",
+                    replay.unsupported_fence_count, effective_diagnostic_count,
+                    effective_conflict ? "true" : "false", replay.metadata_full ? "true" : "false",
                     replay.diagnostic_capacity_exhausted ? "true" : "false",
                     replay.maximum_atomic_release_metadata_count,
                     replay.maximum_acquired_epoch_metadata_count, header->diagnostic_capacity,
                     replay_header.diagnostic_capacity, provenance.repaired_diagnostic_count,
-                    provenance.unresolved_diagnostic_count, exact_shadow_entries.size());
+                    provenance.unresolved_diagnostic_count, disjoint_owner_suppressed,
+                    exact_shadow_entries.size());
         for (uint32_t i = 0; i < replay_visible_diagnostics; ++i) {
           const rocjitsu::ConSanMoiDiagnosticRecord &diagnostic = diagnostics[i];
           log_message(kLogInfo,

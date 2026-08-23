@@ -48,11 +48,21 @@ def load_module(path: pathlib.Path, name: str):
     return module
 
 
-def measure_scalar(invoke, expected, tolerance, repetitions, allow_oracle_failure):
-    warmup = float(invoke())
-    warmup_ok = math.isfinite(warmup) and abs(warmup - expected) <= tolerance
-    if not warmup_ok and not allow_oracle_failure:
-        raise RuntimeError(f"warmup oracle failed: {warmup}")
+def measure_scalar(
+    invoke,
+    expected,
+    tolerance,
+    repetitions,
+    allow_oracle_failure,
+    skip_warmup=False,
+):
+    warmup = None
+    warmup_ok = True
+    if not skip_warmup:
+        warmup = float(invoke())
+        warmup_ok = math.isfinite(warmup) and abs(warmup - expected) <= tolerance
+        if not warmup_ok and not allow_oracle_failure:
+            raise RuntimeError(f"warmup oracle failed: {warmup}")
 
     samples_ms = []
     values = []
@@ -74,6 +84,7 @@ def measure_scalar(invoke, expected, tolerance, repetitions, allow_oracle_failur
         "min_ms": min(samples_ms),
         "max_ms": max(samples_ms),
         "warmup_oracle": warmup,
+        "warmup_skipped": skip_warmup,
         "oracle_min": min(values),
         "oracle_max": max(values),
         "oracle_ok": warmup_ok and all(oracle_results),
@@ -121,6 +132,7 @@ def run_llama(args):
                 tolerance,
                 args.repetitions,
                 args.allow_oracle_failure,
+                args.skip_warmup,
             )
         finally:
             # IREE's Python SystemContext and BoundModule objects form a
@@ -220,6 +232,11 @@ def parse_args():
         help="Llama mode; ignored for CLIP",
     )
     parser.add_argument("--repetitions", type=int, default=10)
+    parser.add_argument(
+        "--skip-warmup",
+        action="store_true",
+        help="run only the measured exact-oracle invocation",
+    )
     parser.add_argument("--label", default="unnamed")
     parser.add_argument(
         "--allow-oracle-failure",

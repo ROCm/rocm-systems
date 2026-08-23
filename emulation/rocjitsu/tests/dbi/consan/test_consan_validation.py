@@ -2509,16 +2509,9 @@ class ConSanValidationTest(unittest.TestCase):
                 "tp2-combined": "combined",
             },
         )
-        self.assertTrue(
-            all(
-                workloads[workload_id]["run_timeout_seconds"] == 180
-                for workload_id in (
-                    "tp2-family",
-                    "tp2-decode",
-                    "tp2-combined",
-                )
-            )
-        )
+        self.assertEqual(workloads["tp2-family"]["run_timeout_seconds"], 180)
+        self.assertEqual(workloads["tp2-decode"]["run_timeout_seconds"], 300)
+        self.assertEqual(workloads["tp2-combined"]["run_timeout_seconds"], 180)
         for workload_id, expected_mode in (
             ("tp2-family", "prefill"),
             ("tp2-decode", "decode"),
@@ -2532,6 +2525,10 @@ class ConSanValidationTest(unittest.TestCase):
                 Path("/output.json"),
             )
             self.assertEqual(command[command.index("--mode") + 1], expected_mode)
+            self.assertEqual(
+                "--skip-warmup" in command,
+                workload_id == "tp2-decode",
+            )
         gfx950_workloads = {
             workload["id"]: workload
             for workload in validation._manifest("gfx950")["workloads"]
@@ -2576,7 +2573,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-decode-combined", 180),
                 ("gfx950", "tp2-family", 30),
                 ("gfx1250", "tp2-family", 180),
-                ("gfx1250", "tp2-decode", 180),
+                ("gfx1250", "tp2-decode", 300),
                 ("gfx1250", "tp2-combined", 180),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
@@ -3225,6 +3222,10 @@ class ConSanValidationTest(unittest.TestCase):
             ("tp1-prefill", "gfx950", "256"),
             ("tp1-prefill", "gfx1201", None),
             ("tp1-prefill", "gfx1250", "256"),
+            ("tp2-family", "gfx950", None),
+            ("tp2-family", "gfx1250", "256"),
+            ("tp2-decode", "gfx1250", "1"),
+            ("tp2-combined", "gfx1250", "256"),
             ("tp1-decode-combined", "gfx942", None),
             ("tp1-decode-combined", "gfx950", "256"),
             ("tp1-decode-combined", "gfx1201", None),
@@ -7912,6 +7913,28 @@ class ConSanValidationTest(unittest.TestCase):
 
 
 class SharktankValidationLifecycleTests(unittest.TestCase):
+    def test_scalar_measurement_can_skip_only_the_redundant_warmup(self) -> None:
+        invocations = 0
+
+        def invoke() -> float:
+            nonlocal invocations
+            invocations += 1
+            return 0.582
+
+        result = sharktank_validation.measure_scalar(
+            invoke,
+            expected=0.582,
+            tolerance=0.01,
+            repetitions=1,
+            allow_oracle_failure=False,
+            skip_warmup=True,
+        )
+
+        self.assertEqual(invocations, 1)
+        self.assertTrue(result["oracle_ok"])
+        self.assertTrue(result["warmup_skipped"])
+        self.assertIsNone(result["warmup_oracle"])
+
     def test_multi_mode_run_releases_each_model_before_constructing_next(self) -> None:
         class FakeToyLlama:
             live = 0
@@ -7946,6 +7969,7 @@ class SharktankValidationLifecycleTests(unittest.TestCase):
             mode="decode-combined",
             repetitions=1,
             allow_oracle_failure=False,
+            skip_warmup=False,
         )
 
         gc_was_enabled = gc.isenabled()

@@ -235,6 +235,7 @@ class Workload:
     targets: tuple[str, ...] | None = None
     moi_record_evidence_expected: bool = True
     record_replay_runtime_sample_stride: int | None = None
+    sharktank_skip_warmup: bool = False
     run_timeout_seconds: int = TIMEOUT_SECONDS
     coverage_output_contract: CoverageOutputContract | None = None
     tensile_inner_timeout_seconds: int | None = None
@@ -1903,10 +1904,30 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # 252-MB rank report buffers across independent model lifecycles and
         # exceeds the emulator bound. Keep the reviewed family fault on
         # prefill, while the adjacent target-only rows retain decode and
-        # combined as separate exact, fully covered processes.
+        # combined as separate exact, fully covered processes. Once the
+        # Record/Replay workgroup predicate is cached correctly, this compact
+        # 64-packet prefill schedule selects no workgroup at the production
+        # stride. The established bounded-validation cadence produces exact
+        # evidence without changing the model, oracle, or static denominator.
         "tp2-family": {
             "sharktank_mode": "prefill",
+            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 180,
+        },
+        "tp2-decode": {
+            # Decode dispatches only one workgroup per kernel. Sparse
+            # workgroup cadences can miss every instrumented site, while two
+            # dense invocations exceed the emulator bound. Keep the exact
+            # timed oracle and omit only the redundant untimed warmup. A
+            # complete dense Record/Replay run takes roughly 165--185 seconds,
+            # so the former 180-second bound was sensitive to ordinary host
+            # variance.
+            "record_replay_runtime_sample_stride": 1,
+            "sharktank_skip_warmup": True,
+            "run_timeout_seconds": 300,
+        },
+        "tp2-combined": {
+            "record_replay_runtime_sample_stride": 256,
         },
         # Preserve all six exact problems and all 16 generated solutions per
         # problem, but give each exact size an independent numeric oracle,
@@ -3044,7 +3065,7 @@ def _workload_command(
         repetitions = inner_repetitions_override or _inner_repetitions(
             target, phase, workload
         )
-        return [
+        command = [
             str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
             "--suite-root",
@@ -3058,6 +3079,9 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
+        if workload.sharktank_skip_warmup:
+            command.append("--skip-warmup")
+        return command
     if workload.kind == "pytorch":
         # Large rows may declare isolated outer processes because repeated
         # instrumented dispatches accumulate bounded report state. Small rows

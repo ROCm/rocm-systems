@@ -63,9 +63,10 @@ struct DispatchEntry {
   uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
-  /// AQL ring packet id (queue read index at which this dispatch's packet was
-  /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.
-  uint32_t aql_packet_id = 0;
+  /// Absolute AQL packet id (queue read index at which this dispatch's packet
+  /// was fetched). This is the AMDHSA dispatch-ID preload and is also narrowed
+  /// into TTMP state for rocm-dbgapi wave/dispatch correlation.
+  uint64_t aql_packet_id = 0;
 
   uint64_t kernel_entry_pc = 0;
   uint64_t code_load_bias = 0;

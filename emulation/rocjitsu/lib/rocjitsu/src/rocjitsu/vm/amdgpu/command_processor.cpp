@@ -330,11 +330,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       idx += 2;
     }
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID)) {
-      uint64_t dispatch_id = 0;
-      if (pkt.queue_ptr != 0) {
-        uint64_t wdi_va = pkt.queue_ptr + offsetof(amd_queue_t, write_dispatch_id);
-        dispatch_id = read_gpu_u64(wdi_va, pkt.process_id);
-      }
+      // The AMDHSA dispatch ID belongs to this AQL packet. The queue write
+      // pointer describes the producer frontier instead: a batched submission
+      // can leave it identical for many packets that are already pending.
+      const uint64_t dispatch_id = pkt.aql_packet_id;
       cu->write_sgpr(sbase + idx, static_cast<uint32_t>(dispatch_id));
       cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(dispatch_id >> 32));
       idx += 2;
@@ -1360,7 +1359,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
-      wf->set_aql_packet_id(entry.aql_packet_id);
+      wf->set_aql_packet_id(static_cast<uint32_t>(entry.aql_packet_id));
       wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
       wf->set_process_id(entry.process_id);
@@ -1680,7 +1679,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.queue_id = queue.queue_id;
   dp.queue_packet_id = queue_packet_id;
   dp.process_id = queue.process_id;
-  dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
+  dp.aql_packet_id = aql_packet_id;
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
   dp.kind = DispatchPacketKind::Kernel;

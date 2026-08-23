@@ -5234,7 +5234,15 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   return result;
 }
 
-rocjitsu::ConSanResult auto_report_replay_transform_result() {
+enum class AutoReplayOwnerScope {
+  NoProvenance,
+  SharedOwnerPair,
+  DisjointOwnerPair,
+  UnknownOwnerPair,
+};
+
+rocjitsu::ConSanResult auto_report_replay_transform_result(
+    AutoReplayOwnerScope owner_scope = AutoReplayOwnerScope::NoProvenance) {
   rocjitsu::ConSanResult result = auto_report_atomic_transform_result();
   result.arch = ROCJITSU_CODE_ARCH_RDNA4;
   result.input_fingerprint = "fnv1a64:0123456789abcdef";
@@ -5256,6 +5264,19 @@ rocjitsu::ConSanResult auto_report_replay_transform_result() {
                                       .in_kernel = true,
                                       .text_offset = 0u,
                                       .mnemonic = "ds_store_b32"});
+  if (owner_scope != AutoReplayOwnerScope::NoProvenance) {
+    const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
+      rocjitsu::ConSanPatchInfo patch;
+      patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+      patch.anchor_offset = instruction_offset;
+      if (owner_scope != AutoReplayOwnerScope::UnknownOwnerPair)
+        patch.owner_descriptor_file_offsets = {owner};
+      result.patches.push_back(std::move(patch));
+    };
+    append_patch(0xfe96cu, 0x100u);
+    append_patch(0xfe974u,
+                 owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+  }
   return result;
 }
 
@@ -6269,6 +6290,68 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
         "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)", "second_lds=[16,20)",
         "first_kind=2", "second_kind=2"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
+  }
+}
+
+TEST(HsaHooksUnitTest, AutoReplayConflictRequiresCommonKernelOwnerScope) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  struct Case {
+    std::string_view name;
+    AutoReplayOwnerScope owner_scope;
+    uint32_t expected_diagnostics = 0;
+    uint32_t expected_suppressed = 0;
+  };
+  constexpr std::array cases = {
+      Case{"same kernel owner", AutoReplayOwnerScope::SharedOwnerPair, 1u, 0u},
+      Case{"disjoint kernel owners", AutoReplayOwnerScope::DisjointOwnerPair, 0u, 1u},
+      Case{"missing kernel-owner provenance remains conservative",
+           AutoReplayOwnerScope::UnknownOwnerPair, 1u, 0u},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_report_replay_transform_result(test_case.owner_scope);
+    g_seed_auto_replay_report_on_load = true;
+
+    testing::internal::CaptureStderr();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+    }
+    const std::string log = testing::internal::GetCapturedStderr();
+
+    EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
+    const size_t replay = log.find("ConSan MOI auto replay reader=101");
+    ASSERT_NE(replay, std::string::npos) << log;
+    EXPECT_NE(log.find("diagnostics=" + std::to_string(test_case.expected_diagnostics), replay),
+              std::string::npos)
+        << log;
+    EXPECT_NE(log.find("disjoint_owner_suppressed=" + std::to_string(test_case.expected_suppressed),
+                       replay),
+              std::string::npos)
+        << log;
+    const bool expected_conflict = test_case.expected_diagnostics != 0u;
+    EXPECT_NE(log.find(std::string("conflict=") + (expected_conflict ? "true" : "false"), replay),
+              std::string::npos)
+        << log;
   }
 }
 
