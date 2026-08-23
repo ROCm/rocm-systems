@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "nccl.h"
-#include "net.h" // ncclIbRegMrDmaBufMultiSeg
+#include "rccl_ib_multiseg.h"
 #include "rocmwrap.h"
 
 namespace RCCLNetIbTests {
