@@ -404,6 +404,7 @@ function(rj_add_consan_device_conformance_cases)
         "RepeatedDispatchIdentity|repeated_dispatch_identity|ConSanDeviceRepeatedDispatchIdentityTest"
         "DynamicPrivateStack|dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
         "KernargPreloadDynamicPrivateStack|kernarg_preload_dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
+        "MixedPrivateOwners|mixed_private_owners|ConSanDeviceMixedPrivateOwnersTest"
         "ModuleLifecycle|module_lifecycle|ConSanDeviceModuleLifecycleTest"
         "OverlappingSubwords|overlapping_subwords|ConSanDeviceOverlappingSubwordsTest"
         "AdjacentSubwordWriters|adjacent_subword_writers|ConSanDeviceAdjacentSubwordWritersTest"
@@ -429,6 +430,7 @@ function(rj_add_consan_device_conformance_cases)
         "VglobalCachePublication|vglobal_cache_publication|ConSanDeviceVglobalCachePublicationTest|atomics"
         "FenceBarrierPublication|fence_barrier_publication|ConSanDeviceFenceBarrierPublicationTest|atomics"
         "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
+        "LongRangeLiveScc|long_range_live_scc|ConSanDeviceLongRangeLiveSccTest"
         "SampledMultiRangeBudget|sampled_multi_range_budget|ConSanDeviceSampledMultiRangeBudgetTest|sampled-only"
     )
     if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
@@ -932,6 +934,7 @@ function(rj_add_consan_device_fixture_targets target)
         "repeated_dispatch_identity|repeated_dispatch_identity_test.hip"
         "dynamic_private_stack|dynamic_private_stack_test.hip"
         "kernarg_preload_dynamic_private_stack|dynamic_private_stack_test.hip"
+        "mixed_private_owners|mixed_private_owners_test.hip"
         "overlapping_subwords|overlapping_subwords_test.hip"
         "adjacent_subword_writers|adjacent_subword_writers_test.hip"
         "atomic_arrival|atomic_arrival_test.hip"
@@ -956,6 +959,7 @@ function(rj_add_consan_device_fixture_targets target)
         "vglobal_cache_publication|vglobal_cache_publication_test.hip"
         "fence_barrier_publication|vglobal_cache_publication_test.hip"
         "group_flat_wide|group_flat_wide_test.hip"
+        "long_range_live_scc|long_range_live_scc_test.hip"
         "sampled_multi_range_budget|sampled_multi_range_budget_test.hip"
     )
     if(target STREQUAL "gfx942" OR target STREQUAL "gfx950")
