@@ -403,6 +403,7 @@ function(rj_add_consan_device_conformance_cases)
         "IndependentWorkgroups|independent_workgroups|ConSanDeviceIndependentWorkgroupsTest"
         "RepeatedDispatchIdentity|repeated_dispatch_identity|ConSanDeviceRepeatedDispatchIdentityTest"
         "DynamicPrivateStack|dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
+        "KernargPreloadDynamicPrivateStack|kernarg_preload_dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
         "OverlappingSubwords|overlapping_subwords|ConSanDeviceOverlappingSubwordsTest"
         "AdjacentSubwordWriters|adjacent_subword_writers|ConSanDeviceAdjacentSubwordWritersTest"
         "AtomicArrival|atomic_arrival|ConSanDeviceAtomicArrivalTest|atomics"
@@ -853,6 +854,7 @@ function(rj_add_consan_device_fixture_targets target)
         "independent_workgroups|independent_workgroups_test.hip"
         "repeated_dispatch_identity|repeated_dispatch_identity_test.hip"
         "dynamic_private_stack|dynamic_private_stack_test.hip"
+        "kernarg_preload_dynamic_private_stack|dynamic_private_stack_test.hip"
         "overlapping_subwords|overlapping_subwords_test.hip"
         "adjacent_subword_writers|adjacent_subword_writers_test.hip"
         "atomic_arrival|atomic_arrival_test.hip"
@@ -950,7 +952,10 @@ function(rj_add_consan_device_fixture_targets target)
                 RJ_CONSAN_DEVICE_FENCE_BARRIER_ONLY=1
             )
         endif()
-        if(_workload_name STREQUAL "cdna_kernarg_preload_private_state")
+        if(
+            _workload_name STREQUAL "cdna_kernarg_preload_private_state"
+            OR _workload_name STREQUAL "kernarg_preload_dynamic_private_stack"
+        )
             # Build the same behavioral pair through the compiler's real
             # kernarg-preload ABI. One pointer argument is enough to select the
             # secondary +256 hardware entry on a preloaded dispatch.
