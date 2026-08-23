@@ -577,8 +577,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     // kernel-completion ref if all channels are done.
     pthread_mutex_lock(&coll->mutex);
     coll->nKernelChCompleted++;
-    int allDone = (coll->nKernelChCompleted == coll->nKernelChStarted &&
-                   coll->nKernelChStarted > 0);
+    int allDone = (coll->nKernelChCompleted == coll->nChannels);
     // Drop per-channel ref + kernel-completion ref (if all done) under lock
     coll->refCount--;
     if (allDone)
