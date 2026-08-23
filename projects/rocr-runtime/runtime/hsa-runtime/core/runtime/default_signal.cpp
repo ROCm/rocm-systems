@@ -50,11 +50,12 @@
 namespace rocr {
 namespace core {
 
-BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC)
-    : Signal(abi_block, enableIPC) {
+BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC, bool device_resident_value)
+    : Signal(abi_block, enableIPC, device_resident_value) {
   signal_.kind = AMD_SIGNAL_KIND_USER;
   signal_.event_mailbox_ptr = uint64_t(NULL);
 }
+
 
 hsa_signal_value_t BusyWaitSignal::LoadRelaxed() {
   return hsa_signal_value_t(
@@ -104,7 +105,13 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
-    if (g_use_mwaitx) {
+    // MONITORX arms a hardware monitor on a cache line.  A device resident value
+    // word is mapped write combining, not write-back cacheable, and the
+    // architecture does not guarantee a monitor can be established on such a
+    // line - the park would degenerate into a timed sleep that the awaited write
+    // does not end.  Spin instead; the loop already re-reads the word and
+    // re-tests the condition every iteration.
+    if (g_use_mwaitx && !IsDeviceResidentValue()) {
       // Use timer-enabled mwaitx for busy waiting
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
     }
