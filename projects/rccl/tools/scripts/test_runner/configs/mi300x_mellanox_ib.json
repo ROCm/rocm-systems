@@ -3751,6 +3751,24 @@
             "NCCL_GIN_TYPE": "2",
             "NCCL_GIN_ENABLE": "1"
           }
+        },
+        {
+          "name": "GIN_Barrier_WorldMultiIndex",
+          "description": "ncclGinBarrierSession world team with 4 concurrent barrier indices, one per CTA, exercising the cell striding of the pool auto-allocated from worldGinBarrierCount",
+          "test_filter": "GinMPIDeviceTests.Barrier_WorldMultiIndex",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GIN_BarrierPools_NoCrossTalk",
+          "description": "Generic ncclBarrierSession and the specialized GIN sessions run on the same barrier index and must advance only their own signal pools, covering the hybrid world arm the default fence selects under fully connected GIN",
+          "test_filter": "GinMPIDeviceTests.BarrierPools_NoCrossTalk",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
         }
       ]
     },
