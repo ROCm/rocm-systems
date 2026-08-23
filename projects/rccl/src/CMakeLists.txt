@@ -468,6 +468,7 @@ set(SRC_FILES
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
+  transport/rccl_ib_multiseg.h
   transport/net_ib_limits.h
   transport/net_ib/common.cc
   transport/net_ib/common.h

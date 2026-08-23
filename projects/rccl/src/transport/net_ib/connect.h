@@ -61,6 +61,7 @@ struct ncclIbConnectionMetadata {
   // The receiver side gets in this member, from the sender, the address of the
   // memory to which the receiver writes the CTS messages.
   uint64_t addr;
+  uint32_t caps;
   int ndevs;
   int tc;
   int sl;

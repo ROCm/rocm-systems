@@ -261,15 +261,22 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
-  // Multi-segment (AIRUNTIME-2351 classic-path follow-up). The
-  // receiver publishes its full segment layout so the sender can split RDMA
-  // writes at the receiver's physical segment boundaries. nSegments == 1 (or 0)
-  // means a single contiguous MR and segStart/segRkeys are unused. Extending
-  // this element changes the CTS-FIFO wire format: both peers must run a build
-  // with the same NCCL_IB_MAX_SEGMENTS.
+};
+static_assert(sizeof(struct ncclIbSendFifo) == 64, "CTS slot is one cache line");
+
+// Connect-time capability: peer registered a side table immediately after the
+// 64-byte CTS FIFO (review ID 18). Mixed nSegments<=1 traffic stays
+// bit-compatible with stock classic; nSegments>1 requires this bit.
+#define NCCL_IB_CAP_MULTISEG 0x1u
+
+// Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
+// equal the CTS slot's idx so a later single-segment reuse of the same CTS
+// index ignores a stale side slot.
+struct alignas(64) ncclIbSegLayout {
+  uint64_t idx;
   uint32_t nSegments;
   uint32_t pad;
-  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];                  // receiver VA per segment
+  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
   uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
@@ -488,6 +495,10 @@ struct ncclIbSendComm {
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  // Side table immediately after ctsFifo so one covering MR registers both.
+  // Receiver RDMA-writes this only when nSegments>1 and the peer advertised
+  // NCCL_IB_CAP_MULTISEG.
+  struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
   // for the worst case; single-segment sends use exactly one WR per request.
@@ -506,6 +517,7 @@ struct ncclIbSendComm {
   struct ncclIbRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
+  uint32_t peerCaps;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -514,8 +526,18 @@ static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
               "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
+static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
+static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
+                offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
+              "segLayoutFifo must immediately follow ctsFifo for a covering MR");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
+
+static inline bool ncclIbCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
+  const volatile struct ncclIbSendFifo* cts = &comm->ctsFifo[slot][r];
+  const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
+  return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && side->idx == cts->idx && side->nSegments > 1;
+}
 
 struct ncclIbGpuFlush {
   struct ibv_mr* hostMr;
@@ -545,6 +567,11 @@ struct ncclIbRemCtsFifo {
   uint32_t flags;
 };
 
+struct alignas(32) ncclIbRemSegLayout {
+  struct ncclIbSegLayout elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  uint64_t addr;
+};
+
 struct alignas(16) ncclIbRecvCommDev {
   struct ncclIbNetCommDevBase base;
   struct ncclIbGpuFlush gpuFlush;
@@ -553,6 +580,7 @@ struct alignas(16) ncclIbRecvCommDev {
   // side to gather CTS messages (formatted by the receiver) and write them to
   // the sender's CTS FIFO.
   struct ibv_mr* ctsFifoMr;
+  struct ibv_mr* segLayoutFifoMr;
   // MR that is obtained after registering the completion records on the
   // receiver side. The RKey of this MR is provided to the sender side, to allow
   // the sender side to access receiver's completion records using RDMA
@@ -577,6 +605,8 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
+  struct ncclIbRemSegLayout remSegLayout;
+  uint32_t peerCaps;
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
   struct ncclIbRequestCompletionRecord cmplsRecords[NET_IB_MAX_REQUESTS];
@@ -665,11 +695,6 @@ ncclResult_t ncclIbAcceptImpl(void* listenComm, void** recvComm, ncclNetDeviceHa
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm);
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
-// Register a multi-segment cuMem/VMM buffer as one dma-buf MR per physical
-// segment (per device), returning a composite ncclIbMrHandle (AIRUNTIME-2351
-// classic-path follow-up). The caller exports one dma-buf fd per segment.
-ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
-                                       int* segFds, int type, void** mhandle);
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle);
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request);
