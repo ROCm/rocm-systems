@@ -253,18 +253,13 @@ ncclResult_t checkHsaEnvSetting() {
   return ncclSuccess;
 }
 
-// Fail the job if build flag HIP_HOST_UNCACHED_MEMORY is not set on mi350x or MI300A
+// Fail the job if build flag HIP_HOST_UNCACHED_MEMORY is not set on mi350x
 ncclResult_t checkHostUncacheMemSetting(struct ncclComm* comm) {
 #if defined(HIP_HOST_UNCACHED_MEMORY)
   return ncclSuccess;
 #else
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
     ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
-    return ncclSystemError;
-  }
-  if (IsMi300a(comm->cudaDev)) {
-    ERROR("ROCm >= 7.0 with HIP_HOST_UNCACHED_MEMORY is required on MI300A; uncached host memory is unavailable in "
-          "this build");
     return ncclSystemError;
   }
   return ncclSuccess;
