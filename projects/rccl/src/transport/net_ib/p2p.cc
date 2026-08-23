@@ -105,6 +105,7 @@ static ncclResult_t ncclIbPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
+  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
@@ -177,23 +178,22 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         lOff[0] = 0;
         lOff[1] = reqs[r]->send.size;
       }
-      // Remote segment tables published by the receiver in the CTS FIFO.
+      // Remote segment tables from the side table when the peer published a
+      // matching multi-seg layout; otherwise a single-segment view of the CTS slot.
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
       int nRemote;
       uint64_t remoteReqOff = 0;
-      if (slots[r].nSegments > 1) {
-        nRemote = slots[r].nSegments;
+      bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
+      if (remoteMulti) {
+        nRemote = side[r].nSegments;
         for (int s = 0; s < nRemote; s++) {
-          rVA[s] = slots[r].segStart[s];
-          rOff[s] = slots[r].segStart[s] - slots[r].segStart[0];
+          rVA[s] = side[r].segStart[s];
+          rOff[s] = side[r].segStart[s] - side[r].segStart[0];
         }
-        if (remoteBase < slots[r].segStart[0]) return ncclInternalError;
-        remoteReqOff = remoteBase - slots[r].segStart[0];
+        if (remoteBase < side[r].segStart[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - side[r].segStart[0];
         uint64_t remoteReqEnd = remoteReqOff + slots[r].size;
         if (remoteReqEnd < remoteReqOff) return ncclInternalError;
-        // The wire publishes segment starts but not the registration's final
-        // length. Trim starts beyond this receive and use its end as the final
-        // boundary; no send for this CTS entry may legally pass that point.
         while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
         rOff[nRemote] = remoteReqEnd;
       } else {
@@ -212,7 +212,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         wr->send_flags = 0;
         wr->wr_id = wr_id;
         wr->wr.rdma.remote_addr = remoteBase + sendOffsets[r];
-        wr->wr.rdma.rkey = slots[r].nSegments > 1 ? slots[r].segRkeys[0][remDevIdx] : slots[r].rkeys[remDevIdx];
+        wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[0][remDevIdx] : slots[r].rkeys[remDevIdx];
         sge->addr = localBase + sendOffsets[r];
         sge->length = 0;
         sge->lkey = reqs[r]->send.lkeys[devIndex];
@@ -241,8 +241,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           wr->send_flags = 0;
           wr->wr_id = wr_id;
           wr->wr.rdma.remote_addr = slices[k].remoteAddr;
-          wr->wr.rdma.rkey =
-            slots[r].nSegments > 1 ? slots[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
+          wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
           sge->addr = slices[k].localAddr;
           sge->length = slices[k].len;
           sge->lkey =
@@ -311,7 +310,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // multiple physical segments, use the segment-splitting builder.
   for (int r = 0; r < nreqs; r++) {
     struct ncclIbMrHandle* mh = reqs[r]->send.mh;
-    if ((mh && mh->nSegments > 1) || slots[r].nSegments > 1) {
+    if ((mh && mh->nSegments > 1) || ncclIbCtsRemoteMultiSeg(comm, slot, r)) {
       return ncclIbMultiSendSegmented(comm, slot);
     }
   }
@@ -695,14 +694,45 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
+  bool postSide = false;
+  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    for (int i = 0; i < req->nreqs; i++) {
+      if (comm->remSegLayout.elems[slot][i].nSegments > 1) {
+        postSide = true;
+        break;
+      }
+    }
+  }
+
+  struct ibv_sge sgeSide;
+  struct ibv_send_wr wrSide;
+  struct ibv_send_wr* firstWr = &wr;
+  if (postSide) {
+    memset(&wrSide, 0, sizeof(wrSide));
+    memset(&sgeSide, 0, sizeof(sgeSide));
+    wrSide.wr.rdma.remote_addr =
+      comm->remSegLayout.addr + (uint64_t)slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSegLayout);
+    wrSide.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
+    sgeSide.addr = (uint64_t)comm->remSegLayout.elems[slot];
+    sgeSide.length = req->nreqs * sizeof(struct ncclIbSegLayout);
+    sgeSide.lkey = comm->devs[ctsQp->devIndex].segLayoutFifoMr->lkey;
+    wrSide.sg_list = &sgeSide;
+    wrSide.num_sge = 1;
+    wrSide.opcode = IBV_WR_RDMA_WRITE;
+    wrSide.send_flags = 0; // unsignaled, never inline
+    wrSide.next = &wr;
+    firstWr = &wrSide;
+  }
+
   TRACE(NCCL_NET,
         "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
-        "qp_num=%u)",
-        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num);
+        "qp_num=%u side=%d)",
+        __func__, req, req->base, req->id, slot, req->nreqs, wr.wr_id, wr.opcode, wr.send_flags, ctsQp->qp->qp_num,
+        (int)postSide);
 
   struct ibv_send_wr* bad_wr;
   ncclResult_t postFifoRet;
-  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr), postFifoRet, postFifoFail);
+  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, firstWr, &bad_wr), postFifoRet, postFifoFail);
   TRACE(NCCL_VERBS,
         "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, "
         "imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
@@ -815,28 +845,31 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       }
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
     }
-    // Multi-segment: publish the full receiver segment layout so the
-    // sender can split RDMA writes at these physical segment boundaries. The
-    // buffer base data[i] equals segStart[0] (registration starts at the base),
-    // so segment VAs are contiguous and remote addresses stay linear.
-    localElem[i].nSegments = mhandleWrapper->nSegments;
-    if (mhandleWrapper->nSegments > 1) {
+    localElem[i].nreqs = n;
+    localElem[i].size = sizes[i]; // Sanity/Debugging
+    localElem[i].tag = tags[i];
+    localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
+
+    // Multi-segment layout goes on the side table (review ID 18), never in CTS.
+    struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
+    if (mhandleWrapper->nSegments > 1 && (comm->peerCaps & NCCL_IB_CAP_MULTISEG)) {
+      sideElem[i].nSegments = mhandleWrapper->nSegments;
       for (int s = 0; s < mhandleWrapper->nSegments; s++) {
-        localElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
+        sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
         for (int j = 0; j < comm->base.vProps.ndevs; j++) {
           if (mhandleWrapper->segMrs[s][j] == NULL) {
             WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
             ret = ncclInternalError;
             goto irecvFail;
           }
-          localElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
+          sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
         }
       }
+      sideElem[i].idx = localElem[i].idx;
+    } else {
+      sideElem[i].nSegments = 0;
+      sideElem[i].idx = 0;
     }
-    localElem[i].nreqs = n;
-    localElem[i].size = sizes[i]; // Sanity/Debugging
-    localElem[i].tag = tags[i];
-    localElem[i].idx = comm->base.fifoHead + 1;
   }
 
   // Post to FIFO to notify sender
