@@ -6,13 +6,9 @@
 
 // Host-only microtests for src/init.cc (AICOMRCCL-1685).
 //
-// Like p2p-test.cc, this TU compiles the hipified unit-under-test source
-// directly (`#include INIT_CC_PATH`) so static helpers become callable, links
-// NO librccl/HIP, and routes every GPU/environment dependency through the fake
-// seams. Coverage is grown incrementally: pick an uncovered branch out of the
-// llvm-cov/BRDA report for the hipified init.cc, work out the state that
-// reaches it, and add a test (see test/host/MICROTEST_README.md, "Coverage-
-// driven workflow").
+// Compiles the hipified UUT directly (#include INIT_CC_PATH) so static helpers are
+// callable, links no librccl/HIP, and routes every dependency through fakes/.
+// Workflow for adding coverage: test/host/MICROTEST_README.md, "Coverage-driven".
 
 #include <gtest/gtest.h>
 
@@ -55,24 +51,11 @@
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
   int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
-// ncclCalloc redirector: lets a test fail the Nth allocation so the
-// NCCLCHECK(ncclCalloc(...)) early-return arms become reachable. ncclCalloc is a
-// macro (alloc.h), so retargeting it here -- the same trick the PARAM
-// redirectors above use -- intercepts RCCL's ncclCalloc call sites rather than
-// every heap allocation. Interposing libc malloc instead would also catch
-// gtest's and libstdc++'s allocations, and they would consume the failure
-// counter before the code under test ever ran.
-//
-// Scope caveat: the #define is textual and stays live for the rest of this TU,
-// so g_callocCallIndex counts EVERY ncclCalloc the running test reaches --
-// including ones in a test body and inside commAlloc/devCommSetup. "0-based call
-// index" therefore means "Nth ncclCalloc in this test", which equals "Nth in the
-// UUT" only when the UUT is the first caller. True for the P2pSchedule tests
-// that use it; verify before relying on it elsewhere.
-//
-// Reset lives in the fixture TearDown, not ResetInitFakes(): these two are
-// static to this TU and ResetInitFakes() is compiled in init_fakes.cc, which
-// cannot see them.
+// ncclCalloc redirector: fail the Nth allocation to reach the NCCLCHECK(ncclCalloc)
+// arms. Retargets the macro, not libc malloc -- gtest/libstdc++ would eat the counter.
+// TRAP: the #define is textual and TU-wide, so the index counts every ncclCalloc the
+// TEST reaches, not just the UUT's; "Nth in the UUT" holds only if the UUT allocates first.
+// TRAP: reset lives in TearDown, not ResetInitFakes -- both statics are TU-local.
 static int g_callocCallIndex = 0;
 static int g_callocFailAt = -1;  // -1 = never fail; otherwise 0-based call index
 template <typename... Args>
@@ -148,14 +131,15 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 // Note: ncclGdrCopy is defined by init.cc itself (= NULL by default), so
 // devCommSetup()'s `ncclGdrCopy != NULL` check takes the host-workFifo arm.
 
-// Under -fsanitize=address (install.sh --address-sanitizer, wired through
-// test/host/CMakeLists.txt), ASan's allocator ABORTS THE PROCESS on an
-// allocation above its 1 TiB cap instead of returning NULL. That kills the
-// binary mid-run at P2pSchedule_NegativeGroupSizeParam_FailsInAllocation, whose
-// whole point is that a negative nGroups makes ncclCalloc fail cleanly. Opt into
-// the malloc-like contract ncclCallocDebug's NULL check relies on. No smaller
-// negative avoids this: any negative int widens to a >= 2^63 size_t.
-extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
+// ASan defaults break two tests below: its allocator ABORTS on an allocation above
+// its 1 TiB cap instead of returning NULL (killing the binary mid-run at
+// NegativeGroupSizeParam), and it installs its own SIGFPE handler so
+// KilledBySignal(SIGFPE) can never match. No smaller negative avoids the first --
+// any negative int widens to >= 2^63. Reachable via install.sh --address-sanitizer;
+// the standalone test/host CMake has no sanitizer branch, so it cannot reproduce it.
+extern "C" const char* __asan_default_options() {
+  return "allocator_may_return_null=1:handle_sigfpe=0";
+}
 
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
@@ -164,19 +148,10 @@ extern "C" const char* __asan_default_options() { return "allocator_may_return_n
 class InitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // Hermetic entry. micro_getenv falls through to the real libc getenv on a
-    // map miss, so anything the developer exports reaches the unit under test:
-    // envConfigOverride (init.cc:3359, reached from parseCommConfig) reads
-    // NCCL_CTA_POLICY via ncclGetEnv and overwrites comm->config.CTAPolicy.
-    // Worse, onceEnvCtaPolicy (init.cc:3066) is a function-local once_flag no
-    // test can reset, so a host value would be latched by whichever test runs
-    // envConfigOverride first -- an order-dependent failure under
-    // --gtest_shuffle. Mask every name the BINARY reads through ncclGetEnv/getenv
-    // so no test depends on the ambient environment.
-    //
-    // The list spans every real TU this target links, not just init.cc --
-    // NCCL_HOSTID is read by the real utils.cc (getHostHash) and reaches the unit
-    // under test via fillInfo, latched behind its own once_flag. Re-derive with:
+    // Mask every env name the BINARY reads: micro_getenv falls through to real getenv,
+    // and onceEnvCtaPolicy (:3066) latches the first value seen -- an order-dependent
+    // failure under --gtest_shuffle. Spans every linked TU, not just init.cc.
+    // Re-derive with:
     //   grep -n 'ncclGetEnv(\|getenv(' src/init.cc src/misc/{utils,argcheck,archinfo}.cc
     ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
     for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
@@ -201,15 +176,10 @@ class InitMicrotest : public ::testing::Test {
   }
 };
 
-// Process-isolated tests. Deriving from InitMicrotest rather than using a bare
-// TEST() is what gets the env mask into the RE-EXEC'D CHILD: the child is
-// launched with --gtest_filter=<suite>.<name> and re-enters RUN_ALL_TESTS(), so
-// gtest constructs this fixture and runs SetUp() BEFORE the body reaches
-// handleReexecEntrypoint() (ProcessIsolatedTestRunner.cpp:754, inside
-// executeAllTests). Keeping the suite NAME distinct also keeps
-// test_categories_micro_init.yaml's "InitMicrotestIsolated.*" pattern matching --
-// gtest's `*` does not match across the literal '.', so folding these into
-// InitMicrotest would silently orphan that line.
+// Deriving from InitMicrotest gets the env mask into the RE-EXEC'D CHILD: it re-enters
+// RUN_ALL_TESTS(), so SetUp() runs before the body reaches handleReexecEntrypoint
+// (ProcessIsolatedTestRunner.cpp:754). Distinct suite NAME keeps the yaml's
+// "InitMicrotestIsolated.*" matching -- gtest's `*` does not cross the literal '.'.
 class InitMicrotestIsolated : public InitMicrotest {};
 
 namespace {
@@ -299,15 +269,9 @@ class ScopedDebugLogging {
 }  // namespace
 
 // ===========================================================================
-// showVersion (init.cc:1009) -- builds the once-per-process banner (version +
-// git hash, HIP/ROCm compile-vs-runtime versions, hostname, librccl path) and
-// emits it at VERSION or INFO level depending on ncclDebugLevel. Production
-// reaches it only via std::call_once (init.cc:3399, :4251), so tests call the
-// static helper directly.
-//
-// decodeHipVer/fmtExtVer are the real header-inline code
-// (hip_rocm_version_info.h); only the four inputs are seams -- gethostname,
-// dladdr, hipRuntimeGetVersion and getROCmVersion.
+// showVersion (:1009) -- the once-per-process banner, emitted at VERSION or INFO
+// depending on ncclDebugLevel. decodeHipVer/fmtExtVer are real header-inline code;
+// only gethostname, dladdr, hipRuntimeGetVersion and getROCmVersion are seams.
 // ===========================================================================
 namespace {
 // Runs showVersion() at a given debug level and returns the emitted banner.
@@ -319,16 +283,10 @@ std::string RunShowVersion(int debugLevel) {
 }
 }  // namespace
 
-// LATENT BUG (init.cc:1011-1012): hostBuf is uninitialised and gethostname is
-// not required to NUL-terminate on truncation, so the success arm can build a
-// std::string that reads past the written bytes. The LastGethostnameLen()
-// assertion below pins the sizeof(hostBuf)-1 that keeps one byte in reserve --
-// the only thing currently standing between this and a read overrun.
-//
-// Every label in the banner is a literal in the fmt::format at init.cc:1041-1042,
-// so asserting one proves only that the format string exists. These tests pin
-// label + separator + VALUE as a single string, which is what actually observes
-// gethostname/dladdr/hipRuntimeGetVersion and the label->value pairing.
+// LATENT BUG (init.cc:1011-1012): hostBuf is uninitialised and gethostname need not
+// NUL-terminate on truncation; the sizeof-1 pinned below is all that reserves a byte.
+// Labels are format-string literals, so these assert label+separator+VALUE as one
+// string -- that is what observes gethostname/dladdr/hipRuntimeGetVersion at all.
 TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
   char host[HOST_NAME_MAX] = {};
   ASSERT_EQ(0, gethostname(host, sizeof(host) - 1));
@@ -345,9 +303,6 @@ TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
       << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, (std::string("Librccl path : ") + self.dli_fname).c_str()))
       << "actual log:\n" << log;
-  // showVersion passes sizeof(hostBuf)-1, reserving room for the NUL that
-  // gethostname does not guarantee on truncation.
-  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX - 1), LastGethostnameLen());
   // INFO passes __func__ (debug.h:50-54); VERSION passes __FILE__ (debug.h:39).
   // The captured prefix is therefore what distinguishes the two arms of the
   // ncclDebugLevel test at init.cc:1043.
@@ -358,6 +313,10 @@ TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
 TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
   // First arm of the disjunction at init.cc:1043 short-circuits.
   const std::string log = RunShowVersion(NCCL_LOG_VERSION);
+  // Asserted here, not in HappyPath: that test calls gethostname itself with the
+  // same length, so it could not tell which call it observed. showVersion passes
+  // sizeof(hostBuf)-1, reserving the byte gethostname need not NUL-terminate.
+  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX - 1), LastGethostnameLen());
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
   EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
@@ -415,6 +374,28 @@ TEST_F(InitMicrotest, ShowVersion_RocmVersionUnavailable_OmitsRuntimeRocm) {
 }
 #endif
 
+TEST_F(InitMicrotest, ShowVersion_HipRuntimeMatchesCompileTime_OmitsRuntime) {
+  // fmtExtVer suppresses the runtime line only when it equals the compile-time
+  // value, so without this the compile-time baseline is never asserted at all.
+  g_hipRuntimeGetVersion = [](int* v) {
+    if (v) *v = HIP_VERSION_MAJOR * 10000000 + HIP_VERSION_MINOR * 100000 + HIP_VERSION_PATCH;
+    return hipSuccess;
+  };
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_FALSE(LogHas(log, "HIP runtime")) << "actual log:\n" << log;
+}
+
+#if ROCM_VERSION >= 60000
+TEST_F(InitMicrotest, ShowVersion_RocmRuntimeMatchesCompileTime_OmitsRuntime) {
+  g_getROCmVersionResult = 0;  // VerSuccess
+  g_rocmVersionMajor = ROCM_VERSION_MAJOR;
+  g_rocmVersionMinor = ROCM_VERSION_MINOR;
+  g_rocmVersionPatch = ROCM_VERSION_PATCH;
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_FALSE(LogHas(log, "ROCm runtime")) << "actual log:\n" << log;
+}
+#endif
+
 TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
   SetGethostnameFail(true);
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
@@ -429,15 +410,9 @@ TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {
 }
 
 // ===========================================================================
-// setupChannel (init.cc:1183) -- rotates a channel's ring so it starts at the
-// local rank, and builds the forward (userRanks) and inverse (rankToIndex) maps
-// every ring collective indexes through. Only called from initTransportsRank
-// (init.cc:2207/2215), out of reach host-only.
-//
-// initChannel() is faked (g_initChannelResult) because the real one needs strong
-// streams, memory stacks and device allocations. It therefore does NOT allocate
-// ring->userRanks/rankToIndex the way production does (channel.cc:61-62), so the
-// builder below owns that storage -- which also keeps it leak-free.
+// setupChannel (:1183) -- rotates a channel's ring to start at the local rank and
+// builds the userRanks/rankToIndex maps. initChannel is faked, and unlike the real
+// one (channel.cc:61-62) it does NOT allocate those two arrays -- the builder owns them.
 // ===========================================================================
 namespace {
 // comm->channels is a fixed inline array (comm.h:610), so a value-initialised
@@ -589,18 +564,9 @@ TEST_F(InitMicrotest, SetupChannel_NonZeroChannelId_UsesThatChannel) {
 }
 
 // ===========================================================================
-// commGetSplitInfo (init.cc:2485) + getParentRanks (init.cc:2528) -- the two
-// helpers that decide who ends up in a split/shrunk communicator. Called
-// together from ncclCommInitRankFunc (init.cc:2607/2611), out of reach
-// host-only.
-//
-// commGetSplitInfo allgathers every parent rank's (color, key), keeps those
-// matching our colour, and INSERTION-SORTS them by key. getParentRanks is pure
-// integer logic with no dependencies at all.
-//
-// Lesson from the round-2 review of the P2P schedule tests: for a computed
-// result, assert the CONTENTS. A return-code oracle here would be blind to a
-// broken comparator, a wrong insert position, or a dropped shift.
+// commGetSplitInfo (:2485) + getParentRanks (:2528) -- who ends up in a split or
+// shrunk comm. commGetSplitInfo allgathers each rank's (color,key), keeps matching
+// colours, and INSERTION-SORTS by key; getParentRanks is pure integer logic.
 // ===========================================================================
 namespace {
 // Parent comm for commGetSplitInfo: it reads only nRanks, rank and bootstrap.
@@ -612,16 +578,28 @@ std::unique_ptr<ncclComm> MakeParentComm(int nRanks, int rank) {
   return parent;
 }
 
-// Scripts the post-allgather table. Production's allgather returns every rank's
-// contribution INCLUDING our own, so the caller makes entry [parent->rank] agree
-// with the color/key it passes to commGetSplitInfo. Lives here, not in
-// init_fakes.cc: commSplitInfo is a typedef inside init.cc (2481-2484) and only
-// exists in this TU.
-void InstallSplitInfoTable(std::vector<std::pair<int, int>> colorKey) {
-  g_bootstrapAllGather = [colorKey](void*, void* allData, int size) {
-    EXPECT_EQ(static_cast<int>(sizeof(commSplitInfo)), size);
+// Scripts the post-allgather table. A real allgather GATHERS our slot, it does not
+// write it -- so entry [selfRank] is ASSERTED, not overwritten. That assertion is the
+// only oracle for commGetSplitInfo's own writes at init.cc:2494-2495; overwriting the
+// slot instead leaves six mutants on those two lines alive. Lives here because
+// commSplitInfo is a typedef inside init.cc and exists only in this TU.
+void InstallSplitInfoTable(int selfRank, std::vector<std::pair<int, int>> colorKey) {
+  g_bootstrapAllGather = [selfRank, colorKey](void*, void* allData, int size) {
+    if (size != static_cast<int>(sizeof(commSplitInfo))) {
+      ADD_FAILURE() << "allgather element size " << size << ", expected "
+                    << sizeof(commSplitInfo);
+      return ncclInternalError;
+    }
     auto* info = static_cast<commSplitInfo*>(allData);
     for (size_t i = 0; i < colorKey.size(); ++i) {
+      if (static_cast<int>(i) == selfRank) {
+        if (info[i].color != colorKey[i].first || info[i].key != colorKey[i].second) {
+          ADD_FAILURE() << "rank " << selfRank << " published (" << info[i].color << ","
+                        << info[i].key << "), expected (" << colorKey[i].first << ","
+                        << colorKey[i].second << ")";
+        }
+        continue;
+      }
       info[i].color = colorKey[i].first;
       info[i].key = colorKey[i].second;
     }
@@ -653,9 +631,9 @@ TEST_F(InitMicrotest, GetParentRanks_ExcludesListedRanks_CompactsAndRemapsMyRank
   EXPECT_EQ(std::vector<int>({0, 2, 4}), std::vector<int>(out, out + 3));
 }
 
-// LATENT BUG (init.cc:2537): *myRankRet is only written when the loop reaches
-// i == parentRank, so a caller that excludes itself gets its previous value back
-// with no diagnostic. The count is still computed as if nothing were wrong.
+// NOTE: getParentRanks leaves *myRankRet unwritten when the caller excludes itself;
+// its sole caller rejects that first (bsearch at init.cc:4039), so this is missing
+// defence-in-depth in the helper, not a reachable defect.
 TEST_F(InitMicrotest, GetParentRanks_ExcludingCaller_LeavesMyRankUnwritten) {
   int exclude[1] = {2};
   int out[4] = {-1, -1, -1, -1};
@@ -664,7 +642,7 @@ TEST_F(InitMicrotest, GetParentRanks_ExcludingCaller_LeavesMyRankUnwritten) {
   ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/4, /*parentRank=*/2, exclude,
                                         /*excludeRanksCount=*/1, &nRanks, &myRank, out));
   EXPECT_EQ(3, nRanks);
-  EXPECT_EQ(0x5EED, myRank) << "no validation that the caller survives the exclusion";
+  EXPECT_EQ(0x5EED, myRank) << "getParentRanks itself does not re-check self-exclusion";
   EXPECT_EQ(std::vector<int>({0, 1, 3}), std::vector<int>(out, out + 3));
 }
 
@@ -679,11 +657,30 @@ TEST_F(InitMicrotest, GetParentRanks_ExcludeAll_ReturnsZeroRanks) {
       << "nothing should have been written";
 }
 
+// LATENT BUG (init.cc:2540): *nRanksRet is parentRanks - excludeRanksCount, computed
+// without reference to the loop, and nothing dedupes or range-checks the list
+// (init.cc:4034-4043 checks only non-null, count > 0, self-exclusion). A duplicate
+// silently evicts a real rank; the evicted rank then gets myRank == nRanks -- an index
+// one past the end, returned with ncclSuccess and handed to child-comm init.
+TEST_F(InitMicrotest, GetParentRanks_DuplicateExclusion_EvictsAnExtraRank) {
+  int exclude[2] = {1, 1};  // sorted, but the same rank twice
+  int out[4] = {-1, -1, -1, -1};
+  int nRanks = -1, myRank = -1;
+  ASSERT_EQ(ncclSuccess, getParentRanks(/*parentRanks=*/4, /*parentRank=*/3, exclude,
+                                        /*excludeRanksCount=*/2, &nRanks, &myRank, out));
+  EXPECT_EQ(2, nRanks) << "count comes from the arithmetic, not the loop";
+  EXPECT_EQ(std::vector<int>({0, 2, 3}), std::vector<int>(out, out + 3))
+      << "three ranks were written, but the caller is told there are two";
+  EXPECT_EQ(2, myRank);
+  EXPECT_GE(myRank, nRanks) << "rank 3's index is one past the end of its own comm";
+}
+
 // --- commGetSplitInfo: colour filter + insertion sort by key ---
 
 TEST_F(InitMicrotest, CommGetSplitInfo_NoColor_ReturnsEarlyWithoutTouchingOutputs) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
-  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  // Our own slot carries the colour we pass -- NOCOLOR -- not a fabricated 7.
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {NCCL_SPLIT_NOCOLOR, 0}, {7, 2}, {7, 3}});
   int parentRanks[4] = {-1, -1, -1, -1};
   int nRanks = 0x1234, myRank = 0x5678;  // sentinels
   ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), NCCL_SPLIT_NOCOLOR,
@@ -694,7 +691,7 @@ TEST_F(InitMicrotest, CommGetSplitInfo_NoColor_ReturnsEarlyWithoutTouchingOutput
 
 TEST_F(InitMicrotest, CommGetSplitInfo_SortedKeys_PreservesOrder) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
-  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 1}, {7, 2}, {7, 3}});
   int parentRanks[4] = {-1, -1, -1, -1};
   int nRanks = -1, myRank = -1;
   ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
@@ -704,22 +701,13 @@ TEST_F(InitMicrotest, CommGetSplitInfo_SortedKeys_PreservesOrder) {
   EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), std::vector<int>(parentRanks, parentRanks + 4));
 }
 
-// The one that matters. With already-sorted keys the insert position is always
-// the end, so the shift loop at init.cc:2508 never runs and a broken comparator
-// would go unnoticed -- exactly the blind spot the round-2 review found in the
-// P2P schedule tests.
-//
-// Mutation ceiling for this function: `r > insert` -> `r >= insert` at
-// init.cc:2508 is an EQUIVALENT mutant and no assertion can kill it. The extra
-// iteration writes parentRanksRet[insert] = parentRanksRet[insert-1], which
-// init.cc:2510 immediately overwrites with `i`. (It does add an out-of-bounds
-// read of parentRanksRet[-1] when insert == 0 -- visible to ASan, invisible to
-// any output oracle.) Everything else here is killed: both comparator flips,
-// deleting the shift, append-instead-of-insert, and the colour/myRank/NOCOLOR
-// inversions.
+// The one that matters: sorted keys always insert at the end, so the shift loop at
+// :2508 never runs and a broken comparator goes unnoticed.
+// Mutation ceiling: `r > insert` -> `r >= insert` is EQUIVALENT -- the extra write is
+// overwritten by :2510. (It does add an OOB read at insert==0; ASan-only.)
 TEST_F(InitMicrotest, CommGetSplitInfo_UnsortedKeys_InsertionSortsByKey) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
-  InstallSplitInfoTable({{7, 3}, {7, 1}, {7, 2}, {7, 0}});
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 3}, {7, 1}, {7, 2}, {7, 0}});
   int parentRanks[4] = {-1, -1, -1, -1};
   int nRanks = -1, myRank = -1;
   ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/1,
@@ -732,22 +720,22 @@ TEST_F(InitMicrotest, CommGetSplitInfo_UnsortedKeys_InsertionSortsByKey) {
 
 TEST_F(InitMicrotest, CommGetSplitInfo_MixedColors_SelectsOnlyMatching) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/2);
-  InstallSplitInfoTable({{7, 0}, {9, 1}, {7, 2}, {9, 3}});
-  int parentRanks[4] = {-1, -1, -1, -1};
+  InstallSplitInfoTable(/*selfRank=*/2, {{7, 0}, {9, 1}, {7, 2}, {9, 3}});
+  int parentRanks[4] = {0, 0, 0, 0};  // NOT -1: that is what the 0xff memset writes
   int nRanks = -1, myRank = -1;
   ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/2,
                                           &nRanks, &myRank, parentRanks));
   EXPECT_EQ(2, nRanks);
   EXPECT_EQ(std::vector<int>({0, 2}), std::vector<int>(parentRanks, parentRanks + 2));
   EXPECT_EQ(1, myRank);
-  EXPECT_EQ(-1, parentRanks[2]) << "the 0xff memset tail must be untouched";
+  EXPECT_EQ(-1, parentRanks[2]) << "the 0xff memset must have filled the tail";
 }
 
 // The comparator is `<=`, so an equal key inserts AFTER the incumbent: ties break
 // by parent rank. `<` would reverse them.
 TEST_F(InitMicrotest, CommGetSplitInfo_EqualKeys_TieBreaksByParentRank) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/3);
-  InstallSplitInfoTable({{7, 5}, {7, 5}, {7, 5}, {7, 5}});
+  InstallSplitInfoTable(/*selfRank=*/3, {{7, 5}, {7, 5}, {7, 5}, {7, 5}});
   int parentRanks[4] = {-1, -1, -1, -1};
   int nRanks = -1, myRank = -1;
   ASSERT_EQ(ncclSuccess, commGetSplitInfo(nullptr, parent.get(), /*color=*/7, /*key=*/5,
@@ -759,7 +747,7 @@ TEST_F(InitMicrotest, CommGetSplitInfo_EqualKeys_TieBreaksByParentRank) {
 
 TEST_F(InitMicrotest, CommGetSplitInfo_CallocFails_ReturnsSystemError) {
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
-  InstallSplitInfoTable({{7, 0}, {7, 1}, {7, 2}, {7, 3}});
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 1}, {7, 2}, {7, 3}});
   g_callocFailAt = 0;  // the info table
   int parentRanks[4] = {-1, -1, -1, -1};
   int nRanks = -1, myRank = -1;
@@ -832,31 +820,11 @@ class P2pScheduleComm {
 
 }  // namespace
 
-// NOTE -- init.cc:1331 (`if (0 != nodeRanks[n].localRanks % groupSize)`) is DEAD
-// CODE, not a coverage gap. The loop at init.cc:1314-1317 normalizes groupSize
-// first:
-//
-//   if (localRanks % groupSize != 0 || localRanks < groupSize)
-//     groupSize = gcd(groupSize, nodeRanks[node].localRanks);
-//
-// After each node either the condition was false (divisibility already held) or
-// gcd made it hold; and since every new groupSize divides the previous one, it
-// still divides every earlier node's localRanks. So on exit groupSize divides
-// ALL localRanks and the 1331 check can never be true. Verified against the
-// Euclid implementation at src/include/utils.h:105 for negative and zero inputs
-// too. Do not try to flip this branch -- reaching it requires a state the
-// function's own preceding loop makes impossible.
-//
-// The escape hatch is groupSize == 0, which crashes before 1331 can be reached
-// -- at 1316 (`localRanks % groupSize`) normally, or at 1321
-// (`localRank % groupSize`) when nNodes == 0 and the normalization loop never
-// runs. That is operator-triggerable, not theoretical: ncclLoadParam's strtoll
-// DOES check errno for ERANGE (param.cc:93-97), but nothing checks the
-// int64_t -> int NARROWING at init.cc:1313 -- so NCCL_P2P_SCHEDULE_GROUP_SIZE=0
-// SIGFPEs, and so does any multiple of 2^32, which parses cleanly as an int64_t
-// and then narrows to 0. Negative values do not crash but produce a
-// negative nGroups; both are pinned by the two tests below. The source bug is
-// pre-existing on develop and out of scope for this test-only change.
+// init.cc:1331 is DEAD: the gcd loop at :1314-1317 leaves groupSize dividing every
+// node's localRanks, so the check can never be true. Do not try to flip it.
+// Escape hatch is groupSize==0, which crashes first (:1316, or :1321 when nNodes==0).
+// Operator-triggerable: ERANGE is checked (param.cc:93-97) but the int64->int narrowing
+// at :1313 is not, so GROUP_SIZE=0 or any multiple of 2^32 SIGFPEs. Both pinned below.
 
 // Pins the escape hatch the dead-code argument above leans on. A negative
 // NCCL_P2P_SCHEDULE_GROUP_SIZE does not crash -- it yields a negative nGroups,
@@ -940,17 +908,9 @@ TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
   EXPECT_TRUE(LogHas(log, "group size used is 2")) << "actual log:\n" << log;
 }
 
-// The `|| localRanks < groupSize` disjunct at init.cc:1316 is EFFECTIVELY DEAD,
-// like the check at :1331. For any non-negative localRanks < groupSize the first
-// disjunct has already fired (localRanks % groupSize == localRanks != 0), and
-// the one case it uniquely adds is localRanks == 0 -- where gcd(groupSize, 0)
-// == groupSize (utils.h:105, plain Euclid) makes taking the arm a no-op.
-// Deleting the disjunct is an equivalent mutant for every reachable input. (It
-// IS load-bearing for negative localRanks, since gcd(4,-4) returns -4, but
-// localRanks is a rank count and can never be negative in production.)
-//
-// So this test does not claim to observe that disjunct. What it does pin is the
-// nGroupsInNode == 0 case skipping the inner group loop entirely.
+// `|| localRanks < groupSize` at :1316 is an EQUIVALENT mutant for every reachable
+// input: the first disjunct already fired unless localRanks==0, where gcd(g,0)==g makes
+// it a no-op. This test pins the nGroupsInNode==0 case skipping the inner loop instead.
 TEST_F(InitMicrotest, P2pSchedule_EmptyNode_SkipsGroupLoop) {
   // localRanks=0 on node 1 -> nGroupsInNode = 0/4 = 0, so the inner loop at
   // init.cc:1337 is entered zero times and contributes no groups.
@@ -1322,11 +1282,9 @@ TEST_F(InitMicrotest, GetVersion_ReturnsVersionCode) {
   EXPECT_EQ(NCCL_VERSION_CODE, v);
 }
 // ===========================================================================
-// ncclCommGetUniqueId (init.cc:4160) -- mints a grow handle and hands it back
-// as an ncclUniqueId. Both of its bootstrap dependencies needed new fakes:
-// bootstrapGetUniqueId was a fail-loud abort, and bcastGrowHandle had none at
-// all (it lives in src/bootstrap.cc, which this target does not compile) --
-// the binary only linked because --gc-sections dropped this whole function.
+// ncclCommGetUniqueId (:4160) -- mints a grow handle, hands it back as a uniqueId.
+// bootstrapGetUniqueId was a fail-loud abort; bcastGrowHandle had no fake at all and
+// only linked because --gc-sections dropped this whole function.
 // ===========================================================================
 
 TEST_F(InitMicrotest, CommGetUniqueId_NullComm_ReturnsInvalidArgument) {
@@ -1337,6 +1295,16 @@ TEST_F(InitMicrotest, CommGetUniqueId_NullComm_ReturnsInvalidArgument) {
 TEST_F(InitMicrotest, CommGetUniqueId_NullUniqueId_ReturnsInvalidArgument) {
   ReadyComm rc;
   EXPECT_EQ(ncclInvalidArgument, ncclCommGetUniqueId_impl(rc.get(), nullptr));
+}
+
+TEST_F(InitMicrotest, CommGetUniqueId_NotReadyComm_ReturnsInvalidArgument) {
+  // Without this, deleting NCCLCHECK(ncclCommEnsureReady) at init.cc:4162 survives:
+  // a comm still mid-async-init would mint and broadcast a handle.
+  ReadyComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  ncclUniqueId id{};
+  EXPECT_EQ(ncclInvalidArgument, ncclCommGetUniqueId_impl(rc.get(), &id));
+  EXPECT_EQ(0, g_bcastGrowHandleCalls) << "must not broadcast for a not-ready comm";
 }
 
 TEST_F(InitMicrotest, CommGetUniqueId_HappyPath_CopiesHandleAndBroadcastsAsRoot) {
@@ -1360,7 +1328,7 @@ TEST_F(InitMicrotest, CommGetUniqueId_HappyPath_CopiesHandleAndBroadcastsAsRoot)
   EXPECT_TRUE(g_bcastGrowHandleIsRoot) << "the id owner broadcasts as root";
 }
 
-TEST_F(InitMicrotest, CommGetUniqueId_BootstrapGetUniqueIdFails_Propagates) {
+TEST_F(InitMicrotest, CommGetUniqueId_BootstrapGetUniqueIdFails_PropagatesError) {
   ReadyComm rc;
   ncclUniqueId id{};
   g_bootstrapGetUniqueIdResult = ncclSystemError;
@@ -1368,7 +1336,7 @@ TEST_F(InitMicrotest, CommGetUniqueId_BootstrapGetUniqueIdFails_Propagates) {
   EXPECT_EQ(0, g_bcastGrowHandleCalls) << "must not broadcast a handle it failed to mint";
 }
 
-TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_Propagates) {
+TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_PropagatesError) {
   ReadyComm rc;
   ncclUniqueId id{};
   g_bcastGrowHandleResult = ncclInternalError;
@@ -1376,18 +1344,11 @@ TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_Propagates) {
   EXPECT_EQ(1, g_bcastGrowHandleCalls);
 }
 
-// --- ncclCommShrink exit path (init.cc:4147-4156) ---
-// NOTE: the NVTX3_RANGE_ADD_PAYLOAD at init.cc:4152-4153 expands to NOTHING in
-// this binary -- the preamble above neutralizes it -- so those two lines carry
-// no logic here and their `if (newcomm && *newcomm)` TRUE arm is not worth
-// contriving (it would need a full successful child-comm init). The guard
-// itself and the shared exit path ARE real, and this covers them.
-//
-// Two of the guard's four arms stay uncovered, both for stated reasons:
-//   *newcomm != NULL  -- needs a successful child-comm init (out of scope).
-//   newcomm == NULL   -- UNREACHABLE, and that is a symptom of the bug below:
-//                        a null newcomm crashes at init.cc:4113 inside
-//                        ncclCommInitChildComm, so control never arrives here.
+// --- ncclCommShrink exit path (:4147-4156) ---
+// NVTX3_RANGE_ADD_PAYLOAD at :4152-4153 expands to NOTHING here (the preamble
+// neutralizes it), so those lines carry no logic and the guard is 2/4 by design:
+// *newcomm != NULL needs a successful child-comm init, and newcomm == NULL is
+// UNREACHABLE because it crashes at :4113 first -- a symptom of the bug below.
 TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitPath) {
   ReadyComm rc;
   ncclComm_t out = nullptr;  // stays null -> the guard takes its FALSE arm
@@ -1398,34 +1359,21 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
   EXPECT_EQ(nullptr, out) << "a failed shrink must not hand back a comm";
 }
 
-// LATENT BUG (init.cc:4113) -- NULL-POINTER DEREFERENCE, reachable from the
-// PUBLIC API. ncclCommInitChildComm validates its out-param at init.cc:4032:
-//
-//     NCCLCHECKGOTO(PtrCheck(newcomm, caller, "newcomm"), res, exit);
-//
-// ...and that check jumps to `exit:`, which then does, unconditionally:
-//
-//     Recorder::instance().record(..., *newcomm);      // init.cc:4113
-//
-// So passing NULL for newcomm SEGFAULTS instead of returning ncclInvalidArgument
-// -- the null check is itself what routes into the dereference. The author knew
-// the pointer can be null: the `fail:` path two lines down guards it correctly
-// (`if (newcomm) *newcomm = NULL;`, init.cc:4125). Only `exit:` is missing the
-// guard.
-//
-// Reachable as ncclCommShrink(comm, list, count, NULL, ...) and equally as
-// ncclCommSplit(comm, color, key, NULL, config), which share this helper. The
-// argument is evaluated at the call site, so the no-op Recorder fake does not
-// mask it -- this reproduces the production crash faithfully.
-//
-// Pinned as a death test rather than dropped, so the fix flips it to the
-// EXPECT_EQ below.
-TEST_F(InitMicrotest, CommShrink_NullNewcomm_DerefsNullOnExitPath) {
+// LATENT BUG (init.cc:4113): PtrCheck(newcomm) at :4032 rejects a null out-param by
+// jumping to exit:, which then dereferences *newcomm -- so ncclCommShrink(.., NULL, ..)
+// and ncclCommSplit(.., NULL, ..) SEGFAULT instead of returning ncclInvalidArgument.
+// exit: is the only route: fail: ends in `goto exit` (:4126) and is unreachable when
+// newcomm is null, so the `if (newcomm)` at :4125 guards nothing here.
+// The arg is evaluated at the call site, so the no-op Recorder fake does not mask it.
+TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   ReadyComm rc;
   int exclude[1] = {0};
-  EXPECT_DEATH(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                   /*config=*/nullptr, /*shrinkFlags=*/0),
-               "");
+  // Signal AND message: the signal alone still accepts a crash arriving BEFORE the
+  // newcomm validation -- a real death by the wrong mechanism. WARN is ungated
+  // (debug.h:40), so the text reaches the child's stderr.
+  EXPECT_EXIT(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                  /*config=*/nullptr, /*shrinkFlags=*/0),
+              ::testing::KilledBySignal(SIGSEGV), "newcomm argument is NULL");
 
   // WHEN FIXED (guard the Recorder call at init.cc:4113 the way `fail:` guards
   // its own store), this is the test:
@@ -1434,33 +1382,36 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DerefsNullOnExitPath) {
   //           ncclCommShrink_impl(rc.get(), exclude, 1, nullOut, nullptr, 0));
 }
 
-// --- ncclGetErrorString (init.cc:4369) -- a pure switch, no seams needed. One
-// case per ncclResult_t plus the default. Table-driven so a new enumerator
-// added to nccl.h without a matching case is caught by the count assertion
-// below rather than silently falling into "unknown result code". ---
+// ===========================================================================
+// ncclGetErrorString (:4369) -- a pure switch, no seams. Full strings, not
+// substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped
+// "(run with ...)" hint, both of which users read in production.
+// ===========================================================================
 TEST_F(InitMicrotest, GetErrorString_EveryResultCode_HasDistinctMessage) {
-  const struct { ncclResult_t code; const char* needle; } kCases[] = {
+  const struct { ncclResult_t code; const char* expect; } kCases[] = {
       {ncclSuccess, "no error"},
-      {ncclUnhandledCudaError, "unhandled cuda error"},
-      {ncclSystemError, "unhandled system error"},
-      {ncclInternalError, "internal error"},
-      {ncclInvalidArgument, "invalid argument"},
-      {ncclInvalidUsage, "invalid usage"},
-      {ncclRemoteError, "remote process exited"},
+      {ncclUnhandledCudaError, "unhandled cuda error (run with NCCL_DEBUG=INFO for details)"},
+      {ncclSystemError, "unhandled system error (run with NCCL_DEBUG=INFO for details)"},
+      {ncclInternalError, "internal error - please report this issue to the NCCL developers"},
+      {ncclInvalidArgument, "invalid argument (run with NCCL_DEBUG=WARN for details)"},
+      {ncclInvalidUsage, "invalid usage (run with NCCL_DEBUG=WARN for details)"},
+      {ncclRemoteError, "remote process exited or there was a network error"},
       {ncclInProgress, "NCCL operation in progress"},
       {ncclTimeout, "timeout"},
   };
+  // A new enumerator in nccl.h without a row here (and a case in init.cc) fails
+  // the build rather than silently falling into "unknown result code".
+  static_assert(sizeof(kCases) / sizeof(kCases[0]) == ncclNumResults,
+                "a new ncclResult_t needs a case in init.cc and a row here");
   std::vector<std::string> seen;
   for (const auto& c : kCases) {
     const char* msg = ncclGetErrorString_impl(c.code);
     ASSERT_NE(nullptr, msg) << "code " << c.code;
-    EXPECT_TRUE(LogHas(msg, c.needle)) << "code " << c.code << " -> \"" << msg << '"';
-    EXPECT_FALSE(LogHas(msg, "unknown result code"))
-        << "code " << c.code << " fell through to the default arm";
+    EXPECT_STREQ(c.expect, msg) << "code " << c.code;
     seen.emplace_back(msg);
   }
-  // Every mapped code must produce its OWN string; a copy-paste slip that made
-  // two cases return the same message would otherwise pass the needle checks.
+  // Distinctness too: a copy-paste slip returning one message from two cases
+  // would satisfy every per-code check above.
   std::sort(seen.begin(), seen.end());
   EXPECT_EQ(seen.end(), std::unique(seen.begin(), seen.end()))
       << "two result codes share a message";

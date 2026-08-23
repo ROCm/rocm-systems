@@ -18,8 +18,6 @@
 // handle->magic, so a forward declaration is not enough.
 #include "bootstrap.h"
 
-struct ncclComm;
-
 // Controllable (was a fail-loud abort): commGetSplitInfo (init.cc:2496) needs a
 // test to WRITE the allgathered (color, key) table into allData, so this is a
 // std::function seam rather than a result code. Defined in init_fakes.cc and

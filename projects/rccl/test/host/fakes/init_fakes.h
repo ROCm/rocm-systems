@@ -28,12 +28,11 @@
 // `#define getenv(n) micro_getenv(n)` ONLY around `#include INIT_CC_PATH`;
 // micro_getenv lives here (macro inactive in this TU) and calls the real
 // getenv by default. Tests script values with SetMicroEnv().
+//
+// Lifetime: micro_getenv returns a pointer into the map's own std::string, so
+// re-scripting a name invalidates a pointer an earlier caller may still hold --
+// getEnvCtaPolicyOnce holds its `env` across the whole parse. Do not re-script mid-call.
 // -------------------------------------------------------------------------
-// Lifetime: micro_getenv returns a pointer into the map's own std::string. The
-// map is node-based so rehashing is safe, but re-scripting a name (SetMicroEnv
-// or SetMicroEnvAbsent on a key already present) invalidates a pointer an
-// earlier caller may still hold -- getEnvCtaPolicyOnce, for one, holds its
-// `env` across the whole parse. Do not re-script a name mid-call.
 const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);  // nullptr value == absent
 void SetMicroEnvAbsent(const char* name);                // readable alias for the above
@@ -103,6 +102,7 @@ extern ncclResult_t g_amdSmiInitResult;
 // 2496); no test reaches the first two, and a failing default keeps them
 // fail-fast per MICROTEST_README's "return failure loudly" rule. Tests that want
 // success install a scripting lambda.
+// -------------------------------------------------------------------------
 extern std::function<ncclResult_t(void* commState, void* allData, int size)>
     g_bootstrapAllGather;
 
