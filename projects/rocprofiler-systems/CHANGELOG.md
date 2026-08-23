@@ -8,8 +8,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-- **rocpd is now the default output format.** When no output format is specified, profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`) output must now be explicitly enabled via `--output-format proto`. Requires ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
-- `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd replaces Perfetto as the primary trace output.
+- **rocpd is now the default output format.** When no output format is specified,
+profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
+output must now be explicitly enabled via `--output-format proto`. Requires
+ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+- `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
+replaces Perfetto as the primary trace output.
 - The `--balanced` preset now enables rocpd output instead of Perfetto by default.
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
