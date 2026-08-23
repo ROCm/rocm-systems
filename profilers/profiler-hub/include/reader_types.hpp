@@ -323,11 +323,9 @@ enum class track_type_t
               ///< (nid, pid, stream_id). Unlike `dma` (memory-copy only), each returned
               ///< interval_entry_t::id encodes its own event type so the reader routes
               ///< it to the correct get_*_details() overload with no companion tag.
-    memory,  ///< agent_info + queue_info populated. Interval track of memory-allocate
-             ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
-             ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly; both are
-             ///< nullable and NULL is a distinct group value. Distinct from `dma`
-             ///< (memory-copy) and `stream` (cross-table aggregate).
+    memory,   ///< agent_info + queue_info populated. Interval track of memory-allocate
+              ///< events. Distinct from `dma` (memory copies) and `stream`
+              ///< (cross-table aggregate).
     kernel_dispatch_pmc,  ///< agent_info populated. Interval track of kernel-dispatch PMC
                           ///< events (rocpd_pmc_event JOIN rocpd_kernel_dispatch), keyed
                           ///< (nid, agent_id, pmc_id, pid) to match Optiq's

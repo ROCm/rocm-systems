@@ -3026,11 +3026,11 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
-    // A flow_edge_t carries no timestamps or track_id, so this selector cannot post-filter
-    // get_flows({}) directly like the adjacency/chain selectors. Instead each endpoint's
-    // (start, end) and track membership are resolved by sweeping the interval tracks via
-    // get_interval_track, which hides the v3/v4 track-id difference so both backends
-    // yield identical selector semantics.
+    // A flow_edge_t carries no timestamps or track_id, so this selector cannot
+    // post-filter get_flows({}) directly like the adjacency/chain selectors. Instead each
+    // endpoint's (start, end) and track membership are resolved by sweeping the interval
+    // tracks via get_interval_track, which hides the v3/v4 track-id difference so both
+    // backends yield identical selector semantics.
     struct endpoint_geom
     {
         reader_types::timestamp_t start{};
@@ -3085,8 +3085,8 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
             if(elo > whi || ehi < wlo) continue;
         }
 
-        // Kept iff at least one endpoint sits on a listed track (see get_flows_in_window's
-        // tracks contract); empty tracks = all. Reversible.
+        // Kept iff at least one endpoint sits on a listed track (see
+        // get_flows_in_window's tracks contract); empty tracks = all. Reversible.
         if(!track_set.empty())
         {
             bool touches = false;

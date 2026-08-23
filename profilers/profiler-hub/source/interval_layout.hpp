@@ -19,8 +19,8 @@ namespace profiler_hub::detail
 // a header only so it can be unit-tested directly with exact coordinates.
 //
 // The containment walk searches DOWN the ancestor stack for the nearest true container
-// instead of testing only the immediate top (A=[0,100], B=[10,60], C=[50,90]: C is a child
-// of A, not top-level).
+// instead of testing only the immediate top (A=[0,100], B=[10,60], C=[50,90]: C is a
+// child of A, not top-level).
 inline uint32_t
 compute_interval_layout(reader_types::interval_entry_list_t& events,
                         reader_types::nesting_model_t        nesting)
