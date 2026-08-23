@@ -38,6 +38,13 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
 // (channel.cc:61-62), so callers supply that storage.
 extern ncclResult_t g_initChannelResult;
 ncclResult_t initChannel(struct ncclComm* comm, int channelid) { return g_initChannelResult; }
+
+// showVersion() ROCm-version seam; defined in init_fakes.cc (see getROCmVersion
+// below). Declared here for the same reason as g_initChannelResult.
+extern int g_getROCmVersionResult;
+extern unsigned int g_rocmVersionMajor;
+extern unsigned int g_rocmVersionMinor;
+extern unsigned int g_rocmVersionPatch;
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
@@ -104,8 +111,17 @@ const char* rcclGitHash = "microtest";
 
 extern "C" {
 ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { return ncclSuccess; }
-// librocm-core: return non-VerSuccess (benign "version unknown") if ever reached.
-int getROCmVersion(int*, int*, int*) { return 1; }
+// librocm-core. Injectable so showVersion()'s runtime-ROCm arm (init.cc:1030) is
+// reachable; g_getROCmVersionResult defaults to 1 (!= VerSuccess), preserving the
+// original benign "version unknown". The int* spelling is deliberate: the real
+// rocm-core header declares unsigned int*, and the two only link because of C
+// linkage -- changing it here would break that.
+int getROCmVersion(int* major, int* minor, int* patch) {
+  if (major) *major = static_cast<int>(g_rocmVersionMajor);
+  if (minor) *minor = static_cast<int>(g_rocmVersionMinor);
+  if (patch) *patch = static_cast<int>(g_rocmVersionPatch);
+  return g_getROCmVersionResult;
+}
 // Public nccl.h API reached only from the deep ncclCommInitRankFunc arm
 // (comm->localSizes alloc); C linkage inherited from nccl.h above.
 ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }

@@ -34,6 +34,21 @@
 // or SetMicroEnvAbsent on a key already present) invalidates a pointer an
 // earlier caller may still hold -- getEnvCtaPolicyOnce, for one, holds its
 // `env` across the whole parse. Do not re-script a name mid-call.
+// showVersion() (init.cc:1012, :1016) falls back to "Unknown" when gethostname
+// or dladdr fails. Both succeed in practice, so those arms need interposition --
+// same extern "C" + dlsym(RTLD_NEXT) mechanism as the getenv seam. Default is
+// pass-through; ResetInitFakes() disarms.
+void SetGethostnameFail(bool fail);
+void SetDladdrFail(bool fail);
+
+// showVersion() ROCm-version seam. The stub (nccl_stubs.cc) returns
+// g_getROCmVersionResult and writes the three g_rocmVersion* values; the default
+// of 1 is != VerSuccess(0), so the runtime-ROCm block is skipped as before.
+extern int g_getROCmVersionResult;
+extern unsigned int g_rocmVersionMajor;
+extern unsigned int g_rocmVersionMinor;
+extern unsigned int g_rocmVersionPatch;
+
 const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);  // nullptr value == absent
 void SetMicroEnvAbsent(const char* name);                // readable alias for the above

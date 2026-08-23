@@ -18,11 +18,13 @@
 
 #include "init_fakes.h"
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 
 #include "recorder.h"
@@ -79,6 +81,39 @@ void SetMicroEnv(const char* name, const char* value) {
 void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
 
 void ClearMicroEnv() { microEnvMap().clear(); }
+
+// -------------------------------------------------------------------------
+// gethostname / dladdr failure seams. showVersion() (init.cc:1012, :1016) falls
+// back to "Unknown" when either fails, and both succeed in practice -- so the
+// fallbacks are only reachable by interposing, the same extern "C" +
+// dlsym(RTLD_NEXT) trick used for getenv above. Default is pure pass-through;
+// the real symbol is resolved on first call so the lookup itself never runs
+// while a failure is armed. ResetInitFakes() disarms both.
+// -------------------------------------------------------------------------
+namespace {
+bool g_gethostnameFail = false;
+bool g_dladdrFail = false;
+}  // namespace
+
+void SetGethostnameFail(bool fail) { g_gethostnameFail = fail; }
+void SetDladdrFail(bool fail) { g_dladdrFail = fail; }
+
+extern "C" int gethostname(char* name, size_t len) {
+  using Fn = int (*)(char*, size_t);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "gethostname"));
+  if (g_gethostnameFail) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  return real ? real(name, len) : -1;
+}
+
+extern "C" int dladdr(const void* addr, Dl_info* info) {
+  using Fn = int (*)(const void*, Dl_info*);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "dladdr"));
+  if (g_dladdrFail) return 0;  // dladdr reports failure as 0, not -1
+  return real ? real(addr, info) : 0;
+}
 
 // -------------------------------------------------------------------------
 // Environment read: init.cc calls ncclGetEnv() for NCCL_* lookups. Route it
@@ -240,6 +275,12 @@ ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
 ncclResult_t g_amdSmiInitResult         = ncclSuccess;
 // setupChannel() seam; the stub itself lives in nccl_stubs.cc.
 ncclResult_t g_initChannelResult        = ncclSuccess;
+// showVersion() seam; the getROCmVersion stub also lives in nccl_stubs.cc.
+// Default 1 (!= VerSuccess) preserves the stub's original "version unknown".
+int g_getROCmVersionResult = 1;
+unsigned int g_rocmVersionMajor = 0;
+unsigned int g_rocmVersionMinor = 0;
+unsigned int g_rocmVersionPatch = 0;
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
@@ -288,4 +329,10 @@ void ResetInitFakes() {
   g_ncclMemManagerInitResult = ncclSuccess;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
+  g_gethostnameFail = false;
+  g_dladdrFail = false;
+  g_getROCmVersionResult = 1;  // != VerSuccess
+  g_rocmVersionMajor = 0;
+  g_rocmVersionMinor = 0;
+  g_rocmVersionPatch = 0;
 }

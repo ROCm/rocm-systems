@@ -223,6 +223,123 @@ TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
   EXPECT_FALSE(uniformRanksPerHost(p.comm(), 0));
 }
 
+// ---------------------------------------------------------------------------
+// Shared log-assertion helpers, used by the showVersion, ncclP2pSchedule and
+// getEnvCtaPolicyOnce sections below.
+// ---------------------------------------------------------------------------
+namespace {
+// Substring check for captured WARN/INFO/VERSION text. These targets link
+// GTest::GTest only (no gmock), so ::testing::HasSubstr is unavailable.
+bool LogHas(const std::string& log, const char* needle) {
+  return log.find(needle) != std::string::npos;
+}
+
+// INFO() (debug.h:50) is gated on ncclDebugLevel, which nccl_fakes.cc pins to
+// NCCL_LOG_NONE -- so INFO never reaches the stderr-writing ncclDebugLog fake
+// and CaptureLog would see nothing. Set the level/mask for the scope of a
+// capture, then put both back. (WARN and VERSION are ungated, which is why the
+// other log-asserting suites need no such guard.) The level is a parameter
+// because showVersion branches on ncclDebugLevel itself.
+class ScopedDebugLogging {
+ public:
+  explicit ScopedDebugLogging(int level = NCCL_LOG_INFO, uint64_t mask = NCCL_ALL)
+      : level_(ncclDebugLevel), mask_(ncclDebugMask) {
+    ncclDebugLevel = level;
+    ncclDebugMask = mask;
+  }
+  ~ScopedDebugLogging() {
+    ncclDebugLevel = level_;
+    ncclDebugMask = mask_;
+  }
+  ScopedDebugLogging(const ScopedDebugLogging&) = delete;
+  ScopedDebugLogging& operator=(const ScopedDebugLogging&) = delete;
+
+ private:
+  int level_;
+  uint64_t mask_;
+};
+}  // namespace
+
+// ===========================================================================
+// showVersion (init.cc:1009) -- builds the once-per-process banner (version +
+// git hash, HIP/ROCm compile-vs-runtime versions, hostname, librccl path) and
+// emits it at VERSION or INFO level depending on ncclDebugLevel. Production
+// reaches it only via std::call_once (init.cc:3399, :4251), so tests call the
+// static helper directly.
+//
+// decodeHipVer/fmtExtVer are the real header-inline code
+// (hip_rocm_version_info.h); only the four inputs are seams -- gethostname,
+// dladdr, hipRuntimeGetVersion and getROCmVersion.
+// ===========================================================================
+namespace {
+// Runs showVersion() at a given debug level and returns the emitted banner.
+// VERSION is ungated but INFO is not, so the level doubles as both the branch
+// input under test and the gate that lets CaptureLog see the INFO arm.
+std::string RunShowVersion(int debugLevel) {
+  ScopedDebugLogging log(debugLevel);
+  return RcclUnitTesting::CaptureLog([] { showVersion(); });
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  // Banner shape from the fmt::format at init.cc:1040-1041.
+  EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "microtest")) << "git hash missing:\n" << log;  // rcclGitHash fake
+  EXPECT_TRUE(LogHas(log, "Hostname")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Librccl path")) << "actual log:\n" << log;
+  // Both lookups succeeded, so neither field fell back.
+  EXPECT_FALSE(LogHas(log, "Unknown")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
+  // First arm of the disjunction at init.cc:1043 short-circuits.
+  const std::string log = RunShowVersion(NCCL_LOG_VERSION);
+  EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_DebugLevelWarn_UsesVersionLog) {
+  // First arm false, second true -- only reachable at exactly NCCL_LOG_WARN.
+  const std::string log = RunShowVersion(NCCL_LOG_WARN);
+  EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_HipRuntimeVersionUnavailable_StillReportsCompileTime) {
+  // hipRuntimeGetVersion failing leaves hipRt default-constructed; the banner
+  // still carries the compile-time HIP version.
+  g_hipRuntimeGetVersion = [](int*) { return hipErrorInvalidValue; };
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "HIP version")) << "actual log:\n" << log;
+}
+
+#if ROCM_VERSION >= 60000
+TEST_F(InitMicrotest, ShowVersion_RocmVersionAvailable_ReportsRuntimeRocm) {
+  // The getROCmVersion block is preprocessed out below ROCm 6, mirroring the
+  // guard at init.cc:1027.
+  g_getROCmVersionResult = 0;  // VerSuccess
+  g_rocmVersionMajor = 9;
+  g_rocmVersionMinor = 8;
+  g_rocmVersionPatch = 7;
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "ROCm version")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "9.8.7")) << "runtime ROCm version not reported:\n" << log;
+}
+#endif
+
+TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
+  SetGethostnameFail(true);
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "Unknown")) << "hostname did not fall back:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Hostname")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {
+  SetDladdrFail(true);
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "Unknown")) << "lib path did not fall back:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Librccl path")) << "actual log:\n" << log;
+}
+
 // ===========================================================================
 // setupChannel (init.cc:1183) -- rotates a channel's ring so it starts at the
 // local rank, and builds the forward (userRanks) and inverse (rankToIndex) maps
@@ -389,34 +506,6 @@ class P2pScheduleComm {
   std::unique_ptr<ncclComm> comm_;
 };
 
-// Substring check for captured WARN/INFO text. These targets link GTest::GTest
-// only (no gmock), so ::testing::HasSubstr is unavailable.
-bool LogHas(const std::string& log, const char* needle) {
-  return log.find(needle) != std::string::npos;
-}
-
-// INFO() (debug.h:50) is gated on ncclDebugLevel, which nccl_fakes.cc pins to
-// NCCL_LOG_NONE -- so INFO never reaches the stderr-writing ncclDebugLog fake
-// and CaptureLog would see nothing. Raise the level/mask for the scope of a
-// capture, then put both back. (WARN is ungated, which is why the other
-// log-asserting suites need no such guard.)
-class ScopedInfoLogging {
- public:
-  ScopedInfoLogging() : level_(ncclDebugLevel), mask_(ncclDebugMask) {
-    ncclDebugLevel = NCCL_LOG_INFO;
-    ncclDebugMask = NCCL_ALL;
-  }
-  ~ScopedInfoLogging() {
-    ncclDebugLevel = level_;
-    ncclDebugMask = mask_;
-  }
-  ScopedInfoLogging(const ScopedInfoLogging&) = delete;
-  ScopedInfoLogging& operator=(const ScopedInfoLogging&) = delete;
-
- private:
-  int level_;
-  uint64_t mask_;
-};
 }  // namespace
 
 // NOTE -- init.cc:1331 (`if (0 != nodeRanks[n].localRanks % groupSize)`) is DEAD
@@ -470,7 +559,7 @@ TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
   std::string log;
   ncclResult_t res = ncclInternalError;
   {
-    ScopedInfoLogging info;
+    ScopedDebugLogging dbg;
     log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
   }
   EXPECT_EQ(ncclSuccess, res);
@@ -591,7 +680,7 @@ int RunCtaPolicyEnv(const char* value) {
 // are state-indistinguishable ("7" and an unset variable both leave UNDEF), so
 // the diagnostic is the only thing that separates them.
 std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
-  ScopedInfoLogging info;
+  ScopedDebugLogging dbg;
   return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
 }
 }  // namespace
@@ -671,7 +760,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownTokenAmongValid_IgnoresOnlyTheUnkno
 // Nothing recognized at all -> both the per-token and the summary diagnostic.
 // "Logs", not "Warns": getEnvCtaPolicyOnce emits only INFO -- there is no WARN
 // anywhere in init.cc:144-187, and the two are gated differently (debug.h:40
-// vs :50), which is the whole reason ScopedInfoLogging exists.
+// vs :50), which is the whole reason ScopedDebugLogging exists.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) {
   int policy = NCCL_CONFIG_UNDEF_INT;
   const std::string log = RunCtaPolicyEnvCapturingLog("BOGUS", &policy);
