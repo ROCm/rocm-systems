@@ -5277,6 +5277,11 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(atomic_snapshot);
   EXPECT_EQ(count_subsequence(patched_words, *atomic_snapshot), 1u);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const auto overwrite_guest_exec_snapshot =
+      build_s_mov_b64(*result.resolved_moi_exec_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(overwrite_guest_exec_snapshot);
+  EXPECT_EQ(std::ranges::count(patched_words, *overwrite_guest_exec_snapshot), 0u);
 }
 
 TEST(ConSanMoi, Gfx1250SampledFastGatesKeepThousandPackedSitesReachable) {

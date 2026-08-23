@@ -74,6 +74,12 @@
 
 namespace {
 
+// Sampled assigns one of eight identity banks to each owner at a static access
+// site. Nine conflicting waves make at least one bank collision deterministic
+// instead of asking the test harness to win a one-in-eight two-owner sample.
+constexpr uint32_t kMoiNonemptyScalarSpillWaveCount = 9u;
+constexpr uint32_t kMoiNonemptyScalarSpillThreadCount = 576u;
+
 __global__ __launch_bounds__(64) void moi_zero_exec_scalar_spill_correct_kernel_for_instrumentation(
     uint32_t *out) {
   __shared__ uint32_t lds[1];
@@ -94,19 +100,20 @@ __global__ __launch_bounds__(64) void moi_zero_exec_scalar_spill_correct_kernel_
     out[0] = checksum;
 }
 
-__global__ __launch_bounds__(
-    128) void moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation(uint32_t *out) {
+__global__
+__launch_bounds__(kMoiNonemptyScalarSpillThreadCount) void moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation(
+    uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
-  // Select lane zero from the first two native waves. Using a hard-coded
+  // Select lane zero from the first nine native waves. Using a hard-coded
   // wave64 mask accidentally selected waves zero and two on RDNA, allowing
   // the simulator to recycle the same resident-wave identity between them and
   // erasing the intended cross-wave conflict.
-  if (tid == 0u || tid == warpSize) {
+  if (tid % warpSize == 0u && tid / warpSize < kMoiNonemptyScalarSpillWaveCount) {
     const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
     const uint32_t value = 0x1cc00000u | tid;
     uint32_t checksum = 0;
-    // One active lane in each of two waves performs the conflicting store.
+    // One active lane in each wave performs the conflicting store.
     // This is the behavioral counterpart to the empty-EXEC case above: the
     // guard must not suppress instrumentation for a nonempty wave.
     asm volatile(RJ_CONSAN_MOI_SCALAR_SPILL_LIVE_VALUES RJ_CONSAN_MOI_SCALAR_SPILL_EIGHT_LDS_STORES

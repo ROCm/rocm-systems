@@ -2209,8 +2209,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::vector<std::string> &errors) {
   if (!options.moi_sampled_check)
     return true;
-  if (!options.moi_report_buffer_address || !options.scratch_vgpr || !options.moi_exec_save_sgpr) {
-    errors.emplace_back("ConSan MOI sampled checker is missing report or scalar resources");
+  if (!options.moi_report_buffer_address || !options.scratch_vgpr) {
+    errors.emplace_back("ConSan MOI sampled checker is missing report or vector resources");
     return false;
   }
 
@@ -2226,16 +2226,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t prior_address = *options.moi_report_buffer_address + sampled_watchpoints_offset +
                                  static_cast<uint64_t>(prior_record_index) * sizeof(uint64_t);
   InstructionSequence sequence(words);
-  const auto restore_vcc_label = sequence.make_label();
+  const auto done_label = sequence.make_label();
 
-  const auto save_vcc =
-      instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
   const auto zero_low = instrumentation::build_v_mov_b32_literal(prior_low_vgpr, 0u, arch);
   const auto zero_high = instrumentation::build_v_mov_b32_literal(prior_high_vgpr, 0u, arch);
   const auto atomic_snapshot = instrumentation::build_flat_atomic_add_u64(
       address_lo_vgpr, prior_low_vgpr, prior_low_vgpr,
       /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  if (!save_vcc || !zero_low || !zero_high || !atomic_snapshot ||
+  if (!zero_low || !zero_high || !atomic_snapshot ||
       !append_sampled_banked_address(words, prior_address, sizeof(uint64_t), window_bank_count,
                                      bank_vgpr, address_lo_vgpr, tmp_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled checker could not atomically snapshot the prior slot");
@@ -2246,13 +2244,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   words.insert(words.end(), atomic_snapshot->begin(), atomic_snapshot->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return false;
-  words.push_back(*save_vcc);
-
   auto append_required_predicate = [&](std::optional<uint32_t> compare) {
     if (!compare)
       return false;
     words.push_back(*compare);
-    return sequence.emit_branch(restore_vcc_label, InstructionSequence::BranchKind::VccZero);
+    return sequence.emit_branch(done_label, InstructionSequence::BranchKind::VccZero);
   };
 
   const auto prior_valid =
@@ -2335,15 +2331,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return false;
   }
 
-  const auto restore_vcc =
-      instrumentation::build_s_mov_b64(kRdna4VccLo, *options.moi_exec_save_sgpr, arch);
-  if (!restore_vcc) {
-    errors.emplace_back("ConSan MOI sampled checker could not restore VCC");
+  // VCC is instrumentation-local here. The sampled body's common exit
+  // restores guest VCC from its dedicated snapshot, so saving VCC in this
+  // helper is both unnecessary and unsafe: moi_exec_save_sgpr is the
+  // immutable guest-EXEC snapshot which that exit later consumes.
+  if (!sequence.bind(done_label))
     return false;
-  }
-  if (!sequence.bind(restore_vcc_label))
-    return false;
-  words.push_back(*restore_vcc);
   if (!sequence.resolve_branches(arch)) {
     errors.emplace_back("ConSan MOI sampled checker skip branch is out of range");
     return false;

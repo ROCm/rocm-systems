@@ -133,21 +133,21 @@ TEST(ConSanMoiRdna3Test, ZeroExecScalarSpillCorrectPreservesLiveScalars) {
 }
 
 TEST(ConSanMoiRdna3Test, NonemptyScalarSpillIncorrectReportsRace) {
-  constexpr size_t kWaveCount = 2;
   uint32_t *out_device = nullptr;
-  HIP_ASSERT(hipMalloc(&out_device, kWaveCount * sizeof(uint32_t)));
-  HIP_ASSERT(hipMemset(out_device, 0, kWaveCount * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&out_device, kMoiNonemptyScalarSpillWaveCount * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0, kMoiNonemptyScalarSpillWaveCount * sizeof(uint32_t)));
 
-  moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation<<<1, 128>>>(out_device);
+  moi_nonempty_scalar_spill_incorrect_kernel_for_instrumentation<<<
+      1, kMoiNonemptyScalarSpillThreadCount>>>(out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
-  std::array<uint32_t, kWaveCount> out{};
+  std::array<uint32_t, kMoiNonemptyScalarSpillWaveCount> out{};
   HIP_ASSERT(hipMemcpy(out.data(), out_device, sizeof(out), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(out_device));
   constexpr uint32_t expected = 0x2468ace0u;
-  EXPECT_EQ(out[0], expected);
-  EXPECT_EQ(out[1], expected);
+  for (uint32_t wave = 0u; wave < kMoiNonemptyScalarSpillWaveCount; ++wave)
+    EXPECT_EQ(out[wave], expected) << "wave=" << wave;
 }
 
 } // namespace
