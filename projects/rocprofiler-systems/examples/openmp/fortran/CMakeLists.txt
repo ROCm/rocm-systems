@@ -87,7 +87,9 @@ enable_language(Fortran)
 # ---------------------------------------------------------------------------------------#
 
 set(HOST_EXAMPLE_NAME "openmp-fortran-host")
-set(HOST_EXAMPLE_FLAGS "-fopenmp")
+# host.f90 uses task detach/omp_fulfill_event (OpenMP 5.0). Request it explicitly
+# rather than relying on the compiler default, which varies by flang build.
+set(HOST_EXAMPLE_FLAGS "-fopenmp" "-fopenmp-version=50")
 
 add_executable(${HOST_EXAMPLE_NAME})
 # TODO: Once SDK issue is fixed (early_fulfill arriving after task_complete causes failure),
