@@ -37,14 +37,12 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
 // does NOT allocate ring->userRanks/rankToIndex the way the real one does
 // (channel.cc:61-62), so callers supply that storage.
 extern ncclResult_t g_initChannelResult;
-ncclResult_t initChannel(struct ncclComm* comm, int channelid) { return g_initChannelResult; }
+extern int g_initChannelLastId;
+ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
+  g_initChannelLastId = channelid;  // so a test can see WHICH channel was asked for
+  return g_initChannelResult;
+}
 
-// showVersion() ROCm-version seam; defined in init_fakes.cc (see getROCmVersion
-// below). Declared here for the same reason as g_initChannelResult.
-extern int g_getROCmVersionResult;
-extern unsigned int g_rocmVersionMajor;
-extern unsigned int g_rocmVersionMinor;
-extern unsigned int g_rocmVersionPatch;
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
@@ -109,17 +107,24 @@ thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
 const char* rcclGitHash = "microtest";
 
+// showVersion() ROCm-version seam; defined in init_fakes.cc. Declared here for
+// the same reason as g_initChannelResult above.
+extern int g_getROCmVersionResult;
+extern unsigned int g_rocmVersionMajor;
+extern unsigned int g_rocmVersionMinor;
+extern unsigned int g_rocmVersionPatch;
+
 extern "C" {
 ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { return ncclSuccess; }
 // librocm-core. Injectable so showVersion()'s runtime-ROCm arm (init.cc:1030) is
 // reachable; g_getROCmVersionResult defaults to 1 (!= VerSuccess), preserving the
-// original benign "version unknown". The int* spelling is deliberate: the real
-// rocm-core header declares unsigned int*, and the two only link because of C
-// linkage -- changing it here would break that.
-int getROCmVersion(int* major, int* minor, int* patch) {
-  if (major) *major = static_cast<int>(g_rocmVersionMajor);
-  if (minor) *minor = static_cast<int>(g_rocmVersionMinor);
-  if (patch) *patch = static_cast<int>(g_rocmVersionPatch);
+// original benign "version unknown". Signature matches rocm-core's
+// (unsigned int*), which costs nothing here -- rocm_version.h is not included in
+// this TU, so there is no declaration for it to conflict with.
+int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch) {
+  if (major) *major = g_rocmVersionMajor;
+  if (minor) *minor = g_rocmVersionMinor;
+  if (patch) *patch = g_rocmVersionPatch;
   return g_getROCmVersionResult;
 }
 // Public nccl.h API reached only from the deep ncclCommInitRankFunc arm

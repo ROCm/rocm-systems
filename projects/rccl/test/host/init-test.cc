@@ -20,6 +20,7 @@
 // transitive re-includes no-ops.
 #include <algorithm>
 #include <cassert>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -147,6 +148,15 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 // Note: ncclGdrCopy is defined by init.cc itself (= NULL by default), so
 // devCommSetup()'s `ncclGdrCopy != NULL` check takes the host-workFifo arm.
 
+// Under -fsanitize=address (install.sh --address-sanitizer, wired through
+// test/host/CMakeLists.txt), ASan's allocator ABORTS THE PROCESS on an
+// allocation above its 1 TiB cap instead of returning NULL. That kills the
+// binary mid-run at P2pSchedule_NegativeGroupSizeParam_FailsInAllocation, whose
+// whole point is that a negative nGroups makes ncclCalloc fail cleanly. Opt into
+// the malloc-like contract ncclCallocDebug's NULL check relies on. No smaller
+// negative avoids this: any negative int widens to a >= 2^63 size_t.
+extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
+
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
 // exercise ncclInit()/call_once outcomes run process-isolated.
@@ -190,6 +200,17 @@ class InitMicrotest : public ::testing::Test {
     g_callocFailAt = -1;
   }
 };
+
+// Process-isolated tests. Deriving from InitMicrotest rather than using a bare
+// TEST() is what gets the env mask into the RE-EXEC'D CHILD: the child is
+// launched with --gtest_filter=<suite>.<name> and re-enters RUN_ALL_TESTS(), so
+// gtest constructs this fixture and runs SetUp() BEFORE the body reaches
+// handleReexecEntrypoint() (ProcessIsolatedTestRunner.cpp:754, inside
+// executeAllTests). Keeping the suite NAME distinct also keeps
+// test_categories_micro_init.yaml's "InitMicrotestIsolated.*" pattern matching --
+// gtest's `*` does not match across the literal '.', so folding these into
+// InitMicrotest would silently orphan that line.
+class InitMicrotestIsolated : public InitMicrotest {};
 
 namespace {
 // Minimal comm builder for uniformRanksPerHost, which reads ONLY
@@ -293,40 +314,83 @@ namespace {
 // VERSION is ungated but INFO is not, so the level doubles as both the branch
 // input under test and the gate that lets CaptureLog see the INFO arm.
 std::string RunShowVersion(int debugLevel) {
-  ScopedDebugLogging log(debugLevel);
+  ScopedDebugLogging dbg(debugLevel);
   return RcclUnitTesting::CaptureLog([] { showVersion(); });
 }
 }  // namespace
 
+// LATENT BUG (init.cc:1011-1012): hostBuf is uninitialised and gethostname is
+// not required to NUL-terminate on truncation, so the success arm can build a
+// std::string that reads past the written bytes. The LastGethostnameLen()
+// assertion below pins the sizeof(hostBuf)-1 that keeps one byte in reserve --
+// the only thing currently standing between this and a read overrun.
+//
+// Every label in the banner is a literal in the fmt::format at init.cc:1041-1042,
+// so asserting one proves only that the format string exists. These tests pin
+// label + separator + VALUE as a single string, which is what actually observes
+// gethostname/dladdr/hipRuntimeGetVersion and the label->value pairing.
 TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
+  char host[HOST_NAME_MAX] = {};
+  ASSERT_EQ(0, gethostname(host, sizeof(host) - 1));
+  Dl_info self{};
+  ASSERT_NE(0, dladdr((void*)ncclCommInitRank, &self));
+
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  // Banner shape from the fmt::format at init.cc:1040-1041.
+
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "microtest")) << "git hash missing:\n" << log;  // rcclGitHash fake
-  EXPECT_TRUE(LogHas(log, "Hostname")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "Librccl path")) << "actual log:\n" << log;
-  // Both lookups succeeded, so neither field fell back.
-  EXPECT_FALSE(LogHas(log, "Unknown")) << "actual log:\n" << log;
+  // Label, separator and value together: a swapped label pair, a substituted
+  // value, a changed separator or a changed field width all break this.
+  EXPECT_TRUE(LogHas(log, (std::string("Hostname     : ") + host).c_str()))
+      << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, (std::string("Librccl path : ") + self.dli_fname).c_str()))
+      << "actual log:\n" << log;
+  // showVersion passes sizeof(hostBuf)-1, reserving room for the NUL that
+  // gethostname does not guarantee on truncation.
+  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX - 1), LastGethostnameLen());
+  // INFO passes __func__ (debug.h:50-54); VERSION passes __FILE__ (debug.h:39).
+  // The captured prefix is therefore what distinguishes the two arms of the
+  // ncclDebugLevel test at init.cc:1043.
+  EXPECT_TRUE(LogHas(log, "showVersion:")) << "INFO arm not taken:\n" << log;
+  EXPECT_FALSE(LogHas(log, "init.cc:")) << "took the VERSION arm:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
   // First arm of the disjunction at init.cc:1043 short-circuits.
   const std::string log = RunShowVersion(NCCL_LOG_VERSION);
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
+  EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DebugLevelWarn_UsesVersionLog) {
   // First arm false, second true -- only reachable at exactly NCCL_LOG_WARN.
   const std::string log = RunShowVersion(NCCL_LOG_WARN);
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
+  EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
 }
 
-TEST_F(InitMicrotest, ShowVersion_HipRuntimeVersionUnavailable_StillReportsCompileTime) {
-  // hipRuntimeGetVersion failing leaves hipRt default-constructed; the banner
-  // still carries the compile-time HIP version.
+TEST_F(InitMicrotest, ShowVersion_HipRuntimeVersionUnavailable_OmitsRuntimeHip) {
+  // hipRuntimeGetVersion failing leaves hipRt default-constructed (valid=false),
+  // so fmtExtVer prints no runtime line at all. Without the guard hipRuntimeVer
+  // is still 0, hipRt becomes {true,0,0,0} and the banner gains a FABRICATED
+  // "HIP runtime : 0.0.0" -- which is what this EXPECT_FALSE catches.
   g_hipRuntimeGetVersion = [](int*) { return hipErrorInvalidValue; };
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
   EXPECT_TRUE(LogHas(log, "HIP version")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "HIP runtime")) << "fabricated a runtime version:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_HipRuntimeDiffersFromCompileTime_ReportsRuntime) {
+  // 90807006 decodes to 9.8.7006 -- deliberately not the compile-time version,
+  // so swapping hipRt/hipCt in fmtExtVer is observable.
+  g_hipRuntimeGetVersion = [](int* v) {
+    if (v) *v = 90807006;
+    return hipSuccess;
+  };
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "9.8.7006")) << "runtime HIP version not reported:\n" << log;
 }
 
 #if ROCM_VERSION >= 60000
@@ -338,23 +402,30 @@ TEST_F(InitMicrotest, ShowVersion_RocmVersionAvailable_ReportsRuntimeRocm) {
   g_rocmVersionMinor = 8;
   g_rocmVersionPatch = 7;
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "ROCm runtime : 9.8.7")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_RocmVersionUnavailable_OmitsRuntimeRocm) {
+  // The default g_getROCmVersionResult is 1 (!= VerSuccess), so rocmRt stays
+  // invalid and no runtime ROCm line is printed. Taking the arm unconditionally
+  // would emit "ROCm runtime : 0.0.0".
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
   EXPECT_TRUE(LogHas(log, "ROCm version")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "9.8.7")) << "runtime ROCm version not reported:\n" << log;
+  EXPECT_FALSE(LogHas(log, "ROCm runtime")) << "fabricated a runtime version:\n" << log;
 }
 #endif
 
 TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
   SetGethostnameFail(true);
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  EXPECT_TRUE(LogHas(log, "Unknown")) << "hostname did not fall back:\n" << log;
-  EXPECT_TRUE(LogHas(log, "Hostname")) << "actual log:\n" << log;
+  // Label + value, so substituting a literal for the fallback is observable.
+  EXPECT_TRUE(LogHas(log, "Hostname     : Unknown")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {
   SetDladdrFail(true);
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  EXPECT_TRUE(LogHas(log, "Unknown")) << "lib path did not fall back:\n" << log;
-  EXPECT_TRUE(LogHas(log, "Librccl path")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Librccl path : Unknown")) << "actual log:\n" << log;
 }
 
 // ===========================================================================
@@ -461,20 +532,60 @@ TEST_F(InitMicrotest, SetupChannel_InitChannelInProgress_ContinuesAndSucceeds) {
   EXPECT_EQ(std::vector<int>({3, 1, 2, 0}), c.userRanks());
 }
 
-// setupChannel does not validate that `rank` is actually a member of the ring:
-// ixRank keeps its 0 initialiser, so the ring is silently left unrotated and
-// userRanks[0] is whatever happened to be first -- a well-formed but wrong ring,
-// with no diagnostic. (The mirror case, rank 0 missing from the ring, is not
-// safely constructible: rankToIndex is indexed by rank value and sized nranks,
-// so every entry must be < nranks, and nranks distinct such values must include 0.)
+// LATENT BUG (init.cc:1189-1193): setupChannel validates neither that `rank` nor
+// that rank 0 is a member of the ring. ixRank/ixZero keep their 0 initialisers
+// and the result is a well-formed but WRONG ring, with no diagnostic. Both
+// halves are pinned below.
 TEST_F(InitMicrotest, SetupChannel_RankNotInRing_SilentlyTreatsIndexZeroAsSelf) {
   int ringRanks[4] = {1, 2, 3, 0};
   SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
   ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/7, /*nranks=*/4, ringRanks));
 
   EXPECT_EQ(1, c.ring().index);                              // (0 - 3 + 4) % 4
-  EXPECT_EQ(std::vector<int>({1, 2, 3, 0}), c.userRanks());   // unrotated
-  EXPECT_NE(7, c.userRanks()[0]) << "no validation that rank is in the ring";
+  EXPECT_EQ(std::vector<int>({1, 2, 3, 0}), c.userRanks());   // unrotated: rank 7 is not first
+  EXPECT_EQ(std::vector<int>({3, 0, 1, 2}), c.rankToIndex());
+}
+
+// The mirror half, and the more dangerous one. Memory safety only requires every
+// entry < nranks -- NOT distinctness -- so a ring with no rank 0 is perfectly
+// constructible. ixZero stays 0, the ring is misrotated, and the duplicate makes
+// rankToIndex[0] never written at all: production leaves it 0 from initChannel's
+// calloc, i.e. an index aliased onto position 0.
+TEST_F(InitMicrotest, SetupChannel_RankZeroNotInRing_MisrotatesAndLeavesHole) {
+  int ringRanks[4] = {1, 1, 2, 3};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/2, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(2, c.ring().index) << "measured from a rank 0 that is not in the ring";
+  EXPECT_EQ(std::vector<int>({2, 3, 1, 1}), c.userRanks());
+  // rankToIndex[0] is the builder's -1 fill: nothing ever wrote it.
+  EXPECT_EQ(std::vector<int>({-1, 3, 0, 1}), c.rankToIndex());
+}
+
+// Every rotation the other tests use is a SELF-INVERSE permutation, so the
+// forward and inverse maps coincide and `rankToIndex[userRanks[i]] = i` cannot be
+// told apart from `rankToIndex[i] = userRanks[i]`. A 4-cycle is the smallest
+// shape that separates them.
+TEST_F(InitMicrotest, SetupChannel_NonInvolutiveRotation_PinsRankToIndex) {
+  int ringRanks[4] = {0, 1, 2, 3};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/0);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 0, /*rank=*/1, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(std::vector<int>({1, 2, 3, 0}), c.userRanks());
+  EXPECT_EQ(std::vector<int>({3, 0, 1, 2}), c.rankToIndex()) << "not the forward map";
+}
+
+// Every other setupChannel test uses channelId 0, which makes both
+// `channels[channelId] -> channels[0]` and a wrong channelId forwarded to
+// initChannel unobservable.
+TEST_F(InitMicrotest, SetupChannel_NonZeroChannelId_UsesThatChannel) {
+  int ringRanks[4] = {2, 0, 3, 1};
+  SetupChannelComm c(/*nranks=*/4, /*channelId=*/2);
+  ASSERT_EQ(ncclSuccess, setupChannel(c.get(), 2, /*rank=*/3, /*nranks=*/4, ringRanks));
+
+  EXPECT_EQ(1, c.ring().index);
+  EXPECT_EQ(std::vector<int>({3, 1, 2, 0}), c.userRanks());
+  EXPECT_EQ(2, g_initChannelLastId) << "the channelId must be forwarded, not hardcoded";
 }
 
 // ===========================================================================
@@ -739,10 +850,11 @@ class P2pScheduleComm {
 // The escape hatch is groupSize == 0, which crashes before 1331 can be reached
 // -- at 1316 (`localRanks % groupSize`) normally, or at 1321
 // (`localRank % groupSize`) when nNodes == 0 and the normalization loop never
-// runs. That is operator-triggerable, not theoretical: ncclLoadParam does a bare
-// strtoll with no range check (param.cc:96), so NCCL_P2P_SCHEDULE_GROUP_SIZE=0
-// SIGFPEs, and so does any multiple of 2^32, which narrows to 0 on the
-// int64_t -> int conversion at 1313. Negative values do not crash but produce a
+// runs. That is operator-triggerable, not theoretical: ncclLoadParam's strtoll
+// DOES check errno for ERANGE (param.cc:93-97), but nothing checks the
+// int64_t -> int NARROWING at init.cc:1313 -- so NCCL_P2P_SCHEDULE_GROUP_SIZE=0
+// SIGFPEs, and so does any multiple of 2^32, which parses cleanly as an int64_t
+// and then narrows to 0. Negative values do not crash but produce a
 // negative nGroups; both are pinned by the two tests below. The source bug is
 // pre-existing on develop and out of scope for this test-only change.
 
@@ -766,7 +878,11 @@ TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
   };
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
-  EXPECT_DEATH(ncclP2pSchedule(c.get()), "");
+  // EXPECT_DEATH("") would accept ANY death: ::abort(), _exit(1) and a null
+  // deref injected at the same spot all satisfy it. Pin the signal so the test
+  // actually asserts "divide by zero", and so an inert guard (e.g. an assert()
+  // that vanishes under NDEBUG) cannot quietly go back to passing.
+  EXPECT_EXIT(ncclP2pSchedule(c.get()), ::testing::KilledBySignal(SIGFPE), "");
 }
 
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
@@ -783,7 +899,7 @@ TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
   }
 }
 
-TEST_F(InitMicrotest, P2pSchedule_MultiNode_UsesGroupSizeParam) {
+TEST_F(InitMicrotest, P2pSchedule_MultiNode_Rank1OnNode1_FullScheduleContents) {
   // nNodes > 1 takes the ncclParamGroupSize() arm; comm->node=1 makes the
   // `n < comm->node` group-offset branch fire on node 0.
   //
@@ -1021,12 +1137,19 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_TwoNamedModes_AccumulatesBoth) {
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
             RunCtaPolicyEnv("EFFICIENCY|ZERO"));
 }
-// Comparison is strcasecmp, so spelling case is irrelevant. All THREE tokens are
-// lower/mixed-cased deliberately: with DEFAULT spelled all-caps everywhere else,
-// `strcasecmp(token,"DEFAULT") -> strcmp` survives the whole suite.
+// Comparison is strcasecmp, so spelling case is irrelevant.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_MixedCaseModes_AccumulatesBoth) {
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
-            RunCtaPolicyEnv("default|efficiency|ZeRo"));
+            RunCtaPolicyEnv("efficiency|ZeRo"));
+}
+// NCCL_CTA_POLICY_DEFAULT is 0x00, which makes a lower-cased DEFAULT alongside
+// other tokens BIT-INVISIBLE: match-and-contribute-0 and skip-then-let-the-next
+// -token-take-the-first-assign-arm produce the same final value, and no test
+// captures the log to see the extra "Unknown CTA policy" line. So
+// `strcasecmp(token,"DEFAULT") -> strcmp` survives a mixed-case combined input.
+// DEFAULT ALONE is the only spelling where 0 and NCCL_CONFIG_UNDEF_INT differ.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_LowerCaseDefaultAlone_SelectsDefault) {
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, RunCtaPolicyEnv("default"));
 }
 // An unrecognized token is reported and skipped; the recognized ones around it
 // still apply, covering the skip (174-F), first-assign and accumulate arms in
@@ -1713,28 +1836,17 @@ TEST_F(InitMicrotest, CommInitRankDev_PostInit_MyrankGeNranks_ReturnsInvalidArgu
 // once any in-process test runs it (success), it can't be made to fail. The
 // ProcessIsolatedTestRunner re-execs a fresh binary image (pristine call_once)
 // per registered test, so bootstrapNetInit failure genuinely fails ncclInit. --
-TEST(InitMicrotestIsolated, NcclInit_BootstrapNetInitFailure_ReturnsSystemError) {
+TEST_F(InitMicrotestIsolated, NcclInit_BootstrapNetInitFailure_ReturnsSystemError) {
   // Canonical RUN_ISOLATED_TEST (fork+execv fresh image -> pristine call_once).
   // If isolation failed (cached ncclInit success), the valid-args path would
   // reach ncclAsyncLaunch -> fail-loud abort -> child crash -> RED. Green proves
   // ncclInit genuinely failed via bootstrapNetInit.
   //
-  // The env mask lives in the lambda, not in InitMicrotest::SetUp: the child
-  // re-execs and runs THIS lambda directly off a marker env var, never through
-  // gtest, so no fixture SetUp ever executes there. Converting this to a TEST_F
-  // would mask the parent (which does not run the body) and leave the child --
-  // which reaches initOnceFunc's HSA_* reads and envConfigOverride's
-  // NCCL_CTA_POLICY read -- still exposed to the real environment.
+  // The env mask comes from InitMicrotest::SetUp and applies in the CHILD too --
+  // see the fixture comment above. No mask list is duplicated here.
   RUN_ISOLATED_TEST(
       "Init_NcclInit_BootstrapNetInitFailure",
       []() {
-        for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
-                                 "NCCL_COMM_ID", "NCCL_LAUNCH_MODE", "NCCL_NET",
-                                 "NCCL_PAT_ENABLE", "NCCL_TOPO_DUMP_FILE",
-                                 "HSA_FORCE_FINE_GRAIN_PCIE", "HSA_NO_SCRATCH_RECLAIM",
-                                 "ROCSHMEM_HEAP_SIZE", "NCCL_HOSTID"}) {
-          SetMicroEnvAbsent(name);
-        }
         g_bootstrapNetInitFail = true;
         ncclComm_t nc = nullptr;
         ncclUniqueId id{};

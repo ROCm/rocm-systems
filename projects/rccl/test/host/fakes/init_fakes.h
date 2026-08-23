@@ -34,25 +34,31 @@
 // or SetMicroEnvAbsent on a key already present) invalidates a pointer an
 // earlier caller may still hold -- getEnvCtaPolicyOnce, for one, holds its
 // `env` across the whole parse. Do not re-script a name mid-call.
-// showVersion() (init.cc:1012, :1016) falls back to "Unknown" when gethostname
-// or dladdr fails. Both succeed in practice, so those arms need interposition --
-// same extern "C" + dlsym(RTLD_NEXT) mechanism as the getenv seam. Default is
-// pass-through; ResetInitFakes() disarms.
-void SetGethostnameFail(bool fail);
-void SetDladdrFail(bool fail);
-
-// showVersion() ROCm-version seam. The stub (nccl_stubs.cc) returns
-// g_getROCmVersionResult and writes the three g_rocmVersion* values; the default
-// of 1 is != VerSuccess(0), so the runtime-ROCm block is skipped as before.
-extern int g_getROCmVersionResult;
-extern unsigned int g_rocmVersionMajor;
-extern unsigned int g_rocmVersionMinor;
-extern unsigned int g_rocmVersionPatch;
-
 const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);  // nullptr value == absent
 void SetMicroEnvAbsent(const char* name);                // readable alias for the above
 void ClearMicroEnv();                                    // back to real getenv
+
+// -------------------------------------------------------------------------
+// gethostname / dladdr seams. showVersion() (init.cc:1012, :1016) falls back to
+// "Unknown" when either fails; both succeed in practice, so those arms need the
+// same extern "C" + dlsym(RTLD_NEXT) interposition as the getenv seam above.
+// Default is pass-through; ResetInitFakes() disarms. LastGethostnameLen()
+// exposes the `len` argument so a test can pin showVersion's sizeof(buf)-1.
+// -------------------------------------------------------------------------
+void SetGethostnameFail(bool fail);
+void SetDladdrFail(bool fail);
+size_t LastGethostnameLen();
+
+// -------------------------------------------------------------------------
+// showVersion() ROCm-version seam. The stub (nccl_stubs.cc) returns
+// g_getROCmVersionResult and writes the three g_rocmVersion* values; the default
+// of 1 is != VerSuccess(0), so the runtime-ROCm block is skipped as before.
+// -------------------------------------------------------------------------
+extern int g_getROCmVersionResult;
+extern unsigned int g_rocmVersionMajor;
+extern unsigned int g_rocmVersionMinor;
+extern unsigned int g_rocmVersionPatch;
 
 // Controllable GIN error state: ncclGinQueryLastError() reports this. Tests set
 // it to drive the ncclRemoteError precedence branch in ncclCommGetAsyncError.
@@ -80,6 +86,13 @@ extern bool g_bootstrapNetInitFail;
 // (name "microfake") on success. (ncclCreateSideStream is a static-inline in
 // alloc.h and ncclCudaCompCap comes from the real utils.cc oracle -- both real,
 // driven via the HIP device model, not faked here.)
+// -------------------------------------------------------------------------
+extern ncclResult_t g_ncclNetInitResult;
+extern ncclResult_t g_ncclGinInitResult;
+extern ncclResult_t g_ncclStrongStreamResult;
+extern ncclResult_t g_ncclMemManagerInitResult;
+extern ncclResult_t g_amdSmiInitResult;
+
 // -------------------------------------------------------------------------
 // commGetSplitInfo() seam. Unlike the result-only seams below this is a
 // std::function, because the ALLGATHERED TABLE IS THE ALGORITHM'S INPUT: a test
@@ -112,12 +125,10 @@ extern bool g_bcastGrowHandleIsRoot; // and with which role
 // ring->userRanks/rankToIndex (channel.cc:61-62); the fake does not, so a test
 // calling setupChannel must point the ring at storage it owns.
 extern ncclResult_t g_initChannelResult;
-
-extern ncclResult_t g_ncclNetInitResult;
-extern ncclResult_t g_ncclGinInitResult;
-extern ncclResult_t g_ncclStrongStreamResult;
-extern ncclResult_t g_ncclMemManagerInitResult;
-extern ncclResult_t g_amdSmiInitResult;
+// Records the channelId setupChannel forwarded. Without this the fake ignores
+// the argument entirely, so `initChannel(comm, channelId) -> initChannel(comm, 0)`
+// is unobservable.
+extern int g_initChannelLastId;
 
 // Enable the full commAlloc() happy path in one call: flips the HIP deep-path
 // seams (attribute/PCIBusId/event/mempool/stream) to success and resets the

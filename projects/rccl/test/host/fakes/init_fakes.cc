@@ -18,13 +18,14 @@
 
 #include "init_fakes.h"
 
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string>
-#include <unistd.h>
 #include <unordered_map>
 
 #include "recorder.h"
@@ -87,20 +88,35 @@ void ClearMicroEnv() { microEnvMap().clear(); }
 // back to "Unknown" when either fails, and both succeed in practice -- so the
 // fallbacks are only reachable by interposing, the same extern "C" +
 // dlsym(RTLD_NEXT) trick used for getenv above. Default is pure pass-through;
-// the real symbol is resolved on first call so the lookup itself never runs
-// while a failure is armed. ResetInitFakes() disarms both.
+// ResetInitFakes() disarms both.
+//
+// The dlsym lookup DOES run while a failure is armed -- a function-local static
+// initialises when control passes its declaration, which is before the
+// g_*Fail check. That is harmless only because dlsym calls neither interposed
+// symbol; it is not avoided by the ordering.
+//
+// gethostname has a SECOND consumer: getHostName (src/misc/utils.cc:75) via
+// getHostHashOnce, reached from fillInfo. That value is latched behind a
+// call_once (utils.cc:156-158) that ResetInitFakes cannot undo, so a test that
+// arms SetGethostnameFail(true) AND reaches fillInfo in the same case would
+// pin hostHashValue to the fallback for the rest of the process -- an
+// order-dependent corruption under --gtest_shuffle. Arm and disarm per test.
+// dladdr has no second consumer.
 // -------------------------------------------------------------------------
 namespace {
 bool g_gethostnameFail = false;
 bool g_dladdrFail = false;
+size_t g_lastGethostnameLen = 0;
 }  // namespace
 
 void SetGethostnameFail(bool fail) { g_gethostnameFail = fail; }
 void SetDladdrFail(bool fail) { g_dladdrFail = fail; }
+size_t LastGethostnameLen() { return g_lastGethostnameLen; }
 
 extern "C" int gethostname(char* name, size_t len) {
   using Fn = int (*)(char*, size_t);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "gethostname"));
+  g_lastGethostnameLen = len;  // lets a test pin the sizeof(buf)-1 at init.cc:1012
   if (g_gethostnameFail) {
     errno = ENAMETOOLONG;
     return -1;
@@ -287,6 +303,7 @@ bool g_bcastGrowHandleIsRoot              = false;
 
 // setupChannel() seam; the stub itself lives in nccl_stubs.cc.
 ncclResult_t g_initChannelResult        = ncclSuccess;
+int g_initChannelLastId                 = -1;
 // showVersion() seam; the getROCmVersion stub also lives in nccl_stubs.cc.
 // Default 1 (!= VerSuccess) preserves the stub's original "version unknown".
 int g_getROCmVersionResult = 1;
@@ -341,6 +358,7 @@ void ResetInitFakes() {
   g_ncclMemManagerInitResult = ncclSuccess;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
+  g_initChannelLastId = -1;
   g_bootstrapGetUniqueIdResult = ncclSuccess;
   g_bcastGrowHandleResult = ncclSuccess;
   g_bootstrapHandleMagic = 0xB007ULL;
@@ -349,6 +367,7 @@ void ResetInitFakes() {
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
+  g_lastGethostnameLen = 0;
   g_getROCmVersionResult = 1;  // != VerSuccess
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
