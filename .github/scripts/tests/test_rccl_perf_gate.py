@@ -10,11 +10,13 @@ Runs standalone (no pip install needed) and under pytest via conftest.py.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,6 +25,7 @@ import rccl_perf_gate as gate  # noqa: E402
 
 COMMAND = "/perf-regression"
 REPOSITORY = "ROCm/rocm-systems"
+FORK = "outsider/rocm-systems"
 
 
 class FakeApi:
@@ -54,10 +57,21 @@ def permission_path(login: str = "octocat") -> str:
 
 
 class GateCommandTest(unittest.TestCase):
-    def test_exact_command_is_accepted_with_surrounding_whitespace(self) -> None:
+    def test_bare_command_is_accepted_with_surrounding_whitespace(self) -> None:
         for body in (COMMAND, f"  {COMMAND}  ", f"{COMMAND}\r\n", f"\n{COMMAND}\n"):
             with self.subTest(body=body):
-                self.assertTrue(gate.is_gate_command(body, COMMAND))
+                self.assertEqual(gate.parse_gate_command(body, COMMAND), "")
+
+    def test_a_vouched_sha_is_returned_lowercased(self) -> None:
+        for suffix, expected in (
+            ("abc1234", "abc1234"),
+            ("ABC1234", "abc1234"),
+            ("a" * 40, "a" * 40),
+            ("  DEADBEEF  ", "deadbeef"),
+        ):
+            with self.subTest(suffix=suffix):
+                body = f"{COMMAND} {suffix}"
+                self.assertEqual(gate.parse_gate_command(body, COMMAND), expected)
 
     def test_substrings_and_quotations_are_rejected(self) -> None:
         near_misses = [
@@ -71,7 +85,24 @@ class GateCommandTest(unittest.TestCase):
         ]
         for body in near_misses:
             with self.subTest(body=body):
-                self.assertFalse(gate.is_gate_command(body, COMMAND))
+                self.assertIsNone(gate.parse_gate_command(body, COMMAND))
+
+    def test_malformed_sha_arguments_are_rejected(self) -> None:
+        near_misses = [
+            f"{COMMAND} abc123",
+            f"{COMMAND} {'a' * 41}",
+            f"{COMMAND} abcdefg",
+            f"{COMMAND} abc1234 extra",
+            f"{COMMAND} abc1234; rm -rf /",
+            f"{COMMAND} --dry-run",
+        ]
+        for body in near_misses:
+            with self.subTest(body=body):
+                self.assertIsNone(gate.parse_gate_command(body, COMMAND))
+
+    def test_a_bare_command_is_distinguishable_from_a_refusal(self) -> None:
+        self.assertIsNotNone(gate.parse_gate_command(COMMAND, COMMAND))
+        self.assertIsNone(gate.parse_gate_command("hello", COMMAND))
 
 
 @unittest.skipUnless(shutil.which("git"), "git is required for check-ref-format")
@@ -87,6 +118,15 @@ class ValidateRefTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gate.validate_ref(ref)
 
+    def test_rejects_sbatch_export_separators_git_would_accept(self) -> None:
+        for ref in ("develop,BASH_ENV=/tmp/x", "feature,x", "a=b"):
+            with self.subTest(ref=ref):
+                self.assertEqual(
+                    gate.git_output("check-ref-format", f"refs/heads/{ref}"), ""
+                )
+                with self.assertRaises(ValueError):
+                    gate.validate_ref(ref)
+
 
 @unittest.skipUnless(shutil.which("git"), "git is required for check-ref-format")
 class ResolveRequestTest(unittest.TestCase):
@@ -95,13 +135,23 @@ class ResolveRequestTest(unittest.TestCase):
             "issue_comment", event, api, REPOSITORY, COMMAND, {}
         )
 
-    def _api(self, permission: object, base_ref: str = "develop") -> FakeApi:
+    def _api(
+        self,
+        permission: object,
+        base_ref: str = "develop",
+        head_repo: object = REPOSITORY,
+        author: str = "octocat",
+    ) -> FakeApi:
         return FakeApi(
             {
                 permission_path(): permission,
                 f"/repos/{REPOSITORY}/pulls/9950": {
-                    "head": {"sha": "a" * 40, "repo": {"full_name": REPOSITORY}},
+                    "head": {
+                        "sha": "a" * 40,
+                        "repo": None if head_repo is None else {"full_name": head_repo},
+                    },
                     "base": {"ref": base_ref},
+                    "user": {"login": author},
                 },
             }
         )
@@ -133,6 +183,7 @@ class ResolveRequestTest(unittest.TestCase):
                 )
                 self.assertFalse(request.authorized)
                 self.assertEqual(request.level, "warning")
+                self.assertEqual(request.deny_reason, "not_writer")
 
     def test_permission_read_failure_fails_closed_and_is_loud(self) -> None:
         error = urllib.error.HTTPError(
@@ -141,6 +192,7 @@ class ResolveRequestTest(unittest.TestCase):
         request = self._resolve(self._api(error), comment_event(COMMAND))
         self.assertFalse(request.authorized)
         self.assertEqual(request.level, "error")
+        self.assertEqual(request.deny_reason, "perm_read_error")
 
     def test_wrong_command_never_reaches_the_permission_api(self) -> None:
         api = self._api({"permission": "admin"})
@@ -154,20 +206,60 @@ class ResolveRequestTest(unittest.TestCase):
         request = self._resolve(self._api({"permission": "admin"}), event)
         self.assertFalse(request.authorized)
 
-    def test_fork_head_repo_is_reported_verbatim(self) -> None:
-        api = self._api({"permission": "admin"})
-        api.responses[f"/repos/{REPOSITORY}/pulls/9950"]["head"]["repo"] = {
-            "full_name": "someone/rocm-systems"
-        }
+    def test_same_repo_author_may_run_the_gate_on_their_own_branch(self) -> None:
+        api = self._api({"permission": "write"}, author="octocat")
         request = self._resolve(api, comment_event(COMMAND))
         self.assertTrue(request.authorized)
-        self.assertNotEqual(request.head_repo, REPOSITORY)
+        self.assertEqual(request.vouched_sha, "")
 
-    def test_deleted_fork_yields_an_empty_head_repo(self) -> None:
-        api = self._api({"permission": "admin"})
-        api.responses[f"/repos/{REPOSITORY}/pulls/9950"]["head"]["repo"] = None
+    def test_same_repo_sha_is_still_checked_when_supplied(self) -> None:
+        api = self._api({"permission": "write"})
+        request = self._resolve(api, comment_event(f"{COMMAND} bbbbbbb"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "sha_stale")
+
+    def test_fork_author_cannot_vouch_for_themselves(self) -> None:
+        api = self._api({"permission": "write"}, head_repo=FORK, author="octocat")
+        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "fork_author_self")
+
+    def test_fork_without_a_sha_is_told_the_syntax(self) -> None:
+        api = self._api({"permission": "write"}, head_repo=FORK, author="outsider")
         request = self._resolve(api, comment_event(COMMAND))
-        self.assertEqual(request.head_repo, "")
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "fork_needs_vouch")
+        self.assertIn(f"{COMMAND} {'a' * 40}", request.reason)
+
+    def test_fork_with_a_stale_sha_is_told_the_current_head(self) -> None:
+        api = self._api({"permission": "write"}, head_repo=FORK, author="outsider")
+        request = self._resolve(api, comment_event(f"{COMMAND} {'b' * 40}"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "sha_stale")
+        self.assertIn("a" * 40, request.reason)
+
+    def test_fork_with_a_matching_sha_runs(self) -> None:
+        for vouched in ("a" * 7, "a" * 40, "A" * 40):
+            with self.subTest(vouched=vouched):
+                api = self._api(
+                    {"permission": "write"}, head_repo=FORK, author="outsider"
+                )
+                request = self._resolve(api, comment_event(f"{COMMAND} {vouched}"))
+                self.assertTrue(request.authorized)
+                self.assertEqual(request.head_repo, FORK)
+                self.assertEqual(request.vouched_sha, vouched.lower())
+
+    def test_fork_requester_without_write_access_is_denied_first(self) -> None:
+        api = self._api({"permission": "read"}, head_repo=FORK, author="outsider")
+        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "not_writer")
+
+    def test_deleted_fork_is_refused_outright(self) -> None:
+        api = self._api({"permission": "admin"}, head_repo=None)
+        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "head_repo_gone")
 
     def test_malicious_base_ref_is_rejected(self) -> None:
         api = self._api({"permission": "admin"}, base_ref="develop --upload-pack=evil")
@@ -217,16 +309,43 @@ class VerdictTest(unittest.TestCase):
         verdict = gate.compute_verdict("failure", "skipped", "")
         self.assertEqual(verdict.state, "failure")
 
-    def test_skipped_or_cancelled_detector_is_an_error(self) -> None:
-        for result in ("cancelled", "skipped"):
-            with self.subTest(result=result):
-                verdict = gate.compute_verdict("success", result, "")
-                self.assertEqual(verdict.state, "error")
+    def test_skipped_detector_is_an_error(self) -> None:
+        verdict = gate.compute_verdict("success", "skipped", "")
+        self.assertEqual(verdict.state, "error")
+
+    def test_detector_evicted_by_another_pr_stays_pending(self) -> None:
+        verdict = gate.compute_verdict("success", "cancelled", "")
+        self.assertTrue(verdict.publish)
+        self.assertEqual(verdict.state, "pending")
 
     def test_superseded_run_does_not_publish(self) -> None:
         verdict = gate.compute_verdict("cancelled", "skipped", "")
         self.assertFalse(verdict.publish)
         self.assertEqual(verdict.outputs()["publish"], "false")
+
+
+class GateRequestOutputTest(unittest.TestCase):
+    def test_authorized_is_only_true_for_an_authorized_request(self) -> None:
+        allowed = gate.GateRequest(True, "ok", head_repo=REPOSITORY)
+        self.assertEqual(allowed.outputs()["authorized"], "true")
+        for denied in (
+            gate.GateRequest(False, "not a writer", deny_reason="not_writer"),
+            gate.GateRequest(False, "no vouch", deny_reason="fork_needs_vouch"),
+            gate.GateRequest(False, "boom", level="error"),
+        ):
+            with self.subTest(reason=denied.reason):
+                self.assertEqual(denied.outputs()["authorized"], "false")
+
+    def test_vouched_sha_and_deny_reason_are_exported(self) -> None:
+        request = gate.GateRequest(
+            True, "ok", head_repo=FORK, vouched_sha="a" * 7, deny_reason=""
+        )
+        self.assertEqual(request.outputs()["vouched_sha"], "a" * 7)
+        self.assertEqual(request.outputs()["deny_reason"], "")
+
+    def test_a_denied_request_never_leaks_a_vouched_sha(self) -> None:
+        denied = gate.GateRequest(False, "stale", deny_reason="sha_stale")
+        self.assertEqual(denied.outputs()["vouched_sha"], "")
 
 
 class ChangedPathsTest(unittest.TestCase):
@@ -280,24 +399,33 @@ class CleanupConfigTest(unittest.TestCase):
         path.write_text("{}", encoding="utf-8")
         return path
 
-    def test_removes_a_per_run_copy(self) -> None:
+    def test_removes_this_runs_own_copy(self) -> None:
         path = self._touch("ci_detect_run_42.json")
-        self.assertTrue(gate.cleanup_run_config(str(path), self.root))
+        self.assertTrue(gate.cleanup_run_config(str(path), self.root, "42"))
         self.assertFalse(path.exists())
 
     def test_refuses_the_shared_production_config(self) -> None:
         path = self._touch("ci_detect_prod.json")
-        self.assertFalse(gate.cleanup_run_config(str(path), self.root))
+        self.assertFalse(gate.cleanup_run_config(str(path), self.root, "42"))
+        self.assertTrue(path.exists())
+
+    def test_refuses_another_runs_live_copy(self) -> None:
+        path = self._touch("ci_detect_run_999.json")
+        self.assertFalse(gate.cleanup_run_config(str(path), self.root, "42"))
         self.assertTrue(path.exists())
 
     def test_refuses_paths_outside_the_configs_directory(self) -> None:
         outside = Path(self.root) / "ci_detect_run_42.json"
         outside.write_text("{}", encoding="utf-8")
-        self.assertFalse(gate.cleanup_run_config(str(outside), self.root))
+        self.assertFalse(gate.cleanup_run_config(str(outside), self.root, "42"))
         self.assertTrue(outside.exists())
 
+    def test_refuses_a_traversal_dressed_up_as_this_runs_name(self) -> None:
+        traversal = f"{self.root}/configs/../../ci_detect_run_42.json"
+        self.assertFalse(gate.cleanup_run_config(traversal, self.root, "42"))
+
     def test_empty_path_is_a_no_op(self) -> None:
-        self.assertFalse(gate.cleanup_run_config("", self.root))
+        self.assertFalse(gate.cleanup_run_config("", self.root, "42"))
 
 
 class OutputTest(unittest.TestCase):
@@ -319,6 +447,19 @@ class OutputTest(unittest.TestCase):
         self.assertIn("c" * 40, body)
         self.assertIn("| a | b |", body)
 
+    def test_a_missing_report_is_called_out_instead_of_shown_as_clean(self) -> None:
+        verdict = gate.Verdict(True, "success", "Perf gate passed")
+        body = gate.render_comment("c" * 40, verdict, "https://example/run")
+        self.assertIn("No perf table", body)
+
+    def test_an_oversized_report_is_truncated_below_the_comment_limit(self) -> None:
+        verdict = gate.Verdict(True, "success", "Perf gate passed")
+        body = gate.render_comment(
+            "c" * 40, verdict, "https://example/run", "x" * 100000
+        )
+        self.assertLess(len(body), 65536)
+        self.assertIn("Report truncated", body)
+
     def test_long_status_descriptions_are_truncated(self) -> None:
         api = FakeApi({})
         gate.set_commit_status(
@@ -326,6 +467,121 @@ class OutputTest(unittest.TestCase):
         )
         _, payload = api.posts[0]
         self.assertEqual(len(payload["description"]), gate.MAXIMUM_DESCRIPTION_LENGTH)
+
+
+class MainCommandTest(unittest.TestCase):
+    """Drives main(): argv, environment, GITHUB_OUTPUT contents and exit code."""
+
+    def setUp(self) -> None:
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory, True)
+        self.output = self.directory / "github_output"
+        self.comment = self.directory / "comment.md"
+        self.api = FakeApi({})
+        patcher = mock.patch.object(gate, "_api", lambda: self.api)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _main(self, argv: list[str], **environment: str) -> int:
+        base = {"GITHUB_REPOSITORY": REPOSITORY, "STATUS_CONTEXT": "ctx"}
+        with mock.patch.dict(gate.os.environ, {**base, **environment}):
+            return gate.main(argv)
+
+    def _outputs(self) -> dict[str, str]:
+        lines = self.output.read_text(encoding="utf-8").splitlines()
+        return dict(line.split("=", 1) for line in lines)
+
+    def _verdict(self, **environment: str) -> int:
+        base = {
+            "HEAD_SHA": "e" * 40,
+            "BUILD_RESULT": "success",
+            "DETECT_RESULT": "success",
+            "DETECT_CODE": "0",
+        }
+        return self._main(
+            ["verdict", "--comment", str(self.comment), "--output", str(self.output)],
+            **{**base, **environment},
+        )
+
+    def test_verdict_stamps_the_status_for_a_pull_request_run(self) -> None:
+        self.assertEqual(self._verdict(PR_NUMBER="9950"), 0)
+        path, payload = self.api.posts[0]
+        self.assertEqual(path, f"/repos/{REPOSITORY}/statuses/{'e' * 40}")
+        self.assertEqual(payload["state"], "success")
+        self.assertEqual(self._outputs()["state"], "success")
+
+    def test_verdict_never_stamps_a_status_for_a_dispatch_run(self) -> None:
+        self.assertEqual(self._verdict(PR_NUMBER=""), 0)
+        self.assertEqual(self.api.posts, [])
+        self.assertEqual(self._outputs()["publish"], "true")
+
+    def test_verdict_of_a_superseded_run_publishes_nothing(self) -> None:
+        self.assertEqual(self._verdict(PR_NUMBER="9950", BUILD_RESULT="cancelled"), 0)
+        self.assertEqual(self.api.posts, [])
+        self.assertEqual(self._outputs()["publish"], "false")
+
+    def test_enforce_fails_only_on_a_failure_or_error_state(self) -> None:
+        for state, expected in (
+            ("success", 0),
+            ("pending", 0),
+            ("", 0),
+            ("failure", 1),
+            ("error", 1),
+        ):
+            with self.subTest(state=state):
+                self.assertEqual(self._main(["enforce"], STATE=state), expected)
+
+    def _resolve(self, event: dict, **environment: str) -> int:
+        event_path = self.directory / "event.json"
+        event_path.write_text(json.dumps(event), encoding="utf-8")
+        return self._main(
+            [
+                "resolve",
+                "--event",
+                str(event_path),
+                "--comment",
+                str(self.comment),
+                "--output",
+                str(self.output),
+            ],
+            GITHUB_EVENT_NAME="issue_comment",
+            PERF_COMMAND=COMMAND,
+            **environment,
+        )
+
+    def test_resolve_denies_a_non_writer_and_writes_the_explanation(self) -> None:
+        self.api.responses[permission_path()] = {"permission": "read"}
+        self.assertEqual(self._resolve(comment_event(COMMAND)), 0)
+        self.assertEqual(self._outputs()["authorized"], "false")
+        self.assertEqual(self._outputs()["deny_reason"], "not_writer")
+        self.assertIn("write access", self.comment.read_text(encoding="utf-8"))
+
+    def test_resolve_exits_non_zero_when_it_cannot_read_the_permission(self) -> None:
+        self.api.responses[permission_path()] = urllib.error.HTTPError(
+            "https://api.github.com", 403, "Forbidden", {}, None
+        )
+        self.assertEqual(self._resolve(comment_event(COMMAND)), 1)
+        self.assertEqual(self._outputs()["authorized"], "false")
+        self.assertEqual(self._outputs()["deny_reason"], "perm_read_error")
+
+    def test_resolve_stays_quiet_when_the_comment_is_not_the_command(self) -> None:
+        self.assertEqual(self._resolve(comment_event("looks good to me")), 0)
+        self.assertEqual(self._outputs()["deny_reason"], "")
+        self.assertFalse(self.comment.exists())
+
+    def test_cleanup_config_refuses_a_path_this_run_did_not_create(self) -> None:
+        configs = self.directory / "configs"
+        configs.mkdir()
+        victim = configs / "ci_detect_prod.json"
+        victim.write_text("{}", encoding="utf-8")
+        code = self._main(
+            ["cleanup-config"],
+            CONFIG_JSON=str(victim),
+            RCCL_CI_ROOT=str(self.directory),
+            GITHUB_RUN_ID="42",
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(victim.exists())
 
 
 if __name__ == "__main__":

@@ -28,10 +28,16 @@ import urllib.request
 API_TIMEOUT_SECONDS = 30
 # GitHub rejects a longer commit-status description.
 MAXIMUM_DESCRIPTION_LENGTH = 140
+# GitHub rejects an issue-comment body over 65536 characters.
+MAXIMUM_REPORT_LENGTH = 60000
 RCCL_PATH_PREFIX = "projects/rccl/"
 RUN_CONFIG_PREFIX = "ci_detect_run_"
 RUN_CONFIG_SUFFIX = ".json"
+# sbatch --export takes a comma-separated NAME=VALUE list, so a ref carrying
+# either separator would corrupt it; git itself accepts both.
+REF_FORBIDDEN_CHARACTERS = ",="
 REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+VOUCHED_SHA_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 # author_association is too coarse: COLLABORATOR includes read and triage.
 WRITE_PERMISSIONS = frozenset({"admin", "maintain", "write"})
 
@@ -50,6 +56,8 @@ class GateRequest:
     pr_number: str = ""
     requester: str = ""
     head_repo: str = ""
+    vouched_sha: str = ""
+    deny_reason: str = ""
 
     def outputs(self) -> dict[str, str]:
         return {
@@ -59,6 +67,8 @@ class GateRequest:
             "pr_number": self.pr_number,
             "requester": self.requester,
             "head_repo": self.head_repo,
+            "vouched_sha": self.vouched_sha,
+            "deny_reason": self.deny_reason,
         }
 
 
@@ -77,6 +87,8 @@ class Verdict:
 
 
 class GitHubApi:
+    # Duplicates rocjitsu_corpus_translation_comment.py. Sharing it means
+    # editing a rocjitsu-owned workflow's path filter; tracked in AIMVT-285.
     def __init__(self, repository: str, token: str, api_url: str) -> None:
         if REPOSITORY_RE.fullmatch(repository) is None:
             raise ValueError(f"invalid GitHub repository: {repository!r}")
@@ -158,8 +170,9 @@ def resolve_request(
         return GateRequest(False, "comment is not on a pull request")
 
     comment = event.get("comment") or {}
-    if not is_gate_command(str(comment.get("body") or ""), command):
-        return GateRequest(False, f"comment is not exactly {command!r}")
+    vouched = parse_gate_command(str(comment.get("body") or ""), command)
+    if vouched is None:
+        return GateRequest(False, f"comment is not {command!r}")
 
     actor = str((comment.get("user") or {}).get("login") or "")
     if not actor:
@@ -172,15 +185,18 @@ def resolve_request(
     except PermissionReadError as error:
         return GateRequest(
             False,
-            f"could not read collaborator permission for @{actor} "
-            f"(failing closed): {error}",
+            f"Could not read @{actor}'s permission level, so the gate failed "
+            f"closed: {error}",
             level="error",
+            deny_reason="perm_read_error",
         )
     if permission not in WRITE_PERMISSIONS:
         return GateRequest(
             False,
-            f"@{actor} lacks write permission (got {permission!r}); not triggering",
+            f"@{actor} needs write access to `{repository}` to run the perf "
+            f"gate (got {permission!r}).",
             level="warning",
+            deny_reason="not_writer",
         )
 
     number = issue.get("number")
@@ -188,27 +204,92 @@ def resolve_request(
     if not isinstance(pull, dict):
         raise ValueError(f"pull request {number} response is not an object")
     head = pull.get("head") or {}
-    head_repo = (head.get("repo") or {}).get("full_name") or ""
+    head_sha = str(head.get("sha") or "")
+    head_repo = str((head.get("repo") or {}).get("full_name") or "")
+    author = str((pull.get("user") or {}).get("login") or "")
+    denial = fork_vouch_denial(
+        command, actor, author, head_repo, head_sha, vouched, repository
+    )
+    if denial is not None:
+        return denial
     return GateRequest(
         authorized=True,
         reason=f"authorized for @{actor}",
-        head_sha=str(head.get("sha") or ""),
+        head_sha=head_sha,
         base_ref=validate_ref(str((pull.get("base") or {}).get("ref") or "")),
         pr_number=str(number),
         requester=actor,
-        head_repo=str(head_repo),
+        head_repo=head_repo,
+        vouched_sha=vouched,
     )
 
 
-def is_gate_command(body: str, command: str) -> bool:
-    """Exact, trimmed, single-line match -- rejects substrings and quotations."""
-    return body.replace("\r", "").strip() == command
+def fork_vouch_denial(
+    command: str,
+    actor: str,
+    author: str,
+    head_repo: str,
+    head_sha: str,
+    vouched: str,
+    repository: str,
+) -> GateRequest | None:
+    """Refuse a fork run unless a second writer named the head SHA."""
+    if not head_repo:
+        return GateRequest(
+            False,
+            "The pull request's head repository no longer exists.",
+            level="warning",
+            deny_reason="head_repo_gone",
+        )
+    if head_repo != repository:
+        if actor.lower() == author.lower():
+            return GateRequest(
+                False,
+                f"A fork pull request has to be vouched for by someone other "
+                f"than its author, so @{actor} cannot request the gate here.",
+                level="warning",
+                deny_reason="fork_author_self",
+            )
+        if not vouched:
+            return GateRequest(
+                False,
+                f"This is a fork pull request. Review the diff, then re-comment "
+                f"`{command} {head_sha}` to vouch for that exact commit.",
+                level="warning",
+                deny_reason="fork_needs_vouch",
+            )
+    if vouched and not head_sha.startswith(vouched):
+        return GateRequest(
+            False,
+            f"`{vouched}` is not the current head. Re-comment "
+            f"`{command} {head_sha}` if you vouch for what is there now.",
+            level="warning",
+            deny_reason="sha_stale",
+        )
+    return None
+
+
+def parse_gate_command(body: str, command: str) -> str | None:
+    """None when the body is not the command, else the vouched SHA or ""."""
+    stripped = body.replace("\r", "").strip()
+    if "\n" in stripped:
+        return None
+    parts = stripped.split()
+    if not parts or parts[0] != command:
+        return None
+    if len(parts) == 1:
+        return ""
+    if len(parts) > 2 or VOUCHED_SHA_RE.fullmatch(parts[1]) is None:
+        return None
+    return parts[1].lower()
 
 
 def validate_ref(ref: str) -> str:
-    """Reject a branch name git would not accept; the base ref is untrusted."""
+    """Reject a branch name git or `sbatch --export` could not carry safely."""
     if not ref:
         raise ValueError("branch name is empty")
+    if any(character in ref for character in REF_FORBIDDEN_CHARACTERS):
+        raise ValueError(f"branch name may not contain ',' or '=': {ref!r}")
     result = subprocess.run(
         ["git", "check-ref-format", f"refs/heads/{ref}"],
         capture_output=True,
@@ -248,13 +329,22 @@ def git_output(*arguments: str) -> str:
     return result.stdout.strip()
 
 
-def fetch_base(base_ref: str) -> None:
+def cvs_revision(rccl_ci_root: str) -> str:
+    """The ROCm/cvs working copy is not pinned, so record what produced this run."""
+    try:
+        return git_output("-C", f"{rccl_ci_root}/cvs", "rev-parse", "HEAD")
+    except (subprocess.CalledProcessError, OSError):
+        return "unknown"
+
+
+def fetch_base(base_ref: str, remote: str) -> None:
+    """Fetch by URL: after a fork checkout `origin` is the fork, not upstream."""
     subprocess.run(
         [
             "git",
             "fetch",
             "--no-tags",
-            "origin",
+            remote,
             f"+refs/heads/{base_ref}:refs/remotes/origin/{base_ref}",
         ],
         check=True,
@@ -279,16 +369,12 @@ def run_config_path(rccl_ci_root: str, run_id: str) -> Path:
     return Path(rccl_ci_root) / "configs" / name
 
 
-def cleanup_run_config(config_json: str, rccl_ci_root: str) -> bool:
-    """Delete a per-run config copy, refusing any other path."""
+def cleanup_run_config(config_json: str, rccl_ci_root: str, run_id: str) -> bool:
+    """Delete this run's own config copy, refusing every other path."""
     if not config_json:
         return False
     path = Path(config_json)
-    if path.parent != Path(rccl_ci_root) / "configs":
-        return False
-    if not path.name.startswith(RUN_CONFIG_PREFIX):
-        return False
-    if not path.name.endswith(RUN_CONFIG_SUFFIX):
+    if path != run_config_path(rccl_ci_root, run_id):
         return False
     path.unlink(missing_ok=True)
     return True
@@ -305,8 +391,14 @@ def compute_verdict(build_result: str, detect_result: str, detect_code: str) -> 
         return Verdict(publish=False, state="", description="")
     if build_result != "success":
         return Verdict(True, "failure", f"Build job {build_result}")
-    if detect_result in {"cancelled", "skipped"}:
-        return Verdict(True, "error", f"Detector {detect_result}")
+    if detect_result == "cancelled":
+        # Another PR entering the global lock evicts a queued detector. Nothing
+        # was measured, so stay pending rather than blaming this PR.
+        return Verdict(
+            True, "pending", "Detector cancelled (nodes busy); re-request the gate"
+        )
+    if detect_result == "skipped":
+        return Verdict(True, "error", "Detector skipped")
     if detect_code not in {"0", "1"}:
         return Verdict(
             True, "failure", f"Detector infra error (exit {detect_code or 'unknown'})"
@@ -325,9 +417,22 @@ def render_comment(
         f"- [Run log]({run_url})",
         "",
     ]
-    if report:
+    if not report:
+        lines.append("_No perf table: the detector produced no report artifact._")
+    elif len(report) > MAXIMUM_REPORT_LENGTH:
+        lines.append(report[:MAXIMUM_REPORT_LENGTH])
+        lines.append("\n_Report truncated; see the run log for the full table._")
+    else:
         lines.append(report)
     return "\n".join(lines) + "\n"
+
+
+def render_deny_comment(request: GateRequest) -> str:
+    return (
+        "### RCCL Perf Regression Gate\n\n"
+        f"🚫 {request.reason}\n\n"
+        f"<sub>`{request.deny_reason}`</sub>\n"
+    )
 
 
 def write_outputs(output: Path | None, values: dict[str, str]) -> None:
@@ -376,9 +481,13 @@ def _command_resolve(args: argparse.Namespace) -> int:
         dict(os.environ),
     )
     write_outputs(args.output, request.outputs())
+    if request.deny_reason and args.comment is not None:
+        args.comment.write_text(render_deny_comment(request), encoding="utf-8")
     prefix = f"::{request.level}::" if request.level else ""
     print(f"{prefix}{request.reason}")
-    return 0
+    # A permission read that fails closed denies everyone, so go red instead of
+    # leaving the gate silently pending.
+    return 1 if request.level == "error" else 0
 
 
 def _command_set_status(args: argparse.Namespace) -> int:
@@ -398,7 +507,8 @@ def _command_set_status(args: argparse.Namespace) -> int:
 
 def _command_changed_paths(args: argparse.Namespace) -> int:
     base_ref = validate_ref(_environment("BASE_REF"))
-    fetch_base(base_ref)
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    fetch_base(base_ref, f"{server}/{_environment('GITHUB_REPOSITORY')}")
     changed = rccl_paths_changed(base_ref)
     write_outputs(args.output, {"rccl_changed": "1" if changed else "0"})
     print(f"projects/rccl/ changed: {changed}")
@@ -408,6 +518,7 @@ def _command_changed_paths(args: argparse.Namespace) -> int:
 def _command_build(args: argparse.Namespace) -> int:
     rccl_ci_root = _environment("RCCL_CI_ROOT")
     source_config = _environment("SOURCE_CONFIG_JSON")
+    print(f"ROCm/cvs revision: {cvs_revision(rccl_ci_root)}")
     build = should_build_rccl(
         _environment("GITHUB_EVENT_NAME"),
         os.environ.get("RCCL_CHANGED", "0"),
@@ -419,10 +530,10 @@ def _command_build(args: argparse.Namespace) -> int:
         return 0
 
     # Own copy per run, so a concurrent build cannot clobber another PR's config.
+    # Emit first: a copy that dies part-way still has to be cleanable.
     run_config = run_config_path(rccl_ci_root, _environment("GITHUB_RUN_ID"))
-    shutil.copyfile(source_config, run_config)
-    # Emit before sbatch so failure cleanup can still find the copy.
     write_outputs(args.output, {"config_json": str(run_config)})
+    shutil.copyfile(source_config, run_config)
     exported = ",".join(
         [
             "ALL",
@@ -461,7 +572,9 @@ def _command_detect(args: argparse.Namespace) -> int:
 
 def _command_cleanup_config(args: argparse.Namespace) -> int:
     removed = cleanup_run_config(
-        os.environ.get("CONFIG_JSON", ""), _environment("RCCL_CI_ROOT")
+        os.environ.get("CONFIG_JSON", ""),
+        _environment("RCCL_CI_ROOT"),
+        _environment("GITHUB_RUN_ID"),
     )
     print("Removed the per-run config copy" if removed else "Nothing to clean up")
     return 0
@@ -481,7 +594,9 @@ def _command_verdict(args: argparse.Namespace) -> int:
 
     head_sha = os.environ.get("HEAD_SHA", "")
     run_url = os.environ.get("TARGET_URL", "")
-    if head_sha:
+    # Dispatch has no PR, so nothing here measured a PR's code: stamping the
+    # required status from it would green the gate without evidence.
+    if head_sha and os.environ.get("PR_NUMBER", ""):
         set_commit_status(
             _api(),
             repository,
@@ -544,6 +659,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     resolve = add("resolve", "Authorize and resolve PR context", output=True)
     resolve.add_argument("--event", type=Path, default=None, help="GITHUB_EVENT_PATH")
+    resolve.add_argument("--comment", type=Path, default=None)
 
     status = add("set-status", "Set the gate's commit status on a SHA")
     status.add_argument("--state", required=True)

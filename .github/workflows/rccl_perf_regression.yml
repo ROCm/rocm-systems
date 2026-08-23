@@ -1,5 +1,11 @@
-# Slurm scripts (rccl_build.sbatch, submit_and_poll.sh, format_report.py) live in
-# ROCm/cvs under ci/rccl_perf_gate. Branch protection must require STATUS_CONTEXT.
+# TODO(AIMVT-285): the Slurm scripts (rccl_build.sbatch, submit_and_poll.sh,
+# format_report.py) are an unpinned ROCm/cvs working copy; vendor them in-tree.
+
+# DO NOT make STATUS_CONTEXT a required check yet: a commit status has no
+# `skipped` state, so PRs that never trigger this would block forever (AIMVT-285).
+
+# Fork PRs run only when a second repo writer vouches for an exact head SHA with
+# `/perf-regression <sha>`; that limits who, not what the code can do on-runner.
 
 # Advisory: a detected regression does not fail the gate, only build/infra errors
 # do. Logic is in .github/scripts/rccl_perf_gate.py. See AIMVT-285.
@@ -33,12 +39,11 @@ on:
 env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   SLURM_RESERVATION: rccl_ci
-  NODELIST: mia1-p01-g[22,26,28,32]
   PERF_COMMAND: /perf-regression
   STATUS_CONTEXT: RCCL Perf Regression Gate
 
-# Load-bearing default-deny: without it the jobs that run PR code fall back to
-# the repository's default token permissions.
+# Every job below sets its own permissions, so this is defence in depth: a job
+# added later that forgets gets nothing rather than the repository default.
 permissions: {}
 
 jobs:
@@ -50,30 +55,24 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       statuses: write
     concurrency:
       group: rccl-perf-gate-hint-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Check out CI scripts
-        uses: actions/checkout@v4
-        with:
-          # Write token: pin to the default branch so a PR cannot edit the
-          # script that runs with it (the default here is the merge commit).
-          ref: ${{ github.event.repository.default_branch }}
-          sparse-checkout: .github/scripts
-          persist-credentials: false
-
+      # Inlined rather than checked out: a default-branch checkout cannot see
+      # this branch's helper, and pinning buys nothing when the YAML is PR-owned.
       - name: Post pending hint status
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/pull/${{ github.event.pull_request.number }}
         run: |
-          python3 .github/scripts/rccl_perf_gate.py set-status \
-            --state pending \
-            --description "Comment ${PERF_COMMAND} (repo writers) to run the perf gate"
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f context="${STATUS_CONTEXT}" \
+            -f target_url="${TARGET_URL}" \
+            -f description="Comment ${PERF_COMMAND} (repo writers) to run the perf gate"
 
   rccl-perf-resolve:
     name: 'RCCL perf gate: authorize and resolve'
@@ -97,12 +96,13 @@ jobs:
       pr_number: ${{ steps.ctx.outputs.pr_number }}
       requester: ${{ steps.ctx.outputs.requester }}
       head_repo: ${{ steps.ctx.outputs.head_repo }}
+      vouched_sha: ${{ steps.ctx.outputs.vouched_sha }}
     steps:
       - name: Check out CI scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          # See rccl-perf-hint. A dispatched ref is trusted (dispatch requires
-          # write access), which is what lets this be tested before it merges.
+          # Default branch under issue_comment. On dispatch this runs the
+          # dispatched ref's helper, which dispatch's write requirement allows.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           persist-credentials: false
@@ -114,22 +114,21 @@ jobs:
         run: |
           python3 .github/scripts/rccl_perf_gate.py resolve \
             --event "${GITHUB_EVENT_PATH}" \
+            --comment comment.md \
             --output "${GITHUB_OUTPUT}"
 
-      - name: Reject fork PRs
-        # Not supported yet: fork code would execute on our self-hosted runner.
-        # Unblock: ephemeral runner pool, or a required-reviewer Environment.
-        if: steps.ctx.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo != github.repository
+      - name: Explain a refusal on the PR
+        # always(): a fail-closed permission read exits non-zero above.
+        if: always() && steps.ctx.outputs.deny_reason != ''
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
-          number: ${{ steps.ctx.outputs.pr_number }}
+          number: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ github.token }}
-          message: |
-            🚫 The RCCL perf gate does not run on fork PRs yet (it would execute unvetted code on our self-hosted cluster runner — see AIMVT-285). Push your branch to `${{ github.repository }}` and re-comment `${{ env.PERF_COMMAND }}`.
+          path: comment.md
 
       - name: Mark commit status pending (PR only)
-        if: steps.ctx.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo == github.repository
+        if: steps.ctx.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
@@ -140,7 +139,7 @@ jobs:
             --description "Perf regression run queued"
 
       - name: Acknowledge on the PR
-        if: steps.ctx.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo == github.repository
+        if: steps.ctx.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
@@ -154,11 +153,12 @@ jobs:
   rccl-perf-build:
     name: 'RCCL perf gate: build reference and candidate'
     needs: rccl-perf-resolve
-    # SAME-REPO ONLY: this builds and MPI-executes PR code on the self-hosted
-    # runner. A pull_request head-repo guard is dead under issue_comment.
+    # Last line of defence before code reaches the self-hosted runner: repeat the
+    # same-repo / vouched-fork test so a helper bug alone cannot get past it.
     if: >
       needs.rccl-perf-resolve.outputs.authorized == 'true' &&
-      needs.rccl-perf-resolve.outputs.head_repo == github.repository
+      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
+        needs.rccl-perf-resolve.outputs.vouched_sha != '' )
     concurrency:
       # Per-PR so PRs don't cancel each other; job-level concurrency can't read
       # `needs`, so the key comes from the event.
@@ -171,14 +171,23 @@ jobs:
     outputs:
       config_json: ${{ steps.build.outputs.config_json }}
     steps:
-      - name: Checkout PR head (pinned SHA, full history)
+      # @v4 to match ainic_test_runner.yml on this same self-hosted runner;
+      # newer checkout majors need a Node runtime we have not confirmed there.
+      - name: Checkout head (pinned SHA, full history)
         uses: actions/checkout@v4
         with:
+          # Vouched fork code still runs on a persistent runner and can leave
+          # state in $HOME, $RUNNER_TEMP and /it-share/; a SHA pin is not a sandbox.
+          repository: ${{ needs.rccl-perf-resolve.outputs.head_repo }}
           ref: ${{ needs.rccl-perf-resolve.outputs.head_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Fetch base branch and detect changed paths
         id: paths
+        # Only comment runs infer the build from changed paths, and a dispatched
+        # tag has no refs/heads/<name> to fetch.
+        if: github.event_name == 'issue_comment'
         env:
           BASE_REF: ${{ needs.rccl-perf-resolve.outputs.base_ref }}
         run: |
@@ -198,8 +207,9 @@ jobs:
             --output "${GITHUB_OUTPUT}"
 
       - name: Clean up per-run config copy on build failure
-        # detect never runs, so nothing else removes this file from NFS.
-        if: failure()
+        # detect never runs, so nothing else removes this file from NFS. Cancel
+        # is the normal path here: re-requesting the gate cancels this job.
+        if: failure() || cancelled()
         continue-on-error: true
         env:
           CONFIG_JSON: ${{ steps.build.outputs.config_json }}
@@ -210,7 +220,8 @@ jobs:
     needs: [rccl-perf-resolve, rccl-perf-build]
     if: >
       needs.rccl-perf-resolve.outputs.authorized == 'true' &&
-      needs.rccl-perf-resolve.outputs.head_repo == github.repository &&
+      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
+        needs.rccl-perf-resolve.outputs.vouched_sha != '' ) &&
       needs.rccl-perf-build.result == 'success'
     concurrency:
       # Thresholds are only valid on the pinned nodes, which host one A/B job at
@@ -224,6 +235,16 @@ jobs:
     outputs:
       exit_code: ${{ steps.detect.outputs.exit_code }}
     steps:
+      # path: confines checkout's clean to this subdir, so the build job's
+      # workspace root (CANDIDATE_SRC) survives. @v4 for this runner, as above.
+      - name: Check out CI scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          path: .perf-gate-ci
+          persist-credentials: false
+
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
         # finalize decides pass/fail from the exit code; continue-on-error alone
@@ -232,7 +253,7 @@ jobs:
         env:
           CONFIG_JSON: ${{ needs.rccl-perf-build.outputs.config_json }}
         run: |
-          python3 .github/scripts/rccl_perf_gate.py detect \
+          python3 .perf-gate-ci/.github/scripts/rccl_perf_gate.py detect \
             --output "${GITHUB_OUTPUT}"
 
       - name: Render report
@@ -273,13 +294,16 @@ jobs:
         continue-on-error: true
         env:
           CONFIG_JSON: ${{ needs.rccl-perf-build.outputs.config_json }}
-        run: python3 .github/scripts/rccl_perf_gate.py cleanup-config
+        run: python3 .perf-gate-ci/.github/scripts/rccl_perf_gate.py cleanup-config
 
   rccl-perf-finalize:
     name: 'RCCL perf gate: verdict and report'
     needs: [rccl-perf-resolve, rccl-perf-build, rccl-perf-detect]
     # always(): the commit status must be resolved even when build/detect fail.
-    if: always() && needs.rccl-perf-resolve.outputs.authorized == 'true' && needs.rccl-perf-resolve.outputs.head_repo == github.repository
+    if: >
+      always() && needs.rccl-perf-resolve.outputs.authorized == 'true' &&
+      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
+        needs.rccl-perf-resolve.outputs.vouched_sha != '' )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -290,7 +314,7 @@ jobs:
     steps:
       # Must precede download-artifact: checkout cleans the workspace.
       - name: Check out CI scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
@@ -309,6 +333,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.rccl-perf-resolve.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.rccl-perf-resolve.outputs.pr_number }}
           BUILD_RESULT: ${{ needs.rccl-perf-build.result }}
           DETECT_RESULT: ${{ needs.rccl-perf-detect.result }}
           DETECT_CODE: ${{ needs.rccl-perf-detect.outputs.exit_code }}
@@ -343,8 +368,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
+          sparse-checkout: .github/scripts
           persist-credentials: false
 
       - name: Run rccl_perf_gate.py unit tests
