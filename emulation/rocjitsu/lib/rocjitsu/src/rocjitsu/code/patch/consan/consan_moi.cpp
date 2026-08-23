@@ -535,10 +535,14 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   if (!result.errors.empty())
     return result;
+  const std::set<OrderedOrdinarySyncSiteKey> ordered_sync_sites =
+      ordered_ordinary_sync_site_keys(result);
   for (const ConSanKernelInfo &kernel : result.kernels)
-    append_moi_candidates(kernel, effective_options.flat_provenance_mode, arch, result);
+    append_moi_candidates(kernel, effective_options.flat_provenance_mode, arch, ordered_sync_sites,
+                          result);
   for (const ConSanFunctionInfo &function : result.functions)
-    append_moi_candidates(function, effective_options.flat_provenance_mode, arch, result);
+    append_moi_candidates(function, effective_options.flat_provenance_mode, arch,
+                          ordered_sync_sites, result);
   if (!effective_options.test_kernel_name_filter.empty()) {
     std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
       return candidate.container_name.find(effective_options.test_kernel_name_filter) ==
@@ -561,11 +565,11 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   for (const ConSanKernelInfo &kernel : result.kernels)
     append_moi_access_site_dispositions(code_object_bytes, kernel,
                                         effective_options.flat_provenance_mode, effective_options,
-                                        arch, result);
+                                        arch, ordered_sync_sites, result);
   for (const ConSanFunctionInfo &function : result.functions)
     append_moi_access_site_dispositions(code_object_bytes, function,
                                         effective_options.flat_provenance_mode, effective_options,
-                                        arch, result);
+                                        arch, ordered_sync_sites, result);
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
       effective_options.moi_track_atomics && result.moi_candidates.empty()) {
     // Sampled atomics publish ordering only into a selected LDS watchpoint's

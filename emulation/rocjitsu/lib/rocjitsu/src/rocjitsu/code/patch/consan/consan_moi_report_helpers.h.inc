@@ -216,6 +216,7 @@ enum class ConSanMoiInlineAtomicLookup : uint8_t {
 inline constexpr uint32_t kConSanMoiInlineTokenWorkgroupMultiplier = 0x9e3779b1u;
 inline constexpr uint32_t kConSanMoiInlineTokenConsumerMultiplier = 0x85ebca6bu;
 inline constexpr uint32_t kConSanMoiInlineTokenProducerMultiplier = 0xc2b2ae35u;
+inline constexpr uint32_t kConSanMoiInlineTokenConsumerEpochMultiplier = 0x27d4eb2fu;
 inline constexpr uint32_t kConSanMoiInlineTokenReleaseSequenceSalt = 0x9e3779b9u;
 inline constexpr uint32_t kConSanMoiInlineTokenAvalancheMultiplier0 = 0x7feb352du;
 inline constexpr uint32_t kConSanMoiInlineTokenAvalancheMultiplier1 = 0x846ca68bu;
@@ -237,13 +238,14 @@ consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &
 
 [[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_slot_index(
     uint32_t workgroup_key, uint32_t consumer_owner_id, uint32_t producer_owner_id,
-    uint32_t table_capacity, bool release_sequence = false) {
+    uint32_t consumer_epoch, uint32_t table_capacity, bool release_sequence = false) {
   if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
     return 0;
   const uint32_t namespace_capacity = table_capacity / 2u;
   uint32_t mixed = workgroup_key * kConSanMoiInlineTokenWorkgroupMultiplier;
   mixed ^= consumer_owner_id * kConSanMoiInlineTokenConsumerMultiplier;
   mixed ^= producer_owner_id * kConSanMoiInlineTokenProducerMultiplier;
+  mixed ^= consumer_epoch * kConSanMoiInlineTokenConsumerEpochMultiplier;
   if (release_sequence)
     mixed ^= kConSanMoiInlineTokenReleaseSequenceSalt;
   mixed ^= mixed >> 16u;
@@ -364,7 +366,8 @@ consan_moi_inline_publish_acquired_token_transaction(
       return result;
     }
     destinations[i] = consan_moi_inline_acquired_epoch_token_slot_index(
-        token.workgroup_key, token.consumer_owner_id, token.producer_owner_id, table.size(),
+        token.workgroup_key, token.consumer_owner_id, token.producer_owner_id,
+        token.consumer_epoch_plus_one - 1u, table.size(),
         token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
     for (size_t prior = 0; prior < i; ++prior) {
       if (destinations[prior] == destinations[i]) {
@@ -384,7 +387,8 @@ consan_moi_inline_publish_acquired_token_transaction(
         (classified.token.consumer_owner_id != token.consumer_owner_id ||
          classified.token.producer_owner_id != token.producer_owner_id ||
          classified.token.workgroup_key != token.workgroup_key ||
-         classified.token.dispatch_id != token.dispatch_id)) {
+         classified.token.dispatch_id != token.dispatch_id ||
+         classified.token.consumer_epoch_plus_one != token.consumer_epoch_plus_one)) {
       result.collision = true;
       return result;
     }

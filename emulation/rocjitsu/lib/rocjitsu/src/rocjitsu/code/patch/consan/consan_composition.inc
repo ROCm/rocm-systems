@@ -792,7 +792,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                                                result);
     annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks, result);
     associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events, result);
-    associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, result);
+    associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch, result);
     build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch, result);
     build_moi_fence_candidate_inventory(result);
     build_perturbation_candidate_inventory(result);

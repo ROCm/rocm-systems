@@ -279,6 +279,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
+  for (const PlannedAtomicRecord &planned : selected_candidates) {
+    if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
+      return;
+  }
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;

@@ -155,9 +155,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       candidates.size() >= kLargeRdna4RelayCandidateCount ||
       (has_spill_backed_scalar_assignment && candidates.size() <= 2u);
   const uint64_t ordinary_access_relay_words =
-      arch == ROCJITSU_CODE_ARCH_CDNA5
-          ? 24u
-          : (needs_large_rdna4_relay ? 20u : 10u) + (has_spill_backed_scalar_assignment ? 1u : 0u);
+      (arch == ROCJITSU_CODE_ARCH_CDNA5 ? 24u : (needs_large_rdna4_relay ? 20u : 10u)) +
+      (has_spill_backed_scalar_assignment ? 1u : 0u);
   const uint64_t access_relay_words =
       options.moi_runtime_sample_stride > 1u
           ? std::max(ordinary_access_relay_words, runtime_gate_island_words)
@@ -367,7 +366,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 key.first ? kernel->fence_sites.size() : function->fence_sites.size();
             const size_t owner_atomic_count =
                 key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
-            owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count);
+            owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count +
+                                      result.sync_sequences.size());
             const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
               if (size != 0u)
                 owner_sync_ranges.emplace_back(begin, begin + size);
@@ -384,6 +384,27 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               append_owner_sites(*kernel);
             else
               append_owner_sites(*function);
+            // Compiler atomics can be expressed as ordinary loads/stores plus
+            // exact wait/cache clauses. They are downstream synchronization
+            // sites even though they do not appear in atomic_sites or
+            // fence_sites. Preserve the complete qualified sequence: a dense
+            // access router that borrows any part of it as a relocatable host
+            // otherwise prevents the ordering pass from emitting its record.
+            for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+              if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+                  sequence.in_kernel != key.first || sequence.container_name != key.second ||
+                  !consan_sync_confidence_meets(sequence.confidence,
+                                                ConSanSemanticConfidence::Conservative) ||
+                  !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                                ConSanSemanticConfidence::Conservative) ||
+                  sequence.memory_role == ConSanSyncMemoryRole::Unknown ||
+                  sequence.memory_role == ConSanSyncMemoryRole::None ||
+                  sequence.end_text_offset <= sequence.begin_text_offset) {
+                continue;
+              }
+              append_occupied_range(sequence.begin_text_offset,
+                                    sequence.end_text_offset - sequence.begin_text_offset);
+            }
             merge_ranges(owner_sync_ranges);
             const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
               return overlaps_ranges(global_access_ranges, begin, end) ||
@@ -1055,14 +1076,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           }
           displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
         }
+        const uint64_t displaced_size = displaced_words.size() * sizeof(uint32_t);
         if (displaced_words.size() >= candidate_entry_island_words &&
-            displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
+            displaced_size <= std::numeric_limits<uint32_t>::max() &&
+            moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
+                                              displaced_size)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,
                                         displaced_words.end());
-            displaced_original_size =
-                static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
+            displaced_original_size = static_cast<uint32_t>(displaced_size);
             entry_island_offset = candidate.text_offset;
             entry_island_at_anchor = true;
             uses_reserved_entry_relay = false;

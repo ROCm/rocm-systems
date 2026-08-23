@@ -236,6 +236,12 @@ struct ConSanSyncSequence {
   std::optional<uint32_t> basic_block_index;
   bool in_cyclic_cfg_component = false;
   bool inside_scalar_clause = false;
+  /// Exact scalar-clause instruction covering the addressed communication
+  /// instruction, when one exists. Engines that replace the communication
+  /// instruction with a trampoline must neutralize this scheduling hint: an
+  /// s_clause may not have a control-flow instruction inserted between it and
+  /// the memory operations that it covers.
+  std::optional<uint64_t> scalar_clause_text_offset;
   std::vector<std::string> member_event_identities;
   uint32_t width_bits = 0;
   std::optional<int64_t> static_byte_offset;

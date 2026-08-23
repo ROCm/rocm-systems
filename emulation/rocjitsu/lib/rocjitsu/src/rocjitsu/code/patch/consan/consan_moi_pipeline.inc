@@ -72,32 +72,35 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       break;
     FenceRecordCandidate candidate = candidates[candidate_index];
     const ConSanMoiFenceCandidate &fence = candidate.fence;
-    if (fence.text_offset > old_text.size() || fence.size > old_text.size() - fence.text_offset) {
+    if (candidate.patch_text_offset > old_text.size() ||
+        candidate.patch_size > old_text.size() - candidate.patch_text_offset) {
       result.errors.emplace_back("ConSan MOI fence record patch site is outside .text");
       return;
     }
     const bool overlaps = std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
       const uint64_t patch_end = patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1);
-      return fence.text_offset < patch_end && patch.anchor_offset < fence.text_offset + fence.size;
+      return candidate.patch_text_offset < patch_end &&
+             patch.anchor_offset < candidate.patch_text_offset + candidate.patch_size;
     });
     if (overlaps) {
       result.warnings.emplace_back("ConSan MOI fence record patch skipped an overlapping patch");
       continue;
     }
-    const uint16_t scratch_count = std::max<uint16_t>(
-        inline_atomic_scratch_count(candidate.communication_site, arch),
-        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 0u);
+    const uint16_t scratch_count = fence_record_scratch_count(candidate.communication_site, arch);
     const ConSanCandidateResourcePlan *existing_plan =
         resource_plan_for_site(result, ConSanResourceSiteKind::Fence, fence.text_offset);
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
             : plan_moi_resource_site(resource_state, options, ConSanResourceSiteKind::Fence,
-                                     candidate_index, fence.text_offset,
+                                     candidate_index, candidate.patch_text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
                                      nullptr, &candidate.communication_site);
-    if (!existing_plan)
+    if (!existing_plan) {
+      if (candidate.patch_text_offset != fence.text_offset)
+        plan.semantic_text_offset = fence.text_offset;
       result.resource_plans.push_back(plan);
+    }
     const auto resources = resolve_moi_scratch_plan(plan, options, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI fence record patch has no usable resource plan");
@@ -242,8 +245,15 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result, arch,
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
+  for (const PlannedFenceRecord &planned : selected) {
+    AtomicRecordCandidate scalar_clause_candidate;
+    scalar_clause_candidate.site = planned.candidate.communication_site;
+    scalar_clause_candidate.scalar_clause_text_offset = planned.candidate.scalar_clause_text_offset;
+    if (!neutralize_atomic_scalar_clause(new_text, scalar_clause_candidate, arch, patches,
+                                         result.errors))
+      return;
+  }
   uint32_t record_index = 0;
-  const uint32_t record_count = static_cast<uint32_t>(selected.size());
   struct DenseFenceRelay {
     uint64_t island_offset = 0;
     size_t dispatcher_patch_index = 0;
@@ -320,25 +330,27 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                    : std::nullopt);
     const auto dense_indirect_state = moi_indirect_jump_sgprs(candidate_options);
     const auto dense_special_state = moi_special_state_sgprs(candidate_options);
+    const uint64_t patch_text_offset = planned.candidate.patch_text_offset;
+    const uint32_t patch_size = planned.candidate.patch_size;
     const bool direct_entry =
-        compute_sopp_branch_simm16(fence.text_offset, cave_text_offset).has_value();
+        compute_sopp_branch_simm16(patch_text_offset, cave_text_offset).has_value();
     uint64_t indirect_entry_island = 0;
     bool has_indirect_entry_island = false;
     if (!direct_entry) {
-      const auto claimed_island = indirect_allocator.claim_reachable(fence.text_offset);
+      const auto claimed_island = indirect_allocator.claim_reachable(patch_text_offset);
       if (claimed_island) {
         indirect_entry_island = *claimed_island;
         has_indirect_entry_island = true;
       }
     }
     std::vector<uint32_t> displaced_tail_words;
-    uint32_t displaced_original_size = fence.size;
+    uint32_t displaced_original_size = patch_size;
     bool entry_island_at_anchor = false;
     bool compact_entry_without_scc = false;
     if (!direct_entry && !has_indirect_entry_island && is_rdna4_family_arch(arch)) {
       constexpr size_t kCompactEntryIslandWords = 7u;
-      BasicBlock *entry_block = block_for_offset(resource_state.block_index, fence.text_offset);
-      const Instruction *entry_instruction = instruction_at(entry_block, fence.text_offset);
+      BasicBlock *entry_block = block_for_offset(resource_state.block_index, patch_text_offset);
+      const Instruction *entry_instruction = instruction_at(entry_block, patch_text_offset);
       bool found_owner_context = false;
       bool scc_live = false;
       if (entry_block != nullptr && entry_instruction != nullptr) {
@@ -355,9 +367,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           compact_entry_without_scc ? kCompactEntryIslandWords : kMoiLocalIndirectIslandWords;
       std::vector<uint32_t> displaced_words;
       std::vector<std::string> decode_errors;
-      while (displaced_words.size() < required_island_words) {
+      const size_t patch_words = patch_size / sizeof(uint32_t);
+      while (displaced_words.size() < std::max(required_island_words, patch_words)) {
         auto decoded = decode_relocatable_entry_instruction(
-            old_text, fence.text_offset + displaced_words.size() * sizeof(uint32_t), arch,
+            old_text, patch_text_offset + displaced_words.size() * sizeof(uint32_t), arch,
             decode_errors, resource_state.decoder.get());
         if (!decoded) {
           displaced_words.clear();
@@ -365,41 +378,39 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         }
         displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
       }
-      const size_t fence_words = fence.size / sizeof(uint32_t);
-      const uint64_t displaced_end = fence.text_offset + displaced_words.size() * sizeof(uint32_t);
+      const uint64_t displaced_end = patch_text_offset + displaced_words.size() * sizeof(uint32_t);
       const bool overlaps_existing_patch =
           std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
             const uint64_t patch_end =
                 patch.anchor_offset + std::max<uint32_t>(patch.original_size, 1u);
-            return fence.text_offset < patch_end && patch.anchor_offset < displaced_end;
+            return patch_text_offset < patch_end && patch.anchor_offset < displaced_end;
           });
       const bool swallows_another_fence =
           std::ranges::any_of(candidates, [&](const FenceRecordCandidate &other) {
-            return other.fence.text_offset != fence.text_offset &&
-                   other.fence.text_offset > fence.text_offset &&
-                   other.fence.text_offset < displaced_end;
+            return other.patch_text_offset != patch_text_offset &&
+                   other.patch_text_offset > patch_text_offset &&
+                   other.patch_text_offset < displaced_end;
           });
       if (displaced_words.size() >= required_island_words &&
-          fence_words <= displaced_words.size() && !overlaps_existing_patch &&
+          patch_words <= displaced_words.size() && !overlaps_existing_patch &&
           !swallows_another_fence &&
+          moi_entry_window_is_single_entry(resource_state.block_index, patch_text_offset,
+                                            displaced_end - patch_text_offset) &&
           displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
-        displaced_tail_words.assign(displaced_words.begin() + fence_words, displaced_words.end());
+        displaced_tail_words.assign(displaced_words.begin() + patch_words, displaced_words.end());
         displaced_original_size = static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
-        indirect_entry_island = fence.text_offset;
+        indirect_entry_island = patch_text_offset;
         has_indirect_entry_island = true;
         entry_island_at_anchor = true;
       }
     }
-    const uint64_t return_text_offset = fence.text_offset + displaced_original_size;
+    const uint64_t return_text_offset = patch_text_offset + displaced_original_size;
     auto cave_words = build_fence_record_cave_words(
         active_bytes, planned.candidate, planned.address_plan, candidate_options,
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
-        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-            ? layout.fence_record_capacity
-            : record_count,
-        layout.fence_records_offset, cave_text_offset, return_text_offset, std::nullopt,
-        displaced_tail_words,
+        layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
+        return_text_offset, std::nullopt, displaced_tail_words,
         planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
                               : std::nullopt,
         planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
@@ -413,7 +424,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         dense_dispatch_key_sgpr && dense_indirect_state && dense_special_state) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
       if (dense_relay &&
-          !compute_sopp_branch_simm16(fence.text_offset, dense_relay->island_offset)) {
+          !compute_sopp_branch_simm16(patch_text_offset, dense_relay->island_offset)) {
         dense_relay.reset();
       }
       if (dense_relay) {
@@ -421,11 +432,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             active_bytes, planned.candidate, planned.address_plan, candidate_options,
             planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
-            arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-                ? layout.fence_record_capacity
-                : record_count,
-            layout.fence_records_offset, cave_text_offset, return_text_offset,
-            *dense_call_return_sgpr,
+            layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
+            return_text_offset, *dense_call_return_sgpr,
             /*displaced_tail_words=*/{},
             planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
                                   : std::nullopt,
@@ -444,7 +452,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     std::string placement_error;
     const auto placement = placement_planner.plan_indirect_appended(
-        fence.text_offset, displaced_original_size, cave_words->size() * sizeof(uint32_t),
+        patch_text_offset, displaced_original_size, cave_words->size() * sizeof(uint32_t),
         &placement_error);
     if (!placement) {
       result.errors.emplace_back("ConSan MOI fence record placement failed: " + placement_error);
@@ -480,7 +488,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     } else {
       anchor_words.front() = build_s_branch(*fwd, arch);
     }
-    std::memcpy(new_text.data() + fence.text_offset, anchor_words.data(),
+    std::memcpy(new_text.data() + patch_text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
     if (has_indirect_entry_island) {
       if (compact_entry_without_scc && entry_island_at_anchor) {
@@ -514,7 +522,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                     island_words.size() * sizeof(uint32_t));
         ConSanPatchInfo island_info;
         island_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-        island_info.anchor_offset = fence.text_offset;
+        island_info.anchor_offset = patch_text_offset;
         island_info.trampoline_offset = indirect_entry_island;
         // The fence patch owns the entire decoded prefix. A multiword final
         // guest instruction can make that prefix one word larger than the
@@ -523,7 +531,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         island_info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
         patches.push_back(std::move(island_info));
       } else if (!emit_moi_local_indirect_entry_island(
-                     new_text, indirect_entry_island, placement->body_offset, fence.text_offset,
+                     new_text, indirect_entry_island, placement->body_offset, patch_text_offset,
                      candidate_options, planned.resources.owner_descriptor_file_offsets, arch,
                      patches, result.errors, "ConSan MOI fence record patch")) {
         return;
@@ -556,7 +564,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       }
       dispatcher_words.push_back(*compare);
       dispatcher_words.push_back(
-          static_cast<uint32_t>(fence.text_offset + sizeof(uint32_t) - dense_relay->island_offset));
+          static_cast<uint32_t>(patch_text_offset + sizeof(uint32_t) - dense_relay->island_offset));
       std::vector<uint32_t> matched_words;
       const uint64_t matched_offset =
           dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -590,7 +598,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::TrampolineMoiFenceRecord;
-    info.anchor_offset = fence.text_offset;
+    info.anchor_offset = patch_text_offset;
     info.trampoline_offset = cave_text_offset;
     info.original_size = displaced_original_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
@@ -731,15 +739,14 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     }
     for (size_t index = 0; index < candidates.size(); ++index) {
       const FenceRecordCandidate &candidate = candidates[index];
-      result.resource_plans.push_back(plan_moi_resource_site(
-          state, options, ConSanResourceSiteKind::Fence, index, candidate.fence.text_offset,
+      ConSanCandidateResourcePlan plan = plan_moi_resource_site(
+          state, options, ConSanResourceSiteKind::Fence, index, candidate.patch_text_offset,
           candidate.kernel_descriptor_file_offset,
-          std::max<uint16_t>(inline_atomic_scratch_count(candidate.communication_site, state.arch),
-                             state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                                     state.arch == ROCJITSU_CODE_ARCH_CDNA4
-                                 ? 8u
-                                 : 0u),
-          nullptr, &candidate.communication_site));
+          fence_record_scratch_count(candidate.communication_site, state.arch), nullptr,
+          &candidate.communication_site);
+      if (candidate.patch_text_offset != candidate.fence.text_offset)
+        plan.semantic_text_offset = candidate.fence.text_offset;
+      result.resource_plans.push_back(std::move(plan));
     }
   }
 }
@@ -865,8 +872,10 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
     } else if (!event_kind) {
       reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
     } else if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
+      const ConSanAtomicSite normalized =
+          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
       reason = inline_atomic_disposition_reason(
-          classify_consan_moi_inline_atomic_support(site, *event_kind, semantic_result.arch));
+          classify_consan_moi_inline_atomic_support(normalized, *event_kind, semantic_result.arch));
     } else {
       const ConSanAtomicSite normalized =
           normalize_atomic_record_site(site, allow_ordered_lds_atomic);
@@ -1074,9 +1083,10 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
   resource_kind_by_offset.reserve(result.resource_plans.size());
   failed_sites.reserve(result.resource_plans.size());
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    resource_kind_by_offset.try_emplace(plan.text_offset, plan.site_kind);
+    const uint64_t semantic_offset = plan.semantic_text_offset.value_or(plan.text_offset);
+    resource_kind_by_offset.try_emplace(semantic_offset, plan.site_kind);
     if (plan.source == ConSanRegisterAllocationSource::Unsupported)
-      failed_sites.try_emplace({plan.site_kind, plan.text_offset}, plan.reason);
+      failed_sites.try_emplace({plan.site_kind, semantic_offset}, plan.reason);
   }
 
   std::unordered_map<std::string_view, const ConSanSyncEvent *> event_by_identity;
@@ -1104,8 +1114,16 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       continue;
     if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata) {
       const auto patch_kind = moi_instrumentation_patch_site_kind(patch);
-      if (patch_kind)
-        patched_sites.insert({*patch_kind, patch.anchor_offset});
+      if (patch_kind) {
+        const auto plan = std::ranges::find_if(result.resource_plans, [&](const auto &candidate) {
+          return candidate.site_kind == *patch_kind && candidate.text_offset == patch.anchor_offset;
+        });
+        const uint64_t semantic_offset =
+            plan == result.resource_plans.end()
+                ? patch.anchor_offset
+                : plan->semantic_text_offset.value_or(plan->text_offset);
+        patched_sites.insert({*patch_kind, semantic_offset});
+      }
       continue;
     }
 

@@ -316,8 +316,12 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   const bool is_cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
   const bool is_rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
   const bool is_gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-  const bool gfx12_flat_encoding = is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) &&
-                                   site.raw_saddr && *site.raw_saddr == 0x7cu;
+  const bool gfx12_flat_saddr =
+      site.raw_saddr &&
+      (*site.raw_saddr == 0x7cu || (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&
+                                    *site.saddr_sgpr <= 104u && (*site.saddr_sgpr & 1u) == 0u));
+  const bool gfx12_flat_encoding =
+      is_flat && is_gfx12 && site.size == 3u * sizeof(uint32_t) && gfx12_flat_saddr;
   const bool cdna_flat_encoding = is_flat && is_cdna && site.size == 2u * sizeof(uint32_t) &&
                                   site.raw_saddr && *site.raw_saddr == 0u;
   const bool rdna3_flat_encoding = is_flat && is_rdna3 && site.size == 2u * sizeof(uint32_t) &&

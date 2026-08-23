@@ -681,8 +681,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
       candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
       candidate_options.moi_sampled_spill_backed_operand_recovery = spill_backed_operand_recovery;
-    } else if (spill &&
-               sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
+    } else if (spill && sampled_access_can_emit_spill_over_guest_operands(candidate_options,
+                                                                          candidate, arch)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
@@ -732,14 +732,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           }
           displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
         }
+        const uint64_t displaced_size = displaced_words.size() * sizeof(uint32_t);
         if (displaced_words.size() >= candidate_entry_island_words &&
-            displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
+            displaced_size <= std::numeric_limits<uint32_t>::max() &&
+            moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
+                                              displaced_size)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,
                                         displaced_words.end());
-            displaced_original_size =
-                static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
+            displaced_original_size = static_cast<uint32_t>(displaced_size);
             entry_island_offset = candidate.text_offset;
             uses_local_entry_island = true;
             entry_island_at_anchor = true;

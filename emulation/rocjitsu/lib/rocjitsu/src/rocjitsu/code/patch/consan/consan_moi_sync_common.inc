@@ -13,6 +13,9 @@ struct AtomicRecordCandidate {
   // RMW instructions normally end at site.text_offset + site.size; an
   // ordinary acquire includes its wait/cache suffix.
   uint64_t ordered_sequence_end_text_offset = 0;
+  /// Scalar scheduling hint covering site, if analysis proved one. Any engine
+  /// that replaces site with control flow must turn the hint into an s_nop.
+  std::optional<uint64_t> scalar_clause_text_offset;
 };
 
 [[nodiscard]] bool atomic_record_candidate_semantics_equal(const AtomicRecordCandidate &lhs,
@@ -25,6 +28,7 @@ struct AtomicRecordCandidate {
          lhs.uses_gfx1250_cluster_workgroup_id == rhs.uses_gfx1250_cluster_workgroup_id &&
          lhs.is_rmw == rhs.is_rmw &&
          lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset &&
+         lhs.scalar_clause_text_offset == rhs.scalar_clause_text_offset &&
          std::tie(left.address_space_hint, left.text_offset, left.file_offset, left.size,
                   left.width_bits, left.dst_vgpr, left.addr_vgpr, left.data_vgpr, left.saddr_sgpr,
                   left.raw_op, left.raw_addr, left.raw_data0, left.raw_data1, left.raw_vdst,
@@ -188,11 +192,22 @@ struct FenceRecordCandidate {
   std::optional<uint64_t> kernel_descriptor_file_offset;
   uint64_t container_entry_text_offset = 0;
   uint64_t text_file_offset = 0;
+  /// Physical replacement range. Most fence records replace only the fence.
+  /// An ordinary acquire instead replaces its complete load-through-fence
+  /// sequence so the communication address can be captured before a
+  /// two-address load destroys it.
+  uint64_t patch_text_offset = 0;
+  uint64_t patch_file_offset = 0;
+  uint32_t patch_size = 0;
+  bool capture_address_before_guest = false;
+  std::optional<uint64_t> scalar_clause_text_offset;
 };
 
 [[nodiscard]] ConSanAtomicSite
 normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   ConSanAtomicSite normalized;
+  if (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group)
+    normalized.address_space_hint = ConSanAtomicAddressSpaceHint::FlatGroup;
   normalized.text_offset = site.text_offset;
   normalized.file_offset = site.file_offset;
   normalized.size = site.size;
@@ -234,6 +249,14 @@ void append_fence_record_candidates(const ConSanResult &result,
         event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
         event->execution_owners.empty())
       continue;
+    const auto sequence_it = std::ranges::find(result.sync_sequences, fence.sequence_identity,
+                                               &ConSanSyncSequence::identity);
+    const ConSanSyncSequence *sequence =
+        sequence_it != result.sync_sequences.end() &&
+                std::ranges::count(result.sync_sequences, fence.sequence_identity,
+                                   &ConSanSyncSequence::identity) == 1
+            ? &*sequence_it
+            : nullptr;
     const auto append_from = [&](const auto &container,
                                  std::optional<uint64_t> descriptor_file_offset) {
       if (descriptor_file_offset &&
@@ -248,8 +271,16 @@ void append_fence_record_candidates(const ConSanResult &result,
             std::ranges::count(container.atomic_sites, event->text_offset,
                                &ConSanAtomicSite::text_offset) != 1)
           return;
-        candidates.push_back({fence, *site, descriptor_file_offset, container.entry_text_offset,
-                              container.text_file_offset});
+        FenceRecordCandidate candidate;
+        candidate.fence = fence;
+        candidate.communication_site = *site;
+        candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+        candidate.container_entry_text_offset = container.entry_text_offset;
+        candidate.text_file_offset = container.text_file_offset;
+        candidate.patch_text_offset = fence.text_offset;
+        candidate.patch_file_offset = fence.file_offset;
+        candidate.patch_size = fence.size;
+        candidates.push_back(std::move(candidate));
         return;
       }
       const auto site = std::ranges::find(container.ordinary_memory_sites, event->text_offset,
@@ -260,9 +291,37 @@ void append_fence_record_candidates(const ConSanResult &result,
           (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
            site->support_reason != ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly))
         return;
-      candidates.push_back({fence, normalize_ordinary_fence_communication(*site),
-                            descriptor_file_offset, container.entry_text_offset,
-                            container.text_file_offset});
+      FenceRecordCandidate candidate;
+      candidate.fence = fence;
+      candidate.communication_site = normalize_ordinary_fence_communication(*site);
+      candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+      candidate.container_entry_text_offset = container.entry_text_offset;
+      candidate.text_file_offset = container.text_file_offset;
+      candidate.patch_text_offset = fence.text_offset;
+      candidate.patch_file_offset = fence.file_offset;
+      candidate.patch_size = fence.size;
+      if (fence.memory_role == ConSanSyncMemoryRole::Acquire) {
+        // Generated two-address loads may place their destination in either
+        // address VGPR. Preserve the exact communication token before the
+        // complete qualified load-through-fence sequence executes. Fail
+        // closed unless that physical range is exact and unambiguous.
+        if (sequence == nullptr || sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+            sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
+            sequence->begin_text_offset != site->text_offset ||
+            sequence->end_text_offset <= sequence->begin_text_offset ||
+            sequence->end_text_offset < fence.text_offset + fence.size ||
+            sequence->end_text_offset - sequence->begin_text_offset >
+                std::numeric_limits<uint32_t>::max()) {
+          return;
+        }
+        candidate.patch_text_offset = sequence->begin_text_offset;
+        candidate.patch_file_offset = site->file_offset;
+        candidate.patch_size =
+            static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset);
+        candidate.capture_address_before_guest = true;
+        candidate.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
+      }
+      candidates.push_back(std::move(candidate));
     };
     if (fence.in_kernel) {
       const auto kernel =
@@ -351,10 +410,12 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
       candidate.container_name =
           (communication->in_kernel ? "kernel:" : "function:") + communication->container_name;
       candidate.site = normalize_ordinary_fence_communication(*site);
+      candidate.site.raw_scope = sequence.raw_scope;
       candidate.kernel_descriptor_file_offset = descriptor_file_offset;
       candidate.event_kind = *event_kind;
       candidate.is_rmw = false;
       candidate.ordered_sequence_end_text_offset = sequence.end_text_offset;
+      candidate.scalar_clause_text_offset = sequence.scalar_clause_text_offset;
       if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
         candidate.uses_gfx1250_cluster_workgroup_id = container.uses_gfx1250_cluster_workgroup_id;
       candidates.push_back(std::move(candidate));
@@ -396,11 +457,19 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &resul
       site.returns_old_value.value_or(false) && site.addr_vgpr && site.dst_vgpr &&
       *site.dst_vgpr >= *site.addr_vgpr && *site.dst_vgpr < *site.addr_vgpr + 2u;
   return returned_value_aliases_address ||
-                 (site.mnemonic.starts_with("global_") &&
+                 ((site.mnemonic.starts_with("flat_") || site.mnemonic.starts_with("global_")) &&
                   (!site.raw_saddr || !is_vector_flat_no_saddr(*site.raw_saddr, arch) ||
                    site.raw_ioffset.value_or(0) != 0))
              ? 5u
              : 3u;
+}
+
+[[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicSite &site,
+                                                  rj_code_arch_t arch) {
+  // Fence records are dynamically reserved once per executing wave on every
+  // architecture. The common layout keeps five indexed-store temporaries,
+  // one derived-owner temporary, and a preserved 64-bit communication token.
+  return std::max<uint16_t>(inline_atomic_scratch_count(site, arch), 8u);
 }
 
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicSite &site,
@@ -451,6 +520,8 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &resul
   // surrounding sequence has qualified this site as an ordering event.
   if (allow_ordered_lds_atomic && normalized.mnemonic.starts_with("ds_") && !normalized.raw_scope)
     normalized.raw_scope = 1u;
+  if (normalized.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup)
+    normalized.raw_scope = 1u;
   return normalized;
 }
 
@@ -482,6 +553,18 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<uint64_t>
+atomic_scalar_clause_for_site(const MoiSyncInventoryIndex &sync_index,
+                              std::string_view container_name, bool in_kernel,
+                              const ConSanAtomicSite &site) {
+  const ConSanSyncEvent *event =
+      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
+  if (event == nullptr)
+    return std::nullopt;
+  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
+  return sequence == nullptr ? std::nullopt : sequence->scalar_clause_text_offset;
+}
+
 void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSanResult &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
@@ -502,7 +585,9 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
       candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
-                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id});
+                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id,
+                            /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
+                            atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
     }
   }
 }
@@ -517,7 +602,10 @@ void append_atomic_record_candidates(const ConSanFunctionInfo &function, const C
     const ConSanAtomicSite normalized =
         normalize_atomic_record_site(site, allow_ordered_lds_atomic);
     if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) && event_kind)
-      candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind});
+      candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind,
+                            /*uses_gfx1250_cluster_workgroup_id=*/false, /*is_rmw=*/true,
+                            /*ordered_sequence_end_text_offset=*/0,
+                            atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
   }
 }
 
@@ -529,14 +617,17 @@ void append_inline_atomic_candidates(const ConSanKernelInfo &kernel,
   for (const ConSanAtomicSite &site : kernel.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     if (event_kind) {
+      const ConSanAtomicSite normalized = normalize_atomic_record_site(site, false);
       std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
       const ConSanSyncEvent *event =
           sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
       if (event == nullptr || event->execution_owners.size() != 1u ||
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
-      candidates.push_back({"kernel:" + kernel.name, site, descriptor_file_offset, *event_kind,
-                            kernel.uses_gfx1250_cluster_workgroup_id});
+      candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
+                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id,
+                            /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
+                            atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
     }
   }
 }
@@ -547,8 +638,55 @@ void append_inline_atomic_candidates(const ConSanFunctionInfo &function,
   for (const ConSanAtomicSite &site : function.atomic_sites) {
     const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
     if (event_kind)
-      candidates.push_back({"function:" + function.name, site, std::nullopt, *event_kind});
+      candidates.push_back({"function:" + function.name, normalize_atomic_record_site(site, false),
+                            std::nullopt, *event_kind,
+                            /*uses_gfx1250_cluster_workgroup_id=*/false, /*is_rmw=*/true,
+                            /*ordered_sequence_end_text_offset=*/0,
+                            atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
   }
+}
+
+[[nodiscard]] bool neutralize_atomic_scalar_clause(std::vector<uint8_t> &text,
+                                                   const AtomicRecordCandidate &candidate,
+                                                   rj_code_arch_t arch,
+                                                   std::vector<ConSanPatchInfo> &patches,
+                                                   std::vector<std::string> &errors) {
+  if (!candidate.scalar_clause_text_offset)
+    return true;
+  const uint64_t offset = *candidate.scalar_clause_text_offset;
+  if (offset > text.size() || sizeof(uint32_t) > text.size() - offset ||
+      offset >= candidate.site.text_offset) {
+    errors.emplace_back("ConSan MOI atomic scalar-clause offset is outside its text prefix");
+    return false;
+  }
+  uint32_t word = 0;
+  std::memcpy(&word, text.data() + offset, sizeof(word));
+  const uint32_t nop = build_s_nop(0, arch);
+  if (word == nop)
+    return true;
+
+  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  if (!decoder) {
+    errors.emplace_back("ConSan MOI atomic scalar-clause validation could not create a decoder");
+    return false;
+  }
+  std::array<uint32_t, 4> words{};
+  const size_t available = std::min(sizeof(words), text.size() - offset);
+  std::memcpy(words.data(), text.data() + offset, available);
+  std::unique_ptr<Instruction> instruction = decode_bounded_instruction(
+      *decoder, std::span<const uint32_t>(words).first(available / sizeof(uint32_t)), offset);
+  if (!instruction || instruction->mnemonic() != "s_clause") {
+    errors.emplace_back("ConSan MOI atomic scalar-clause prefix is no longer an s_clause");
+    return false;
+  }
+  std::memcpy(text.data() + offset, &nop, sizeof(nop));
+  ConSanPatchInfo info;
+  info.kind = ConSanPatchKind::InlineScalarClauseNopRewrite;
+  info.anchor_offset = offset;
+  info.trampoline_offset = offset;
+  info.original_size = sizeof(nop);
+  patches.push_back(std::move(info));
+  return true;
 }
 
 [[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site,
@@ -784,7 +922,10 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       static_cast<uint16_t>(exec_base + 6u), kRdna4VccLo, arch);
   const auto add_one =
       instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch);
-  const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 8u);
+  // The Y-coordinate predicate journal at +2 is dead after the packed key has
+  // been formed. Reuse it here instead of +8, which the surrounding inline
+  // transaction reserves for the guest VCC snapshot.
+  const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 2u);
   const auto save_valid = instrumentation::build_s_mov_b64(valid_exec, kRdna4ExecLo, arch);
   const auto select_invalid = instrumentation::build_s_andn2_b64(
       kRdna4ExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec, arch);
@@ -801,8 +942,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
     std::vector<uint32_t> &words, uint64_t table_base, uint32_t table_capacity,
     uint16_t workgroup_key_vgpr, uint16_t consumer_owner_vgpr, uint16_t producer_owner_vgpr,
-    uint16_t slot_address_vgpr, uint16_t hash_vgpr, uint16_t temporary_vgpr, bool release_sequence,
-    rj_code_arch_t arch) {
+    uint16_t consumer_epoch_vgpr, uint16_t slot_address_vgpr, uint16_t hash_vgpr,
+    uint16_t temporary_vgpr, bool release_sequence, rj_code_arch_t arch) {
   if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
     return false;
   const uint32_t namespace_capacity = table_capacity / 2u;
@@ -822,6 +963,11 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenProducerMultiplier,
       producer_owner_vgpr, arch);
   const auto mix_producer = instrumentation::build_v_xor_b32(
+      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
+  const auto multiply_consumer_epoch = instrumentation::build_v_mul_lo_u32_literal(
+      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenConsumerEpochMultiplier,
+      consumer_epoch_vgpr, arch);
+  const auto mix_consumer_epoch = instrumentation::build_v_xor_b32(
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto fold0 = instrumentation::build_v_lshrrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
@@ -860,7 +1006,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       instrumentation::build_v_add_u64_vgpr_offset(slot_address_vgpr, hash_vgpr, arch);
   InstructionSequence sequence(words);
   if (!sequence.emit_all(mix_workgroup, multiply_consumer, mix_consumer, multiply_producer,
-                         mix_producer))
+                         mix_producer, multiply_consumer_epoch, mix_consumer_epoch))
     return false;
   if (release_sequence) {
     const auto salt = instrumentation::build_v_mov_b32_literal(
@@ -888,7 +1034,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint16_t workgroup_key_vgpr, uint16_t direct_owner_vgpr, uint16_t direct_epoch_vgpr,
     uint16_t source_version_vgpr, uint16_t snapshot_count_vgpr, uint16_t snapshot_owners_vgpr,
     uint16_t snapshot_epochs_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
-    bool release_sequence, rj_code_arch_t arch) {
+    bool release_sequence, std::optional<uint16_t> inherited_first_exec, rj_code_arch_t arch) {
   const uint16_t base = *options.scratch_vgpr;
   // CDNA3/4 FLAT compare-swap encodes the new/expected operands as an aligned
   // VGPR pair. Preserve the RDNA4 allocation, whose three-dword encoding does
@@ -905,8 +1051,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const uint16_t needed = static_cast<uint16_t>(exec_base + 18u);
   // The enclosing acquire helper's +6 workgroup predicate and +14 owner
   // predicate are dead before this transaction begins. Reuse those pairs for
-  // masks that must survive this transaction instead of extending the scalar
-  // window to +23.
+  // the transaction-wide eligible and skipped masks.
   const uint16_t skipped = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t eligible = static_cast<uint16_t>(exec_base + 6u);
 
@@ -1013,8 +1158,24 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
         !epoch_in_range)
       return false;
     words.insert(words.end(), epoch_limit->begin(), epoch_limit->end());
-    for (const auto instruction :
-         {*owner_not_consumer, *owner_not_releaser, *epoch_nonzero, *epoch_in_range}) {
+    // A reusable partial barrier can legitimately carry the acquiring
+    // consumer's prior epoch in the producer's inherited frontier. That edge
+    // is redundant for this consumer, not malformed: omit it while retaining
+    // the direct consumer<-producer token. Keep every other malformed-entry
+    // predicate fail-closed below.
+    if (!save_exec(static_cast<uint16_t>(exec_base + 4u)))
+      return false;
+    words.push_back(*owner_not_consumer);
+    if (!narrow_vcc())
+      return false;
+    const auto self_ancestor = instrumentation::build_s_xor_b64(
+        needed, static_cast<uint16_t>(exec_base + 4u), kRdna4ExecLo, arch);
+    const auto retain_skipped = instrumentation::build_s_xor_b64(skipped, skipped, needed, arch);
+    if (!self_ancestor || !retain_skipped)
+      return false;
+    words.push_back(*self_ancestor);
+    words.push_back(*retain_skipped);
+    for (const auto instruction : {*owner_not_releaser, *epoch_nonzero, *epoch_in_range}) {
       words.push_back(instruction);
       if (!narrow_vcc())
         return false;
@@ -1034,7 +1195,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const auto derive_slot = [&] {
     return append_inline_acquired_token_slot_address(
         words, token_table_base, token_table_capacity, workgroup_key_vgpr, *options.moi_owner_vgpr,
-        direct_owner_vgpr, base, hash, value, release_sequence, arch);
+        direct_owner_vgpr, *options.moi_epoch_vgpr, base, hash, value, release_sequence, arch);
   };
 
   words.push_back(
@@ -1089,7 +1250,10 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       if (!narrow_vcc())
         return false;
     }
-    if (!save_exec(static_cast<uint16_t>(exec_base + 2u)) || !restore_exec(needed))
+    // `winners` is dead after select_entry materializes this iteration's
+    // `needed` mask. Reuse it for the empty-slot subset so +2 retains the
+    // incoming same-owner provenance through both transaction phases.
+    if (!save_exec(winners) || !restore_exec(needed))
       return false;
 
     const auto nonzero =
@@ -1211,6 +1375,20 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!narrow_vcc())
       return false;
     words.push_back(*consumer_epoch_in_range);
+    if (!narrow_vcc())
+      return false;
+    const auto desired_consumer_epoch = instrumentation::build_v_add_u32(
+        hash, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
+    const auto bound_desired_consumer_epoch = instrumentation::build_v_min_u32_literal(
+        hash, consan_moi_exact_shadow::max_epoch, hash, arch);
+    const auto same_consumer_epoch =
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(hash), value, arch);
+    if (!desired_consumer_epoch || !bound_desired_consumer_epoch || !same_consumer_epoch)
+      return false;
+    words.insert(words.end(), desired_consumer_epoch->begin(), desired_consumer_epoch->end());
+    words.insert(words.end(), bound_desired_consumer_epoch->begin(),
+                 bound_desired_consumer_epoch->end());
+    words.push_back(*same_consumer_epoch);
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
@@ -1225,9 +1403,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
     if (!save_exec(static_cast<uint16_t>(exec_base + 4u)))
       return false;
-    const auto valid_union =
-        instrumentation::build_s_xor_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 2u),
-                                         static_cast<uint16_t>(exec_base + 4u), arch);
+    const auto valid_union = instrumentation::build_s_xor_b64(
+        kRdna4ExecLo, winners, static_cast<uint16_t>(exec_base + 4u), arch);
     if (!valid_union)
       return false;
     words.push_back(*valid_union);
@@ -1372,6 +1549,28 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!kind)
       return false;
     words.insert(words.end(), kind->begin(), kind->end());
+    if (!release_sequence && index == 0u && inherited_first_exec) {
+      // Same-owner acquires omit their direct self edge and promote the first
+      // immutable snapshot ancestor into slot zero. Preserve that distinction
+      // in the durable token even though direct and inherited edges authorize
+      // the same access-ordering relation.
+      // +4 is dead after phase one. +2 remains the incoming same-owner mask:
+      // phase one deliberately reuses `winners` and `needed` for its
+      // empty/exact and self-ancestor temporaries instead of clobbering it.
+      const uint16_t kind_exec = static_cast<uint16_t>(exec_base + 4u);
+      if (!save_exec(kind_exec))
+        return false;
+      const auto select_inherited =
+          instrumentation::build_s_and_b64(kRdna4ExecLo, kRdna4ExecLo, *inherited_first_exec, arch);
+      const auto inherited = instrumentation::build_v_mov_b32_literal(
+          value, static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited), arch);
+      if (!select_inherited || !inherited)
+        return false;
+      words.push_back(*select_inherited);
+      words.insert(words.end(), inherited->begin(), inherited->end());
+      if (!restore_exec(kind_exec))
+        return false;
+    }
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind), value, arch) ||
         !append_store_u32_vgpr_at_offset(
@@ -1464,13 +1663,24 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       static_cast<uint16_t>(exec_base + 6u), kRdna4VccLo, arch);
   const auto narrow_if_other_owner = instrumentation::build_s_and_saveexec_b64(
       static_cast<uint16_t>(exec_base + 14u), kRdna4VccLo, arch);
+  // The low/high address-match journals are dead once owner qualification
+  // begins. Reuse them for the longer-lived same-owner and validated masks.
+  // InlineShadow reserves +8:+9 for guest VCC and +10 for guest SCC; using
+  // either range here would corrupt condition state that remains live across
+  // an ordered acquire sequence.
+  const uint16_t same_owner_exec = static_cast<uint16_t>(exec_base + 2u);
+  const uint16_t validated_exec = static_cast<uint16_t>(exec_base + 4u);
+  const auto select_same_owner = instrumentation::build_s_andn2_b64(
+      same_owner_exec, static_cast<uint16_t>(exec_base + 14u), kRdna4ExecLo, arch);
+  const auto restore_owner_candidates =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
   const auto save_matching_exec =
       instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 16u), kRdna4ExecLo, arch);
   const auto restore_workgroup_exec =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 12u), arch);
   if (!narrow_if_valid || !narrow_if_low_matches || !narrow_if_high_matches ||
-      !narrow_if_workgroup_matches || !narrow_if_other_owner || !save_matching_exec ||
-      !restore_workgroup_exec) {
+      !narrow_if_workgroup_matches || !narrow_if_other_owner || !select_same_owner ||
+      !restore_owner_candidates || !save_matching_exec || !restore_workgroup_exec) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch could not encode EXEC ops");
     return false;
   }
@@ -1567,6 +1777,19 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   }
   words.push_back(*owner_ne);
   words.push_back(*narrow_if_other_owner);
+  words.push_back(*select_same_owner);
+  words.push_back(*restore_owner_candidates);
+
+  // A polling acquire can observe an empty, unstable, mismatched, or
+  // otherwise unusable predecessor. Its validated EXEC mask is then empty.
+  // Same-owner predecessors remain eligible because their immutable snapshot
+  // can carry the head of a release sequence. Skip the complete causal-import
+  // transaction when no lane has either form of authority.
+  const size_t empty_import_skip = words.size();
+  const auto empty_import_placeholder = instrumentation::build_s_cbranch_execz(0, arch);
+  if (!empty_import_placeholder)
+    return false;
+  words.push_back(*empty_import_placeholder);
 
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
@@ -1604,7 +1827,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const uint16_t snapshot_temporary = static_cast<uint16_t>(scratch_vgpr + (cdna ? 17u : 19u));
   const uint16_t snapshot_hash = static_cast<uint16_t>(scratch_vgpr + 21u);
   const uint16_t snapshot_count = static_cast<uint16_t>(scratch_vgpr + 7u);
-  const uint16_t snapshot_flags = static_cast<uint16_t>(scratch_vgpr + 8u);
+  // A claimed release journals its predecessor version in scratch + 8 before
+  // entering this helper. An acquire that becomes ineligible before the token
+  // transaction must retain that journal so the enclosing publisher can
+  // commit its own odd reservation. The generic value register is dead across
+  // this immediate flags check and is overwritten below, so use it instead.
+  const uint16_t snapshot_flags =
+      source_slot_claimed ? value_vgpr : static_cast<uint16_t>(scratch_vgpr + 8u);
   if (!append_inline_atomic_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
                                              address_vgpr, snapshot_address, snapshot_temporary,
                                              snapshot_hash, arch) ||
@@ -1654,6 +1883,68 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   }
 
+  // Convert a same-owner acquire into a snapshot-only import. Slot zero takes
+  // the first inherited ancestor, the remaining canonical entries shift down,
+  // and the self release is never published as a token. Other-owner lanes keep
+  // their direct entry and unmodified snapshot. Empty same-owner snapshots do
+  // not establish an inter-owner edge and are removed before publication.
+  const auto save_validated = instrumentation::build_s_mov_b64(validated_exec, kRdna4ExecLo, arch);
+  const auto intersect_same =
+      instrumentation::build_s_and_b64(same_owner_exec, same_owner_exec, kRdna4ExecLo, arch);
+  const auto restore_same = instrumentation::build_s_mov_b64(kRdna4ExecLo, same_owner_exec, arch);
+  const auto count_nonzero =
+      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), snapshot_count, arch);
+  const auto save_same_nonempty =
+      instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 14u), kRdna4ExecLo, arch);
+  const auto decrement_literal = instrumentation::build_v_mov_b32_literal(
+      temporary_vgpr, std::numeric_limits<uint32_t>::max(), arch);
+  const auto decrement_count = instrumentation::build_v_add_u32(
+      snapshot_count, vector_source_vgpr(temporary_vgpr), snapshot_count, arch);
+  const auto zero = instrumentation::build_v_mov_b32_literal(temporary_vgpr, 0u, arch);
+  const auto select_other_valid =
+      instrumentation::build_s_andn2_b64(kRdna4ExecLo, validated_exec, same_owner_exec, arch);
+  const auto include_same_nonempty = instrumentation::build_s_xor_b64(
+      kRdna4ExecLo, kRdna4ExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
+  const auto preserve_inherited_first = instrumentation::build_s_mov_b64(
+      same_owner_exec, static_cast<uint16_t>(exec_base + 14u), arch);
+  if (!save_validated || !intersect_same || !restore_same || !count_nonzero ||
+      !save_same_nonempty || !decrement_literal || !decrement_count || !zero ||
+      !select_other_valid || !include_same_nonempty || !preserve_inherited_first)
+    return false;
+  words.push_back(*save_validated);
+  words.push_back(*intersect_same);
+  words.push_back(*restore_same);
+  words.push_back(*count_nonzero);
+  words.push_back(*narrow_if_valid);
+  words.push_back(*save_same_nonempty);
+  words.push_back(build_v_mov_b32_e32(
+      producer_owner_vgpr, vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 9u)), arch));
+  words.push_back(build_v_mov_b32_e32(
+      token_value_vgpr, vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 13u)), arch));
+  for (uint16_t i = 0; i + 1u < kConSanMoiInlineCausalSnapshotEntryCapacity; ++i) {
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(scratch_vgpr + 9u + i),
+        vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 10u + i)), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(scratch_vgpr + 13u + i),
+        vector_source_vgpr(static_cast<uint16_t>(scratch_vgpr + 14u + i)), arch));
+  }
+  words.insert(words.end(), decrement_literal->begin(), decrement_literal->end());
+  words.insert(words.end(), decrement_count->begin(), decrement_count->end());
+  words.insert(words.end(), zero->begin(), zero->end());
+  words.push_back(build_v_mov_b32_e32(
+      static_cast<uint16_t>(scratch_vgpr + 9u + kConSanMoiInlineCausalSnapshotEntryCapacity - 1u),
+      vector_source_vgpr(temporary_vgpr), arch));
+  words.push_back(build_v_mov_b32_e32(
+      static_cast<uint16_t>(scratch_vgpr + 13u + kConSanMoiInlineCausalSnapshotEntryCapacity - 1u),
+      vector_source_vgpr(temporary_vgpr), arch));
+  words.push_back(*select_other_valid);
+  words.push_back(*include_same_nonempty);
+  words.push_back(*preserve_inherited_first);
+
+  const size_t empty_validated_import_skip = words.size();
+  words.push_back(*empty_import_placeholder);
+
   if (!release_sequence_only) {
     // Only a fully validated acquire establishes a new consumer segment. In
     // particular, a mismatched or unstable release slot must not make
@@ -1696,11 +1987,17 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (options.moi_persistent_epoch_sgpr) {
       const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
           *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
-      if (!persist_epoch) {
+      const auto persist_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+      if (!persist_epoch || !persist_wait) {
         errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
         return false;
       }
       advance_words.push_back(*persist_epoch);
+      // The next atomic/access cave rematerializes this scalar epoch into a
+      // VGPR. Make the vector-to-scalar transfer architecturally visible
+      // before returning to guest control, rather than relying on elapsed
+      // instructions in this cave to resolve the dependency.
+      advance_words.push_back(*persist_wait);
     }
     if (advance_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
       errors.emplace_back("ConSan MOI inline acquire consumer segment guard exceeds branch range");
@@ -1722,8 +2019,28 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
           words, options, address_vgpr, workgroup_key_vgpr, producer_owner_vgpr, token_value_vgpr,
           version_before, snapshot_count, static_cast<uint16_t>(scratch_vgpr + 9u),
           static_cast<uint16_t>(scratch_vgpr + 13u), token_table_base, token_table_capacity,
-          release_sequence_only, arch))
+          release_sequence_only, same_owner_exec, arch))
     return false;
+  const size_t restore_workgroup_index = words.size();
+  const int64_t empty_import_delta =
+      static_cast<int64_t>(restore_workgroup_index) - static_cast<int64_t>(empty_import_skip + 1u);
+  if (empty_import_delta < std::numeric_limits<int16_t>::min() ||
+      empty_import_delta > std::numeric_limits<int16_t>::max())
+    return false;
+  const auto empty_import_branch =
+      instrumentation::build_s_cbranch_execz(static_cast<int16_t>(empty_import_delta), arch);
+  const int64_t empty_validated_import_delta =
+      static_cast<int64_t>(restore_workgroup_index) -
+      static_cast<int64_t>(empty_validated_import_skip + 1u);
+  if (empty_validated_import_delta < std::numeric_limits<int16_t>::min() ||
+      empty_validated_import_delta > std::numeric_limits<int16_t>::max())
+    return false;
+  const auto empty_validated_import_branch = instrumentation::build_s_cbranch_execz(
+      static_cast<int16_t>(empty_validated_import_delta), arch);
+  if (!empty_import_branch || !empty_validated_import_branch)
+    return false;
+  words[empty_import_skip] = *empty_import_branch;
+  words[empty_validated_import_skip] = *empty_validated_import_branch;
   words.push_back(*restore_workgroup_exec);
   return true;
 }
@@ -2078,9 +2395,21 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!duplicate)
       return false;
     words.push_back(*duplicate);
-    if (!narrow_vcc() || !save_exec(mask_b) ||
-        !set_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed))
+    if (!narrow_vcc() || !save_exec(mask_b))
       return false;
+    // Direct and release-sequence namespaces can both carry the same causal
+    // edge. They are redundant witnesses, not malformed ancestry. Canonicalize
+    // the frontier as an owner->maximum-epoch map before removing the duplicate
+    // candidate from the insertion path.
+    const auto newer_epoch = instrumentation::build_v_cmp_gt_u32_vcc(
+        vector_source_vgpr(producer_epoch), static_cast<uint16_t>(epochs + i), arch);
+    if (!newer_epoch)
+      return false;
+    words.push_back(*newer_epoch);
+    if (!narrow_vcc())
+      return false;
+    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(epochs + i),
+                                        vector_source_vgpr(producer_epoch), arch));
     const auto remove_duplicate =
         instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch);
     if (!remove_duplicate)
@@ -2224,7 +2553,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     uint64_t snapshot_table_base, uint32_t snapshot_capacity, uint64_t token_table_base,
     uint32_t token_capacity, bool emit_guest_instruction, bool import_claimed_predecessor,
     bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors) {
+    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -2363,8 +2692,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     errors.emplace_back("ConSan MOI inline release could not initialize its EXEC transaction");
     return false;
   }
-  failure.stage = "guest CAS qualification";
-  if (predicate_on_compare_exchange_success) {
+  const auto narrow_compare_exchange_success = [&]() -> bool {
     if (!candidate.site.data_vgpr || !candidate.site.dst_vgpr) {
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
       return false;
@@ -2377,10 +2705,13 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
     }
     words.push_back(*compare_succeeded);
-    if (!narrow_vcc()) {
-      errors.emplace_back("ConSan MOI inline release CAS could not predicate publication");
-      return false;
-    }
+    return narrow_vcc();
+  };
+  failure.stage = "guest CAS qualification";
+  if (predicate_on_compare_exchange_success && !emit_guest_instruction &&
+      !narrow_compare_exchange_success()) {
+    errors.emplace_back("ConSan MOI inline release CAS could not predicate publication");
+    return false;
   }
   failure.stage = "release-slot addressing";
   if (!save_exec(eligible_exec) ||
@@ -2541,6 +2872,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
       words.push_back(word);
     }
+    words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
     if (!append_moi_flat_load_wait(words, arch))
       return false;
     const auto guest_store_drain = instrumentation::build_s_wait_flat_store0(arch);
@@ -2553,7 +2885,16 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // the claim's prior even version for the successor commit.
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(base + 8u),
                                         vector_source_vgpr(source_version), arch));
-    if (!append_save_moi_special_state(words, options, arch) || !restore_exec(claimed_exec) ||
+    if (!append_save_moi_special_state(words, options, arch))
+      return false;
+    if (predicate_on_compare_exchange_success &&
+        (!restore_exec(claimed_exec) || !narrow_compare_exchange_success() ||
+         !save_exec(claimed_exec))) {
+      errors.emplace_back(
+          "ConSan MOI inline release CAS could not predicate its claimed predecessor import");
+      return false;
+    }
+    if (!restore_exec(claimed_exec) ||
         !append_inline_atomic_acquire_import(
             words, options, stable_guest_address, workgroup_key, cas_new, cas_expected, temporary,
             snapshot_table_base, snapshot_capacity, token_table_base, token_capacity,
@@ -2570,19 +2911,149 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // mask from the original invocation before either is needed below. Slot
     // address reconstruction uses scratch+2 as its hash temporary, so recover
     // the prior version from the token journal only after that reconstruction.
-    if (!restore_exec(failed_exec) || !save_exec(claimed_exec))
-      return false;
-    const auto rebuild_failed =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, original_exec, claimed_exec, arch);
-    if (!rebuild_failed)
-      return false;
-    words.push_back(*rebuild_failed);
-    if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
-        !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                           stable_guest_address, slot_address, arch))
-      return false;
+    if (predicate_on_compare_exchange_success) {
+      // The metadata claim must precede a returning guest CAS, but only lanes
+      // whose dynamic compare succeeded may import or publish a release.
+      // Restore the prior even slot for failed comparisons, then define
+      // detector undercoverage solely over successful guest lanes that could
+      // not claim metadata.
+      if (!restore_exec(original_exec) || !narrow_compare_exchange_success() ||
+          !save_exec(eligible_exec))
+        return false;
+      const auto successful_claims =
+          instrumentation::build_s_and_b64(claimed_exec, failed_exec, eligible_exec, arch);
+      const auto failed_comparisons =
+          instrumentation::build_s_andn2_b64(ready_exec, failed_exec, claimed_exec, arch);
+      if (!successful_claims || !failed_comparisons)
+        return false;
+      words.push_back(*successful_claims);
+      words.push_back(*failed_comparisons);
+      if (!restore_exec(ready_exec) ||
+          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
+                                             stable_guest_address, slot_address, arch))
+        return false;
+      words.push_back(build_v_mov_b32_e32(
+          prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
+      words.push_back(build_v_mov_b32_e32(cas_new, vector_source_vgpr(prior_version), arch));
+      const auto restore_expected = instrumentation::build_v_add_u32(
+          cas_expected, scalar_positive_inline_u32(1), prior_version, arch);
+      if (!restore_expected ||
+          !append_add_literal_field(words, slot_address,
+                                    offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
+                                    arch))
+        return false;
+      words.insert(words.end(), restore_expected->begin(), restore_expected->end());
+      const auto restore_prior = instrumentation::build_flat_atomic_cmpswap_b32(
+          slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      if (!restore_prior)
+        return false;
+      words.insert(words.end(), restore_prior->begin(), restore_prior->end());
+      if (!append_moi_global_atomic_wait(words, arch))
+        return false;
+      const auto restored =
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
+      if (!restored)
+        return false;
+      words.push_back(*restored);
+      if (!narrow_vcc() || !save_exec(committed_exec))
+        return false;
+      const auto restore_failed =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, ready_exec, committed_exec, arch);
+      if (!restore_failed)
+        return false;
+      words.push_back(*restore_failed);
+      if (!append_atomic_fetch_add_one_u32(
+              words,
+              *options.moi_report_buffer_address +
+                  offsetof(ConSanMoiReportHeader, inline_overflow_count),
+              temporary, cas_new, arch))
+        return false;
+      const auto rebuild_failed =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, eligible_exec, claimed_exec, arch);
+      if (!rebuild_failed)
+        return false;
+      words.push_back(*rebuild_failed);
+      if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
+          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
+                                             stable_guest_address, slot_address, arch))
+        return false;
+    } else {
+      if (!restore_exec(failed_exec) || !save_exec(claimed_exec))
+        return false;
+      const auto rebuild_failed =
+          instrumentation::build_s_andn2_b64(kRdna4ExecLo, original_exec, claimed_exec, arch);
+      if (!rebuild_failed)
+        return false;
+      words.push_back(*rebuild_failed);
+      if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
+          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
+                                             stable_guest_address, slot_address, arch))
+        return false;
+    }
     words.push_back(build_v_mov_b32_e32(
         prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
+  }
+
+  if (candidate.event_kind == ConSanMoiAtomicEventKind::Acquire) {
+    // A read-only acquire must bind its guest observation to exactly one
+    // immutable release transaction. Holding the direct-mapped slot odd
+    // across the guest load excludes a producer from linearizing its RMW
+    // between our metadata snapshot and import. Restore the prior even version
+    // unchanged after the acquired-token transaction; this reader never
+    // becomes a release publisher itself.
+    failure.stage = "acquire reservation restore";
+    // Guest VCC/SCC were re-saved immediately after the guest load, before
+    // acquire import. Do not snapshot them again here: the import changes
+    // both condition registers, so a second save would replace guest state
+    // with detector state just before the final restore.
+    if (!restore_exec(claimed_exec))
+      return false;
+    words.push_back(build_v_mov_b32_e32(cas_new, vector_source_vgpr(prior_version), arch));
+    const auto unlock_expected = instrumentation::build_v_add_u32(
+        cas_expected, scalar_positive_inline_u32(1), prior_version, arch);
+    if (!unlock_expected ||
+        !append_add_literal_field(words, slot_address,
+                                  offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
+                                  arch))
+      return false;
+    words.insert(words.end(), unlock_expected->begin(), unlock_expected->end());
+    const auto unlock = instrumentation::build_flat_atomic_cmpswap_b32(
+        slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+    if (!unlock)
+      return false;
+    words.insert(words.end(), unlock->begin(), unlock->end());
+    if (!append_moi_global_atomic_wait(words, arch))
+      return false;
+    const auto unlock_won =
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
+    if (!unlock_won)
+      return false;
+    words.push_back(*unlock_won);
+    if (!narrow_vcc() || !save_exec(committed_exec))
+      return false;
+    const auto failed =
+        instrumentation::build_s_andn2_b64(kRdna4ExecLo, original_exec, committed_exec, arch);
+    if (!failed)
+      return false;
+    words.push_back(*failed);
+    // A tight polling acquire can otherwise unlock and immediately reclaim
+    // the same direct-mapped slot indefinitely while a release wave is asleep
+    // in its bounded claim loop. Yield once after every read-side unlock so a
+    // waiting publisher gets a hardware scheduling handoff before the guest
+    // poll can re-enter this transaction.
+    const uint32_t publisher_handoff =
+        build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch);
+    if (!append_atomic_fetch_add_one_u32(words,
+                                         *options.moi_report_buffer_address +
+                                             offsetof(ConSanMoiReportHeader, inline_overflow_count),
+                                         temporary, cas_new, arch) ||
+        !restore_exec(original_exec))
+      return false;
+    words.push_back(publisher_handoff);
+    if (!append_restore_moi_special_state(words, options, arch))
+      return false;
+    failure.succeeded = true;
+    return true;
   }
 
   failure.stage = "causal snapshot capture";
@@ -3041,6 +3512,64 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
                                               arch)) {
       errors.emplace_back("ConSan MOI inline acquire-release could not encode its return");
+      return std::nullopt;
+    }
+    return words;
+  }
+
+  // A returning release CAS exposes its success result only after the guest
+  // instruction, so post-guest publication used to leave a window in which
+  // an acquire could observe the new value while the release slot was still
+  // empty. Claim the slot first, execute the CAS once inside that transaction,
+  // and restore the prior slot unchanged for dynamically failed comparisons.
+  const bool claimed_compare_exchange_release =
+      claims_release_predecessor && is_compare_exchange &&
+      candidate.event_kind != ConSanMoiAtomicEventKind::Acquire;
+  if (claimed_compare_exchange_release) {
+    if (!append_inline_versioned_release_transaction(
+            words, bytes, candidate, address_plan, *workgroup_sources, options, arch, slot_base,
+            inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
+            token_table_base, inline_acquired_token_capacity,
+            /*emit_guest_instruction=*/true,
+            /*import_claimed_predecessor=*/true,
+            /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors)) {
+      errors.emplace_back(
+          "ConSan MOI inline compare-exchange could not emit a claimed causal transaction");
+      return std::nullopt;
+    }
+    append_spill_restore();
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
+                                              arch)) {
+      errors.emplace_back("ConSan MOI inline compare-exchange could not encode its return");
+      return std::nullopt;
+    }
+    return words;
+  }
+
+  // A compiler-lowered atomic load plus its acquire cache suffix is safe to
+  // execute while the metadata slot is reserved and must not race a release
+  // publisher through the old pre/post-version fail-closed window. RMW
+  // acquires cannot use this path: an acquire-only RMW also extends a language
+  // release sequence and needs a separate successor-publication contract.
+  const bool claimed_read_only_acquire = claims_release_predecessor && !candidate.is_rmw &&
+                                         candidate.event_kind == ConSanMoiAtomicEventKind::Acquire;
+  if (claimed_read_only_acquire) {
+    if (!append_inline_versioned_release_transaction(
+            words, bytes, candidate, address_plan, *workgroup_sources, options, arch, slot_base,
+            inline_atomic_release_capacity, snapshot_table_base, inline_causal_snapshot_capacity,
+            token_table_base, inline_acquired_token_capacity,
+            /*emit_guest_instruction=*/true,
+            /*import_claimed_predecessor=*/true,
+            /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors,
+            trailing_guest_words)) {
+      errors.emplace_back(
+          "ConSan MOI inline read-only acquire could not emit a claimed causal transaction");
+      return std::nullopt;
+    }
+    append_spill_restore();
+    if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset, options,
+                                              arch)) {
+      errors.emplace_back("ConSan MOI inline read-only acquire could not encode its return");
       return std::nullopt;
     }
     return words;

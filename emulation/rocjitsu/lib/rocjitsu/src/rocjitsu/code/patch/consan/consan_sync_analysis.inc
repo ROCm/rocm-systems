@@ -417,7 +417,13 @@ void append_sync_events_for_container(std::string_view fingerprint, const Contai
     event.mnemonic = site.mnemonic;
     if (site.raw_ioffset)
       event.static_byte_offset = *site.raw_ioffset;
-    event.raw_scope = site.raw_scope;
+    // Pre-gfx12 FLAT atomics do not encode scope, and gfx1250 can omit it for
+    // a scalar-base group-FLAT form. Exact group-aperture provenance is the
+    // stronger architectural fact: communication through LDS is workgroup
+    // scoped regardless of the target-native spelling.
+    event.raw_scope = site.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup
+                          ? std::optional<uint32_t>(1u)
+                          : site.raw_scope;
     finish_event(event, "atomic");
   }
 
@@ -561,18 +567,24 @@ build_original_proof_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &
   return false;
 }
 
-[[nodiscard]] bool instruction_is_inside_scalar_clause(BasicBlock &block, uint64_t text_offset) {
+[[nodiscard]] std::optional<uint64_t> scalar_clause_covering_instruction(BasicBlock &block,
+                                                                         uint64_t text_offset) {
   uint32_t clause_remaining = 0;
+  std::optional<uint64_t> clause_offset;
   for (const Instruction &instruction : block.instructions()) {
     const bool inside_clause = clause_remaining > 0;
     if (clause_remaining > 0)
       --clause_remaining;
     if (instruction.src_loc() == text_offset)
-      return inside_clause;
-    if (is_s_clause(instruction))
+      return inside_clause ? clause_offset : std::nullopt;
+    if (is_s_clause(instruction)) {
       clause_remaining = s_clause_following_instruction_count(instruction);
+      clause_offset = instruction.src_loc();
+    } else if (clause_remaining == 0) {
+      clause_offset.reset();
+    }
   }
-  return false;
+  return std::nullopt;
 }
 
 void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -631,8 +643,9 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
           if (!in_cycle)
             in_cycle = block_is_in_cycle(block);
           sequence.in_cyclic_cfg_component = *in_cycle;
-          sequence.inside_scalar_clause =
-              instruction_is_inside_scalar_clause(*block, event.text_offset);
+          sequence.scalar_clause_text_offset =
+              scalar_clause_covering_instruction(*block, event.text_offset);
+          sequence.inside_scalar_clause = sequence.scalar_clause_text_offset.has_value();
         }
       }
     }
@@ -1408,6 +1421,199 @@ void build_barrier_move_destination_inventory(
   return find_sync_event(events, sequence.member_event_identities.front());
 }
 
+template <typename Container>
+[[nodiscard]] bool container_has_exact_group_flat_communication_site(const Container &container,
+                                                                     const ConSanSyncEvent &event) {
+  if (container.name != event.container_name)
+    return false;
+  if (event.kind == ConSanSyncEventKind::Atomic) {
+    const auto matches = std::ranges::count(container.atomic_sites, event.text_offset,
+                                            &ConSanAtomicSite::text_offset);
+    const auto site = std::ranges::find(container.atomic_sites, event.text_offset,
+                                        &ConSanAtomicSite::text_offset);
+    return matches == 1u && site != container.atomic_sites.end() &&
+           site->address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup;
+  }
+  if (event.kind == ConSanSyncEventKind::OrdinaryMemory) {
+    const auto matches = std::ranges::count(container.ordinary_memory_sites, event.text_offset,
+                                            &ConSanOrdinaryMemorySite::text_offset);
+    const auto site = std::ranges::find(container.ordinary_memory_sites, event.text_offset,
+                                        &ConSanOrdinaryMemorySite::text_offset);
+    return matches == 1u && site != container.ordinary_memory_sites.end() &&
+           site->flat_address_space_hint == ConSanFlatAddressSpaceHint::Group;
+  }
+  return false;
+}
+
+[[nodiscard]] bool is_workgroup_flat_communication(const ConSanResult &result,
+                                                   const ConSanSyncEvent &event) {
+  if (event.address_source != ConSanSyncAddressSource::FlatVector)
+    return false;
+  // gfx12 RDNA carries workgroup scope explicitly even when pointer tracking
+  // cannot reconstruct a complete generic address. Other targets spell the
+  // same semantic through an exact src_shared_base provenance proof.
+  if (event.raw_scope == 1u)
+    return true;
+  if (event.in_kernel) {
+    return std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+      return container_has_exact_group_flat_communication_site(kernel, event);
+    });
+  }
+  return std::ranges::any_of(result.functions, [&](const ConSanFunctionInfo &function) {
+    return container_has_exact_group_flat_communication_site(function, event);
+  });
+}
+
+template <typename Container>
+[[nodiscard]] bool container_has_exact_group_flat_acquire_encoding(const Container &container,
+                                                                   const ConSanSyncEvent &event,
+                                                                   rj_code_arch_t arch) {
+  if (container.name != event.container_name || event.kind != ConSanSyncEventKind::OrdinaryMemory)
+    return false;
+  const auto matches = std::ranges::count(container.ordinary_memory_sites, event.text_offset,
+                                          &ConSanOrdinaryMemorySite::text_offset);
+  const auto site = std::ranges::find(container.ordinary_memory_sites, event.text_offset,
+                                      &ConSanOrdinaryMemorySite::text_offset);
+  if (matches != 1u || site == container.ordinary_memory_sites.end() ||
+      site->operation != ConSanOrdinaryMemoryOperation::Load ||
+      site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
+    return false;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    // Language acquire is SC0/GLC without SC1/SLC. The latter bit appears on
+    // volatile observations but does not create a language happens-before.
+    return site->raw_th && *site->raw_th == 1u;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    // gfx1250's implicit VFLAT scope is the group-aperture workgroup form.
+    // Explicit system scope is used by the final volatile observation.
+    return site->raw_scope && *site->raw_scope == 0u;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return site->raw_scope && *site->raw_scope == 1u;
+  return false;
+}
+
+[[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ConSanResult &result,
+                                                         const ConSanSyncEvent &event,
+                                                         rj_code_arch_t arch) {
+  if (event.in_kernel) {
+    return std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+      return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
+    });
+  }
+  return std::ranges::any_of(result.functions, [&](const ConSanFunctionInfo &function) {
+    return container_has_exact_group_flat_acquire_encoding(function, event, arch);
+  });
+}
+
+[[nodiscard]] bool exact_zero_wait_word(uint32_t word, rj_code_arch_t arch, bool &drains_lds) {
+  const auto lds = instrumentation::build_s_wait_lds0(arch);
+  const auto flat_load = instrumentation::build_s_wait_flat_load0(arch);
+  const auto flat_store = instrumentation::build_s_wait_flat_store0(arch);
+  const auto store = build_s_wait_storecnt0(arch);
+  const auto store_ds = build_s_wait_storecnt_dscnt0(arch);
+  const auto load_ds = build_s_wait_loadcnt_dscnt0(arch);
+  const auto rdna3_store = build_rdna3_s_wait_vscnt0(arch);
+  if ((lds && word == *lds) || (flat_load && word == *flat_load) ||
+      (flat_store && word == *flat_store) || (store_ds && word == *store_ds) ||
+      (load_ds && word == *load_ds)) {
+    drains_lds = true;
+    return true;
+  }
+  return (store && word == *store) || (rdna3_store && word == *rdna3_store);
+}
+
+[[nodiscard]] bool is_bounded_acquire_bookkeeping(const Instruction &instruction);
+
+[[nodiscard]] std::optional<uint64_t>
+exact_workgroup_release_wait_boundary(const ConSanSyncSequence &sequence,
+                                      const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                      rj_code_arch_t arch) {
+  if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size())
+    return std::nullopt;
+  BasicBlock *block = blocks[*sequence.basic_block_index].get();
+  if (block == nullptr)
+    return std::nullopt;
+  std::vector<const Instruction *> preceding;
+  for (const Instruction &instruction : block->instructions()) {
+    if (instruction.src_loc() >= sequence.begin_text_offset)
+      break;
+    preceding.push_back(&instruction);
+  }
+  uint64_t boundary = sequence.begin_text_offset;
+  bool saw_lds_zero = false;
+  bool admitted_leading_clause = false;
+  for (auto instruction = preceding.rbegin(); instruction != preceding.rend(); ++instruction) {
+    const int size = (*instruction)->size();
+    if (size != static_cast<int>(sizeof(uint32_t)) ||
+        (*instruction)->src_loc() + sizeof(uint32_t) != boundary ||
+        (*instruction)->raw_encoding() == nullptr)
+      break;
+    // LLVM may group a release atomic with the immediately following relaxed
+    // atomic. The release is still ordered by the exact zero-wait prefix, but
+    // the scalar scheduling hint sits between that prefix and the first
+    // communication instruction. Admit only that first covered instruction;
+    // an atomic later in the clause has an intervening memory operation and
+    // therefore cannot inherit this release proof.
+    if (!admitted_leading_clause && boundary == sequence.begin_text_offset &&
+        is_s_clause(**instruction) && sequence.scalar_clause_text_offset &&
+        *sequence.scalar_clause_text_offset == (*instruction)->src_loc() &&
+        s_clause_following_instruction_count(**instruction) > 0u) {
+      admitted_leading_clause = true;
+      boundary = (*instruction)->src_loc();
+      continue;
+    }
+    bool drains_lds = false;
+    if (!exact_zero_wait_word((*instruction)->raw_encoding()[0], arch, drains_lds))
+      break;
+    saw_lds_zero |= drains_lds;
+    boundary = (*instruction)->src_loc();
+  }
+  return saw_lds_zero ? std::optional<uint64_t>(boundary) : std::nullopt;
+}
+
+[[nodiscard]] std::optional<uint64_t>
+exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
+                                 const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                 rj_code_arch_t arch) {
+  if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size())
+    return std::nullopt;
+  BasicBlock *block = blocks[*sequence.basic_block_index].get();
+  const auto expected_combined = instrumentation::build_s_wait_flat_load0(arch);
+  const auto expected_load = instrumentation::build_s_wait_global_load0(arch);
+  const auto expected_lds = instrumentation::build_s_wait_lds0(arch);
+  if (block == nullptr || !expected_combined || !expected_load || !expected_lds)
+    return std::nullopt;
+  constexpr uint64_t kMaximumAcquireSuffixBytes = 64u;
+  uint64_t expected_offset = sequence.end_text_offset;
+  bool saw_load_zero = false;
+  bool saw_lds_zero = false;
+  for (const Instruction &instruction : block->instructions()) {
+    if (instruction.src_loc() < expected_offset)
+      continue;
+    if (instruction.src_loc() != expected_offset ||
+        expected_offset - sequence.end_text_offset >= kMaximumAcquireSuffixBytes ||
+        !is_bounded_acquire_bookkeeping(instruction)) {
+      return std::nullopt;
+    }
+    const int size = instruction.size();
+    if (size <= 0)
+      return std::nullopt;
+    expected_offset += static_cast<uint64_t>(size);
+    if (size != static_cast<int>(sizeof(uint32_t)) || instruction.raw_encoding() == nullptr)
+      continue;
+    const uint32_t word = instruction.raw_encoding()[0];
+    if (word == *expected_combined)
+      return expected_offset;
+    saw_load_zero |= word == *expected_load;
+    saw_lds_zero |= word == *expected_lds;
+    if (saw_load_zero && saw_lds_zero)
+      return expected_offset;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] bool is_release_cache_event(const ConSanSyncEvent *event) {
   return event != nullptr && (event->mnemonic == "global_wb" || event->mnemonic == "buffer_wb" ||
                               event->mnemonic == "buffer_wbl2");
@@ -1778,6 +1984,38 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
                                        "immediately before atomic release";
     sequence.release_wait_text_offset = *boundary;
     sequence.identity += "|release-wait=pc=0x" + fixed_hex(*boundary, 16);
+    sequence.begin_text_offset = *boundary;
+  }
+
+  // The language-level workgroup release used by RCCL has no cache event:
+  // LLVM drains LDS immediately before a no-return group-FLAT atomic. Admit
+  // only the exact target-specific zero-wait suffix. This complements the
+  // device/system cache sequence above and deliberately leaves a missing,
+  // nonzero, or noncontiguous wait unqualified.
+  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::Atomic)
+      continue;
+    const ConSanSyncEvent *communication = first_sequence_event(events, sequence);
+    if (communication == nullptr || !is_workgroup_flat_communication(result, *communication))
+      continue;
+    sequence.raw_scope = 1u;
+    if (sequence.memory_role != ConSanSyncMemoryRole::Unknown &&
+        sequence.memory_role != ConSanSyncMemoryRole::Acquire)
+      continue;
+    const auto boundary = exact_workgroup_release_wait_boundary(sequence, blocks, arch);
+    if (!boundary)
+      continue;
+    const bool already_acquire = sequence.memory_role == ConSanSyncMemoryRole::Acquire;
+    sequence.memory_role =
+        already_acquire ? ConSanSyncMemoryRole::AcquireRelease : ConSanSyncMemoryRole::Release;
+    sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+    sequence.confidence = ConSanSemanticConfidence::Conservative;
+    sequence.confidence_reason =
+        already_acquire
+            ? "exact same-block LDS-zero wait before workgroup group-FLAT acquire-release"
+            : "exact same-block LDS-zero wait before workgroup group-FLAT release";
+    sequence.release_wait_text_offset = *boundary;
+    sequence.identity += "|workgroup-release-wait=pc=0x" + fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;
   }
 }
@@ -2171,7 +2409,7 @@ void associate_ordinary_release_sync_sequences(
 
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
-    ConSanResult &result) {
+    rj_code_arch_t arch, ConSanResult &result) {
   struct Association {
     size_t cache_index = 0;
     std::optional<size_t> cache_tail_index;
@@ -2187,6 +2425,9 @@ void associate_ordinary_acquire_sync_sequences(
     }
     const ConSanSyncEvent *load = first_sequence_event(events, load_sequence);
     if (load == nullptr)
+      continue;
+    if (is_workgroup_flat_communication(result, *load) &&
+        !exact_workgroup_flat_acquire_encoding(result, *load, arch))
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
@@ -2262,8 +2503,7 @@ void associate_ordinary_acquire_sync_sequences(
     }
 
     std::optional<Association> association;
-    if (bounded_metadata_matches.size() == 1u && cache_matches.size() == 1u &&
-        bounded_metadata_matches.front() == cache_matches.front()) {
+    if (cache_matches.size() == 1u) {
       association = Association{cache_matches.front(), std::nullopt};
     } else if (bounded_metadata_matches.empty() && cache_matches.empty() &&
                rdna3_pair_matches.size() == 1u) {
@@ -2322,6 +2562,58 @@ void associate_ordinary_acquire_sync_sequences(
     associated.push_back(std::move(sequence));
   }
   result.sync_sequences = std::move(associated);
+
+  // CDNA3/4 lower an LDS acquire load to group-FLAT SC0 plus a combined
+  // VMEM/LDS zero wait. CDNA5's group-aperture form needs only the exact
+  // combined zero wait: LDS has no cache invalidate operation. Keep this
+  // fallback separate from RDNA's cache-associated acquire paths above.
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return;
+  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        sequence.operation != ConSanSyncOperation::OrdinaryLoad ||
+        sequence.memory_role != ConSanSyncMemoryRole::Unknown || sequence.inside_scalar_clause)
+      continue;
+    const ConSanSyncEvent *load = first_sequence_event(events, sequence);
+    if (load == nullptr || load->width_bits != 32u || load->execution_owners.empty() ||
+        !is_workgroup_flat_communication(result, *load))
+      continue;
+    bool ordered_encoding = false;
+    const auto visit = [&](const auto &container) {
+      if (container.name != load->container_name)
+        return;
+      const auto site = std::ranges::find(container.ordinary_memory_sites, load->text_offset,
+                                          &ConSanOrdinaryMemorySite::text_offset);
+      if (site == container.ordinary_memory_sites.end() ||
+          std::ranges::count(container.ordinary_memory_sites, load->text_offset,
+                             &ConSanOrdinaryMemorySite::text_offset) != 1 ||
+          site->operation != ConSanOrdinaryMemoryOperation::Load ||
+          site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
+        return;
+      ordered_encoding = exact_workgroup_flat_acquire_encoding(result, *load, arch);
+    };
+    if (load->in_kernel) {
+      for (const ConSanKernelInfo &kernel : result.kernels)
+        visit(kernel);
+    } else {
+      for (const ConSanFunctionInfo &function : result.functions)
+        visit(function);
+    }
+    if (!ordered_encoding)
+      continue;
+    const auto wait_end = exact_workgroup_acquire_wait_end(sequence, blocks, arch);
+    if (!wait_end)
+      continue;
+    sequence.memory_role = ConSanSyncMemoryRole::Acquire;
+    sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
+    sequence.confidence = ConSanSemanticConfidence::Conservative;
+    sequence.confidence_reason =
+        "exact same-block workgroup group-FLAT load/acquire-zero-wait sequence";
+    sequence.raw_scope = 1u;
+    sequence.identity += "|workgroup-acquire-wait-end=pc=0x" + fixed_hex(*wait_end, 16);
+    sequence.end_text_offset = *wait_end;
+  }
 }
 
 struct CommunicationAddressOperands {
@@ -2351,6 +2643,15 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
           continue;
         if (event.address_source == ConSanSyncAddressSource::GlobalScalarVector && site.addr_vgpr &&
             site.saddr_sgpr) {
+          operands = {.kind = ConSanCommunicationAddressKind::Atomic,
+                      .source = event.address_source,
+                      .address_vgpr = *site.addr_vgpr,
+                      .address_vgpr_count = 1,
+                      .address_sgpr = site.saddr_sgpr,
+                      .address_sgpr_count = 2,
+                      .static_byte_offset = *site.raw_ioffset};
+        } else if (event.address_source == ConSanSyncAddressSource::FlatVector && site.addr_vgpr &&
+                   site.saddr_sgpr) {
           operands = {.kind = ConSanCommunicationAddressKind::Atomic,
                       .source = event.address_source,
                       .address_vgpr = *site.addr_vgpr,
@@ -2402,6 +2703,15 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
                     .address_vgpr_count = 2,
                     .address_sgpr = std::nullopt,
                     .address_sgpr_count = 0,
+                    .static_byte_offset = *site.raw_ioffset};
+      } else if (event.address_source == ConSanSyncAddressSource::FlatVector && site.address_vgpr &&
+                 site.address_sgpr) {
+        operands = {.kind = ConSanCommunicationAddressKind::Ordinary,
+                    .source = event.address_source,
+                    .address_vgpr = *site.address_vgpr,
+                    .address_vgpr_count = 1,
+                    .address_sgpr = site.address_sgpr,
+                    .address_sgpr_count = 2,
                     .static_byte_offset = *site.raw_ioffset};
       } else if (event.address_source == ConSanSyncAddressSource::FlatVector && site.address_vgpr) {
         operands = {.kind = ConSanCommunicationAddressKind::Ordinary,

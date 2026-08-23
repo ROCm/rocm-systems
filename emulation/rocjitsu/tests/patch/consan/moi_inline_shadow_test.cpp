@@ -727,13 +727,22 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  const auto select_invalid = instrumentation::build_s_andn2_b64(
-      kRdna4ExecLo, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 20u),
-      static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 8u), ROCJITSU_CODE_ARCH_CDNA4);
   const auto zero_invalid = instrumentation::build_v_mov_b32_literal(
       *result.resolved_moi_workgroup_key_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(select_invalid && zero_invalid);
-  EXPECT_NE(std::ranges::find(prologue_words, *select_invalid), prologue_words.end());
+  ASSERT_TRUE(zero_invalid);
+  // Entry composition can select an owner-local scalar window distinct from
+  // the object-wide default. Prove the invariant that one such window uses
+  // its original-EXEC journal (+20) and valid-lane journal (+2) to select the
+  // invalid lanes; do not couple this contract to the selected register base.
+  bool selects_invalid_lanes = false;
+  for (uint16_t scalar_base = 0u; scalar_base + 21u < 128u; ++scalar_base) {
+    const auto select_invalid = instrumentation::build_s_andn2_b64(
+        kRdna4ExecLo, static_cast<uint16_t>(scalar_base + 20u),
+        static_cast<uint16_t>(scalar_base + 2u), ROCJITSU_CODE_ARCH_CDNA4);
+    selects_invalid_lanes |= select_invalid && std::ranges::find(prologue_words, *select_invalid) !=
+                                                   prologue_words.end();
+  }
+  EXPECT_TRUE(selects_invalid_lanes);
   EXPECT_TRUE(contains_subsequence(prologue_words, *zero_invalid));
   // Capturing and normalizing the entry workgroup key grows the paired
   // kernarg-preload bodies beyond their 256-byte hardware entry windows.
@@ -2119,8 +2128,12 @@ TEST(ConSanMoi, CdnaInlineShadowKeepsDisjointClobberedAddressInPlace) {
 
 TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto maybe_high = instrumentation::build_s_cselect_b32(
+      /*sdst=*/1u, /*ssrc0=*/1u, /*ssrc1=*/8u, kArch);
+  ASSERT_TRUE(maybe_high);
   std::vector<uint32_t> text_words;
   text_words.push_back(0xBE8001EBu); // s_mov_b64 s[0:1], src_shared_base
+  text_words.push_back(*maybe_high); // s_cselect_b32 s1, s1, s8
   text_words.push_back(build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(30u), kArch));
   text_words.push_back(build_v_mov_b32_e32(/*vdst=*/1u, /*s1=*/1u, kArch));
   constexpr auto load = cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0u, .vdst = 16u});

@@ -40,6 +40,64 @@ TEST(ConSan, InventoriesGfx1250GlobalAsyncToLdsAsAnLdsWrite) {
   EXPECT_EQ(candidate.addr_vgpr, 7u);
 }
 
+TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead) {
+  constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB8Vglobal,
+                                                 {.saddr = 0, .vsrc = 11, .vaddr = 1});
+  constexpr auto async_b32 = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+                                                  {.saddr = 2, .vsrc = 12, .vaddr = 2});
+  constexpr auto async_b64 = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB64Vglobal,
+                                                  {.saddr = 4, .vsrc = 13, .vaddr = 3});
+  constexpr auto async_b128 = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
+                                                   {.saddr = 6, .vsrc = 14, .vaddr = 4});
+  constexpr auto unsupported_nonzero =
+      cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+                           {.saddr = 8, .vsrc = 15, .vaddr = 5, .ioffset = 4});
+  const std::array<uint32_t, 16> words = {
+      async_b8[0],
+      async_b8[1],
+      async_b8[2],
+      async_b32[0],
+      async_b32[1],
+      async_b32[2],
+      async_b64[0],
+      async_b64[1],
+      async_b64[2],
+      async_b128[0],
+      async_b128[1],
+      async_b128[2],
+      unsupported_nonzero[0],
+      unsupported_nonzero[1],
+      unsupported_nonzero[2],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(words, "global_async_from_lds_inventory"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_read_count, 4u);
+  ASSERT_EQ(kernel.lds_sites.size(), 4u);
+  ASSERT_EQ(result.moi_candidates.size(), 4u);
+  constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
+  constexpr std::array<uint16_t, 4> expected_addresses = {11u, 12u, 13u, 14u};
+  for (size_t index = 0; index < expected_widths.size(); ++index) {
+    const ConSanLdsSite &site = kernel.lds_sites[index];
+    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
+    EXPECT_TRUE(site.direct_to_lds);
+    EXPECT_TRUE(site.supported_mvp);
+    EXPECT_EQ(site.width_bits, expected_widths[index]);
+    EXPECT_EQ(site.addr_vgpr, expected_addresses[index]);
+    const ConSanMoiCandidate &candidate = result.moi_candidates[index];
+    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
+    EXPECT_TRUE(candidate.direct_to_lds);
+    EXPECT_EQ(candidate.width_bits, expected_widths[index]);
+    EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
+  }
+}
+
 TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   constexpr auto direct_b32 = cdna4::build_mubuf(
       cdna4::kBufferLoadDwordMubuf, {.offen = 1, .lds = 1, .vaddr = 3, .vdata = 0, .srsrc = 2});
@@ -109,6 +167,8 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
   EXPECT_EQ(site.raw_op, cdna5::kFlatStoreB128Vflat);
   EXPECT_EQ(site.raw_saddr, 124u);
+  ASSERT_TRUE(site.raw_scale_offset);
+  EXPECT_TRUE(*site.raw_scale_offset);
   EXPECT_EQ(site.raw_vaddr, 5u);
   EXPECT_EQ(site.raw_vsrc, 7u);
   EXPECT_EQ(site.raw_vdst, 0u);
@@ -373,7 +433,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(ConSan, ClassifiesHighHalfSharedBaseFlatLoadAsMaybeGroup) {
+TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
   const std::array<uint32_t, 9> text_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000080u,              // v_mov_b32_e64 v0, 0
@@ -393,11 +453,11 @@ TEST(ConSan, ClassifiesHighHalfSharedBaseFlatLoadAsMaybeGroup) {
 
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_EQ(kernel.stats.flat_read_count, 1u);
-  EXPECT_EQ(kernel.stats.flat_group_hint_count, 0u);
-  EXPECT_EQ(kernel.stats.flat_maybe_group_hint_count, 1u);
+  EXPECT_EQ(kernel.stats.flat_group_hint_count, 1u);
+  EXPECT_EQ(kernel.stats.flat_maybe_group_hint_count, 0u);
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
   ASSERT_EQ(kernel.flat_sites.size(), 1u);
-  EXPECT_EQ(kernel.flat_sites.front().address_space_hint, ConSanFlatAddressSpaceHint::MaybeGroup);
+  EXPECT_EQ(kernel.flat_sites.front().address_space_hint, ConSanFlatAddressSpaceHint::Group);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.elf_bytes.empty());
 }
@@ -463,7 +523,7 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
   }
 }
 
-TEST(ConSan, DoesNotTreatCdnaDppAddAsLaneLocalPointerArithmetic) {
+TEST(ConSan, CdnaDppLowHalfArithmeticRetainsExactSharedAperture) {
   const std::array<uint32_t, 8> text_words = {
       0xBE8E01EBu,              // s_mov_b64 s[14:15], src_shared_base
       0x7E00020Eu,              // v_mov_b32_e32 v0, s14
@@ -486,9 +546,9 @@ TEST(ConSan, DoesNotTreatCdnaDppAddAsLaneLocalPointerArithmetic) {
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.kernels.size(), 1u);
     ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
-    EXPECT_NE(result.kernels.front().flat_sites.front().address_space_hint,
+    EXPECT_EQ(result.kernels.front().flat_sites.front().address_space_hint,
               ConSanFlatAddressSpaceHint::Group);
-    EXPECT_EQ(result.kernels.front().stats.flat_group_hint_count, 0u);
+    EXPECT_EQ(result.kernels.front().stats.flat_group_hint_count, 1u);
   }
 }
 
@@ -3099,6 +3159,47 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   EXPECT_FALSE(rejected.sync_sequences.front().release_wait_text_offset);
 }
 
+TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTargets) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_RDNA3 ? "gfx1100" : "gfx1201");
+    const RdnaWorkgroupClauseReleaseFixture fixture =
+        make_rdna_workgroup_clause_release_code_object(arch);
+    ASSERT_FALSE(fixture.bytes.empty());
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+
+    const ConSanResult result = try_patch_consan(fixture.bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    const auto sequence = std::ranges::find_if(result.sync_sequences, [&](const auto &item) {
+      return item.kind == ConSanSyncSequenceKind::Atomic &&
+             item.member_event_identities.size() == 1u &&
+             item.memory_role == ConSanSyncMemoryRole::Release &&
+             item.scalar_clause_text_offset == fixture.clause_text_offset;
+    });
+    ASSERT_NE(sequence, result.sync_sequences.end())
+        << testing::PrintToString(result.sync_sequences);
+    EXPECT_EQ(sequence->release_wait_text_offset, fixture.wait_text_offset);
+    EXPECT_EQ(sequence->begin_text_offset, fixture.wait_text_offset);
+    EXPECT_TRUE(sequence->inside_scalar_clause);
+    EXPECT_NE(sequence->identity.find("|workgroup-release-wait=pc=0x"), std::string::npos);
+
+    const RdnaWorkgroupClauseReleaseFixture interrupted =
+        make_rdna_workgroup_clause_release_code_object(arch, /*contiguous_wait_prefix=*/false);
+    ASSERT_FALSE(interrupted.bytes.empty());
+    const ConSanResult rejected = try_patch_consan(interrupted.bytes, options);
+    ASSERT_TRUE(consan_patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
+    const auto rejected_sequence =
+        std::ranges::find_if(rejected.sync_sequences, [&](const auto &item) {
+          return item.kind == ConSanSyncSequenceKind::Atomic &&
+                 item.scalar_clause_text_offset == interrupted.clause_text_offset;
+        });
+    ASSERT_NE(rejected_sequence, rejected.sync_sequences.end());
+    EXPECT_EQ(rejected_sequence->memory_role, ConSanSyncMemoryRole::Unknown);
+    EXPECT_FALSE(rejected_sequence->release_wait_text_offset);
+  }
+}
+
 TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
@@ -3526,8 +3627,12 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
       /*vaddr=*/0, /*vsrc=*/2, /*vdst=*/3, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(atomic);
-  const std::array<uint32_t, 9> text_words = {
+  const auto maybe_high = instrumentation::build_s_cselect_b32(
+      /*sdst=*/1u, /*ssrc0=*/1u, /*ssrc1=*/8u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_high);
+  const std::array<uint32_t, 10> text_words = {
       0xBE8001EBu,               // s_mov_b64 s[0:1], src_shared_base
+      *maybe_high,               // s_cselect_b32 s1, s1, s8
       0xD5810000u,  0x00000080u, // v_mov_b32_e64 v0, 0
       0xD5810001u,  0x00000001u, // v_mov_b32_e64 v1, s1
       (*atomic)[0], (*atomic)[1], (*atomic)[2],

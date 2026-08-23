@@ -771,7 +771,7 @@ TEST(ConSan, PerturbationEmissionAcceptsReturningOrderedCasReleaseEdge) {
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(atomic);
   const std::array<uint32_t, 12> text_words = {
-      0xBE8001EBu,                             // s_mov_b64 s[0:1], src_shared_base
+      0xBF800000u,                             // unrelated scalar bookkeeping
       0xD5810004u,  0x00000000u,               // v_mov_b32_e64 v4, s0
       0xD5810005u,  0x00000001u,               // v_mov_b32_e64 v5, s1
       0xEE0B0000u,  0x00000000u,  0x00000000u, // global_wb
@@ -784,7 +784,11 @@ TEST(ConSan, PerturbationEmissionAcceptsReturningOrderedCasReleaseEdge) {
   options.sc_perturb_edge = ConSanPerturbationEdge::Release;
   options.sc_perturb_required_count = 1;
   const ConSanResult result = try_patch_consan(bytes, options);
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "errors=" << testing::PrintToString(result.errors)
+      << " warnings=" << testing::PrintToString(result.warnings)
+      << " sequences=" << testing::PrintToString(result.sync_sequences)
+      << " candidates=" << testing::PrintToString(result.perturbation_candidates);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);

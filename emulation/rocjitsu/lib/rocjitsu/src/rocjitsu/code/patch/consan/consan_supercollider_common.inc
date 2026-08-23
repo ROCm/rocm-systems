@@ -16,12 +16,13 @@ struct ByteRange {
                                                 const ConSanFlatSite &rhs) {
   return std::tie(lhs.kind, lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits,
                   lhs.dst_vgpr, lhs.addr_vgpr, lhs.data_vgpr, lhs.raw_op, lhs.raw_saddr,
-                  lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset, lhs.raw_segment,
-                  lhs.raw_scope, lhs.raw_th, lhs.address_space_hint, lhs.mnemonic) ==
+                  lhs.raw_scale_offset, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
+                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.address_space_hint,
+                  lhs.mnemonic) ==
          std::tie(rhs.kind, rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits,
                   rhs.dst_vgpr, rhs.addr_vgpr, rhs.data_vgpr, rhs.raw_op, rhs.raw_saddr,
-                  rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset, rhs.raw_segment,
-                  rhs.raw_scope, rhs.raw_th, rhs.address_space_hint, rhs.mnemonic);
+                  rhs.raw_scale_offset, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
+                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.address_space_hint, rhs.mnemonic);
 }
 
 [[nodiscard]] bool sc_flat_site_is_applicable(const ConSanFlatSite &site,

@@ -1197,7 +1197,10 @@ TEST(ConSanMoi, RecordReplayAtomicEventsSuppressOrderedConflict) {
   const ConSanMoiExactShadowEntry final = decode_consan_moi_exact_shadow_entry(shadow[0]);
   EXPECT_EQ(final.kind, ConSanMoiShadowAccessKind::Read);
   EXPECT_EQ(final.owner_id, 1u);
-  EXPECT_EQ(final.epoch, 0u);
+  // Importing the producer token closes the consumer's pre-acquire segment.
+  // A later access must therefore use the next epoch; otherwise a reused
+  // synchronization token could incorrectly order later, unrelated work.
+  EXPECT_EQ(final.epoch, 1u);
   EXPECT_EQ(final.instruction_offset, 0x20u);
 }
 

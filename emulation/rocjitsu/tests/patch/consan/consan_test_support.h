@@ -2151,6 +2151,87 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   return make_rdna4_lds_code_object(text_words);
 }
 
+struct RdnaWorkgroupClauseReleaseFixture {
+  std::vector<uint8_t> bytes;
+  uint64_t wait_text_offset = 0;
+  uint64_t clause_text_offset = 0;
+  uint64_t release_text_offset = 0;
+};
+
+RdnaWorkgroupClauseReleaseFixture
+make_rdna_workgroup_clause_release_code_object(rj_code_arch_t arch,
+                                               bool contiguous_wait_prefix = true) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4) {
+    ADD_FAILURE() << "workgroup scalar-clause fixture requires an RDNA target";
+    return {};
+  }
+  std::vector<uint32_t> release;
+  std::vector<uint32_t> relaxed;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    const auto release_words = build_rdna3_flat_atomic_add_u32(
+        /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false,
+        /*scope=*/2, arch);
+    const auto relaxed_words = build_rdna3_flat_atomic_add_u32(
+        /*vaddr=*/6, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false,
+        /*scope=*/2, arch);
+    if (release_words && relaxed_words) {
+      release.assign(release_words->begin(), release_words->end());
+      relaxed.assign(relaxed_words->begin(), relaxed_words->end());
+    }
+  } else {
+    const auto release_words = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+        /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/1, arch);
+    const auto relaxed_words = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+        /*vaddr=*/6, /*vsrc=*/4, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/1, arch);
+    if (release_words && relaxed_words) {
+      release.assign(release_words->begin(), release_words->end());
+      relaxed.assign(relaxed_words->begin(), relaxed_words->end());
+    }
+  }
+  const auto lds_wait = instrumentation::build_s_wait_lds0(arch);
+  const auto store_wait = arch == ROCJITSU_CODE_ARCH_RDNA3 ? build_rdna3_s_wait_vscnt0(arch)
+                                                           : build_s_wait_storecnt0(arch);
+  if (release.empty() || relaxed.empty() || !lds_wait || !store_wait)
+    return {};
+
+  std::vector<uint32_t> words = {
+      0xbe8001ebu, // s_mov_b64 s[0:1], SRC_SHARED_BASE
+      build_v_mov_b32_e32(/*vdst=*/2, /*scalar s0=*/0, arch),
+      build_v_mov_b32_e32(/*vdst=*/3, /*scalar s1=*/1, arch),
+      build_v_mov_b32_e32(/*vdst=*/6, /*scalar s0=*/0, arch),
+      build_v_mov_b32_e32(/*vdst=*/7, /*scalar s1=*/1, arch),
+      *store_wait,
+      *lds_wait,
+  };
+  const uint64_t wait_text_offset = 5u * sizeof(uint32_t);
+  if (!contiguous_wait_prefix)
+    words.push_back(build_s_nop(0, arch));
+  const uint64_t clause_text_offset = words.size() * sizeof(uint32_t);
+  words.push_back(0xbf850001u); // s_clause 0x1: release plus relaxed atomic
+  const uint64_t release_text_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), release.begin(), release.end());
+  words.insert(words.end(), relaxed.begin(), relaxed.end());
+  words.push_back(build_s_endpgm(arch));
+
+  const std::string_view name = arch == ROCJITSU_CODE_ARCH_RDNA3
+                                    ? "gfx1100_workgroup_clause_release"
+                                    : "gfx1201_workgroup_clause_release";
+  std::vector<uint8_t> bytes =
+      arch == ROCJITSU_CODE_ARCH_RDNA3
+          ? make_rdna3_lds_code_object(words, name, kRdna4Wave64AllVgprsGranulated,
+                                       /*wave32=*/true, /*uses_dynamic_stack=*/false,
+                                       /*workgroup_id_dimension_mask=*/7u)
+          : make_rdna4_lds_code_object(words, name, kRdna4Wave64AllVgprsGranulated,
+                                       /*wave32=*/true, /*uses_dynamic_stack=*/false,
+                                       /*workgroup_id_dimension_mask=*/7u);
+  return {
+      .bytes = std::move(bytes),
+      .wait_text_offset = wait_text_offset,
+      .clause_text_offset = clause_text_offset,
+      .release_text_offset = release_text_offset,
+  };
+}
+
 std::vector<uint8_t> make_rdna4_flat_atomic_release_acquire_code_object() {
   const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,

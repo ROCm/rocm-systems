@@ -130,6 +130,9 @@ enum class ConSanPatchKind : uint8_t {
   /// Appended after the original patch-kind sequence so existing numeric
   /// diagnostics remain stable across this addition.
   TrampolineNopBranchRelay,
+  /// An s_clause scheduling hint neutralized because one of its covered
+  /// memory instructions is replaced by an instrumentation trampoline.
+  InlineScalarClauseNopRewrite,
 };
 
 enum class ConSanPatchPhase : uint8_t {
@@ -169,6 +172,7 @@ struct ConSanFlatSite {
   std::optional<uint16_t> data_vgpr;
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_saddr;
+  std::optional<bool> raw_scale_offset;
   std::optional<uint32_t> raw_vaddr;
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdst;
@@ -205,6 +209,11 @@ struct ConSanOrdinaryMemorySite {
   ConSanOrdinaryMemoryOperation operation = ConSanOrdinaryMemoryOperation::Load;
   ConSanOrdinaryMemorySupportReason support_reason =
       ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
+  // FLAT ordinary instructions can be the load/store half of a
+  // language-level atomic sequence. Preserve their segment provenance so
+  // synchronization analysis can distinguish a bounded group-FLAT sequence
+  // from an otherwise identical global/private instruction.
+  ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
@@ -348,6 +357,7 @@ struct ConSanMoiCandidate {
   bool uses_gfx1250_cluster_workgroup_id = false;
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_saddr;
+  std::optional<bool> raw_scale_offset;
   std::optional<uint32_t> raw_vaddr;
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdst;

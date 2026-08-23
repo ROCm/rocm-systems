@@ -353,6 +353,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   };
   std::vector<ConSanPatchInfo> patches;
+  for (const PlannedInlineAtomic &planned : planned_candidates) {
+    if (!neutralize_atomic_scalar_clause(new_text, planned.candidate, arch, patches, result.errors))
+      return;
+  }
   std::vector<bool> routed_by_dense_relay(planned_candidates.size(), false);
 
   // A large generated CDNA kernel can strand an early atomic beyond SOPP
@@ -1594,17 +1598,30 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
+  if (!guest_first && !guest_preserves_address) {
+    // Compiler-emitted ordinary acquire loads may reuse the low address VGPR
+    // as their destination. Preserve the synchronization address before that
+    // load replaces it with the acquired value. Atomic RMWs and disjoint
+    // ordinary loads retain the post-guest path below.
+    words.push_back(build_v_mov_b32_e32(
+        saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(saved_address + 1u),
+        vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+  }
   if (!guest_first) {
     if (!defer_guest) {
       if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
         return false;
       words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
     }
-    words.push_back(build_v_mov_b32_e32(
-        saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
-    words.push_back(build_v_mov_b32_e32(
-        static_cast<uint16_t>(saved_address + 1u),
-        vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+    if (guest_preserves_address) {
+      words.push_back(build_v_mov_b32_e32(
+          saved_address, vector_source_vgpr(address_plan.result_address_vgpr), arch));
+      words.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(saved_address + 1u),
+          vector_source_vgpr(static_cast<uint16_t>(address_plan.result_address_vgpr + 1u)), arch));
+    }
   }
   return true;
 }
@@ -2340,25 +2357,30 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return std::nullopt;
     }
   } else if (defer_guest) {
+    std::vector<uint32_t> deferred_guest_words;
+    if (!append_sampled_atomic_guest(deferred_guest_words, bytes, candidate, arch,
+                                     /*guest_instruction_offset=*/nullptr)) {
+      return std::nullopt;
+    }
+    deferred_guest_words.insert(deferred_guest_words.end(), trailing_guest_words.begin(),
+                                trailing_guest_words.end());
     const uint64_t branch_text_offset =
-        cave_text_offset +
-        (words.size() + candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size()) *
-            sizeof(uint32_t);
+        cave_text_offset + (words.size() + deferred_guest_words.size()) * sizeof(uint32_t);
     if (const auto direct = compute_sopp_branch_simm16(branch_text_offset, return_text_offset)) {
-      if (!append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset))
-        return std::nullopt;
-      words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
+      if (guest_instruction_offset)
+        *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+      words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_branch(*direct, arch));
     } else {
       const auto jump_sgprs = moi_indirect_jump_sgprs(options);
-      if (!jump_sgprs ||
-          !append_moi_prepare_scc_preserving_indirect_jump(words, cave_text_offset,
-                                                           return_text_offset, jump_sgprs->pc_sgpr,
-                                                           jump_sgprs->scc_save_sgpr, arch) ||
-          !append_sampled_atomic_guest(words, bytes, candidate, arch, guest_instruction_offset)) {
+      if (!jump_sgprs || !append_moi_prepare_scc_preserving_indirect_jump(
+                             words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
+                             jump_sgprs->scc_save_sgpr, arch)) {
         return std::nullopt;
       }
-      words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
+      if (guest_instruction_offset)
+        *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+      words.insert(words.end(), deferred_guest_words.begin(), deferred_guest_words.end());
       words.push_back(build_s_setpc_b64(jump_sgprs->pc_sgpr, arch));
     }
   } else if (!append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,

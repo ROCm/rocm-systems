@@ -882,8 +882,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       options, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
-  const bool materialize_flat_offset =
-      candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const bool materialize_flat_address =
+      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
   const bool materialize_direct_to_lds = candidate.direct_to_lds;
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
@@ -893,7 +893,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
   const uint16_t address_scratch_count = static_cast<uint16_t>(
-      (materialize_flat_offset ? 2u : (save_clobbered_address ? 1u : 0u)) +
+      (materialize_flat_address ? gfx12_flat_access_address_scratch_count(candidate, arch)
+                                : (save_clobbered_address ? 1u : 0u)) +
       (materialize_direct_to_lds ? 1u : 0u) + (reserve_two_address_replay_scratch ? 1u : 0u));
   const uint16_t scratch_count = static_cast<uint16_t>(base_scratch_count + address_scratch_count);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > 256u) {
@@ -959,8 +960,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
   }
-  if (materialize_flat_offset && access_ranges->size() != 1u) {
-    errors.emplace_back("ConSan MOI flat-offset probe requires one normalized access range");
+  if (materialize_flat_address && access_ranges->size() != 1u) {
+    errors.emplace_back("ConSan MOI flat-address probe requires one normalized access range");
     return std::nullopt;
   }
   if (capture_high_bank_address && load_clobbers_address &&
@@ -1051,14 +1052,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
-  } else if (materialize_flat_offset && options.moi_dynamic_access_records) {
+  } else if (materialize_flat_address && options.moi_dynamic_access_records) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
     words.push_back(build_v_mov_b32_e32(materialized_address_vgpr,
                                         vector_source_vgpr(*candidate.addr_vgpr), arch));
-    words.push_back(build_v_mov_b32_e32(
-        static_cast<uint16_t>(materialized_address_vgpr + 1u),
-        vector_source_vgpr(static_cast<uint16_t>(*candidate.addr_vgpr + 1u)), arch));
+    if (!candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
+      words.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(materialized_address_vgpr + 1u),
+          vector_source_vgpr(static_cast<uint16_t>(*candidate.addr_vgpr + 1u)), arch));
+    }
     lds_byte_offset_vgpr = materialized_address_vgpr;
   } else if (save_clobbered_address) {
     const uint16_t saved_lds_byte_offset_vgpr =
@@ -1122,15 +1125,13 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
       }
-      if (materialize_flat_offset) {
-        const auto add = instrumentation::build_v_add_u64_signed_i24(*lds_byte_offset_vgpr,
-                                                                     *candidate.raw_ioffset, arch);
-        if (!add) {
+      if (materialize_flat_address) {
+        if (!append_materialize_gfx12_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
+                                                          *lds_byte_offset_vgpr, arch)) {
           errors.emplace_back(
-              "ConSan MOI dynamic access-record probe could not materialize FLAT offset");
+              "ConSan MOI dynamic access-record probe could not materialize FLAT address");
           return std::nullopt;
         }
-        words.insert(words.end(), add->begin(), add->end());
       }
 
       if (!append_atomic_fetch_add_one_u32(
@@ -1307,7 +1308,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t address_key_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
   const uint16_t address_group_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
-      !materialize_flat_offset && !save_clobbered_address && spill != nullptr &&
+      !materialize_flat_address && !save_clobbered_address && spill != nullptr &&
               options.moi_spill_overlaps_guest_operands &&
               *lds_byte_offset_vgpr >= spill->vgpr_base &&
               *lds_byte_offset_vgpr < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count
@@ -1429,12 +1430,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
   }
-  if (materialize_flat_offset) {
+  if (materialize_flat_address) {
     const uint16_t materialized_address_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    if (!append_materialize_gfx1250_flat_access_address(words, candidate, materialized_address_vgpr,
-                                                        arch)) {
-      errors.emplace_back("ConSan MOI first-light probe could not materialize FLAT offset");
+    if (!append_materialize_gfx12_flat_access_address(words, candidate, *lds_byte_offset_vgpr,
+                                                      materialized_address_vgpr, arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not materialize FLAT address");
       return std::nullopt;
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
@@ -2718,8 +2719,8 @@ append_add_exact_shadow_generation(std::vector<uint32_t> &words, uint16_t packed
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
     std::vector<uint32_t> &words, uint64_t table_base, uint32_t table_capacity,
     uint16_t workgroup_key_vgpr, uint16_t consumer_owner_vgpr, uint16_t producer_owner_vgpr,
-    uint16_t slot_address_vgpr, uint16_t hash_vgpr, uint16_t temporary_vgpr, bool release_sequence,
-    rj_code_arch_t arch);
+    uint16_t consumer_epoch_vgpr, uint16_t slot_address_vgpr, uint16_t hash_vgpr,
+    uint16_t temporary_vgpr, bool release_sequence, rj_code_arch_t arch);
 
 [[nodiscard]] bool append_inline_atomic_slot_address(std::vector<uint32_t> &words,
                                                      uint64_t table_base, uint32_t table_capacity,

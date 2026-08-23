@@ -295,11 +295,19 @@
       if (!save_conflict)
         return false;
       words.push_back(*save_conflict);
+      // Acquired-edge history is keyed by consumer segment so reuse of an
+      // atomic barrier cannot overwrite evidence for an earlier generation.
+      // The packed access supplies the same raw segment epoch used by the
+      // acquire publisher when it derived this destination.
+      if (!append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
+                                             consan_moi_exact_shadow::epoch_shift,
+                                             consan_moi_exact_shadow::max_epoch, arch))
+        return false;
       if (!append_inline_acquired_token_slot_address(
               words,
               *options.moi_report_buffer_address + layout.inline_acquired_epoch_token_slots_offset,
               layout.inline_acquired_epoch_token_capacity, workgroup_key, token_consumer_owner,
-              token_producer_owner, address_lo_vgpr, token_hash,
+              token_producer_owner, source_version, address_lo_vgpr, token_hash,
               static_cast<uint16_t>(address_lo_vgpr + 1u),
               /*release_sequence=*/false, arch))
         return false;
@@ -2484,8 +2492,8 @@
         "ConSan MOI inline-shadow probe has no scratch VGPR for the expected CAS value");
     return std::nullopt;
   }
-  const bool materialize_flat_offset =
-      candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const bool materialize_flat_address =
+      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
   const bool capture_high_bank_address =
       moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
   const auto source_is_spilled = [&](uint16_t source) {
@@ -2493,7 +2501,7 @@
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
   };
   const std::optional<uint16_t> spill_backed_lds_byte_offset_source =
-      spill != nullptr && !materialize_flat_offset &&
+      spill != nullptr && !materialize_flat_address &&
               (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
               source_is_spilled(*lds_byte_offset_vgpr)
           ? lds_byte_offset_vgpr
@@ -2509,8 +2517,10 @@
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
                                   options.moi_track_atomics) +
                               inline_shadow_loop_scratch_count(options, candidate));
-  } else if (materialize_flat_offset) {
-    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + scratch_count - 2u);
+  } else if (materialize_flat_address) {
+    saved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(*options.scratch_vgpr + scratch_count -
+                              gfx12_flat_access_address_scratch_count(candidate, arch));
   } else if (spill_backed_lds_byte_offset_source) {
     // Address construction and local exchange consume the guest offset before
     // the transaction initializes its expected CAS value. The authoritative
@@ -2613,14 +2623,9 @@
                               "direct-to-LDS destination");
           return std::nullopt;
         }
-      } else if (!capture_high_bank_address) {
+      } else if (!capture_high_bank_address && !materialize_flat_address) {
         words.push_back(build_v_mov_b32_e32(*saved_lds_byte_offset_vgpr,
                                             vector_source_vgpr(*lds_byte_offset_vgpr), arch));
-      }
-      if (materialize_flat_offset) {
-        words.push_back(build_v_mov_b32_e32(
-            static_cast<uint16_t>(*saved_lds_byte_offset_vgpr + 1u),
-            vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));
       }
     }
     lds_byte_offset_vgpr = saved_lds_byte_offset_vgpr;
@@ -2641,14 +2646,12 @@
     errors.emplace_back("ConSan MOI inline-shadow probe could not preserve application VCC/SCC");
     return std::nullopt;
   }
-  if (materialize_flat_offset) {
-    const auto add = instrumentation::build_v_add_u64_signed_i24(*lds_byte_offset_vgpr,
-                                                                 *candidate.raw_ioffset, arch);
-    if (!add) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT offset");
+  if (materialize_flat_address) {
+    if (!append_materialize_gfx12_flat_access_address(words, candidate, *candidate.addr_vgpr,
+                                                      *lds_byte_offset_vgpr, arch)) {
+      errors.emplace_back("ConSan MOI inline-shadow probe could not materialize FLAT address");
       return std::nullopt;
     }
-    words.insert(words.end(), add->begin(), add->end());
   }
   if (!append_moi_lds_wait(words, arch))
     return std::nullopt;
@@ -2757,10 +2760,10 @@
     // address comparison used by hardware: a 32-bit SHARED_BASE source is the
     // shared aperture's high half. Global lanes bypass shadow bookkeeping and
     // later rejoin for the displaced guest access.
-    uint16_t address_hi_source = materialize_flat_offset
+    uint16_t address_hi_source = materialize_flat_address
                                      ? static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)
                                      : static_cast<uint16_t>(*candidate.addr_vgpr + 1u);
-    if (!materialize_flat_offset && source_is_spilled(address_hi_source)) {
+    if (!materialize_flat_address && source_is_spilled(address_hi_source)) {
       const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
       const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
           words, *spill, recovered_address_hi, address_hi_source, arch);

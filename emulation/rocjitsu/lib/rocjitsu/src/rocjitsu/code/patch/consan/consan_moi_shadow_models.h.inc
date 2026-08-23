@@ -734,15 +734,23 @@ consan_moi_inline_publish_acquired_epoch_token(ConSanMoiInlineAcquiredEpochToken
     result.invalid_identity = true;
     return result;
   }
+  const uint32_t token_value = consan_moi_inline_acquired_epoch_token_value(producer_epoch);
+  const uint32_t consumer_token_value =
+      consan_moi_inline_acquired_epoch_token_value(consumer_epoch);
   const auto lookup = consan_moi_inline_acquired_epoch_token_lookup(
       slot, workgroup_key, consumer_owner_id, producer_owner_id);
   if (lookup == ConSanMoiInlineAcquiredEpochTokenLookup::Collision) {
     result.collision = true;
     return result;
   }
-  const uint32_t token_value = consan_moi_inline_acquired_epoch_token_value(producer_epoch);
-  const uint32_t consumer_token_value =
-      consan_moi_inline_acquired_epoch_token_value(consumer_epoch);
+  // The caller has already selected a consumer-segment-keyed destination.
+  // Reaching a stable token from another segment is a finite-table collision,
+  // never permission to replace the older generation's evidence.
+  if (lookup == ConSanMoiInlineAcquiredEpochTokenLookup::Exact &&
+      slot.consumer_epoch_plus_one != consumer_token_value) {
+    result.collision = true;
+    return result;
+  }
   if (lookup == ConSanMoiInlineAcquiredEpochTokenLookup::Exact &&
       slot.producer_epoch_plus_one >= token_value &&
       slot.consumer_epoch_plus_one >= consumer_token_value)

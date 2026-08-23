@@ -132,6 +132,86 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
   }
 }
 
+TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) {
+  const MoiEngineConformanceCase &test_case = GetParam();
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_RDNA4 ? "gfx1201" : "gfx1250");
+    std::array<uint32_t, 5> text_words{};
+    text_words[0] = 0xBE8E01EBu; // s_mov_b64 s[14:15], src_shared_base
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      constexpr auto load = rdna4::build_vflat(
+          rdna4::kFlatLoadB32Vflat, {.saddr = 14u, .vdst = 2u, .vaddr = 2u, .ioffset = 12u});
+      std::ranges::copy(load, text_words.begin() + 1u);
+    } else {
+      constexpr auto load = cdna5::build_vflat(
+          cdna5::kFlatLoadB32Vflat,
+          {.saddr = 14u, .vdst = 2u, .scale_offset = 1u, .vaddr = 2u, .ioffset = 12u});
+      std::ranges::copy(load, text_words.begin() + 1u);
+    }
+    text_words.back() = build_s_endpgm(arch);
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_RDNA4
+            ? make_rdna4_lds_code_object(text_words, "gfx1201_scalar_vector_group_flat")
+            : make_gfx1250_code_object(text_words, "gfx1250_scalar_vector_group_flat");
+
+    const ConSanResult result =
+        try_patch_consan(bytes, conformance_options(test_case, /*access_count=*/1u));
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.moi_candidates.size(), 1u);
+    const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+    EXPECT_EQ(candidate.raw_saddr, 14u);
+    EXPECT_EQ(candidate.raw_ioffset, 12);
+    ASSERT_TRUE(candidate.raw_scale_offset);
+    EXPECT_EQ(*candidate.raw_scale_offset, arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(
+        std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind), 1u)
+        << testing::PrintToString(result.warnings);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+    std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
+                patched.text_sections().front()->size());
+    bool found_materialization = false;
+    for (uint16_t result_vgpr = 8u; result_vgpr <= 64u && !found_materialization; ++result_vgpr) {
+      const uint16_t offset_vgpr = static_cast<uint16_t>(result_vgpr + 2u);
+      for (const uint16_t input_vgpr : {uint16_t{2u}, result_vgpr}) {
+        std::vector<uint32_t> expected;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          const auto scale = instrumentation::build_v_mul_lo_u32_literal(
+              offset_vgpr, offset_vgpr, sizeof(uint32_t), input_vgpr, arch);
+          ASSERT_TRUE(scale);
+          expected.insert(expected.end(), scale->begin(), scale->end());
+        } else {
+          expected.push_back(
+              build_v_mov_b32_e32(offset_vgpr, vector_source_vgpr(input_vgpr), arch));
+        }
+        expected.push_back(build_v_mov_b32_e32(result_vgpr, /*s14=*/14u, arch));
+        expected.push_back(
+            build_v_mov_b32_e32(static_cast<uint16_t>(result_vgpr + 1u), /*s15=*/15u, arch));
+        const auto add_vector =
+            instrumentation::build_v_add_u64_vgpr_offset(result_vgpr, offset_vgpr, arch);
+        const auto add_immediate =
+            instrumentation::build_v_add_u64_signed_i24(result_vgpr, 12, arch);
+        ASSERT_TRUE(add_vector && add_immediate);
+        expected.insert(expected.end(), add_vector->begin(), add_vector->end());
+        expected.insert(expected.end(), add_immediate->begin(), add_immediate->end());
+        if (contains_subsequence(patched_words, expected)) {
+          found_materialization = true;
+          break;
+        }
+      }
+    }
+    EXPECT_TRUE(found_materialization)
+        << "missing scalar-base + vector-offset + immediate VFLAT materialization";
+  }
+}
+
 TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsReachable) {
   const MoiEngineConformanceCase &test_case = GetParam();
   const std::array<uint32_t, 2> kernel_words = {

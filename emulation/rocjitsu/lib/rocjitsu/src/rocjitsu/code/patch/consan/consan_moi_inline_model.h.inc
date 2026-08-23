@@ -324,8 +324,9 @@ consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag flag) {
 }
 
 /// Captures the exact causal frontier owned by `releaser_owner_id`. Unrelated
-/// ready tokens are ignored. Any malformed table entry, duplicate/cyclic
-/// ancestry, incomplete scan, or fifth matching ancestor marks the complete
+/// ready tokens are ignored. Multiple valid witnesses for the same ancestor
+/// coalesce to its maximum epoch. Any malformed table entry, cyclic ancestry,
+/// incomplete scan, or fifth distinct matching ancestor marks the complete
 /// snapshot nonauthorizing.
 [[nodiscard]] constexpr ConSanMoiInlineCausalSnapshot
 consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalTokenView> tokens,
@@ -378,8 +379,8 @@ consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalT
       ++insertion;
     if (insertion < snapshot.entry_count &&
         snapshot.entries[insertion].ancestor_owner_id == token.producer_owner_id) {
-      snapshot.flags |=
-          consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed);
+      snapshot.entries[insertion].ancestor_epoch_plus_one = std::max(
+          snapshot.entries[insertion].ancestor_epoch_plus_one, token.producer_epoch_plus_one);
       continue;
     }
     if (snapshot.entry_count >= kConSanMoiInlineCausalSnapshotEntryCapacity) {
@@ -553,7 +554,7 @@ struct ConSanMoiInlineCausalImportPlan {
     const ConSanMoiInlineVersionedReleaseIdentity &expected_identity, uint32_t consumer_owner_id,
     bool destination_collision = false, bool destination_capacity_exhausted = false) {
   ConSanMoiInlineCausalImportPlan result;
-  if (consumer_owner_id == 0 || consumer_owner_id == release.releaser_owner_id) {
+  if (consumer_owner_id == 0) {
     result.status = ConSanMoiInlineCausalImportStatus::InvalidConsumer;
     return result;
   }
@@ -584,12 +585,6 @@ struct ConSanMoiInlineCausalImportPlan {
   case ConSanMoiInlineCausalSnapshotStatus::Usable:
     break;
   }
-  for (uint32_t i = 0; i < release.snapshot.entry_count; ++i) {
-    if (release.snapshot.entries[i].ancestor_owner_id == consumer_owner_id) {
-      result.status = ConSanMoiInlineCausalImportStatus::MalformedSnapshot;
-      return result;
-    }
-  }
   if (destination_capacity_exhausted) {
     result.status = ConSanMoiInlineCausalImportStatus::DestinationCapacityExhausted;
     return result;
@@ -599,11 +594,21 @@ struct ConSanMoiInlineCausalImportPlan {
     return result;
   }
   result.status = ConSanMoiInlineCausalImportStatus::Usable;
-  result.entries[0] = {release.releaser_owner_id, release.releaser_epoch_plus_one};
-  result.entry_count = release.snapshot.entry_count + 1u;
+  // An acquire can read the caller's own RMW in a release sequence headed by
+  // another owner. The self edge is meaningless, but the immutable ancestors
+  // carried by that release are authoritative and must still be imported.
+  if (release.releaser_owner_id != consumer_owner_id)
+    result.entries[result.entry_count++] = {release.releaser_owner_id,
+                                            release.releaser_epoch_plus_one};
   for (uint32_t i = 0; i < release.snapshot.entry_count; ++i) {
-    result.entries[i + 1u] = {release.snapshot.entries[i].ancestor_owner_id,
-                              release.snapshot.entries[i].ancestor_epoch_plus_one};
+    const auto &entry = release.snapshot.entries[i];
+    // Reusable barriers can close a cycle across generations: the producer
+    // may have imported this consumer's prior segment before publishing its
+    // current segment. The direct producer token orders the current acquire;
+    // re-importing the consumer's own earlier epoch is redundant.
+    if (entry.ancestor_owner_id == consumer_owner_id)
+      continue;
+    result.entries[result.entry_count++] = {entry.ancestor_owner_id, entry.ancestor_epoch_plus_one};
   }
   return result;
 }

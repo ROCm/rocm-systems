@@ -1282,6 +1282,17 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       first_workgroup_index = workgroups.size() - 1u;
     return workgroups.back();
   };
+  const auto reconcile_owner_epoch = [](ReplayWorkgroupState &state, uint32_t owner_id,
+                                        uint32_t recorded_epoch) {
+    uint32_t &epoch = state.owner_epochs[owner_id];
+    epoch = std::max(epoch, recorded_epoch);
+    return epoch;
+  };
+  const auto advance_owner_epoch = [](ReplayWorkgroupState &state, uint32_t owner_id) {
+    uint32_t &epoch = state.owner_epochs[owner_id];
+    if (epoch < consan_moi_exact_shadow::max_epoch)
+      ++epoch;
+  };
 
   // Atomic and fence synchronization share one sparse causal clock. The
   // event-count-squared value above is a fail-closed capacity bound, not a
@@ -1489,12 +1500,14 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         ++replay.unsupported_fence_count;
         continue;
       }
-      const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
+      const uint32_t epoch = reconcile_owner_epoch(state, record.owner_id, record.epoch);
+      bool imported_predecessor = false;
       if (acquire) {
         const ConSanMoiAtomicSyncResult token_result =
             replay_atomic_acquire(state, generation, record.communication_token, record.owner_id,
                                   record.instruction_offset);
         replay.metadata_full |= token_result.metadata_full;
+        imported_predecessor = token_result.updated_record_count != 0u;
       }
       if (release) {
         const ConSanMoiAtomicSyncResult release_result =
@@ -1502,6 +1515,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
                                   epoch, record.instruction_offset);
         replay.metadata_full |= release_result.metadata_full;
       }
+      if (imported_predecessor)
+        advance_owner_epoch(state, record.owner_id);
       continue;
     }
 
@@ -1523,7 +1538,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         continue;
       }
 
-      const uint32_t epoch = record.epoch != 0 ? record.epoch : state.owner_epochs[record.owner_id];
+      const uint32_t epoch = reconcile_owner_epoch(state, record.owner_id, record.epoch);
       ConSanMoiAtomicSyncResult atomic_result;
       switch (record.kind) {
       case ConSanMoiAtomicEventKind::Release:
@@ -1552,6 +1567,14 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       }
       }
       replay.metadata_full |= atomic_result.metadata_full;
+      if ((record.kind == ConSanMoiAtomicEventKind::Acquire ||
+           record.kind == ConSanMoiAtomicEventKind::AcquireRelease) &&
+          atomic_result.updated_record_count != 0u) {
+        // A successful acquire closes the consumer's current segment. Later
+        // accesses must not be covered by a token imported for an earlier
+        // generation of the same reusable partial barrier.
+        advance_owner_epoch(state, record.owner_id);
+      }
       continue;
     }
 
@@ -1606,10 +1629,11 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
                                                        record.workgroup_y, record.workgroup_z);
     state.in_barrier_run = false;
+    const uint32_t effective_epoch = reconcile_owner_epoch(state, record.wave_id, record.epoch);
     const ConSanMoiExactByteAccess access{
         generation,
         /*owner_id=*/record.wave_id,
-        record.epoch != 0 ? record.epoch : state.owner_epochs[record.wave_id],
+        effective_epoch,
         *access_kind,
         lds_byte_offset,
         lds_byte_count,
@@ -2682,8 +2706,44 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
       overlaps(*site.addr_vgpr, 2u, *site.dst_vgpr, destination_count);
 
   if (site.mnemonic.starts_with("flat_")) {
-    if (*site.raw_saddr != flat_no_saddr)
-      return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+    if (*site.raw_saddr != flat_no_saddr) {
+      // gfx12 VFLAT can encode a one-VGPR offset plus an even scalar base.
+      // Reuse the already shared scalar/vector materialization contract used
+      // by VGLOBAL: both targets calculate saddr + zero_extend(vaddr) +
+      // signed24(ioffset), with CDNA5's optional access-width scale.
+      if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+          !site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr || *site.saddr_sgpr > 104u ||
+          (*site.saddr_sgpr & 1u) != 0u)
+        return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
+      if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
+        return reject(ConSanMoiAtomicAddressSupport::UnsupportedOffset);
+      if (*site.addr_vgpr > 255u)
+        return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
+      if (site.returns_old_value.value_or(false))
+        return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
+      if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
+          static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
+        return reject(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape);
+      const uint16_t result_address_vgpr =
+          static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
+      if (overlaps(result_address_vgpr, 2u, *site.addr_vgpr, 1u))
+        return reject(ConSanMoiAtomicAddressSupport::ResultAddressAlias);
+      if (!allow_post_guest_spill_operand_overlap &&
+          (overlaps(scratch_vgpr, scratch_vgpr_count, *site.data_vgpr, data_count) ||
+           overlaps(scratch_vgpr, scratch_vgpr_count - 2u, *site.addr_vgpr, 1u)))
+        return reject(ConSanMoiAtomicAddressSupport::ScratchOperandAlias);
+      plan.kind = ConSanMoiAtomicAddressKind::VglobalMaterialized;
+      plan.support = ConSanMoiAtomicAddressSupport::Supported;
+      plan.input_address_vgpr = *site.addr_vgpr;
+      plan.input_address_vgpr_count = 1u;
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false))
+        plan.input_address_scale = static_cast<uint16_t>(site.width_bits / 8u);
+      plan.scalar_base_sgpr = *site.saddr_sgpr;
+      plan.signed_byte_offset = *site.raw_ioffset;
+      plan.result_address_vgpr = result_address_vgpr;
+      plan.result_address_vgpr_count = 2u;
+      return plan;
+    }
     if (*site.addr_vgpr >= 255u)
       return reject(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth);
     if (*site.raw_ioffset != 0)

@@ -703,8 +703,13 @@ pair_hint_at(const std::array<PointerComponentHint, N> &components, uint16_t ind
       high->half == PointerHalfHint::High)
     return FlatPointerPairHint{low->space, low->maybe || high->maybe};
 
+  // AMD generic-pointer aperture selection lives in the high dword. A low
+  // dword synthesized independently as a constant or arithmetic byte offset
+  // cannot change that aperture. Preserve an exact high-half proof; only a
+  // high half already marked as a join/arithmetic approximation remains
+  // approximate.
   if (high && high->half == PointerHalfHint::High)
-    return FlatPointerPairHint{high->space, true};
+    return FlatPointerPairHint{high->space, high->maybe};
 
   if (low && low->half == PointerHalfHint::Low)
     return FlatPointerPairHint{low->space, true};
@@ -759,7 +764,6 @@ merge_arithmetic_components(std::optional<PointerComponentHint> lhs,
 [[nodiscard]] std::optional<PointerComponentHint>
 merge_source_component_hints(const Instruction &inst, const FlatPointerTracker &tracker) {
   std::optional<ConSanFlatAddressSpaceHint> space;
-  bool saw_low = false;
   bool saw_high = false;
   bool maybe = false;
   for (int i = 0; i < inst.num_src_operands(); ++i) {
@@ -769,7 +773,6 @@ merge_source_component_hints(const Instruction &inst, const FlatPointerTracker &
     if (space && *space != hint->space)
       return std::nullopt;
     space = hint->space;
-    saw_low |= hint->half == PointerHalfHint::Low;
     saw_high |= hint->half == PointerHalfHint::High;
     maybe |= hint->maybe;
   }
@@ -778,8 +781,12 @@ merge_source_component_hints(const Instruction &inst, const FlatPointerTracker &
   // Carry-chain encodings expose the low-half carry producer as a source of
   // the high-half add. Prefer an observed high component rather than treating
   // that mixed-half source list as contradictory provenance.
+  // Arithmetic on the low dword cannot change a generic pointer's aperture,
+  // so an exact low component may remain exact. Any arithmetic that consumes
+  // the aperture-bearing high component is necessarily approximate even when
+  // every recognized source came from the same address space.
   return PointerComponentHint{*space, saw_high ? PointerHalfHint::High : PointerHalfHint::Low,
-                              maybe || (saw_low && saw_high)};
+                              maybe || saw_high};
 }
 
 [[nodiscard]] std::optional<FlatPointerPairHint>
@@ -1267,6 +1274,20 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     return;
   }
 
+  if (mnemonic == "s_movk_i32") {
+    const auto dst = register_index(inst.dst_operand(0), RegClass::SGPR);
+    const auto preserved = dst ? component_hint_at(tracker.sgprs, *dst) : std::nullopt;
+    clear_destination_components(inst, tracker);
+    // Replacing the low 16 bits of a known flat-pointer component cannot
+    // change its aperture. This is the canonical compiler spelling for
+    // `src_shared_base + constant` on every target covered by RCCL's partial
+    // barrier. Retain the exact component instead of degrading the eventual
+    // pair to MaybeGroup.
+    if (dst && preserved)
+      set_sgpr_component(tracker, *dst, *preserved);
+    return;
+  }
+
   if (mnemonic == "s_cselect_b32") {
     const auto dst = register_index(inst.dst_operand(0), RegClass::SGPR);
     const auto selected =
@@ -1275,6 +1296,34 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     clear_destination_components(inst, tracker);
     if (dst && selected)
       set_sgpr_component(tracker, *dst, *selected);
+    return;
+  }
+
+  if (mnemonic.find("v_dual_mov_b32") != std::string_view::npos) {
+    // VOPD exposes its two destinations in X/Y order and concatenates each
+    // slot's source list in the same order. A MOV slot has exactly one source,
+    // so its component transfer is unambiguous even when the peer slot is an
+    // unrelated arithmetic instruction. Capture both transfers before either
+    // destination is invalidated: the compiler commonly packs the low/high
+    // copies of src_shared_base into one dual instruction on gfx11.
+    const bool x_is_move = mnemonic.starts_with("v_dual_mov_b32");
+    const bool y_is_move = mnemonic.ends_with("v_dual_mov_b32");
+    const auto x_dst =
+        x_is_move ? register_index(inst.dst_operand(0), RegClass::VGPR) : std::nullopt;
+    const auto y_dst =
+        y_is_move ? register_index(inst.dst_operand(1), RegClass::VGPR) : std::nullopt;
+    const auto x_source = x_is_move && inst.num_src_operands() > 0
+                              ? source_component_hint(inst.src_operand(0), tracker)
+                              : std::nullopt;
+    const auto y_source =
+        y_is_move && inst.num_src_operands() > 0
+            ? source_component_hint(inst.src_operand(inst.num_src_operands() - 1), tracker)
+            : std::nullopt;
+    clear_destination_components(inst, tracker);
+    if (x_dst && x_source)
+      set_vgpr_component(tracker, *x_dst, *x_source);
+    if (y_dst && y_source)
+      set_vgpr_component(tracker, *y_dst, *y_source);
     return;
   }
 
@@ -1361,6 +1410,17 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
 
 [[nodiscard]] ConSanFlatAddressSpaceHint
 flat_address_space_hint(const Instruction &inst, const FlatPointerTracker &tracker) {
+  // CDNA5 VFLAT can split a generic address into a vector offset and a scalar
+  // 64-bit base. The scalar pair is the aperture-bearing component; treating
+  // only src0 as a complete vector pointer loses the `src_shared_base`
+  // provenance used by RCCL's barrier counters.
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    const auto source = register_ref(inst.src_operand(index), RegClass::SGPR);
+    if (!source || source->width < 2u)
+      continue;
+    if (const auto hint = source_pair_hint(inst.src_operand(index), tracker))
+      return flat_pair_hint_to_public(*hint);
+  }
   const std::optional<uint16_t> addr = vgpr_index(inst.src_operand(0));
   if (!addr)
     return ConSanFlatAddressSpaceHint::Unknown;
@@ -1617,28 +1677,41 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   kernel.lds_sites.push_back(std::move(site));
 }
 
-[[nodiscard]] bool record_direct_to_lds_site(const Instruction &inst,
-                                             std::span<const uint8_t> instruction_bytes,
-                                             ConSanKernelInfo &kernel,
-                                             uint64_t instruction_text_offset,
-                                             rj_code_arch_t arch) {
+[[nodiscard]] std::optional<ConSanLdsAccessKind>
+record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t> instruction_bytes,
+                                ConSanKernelInfo &kernel, uint64_t instruction_text_offset,
+                                rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic == "global_load_async_to_lds_b32" &&
+  const bool gfx1250_async_load =
+      arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic.starts_with("global_load_async_to_lds_b");
+  const bool gfx1250_async_store =
+      arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic.starts_with("global_store_async_from_lds_b");
+  if ((gfx1250_async_load || gfx1250_async_store) &&
       instruction_bytes.size() == sizeof(cdna5::VglobalMachineInst)) {
+    cdna5::VglobalMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    // The instrumentation currently snapshots the explicit LDS VGPR but does
+    // not reproduce VGLOBAL's signed immediate. RCCL's AsyncDataCopier and the
+    // corresponding compiler builtins use the zero-offset form. Keep the
+    // admitted contract exact rather than silently reporting a different LDS
+    // byte when a future workload uses a nonzero immediate.
+    if (sign_extend_24(static_cast<uint32_t>(raw.ioffset)) != 0)
+      return std::nullopt;
+
     ConSanLdsSite site;
-    site.kind = ConSanLdsAccessKind::Write;
+    site.kind = gfx1250_async_load ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
     site.direct_to_lds = true;
     site.text_offset = instruction_text_offset;
     site.file_offset = kernel.text_file_offset + instruction_text_offset;
     site.size = static_cast<uint32_t>(inst.size());
-    site.width_bits = 32u;
-    // Unlike the CDNA3/CDNA4 MUBUF form, CDNA5 names the LDS byte
-    // destination explicitly in the VGLOBAL VDST field.
-    site.addr_vgpr = vgpr_index(inst.src_operand(0));
+    site.width_bits = lds_width_bits(mnemonic);
+    // CDNA5 names the LDS byte address explicitly: the async-load destination
+    // is its first source operand, while the async-store source is its second.
+    site.addr_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
     site.supported_mvp = site.addr_vgpr.has_value();
     site.mnemonic = std::string(mnemonic);
     kernel.lds_sites.push_back(std::move(site));
-    return true;
+    return kernel.lds_sites.back().kind;
   }
 
   const bool is_supported_load =
@@ -1646,7 +1719,7 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
       mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
   if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       !is_supported_load || instruction_bytes.size() != sizeof(cdna4::MubufMachineInst)) {
-    return false;
+    return std::nullopt;
   }
 
   cdna4::MubufMachineInst raw{};
@@ -1655,7 +1728,7 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   // prototype to the documented zero encoding, and to widths whose lane-slot
   // geometry is architecturally established.
   if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
-    return false;
+    return std::nullopt;
 
   ConSanLdsSite site;
   site.kind = ConSanLdsAccessKind::Write;
@@ -1669,7 +1742,7 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   // DWORD, sixteen for DWORDX3/DWORDX4. No address or payload VGPR is defined.
   site.mnemonic = std::string(mnemonic);
   kernel.lds_sites.push_back(std::move(site));
-  return true;
+  return ConSanLdsAccessKind::Write;
 }
 
 [[nodiscard]] ConSanBarrierSite::Scope barrier_scope_for_id(int32_t barrier_id) {
@@ -1902,24 +1975,38 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     site.raw_op = static_cast<uint32_t>(raw.op);
     site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.raw_scale_offset = raw.scale_offset != 0u;
     site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
     site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
     site.raw_vdst = static_cast<uint32_t>(raw.vdst);
     site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
     site.raw_scope = static_cast<uint32_t>(raw.scope);
     site.raw_th = static_cast<uint32_t>(raw.th);
+    if (raw.saddr != cdna5::OPR_SREG_NULL) {
+      if (const auto hint = pair_hint_at(tracker.sgprs, static_cast<uint16_t>(raw.saddr)))
+        site.address_space_hint = flat_pair_hint_to_public(*hint);
+    }
   } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
              instruction_bytes.size() >= sizeof(rdna4::VflatMachineInst)) {
     rdna4::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     site.raw_op = static_cast<uint32_t>(raw.op);
     site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    // RDNA4 reserves this bit in VFLAT; unlike CDNA5, its effective vector
+    // offset is always byte-scaled by one.
+    site.raw_scale_offset = false;
     site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
     site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
     site.raw_vdst = static_cast<uint32_t>(raw.vdst);
     site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
     site.raw_scope = static_cast<uint32_t>(raw.scope);
     site.raw_th = static_cast<uint32_t>(raw.th);
+    // The RDNA4 decoder's generic operand list does not expose SADDR. Recover
+    // its aperture provenance from the authoritative encoded scalar pair.
+    if (raw.saddr != rdna4::OPR_SREG_NULL) {
+      if (const auto hint = pair_hint_at(tracker.sgprs, static_cast<uint16_t>(raw.saddr)))
+        site.address_space_hint = flat_pair_hint_to_public(*hint);
+    }
   }
   count_flat_address_space_hint(kernel.stats, site.address_space_hint);
   site.mnemonic = std::string(mnemonic);
@@ -2024,9 +2111,9 @@ void fill_rdna3_global_ordinary_memory_raw(ConSanOrdinaryMemorySite &site,
     site.value_vgpr = static_cast<uint16_t>(raw.data);
 }
 
-void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kernel,
-                                 uint64_t instruction_text_offset, rj_code_arch_t arch,
-                                 std::span<const uint8_t> instruction_bytes) {
+void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTracker &tracker,
+                                 ConSanKernelInfo &kernel, uint64_t instruction_text_offset,
+                                 rj_code_arch_t arch, std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!is_bounded_ordinary_memory_instruction(mnemonic))
     return;
@@ -2040,6 +2127,8 @@ void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kern
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = bounded_ordinary_memory_width(mnemonic);
   site.mnemonic = std::string(mnemonic);
+  if (mnemonic.starts_with("flat_"))
+    site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
 
   // Operand objects remain useful on unsupported architectures, while the
   // raw RDNA4 fields below are the authoritative bounded decode.
@@ -2090,7 +2179,57 @@ void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kern
 
   bool well_formed = false;
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("global_")) {
+      mnemonic.starts_with("flat_")) {
+    if (instruction_bytes.size() != sizeof(cdna4::FlatMachineInst)) {
+      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
+    } else {
+      cdna4::FlatMachineInst raw{};
+      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+      site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+      site.raw_vaddr = static_cast<uint32_t>(raw.addr);
+      site.raw_vsrc = static_cast<uint32_t>(raw.data);
+      site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+      site.raw_ioffset = static_cast<int32_t>(raw.offset);
+      // Pre-gfx12 FLAT carries coherency bits rather than a literal scope.
+      // Exact group provenance makes the effective scope workgroup; other
+      // apertures retain the existing device-scope convention.
+      site.raw_scope = site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ? 1u : 2u;
+      site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
+      site.address_vgpr = static_cast<uint16_t>(raw.addr);
+      if (site.operation == ConSanOrdinaryMemoryOperation::Load)
+        site.destination_vgpr = static_cast<uint16_t>(raw.vdst);
+      else
+        site.value_vgpr = static_cast<uint16_t>(raw.data);
+      well_formed = raw.encoding == 0x37u && raw.seg == 0u;
+      site.support_reason = well_formed
+                                ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
+                                : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
+    }
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && mnemonic.starts_with("flat_")) {
+    if (instruction_bytes.size() != sizeof(rdna3::FlatMachineInst)) {
+      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
+    } else {
+      rdna3::FlatMachineInst raw{};
+      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+      site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+      site.raw_vaddr = static_cast<uint32_t>(raw.addr);
+      site.raw_vsrc = static_cast<uint32_t>(raw.data);
+      site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+      site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
+      site.raw_scope = site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ? 1u : 2u;
+      site.raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u);
+      site.address_vgpr = static_cast<uint16_t>(raw.addr);
+      if (site.operation == ConSanOrdinaryMemoryOperation::Load)
+        site.destination_vgpr = static_cast<uint16_t>(raw.vdst);
+      else
+        site.value_vgpr = static_cast<uint16_t>(raw.data);
+      well_formed = raw.encoding == 0x37u && raw.seg == 0u && raw.pad_25 == 0u;
+      site.support_reason = well_formed
+                                ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
+                                : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
+    }
+  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+             mnemonic.starts_with("global_")) {
     if (instruction_bytes.size() != sizeof(cdna4::FlatGlblMachineInst)) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
@@ -2424,9 +2563,13 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     classify_instruction(*inst, kernel.stats);
     const std::span<const uint8_t> instruction_bytes =
         text.subspan(offset, static_cast<size_t>(inst_size));
-    if (record_direct_to_lds_site(*inst, instruction_bytes, kernel,
-                                  kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
-      ++kernel.stats.lds_write_count;
+    if (const auto direct_lds_kind = record_direct_lds_transfer_site(
+            *inst, instruction_bytes, kernel,
+            kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
+      if (*direct_lds_kind == ConSanLdsAccessKind::Read)
+        ++kernel.stats.lds_read_count;
+      else if (*direct_lds_kind == ConSanLdsAccessKind::Write)
+        ++kernel.stats.lds_write_count;
     }
     record_lds_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     const std::span<const uint8_t> previous_instruction_bytes =
@@ -2440,7 +2583,7 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     record_flat_site(*inst, flat_pointer_tracker, kernel,
                      kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                      instruction_bytes);
-    record_ordinary_memory_site(*inst, kernel,
+    record_ordinary_memory_site(*inst, flat_pointer_tracker, kernel,
                                 kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                                 instruction_bytes);
     record_atomic_site(*inst, flat_pointer_tracker, kernel,

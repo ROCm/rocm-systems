@@ -49,8 +49,8 @@ TEST(ConSanMoiAdversarial, MultipleProducerClaimLossRollsBackAndDispatchReuseCol
   constexpr uint64_t second_dispatch = 0x1000000000000002ull;
   std::array<ConSanMoiInlineAcquiredEpochTokenSlot, 64> table{};
   const std::array desired = {make_token(first_dispatch, 7, 3), make_token(first_dispatch, 7, 5)};
-  ASSERT_NE(consan_moi_inline_acquired_epoch_token_slot_index(19, 7, 3, table.size()),
-            consan_moi_inline_acquired_epoch_token_slot_index(19, 7, 5, table.size()));
+  ASSERT_NE(consan_moi_inline_acquired_epoch_token_slot_index(19, 7, 3, 0u, table.size()),
+            consan_moi_inline_acquired_epoch_token_slot_index(19, 7, 5, 0u, table.size()));
 
   const auto pristine = table;
   constexpr std::array claim_loss = {true, false};
@@ -113,7 +113,7 @@ TEST(ConSanMoiAdversarial, TransitiveImportUsesImmutableBeforeReleaseAncestry) {
             ConSanMoiInlineCausalImportStatus::UnstableRelease);
 }
 
-TEST(ConSanMoiAdversarial, SnapshotOverflowPublicationDriftAndDuplicateFailClosed) {
+TEST(ConSanMoiAdversarial, SnapshotOverflowPublicationDriftAndDuplicateCoalescing) {
   constexpr uint64_t dispatch = 0x3000000000000001ull;
   std::array<ConSanMoiInlineCausalTokenView, 5> fan_in{};
   for (uint32_t i = 0; i < fan_in.size(); ++i)
@@ -134,9 +134,11 @@ TEST(ConSanMoiAdversarial, SnapshotOverflowPublicationDriftAndDuplicateFailClose
             ConSanMoiInlineCausalSnapshotStatus::Malformed);
 
   const std::array duplicate = {fan_in[0], fan_in[0]};
-  EXPECT_EQ(consan_moi_inline_validate_causal_snapshot(
-                consan_moi_inline_capture_causal_snapshot(duplicate, dispatch, 19, 7), 7),
-            ConSanMoiInlineCausalSnapshotStatus::Malformed);
+  const auto coalesced = consan_moi_inline_capture_causal_snapshot(duplicate, dispatch, 19, 7);
+  EXPECT_EQ(consan_moi_inline_validate_causal_snapshot(coalesced, 7),
+            ConSanMoiInlineCausalSnapshotStatus::Usable);
+  ASSERT_EQ(coalesced.entry_count, 1u);
+  EXPECT_EQ(coalesced.entries[0].ancestor_epoch_plus_one, 1023u);
 
   std::array<ConSanMoiInlineAcquiredEpochTokenSlot, 64> table{};
   const std::array duplicate_destination = {make_token(dispatch, 7, 3), make_token(dispatch, 7, 3)};

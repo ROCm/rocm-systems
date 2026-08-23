@@ -361,7 +361,6 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
   const std::vector<std::vector<uint32_t>> rejected = {
       shape(load, {}, 1u),
       shape(load, wait, 0u),
-      shape(load, wait, 2u),
       shape(load, intervening_store, 1u),
       shape(load, intervening_barrier, 1u),
       shape(load, block_split, 1u),
@@ -373,6 +372,12 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
     SCOPED_TRACE(index);
     EXPECT_EQ(acquire_count(rejected[index]), 0u);
   }
+
+  // A second cache operation after the unique wait-adjacent invalidate is not
+  // an ambiguous acquire match: the intervening first invalidate prevents a
+  // second bounded load-to-cache proof. Preserve the exact compiler prefix
+  // while admitting unrelated later cache maintenance.
+  EXPECT_EQ(acquire_count(shape(load, wait, 2u)), 1u);
 }
 
 TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {

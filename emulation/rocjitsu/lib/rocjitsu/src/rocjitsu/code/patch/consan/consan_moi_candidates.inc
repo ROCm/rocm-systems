@@ -377,6 +377,54 @@ struct SkippedMoiFlatCounts {
   }
 };
 
+using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
+
+[[nodiscard]] std::set<OrderedOrdinarySyncSiteKey>
+ordered_ordinary_sync_site_keys(const ConSanResult &result) {
+  std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
+  events.reserve(result.sync_events.size());
+  for (const ConSanSyncEvent &event : result.sync_events)
+    events.emplace(event.identity, &event);
+
+  std::set<OrderedOrdinarySyncSiteKey> keys;
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+        (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
+         sequence.memory_role != ConSanSyncMemoryRole::Release) ||
+        !consan_sync_confidence_meets(sequence.confidence,
+                                      ConSanSemanticConfidence::Conservative) ||
+        !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                      ConSanSemanticConfidence::Conservative)) {
+      continue;
+    }
+    const ConSanSyncEvent *communication = nullptr;
+    for (const std::string &identity : sequence.member_event_identities) {
+      const auto found = events.find(identity);
+      if (found == events.end() || found->second->kind != ConSanSyncEventKind::OrdinaryMemory)
+        continue;
+      if (communication != nullptr) {
+        communication = nullptr;
+        break;
+      }
+      communication = found->second;
+    }
+    if (communication != nullptr && communication->container_name == sequence.container_name &&
+        communication->in_kernel == sequence.in_kernel) {
+      keys.emplace(communication->in_kernel, communication->container_name,
+                   communication->text_offset);
+    }
+  }
+  return keys;
+}
+
+[[nodiscard]] bool
+is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
+                              std::string_view container_name, bool in_kernel,
+                              uint64_t text_offset) {
+  return ordered_sync_sites.contains(
+      OrderedOrdinarySyncSiteKey{in_kernel, std::string(container_name), text_offset});
+}
+
 void count_skipped_moi_flat_candidate(const ConSanFlatSite &site, SkippedMoiFlatCounts &counts) {
   if (site.kind == ConSanLdsAccessKind::Other) {
     ++counts.other_kind;
@@ -467,6 +515,7 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.uses_gfx1250_cluster_workgroup_id = uses_gfx1250_cluster_workgroup_id;
   candidate.raw_op = site.raw_op;
   candidate.raw_saddr = site.raw_saddr;
+  candidate.raw_scale_offset = site.raw_scale_offset;
   candidate.raw_vaddr = site.raw_vaddr;
   candidate.raw_vsrc = site.raw_vsrc;
   candidate.raw_vdst = site.raw_vdst;
@@ -513,9 +562,15 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_CDNA5))
+  if (!candidate.raw_ioffset)
+    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
+  if (*candidate.raw_ioffset != 0 && !is_rdna4_family_arch(arch))
     return ConSanSiteDispositionReason::NonzeroFlatOffset;
-  if (*candidate.addr_vgpr >= 255)
+  if (is_rdna4_family_arch(arch) && (!candidate.raw_saddr || !candidate.raw_scale_offset))
+    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
+  const bool scalar_vector_address = is_rdna4_family_arch(arch) && candidate.raw_saddr &&
+                                     !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
+  if (*candidate.addr_vgpr >= 255 && !scalar_vector_address)
     return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
   if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
     return ConSanSiteDispositionReason::UnsupportedMnemonic;
@@ -541,10 +596,10 @@ void append_moi_access_site_disposition(std::span<const uint8_t> bytes,
 }
 
 template <typename Container>
-void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const Container &container,
-                                         ConSanFlatProvenanceMode mode,
-                                         const ConSanOptions &options, rj_code_arch_t arch,
-                                         ConSanResult &result) {
+void append_moi_access_site_dispositions(
+    std::span<const uint8_t> bytes, const Container &container, ConSanFlatProvenanceMode mode,
+    const ConSanOptions &options, rj_code_arch_t arch,
+    const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
   if (!options.test_kernel_name_filter.empty() &&
       container.name.find(options.test_kernel_name_filter) == std::string::npos)
@@ -565,6 +620,15 @@ void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const C
         bytes, make_moi_candidate(container.name, in_kernel, descriptor, site), arch, result);
   }
   for (const ConSanFlatSite &site : container.flat_sites) {
+    // A compiler-lowered language-level atomic load/store is represented by
+    // an ordinary FLAT instruction in the ISA, but it is not an ordinary data
+    // access. Its complete load/store + ordering-suffix sequence is owned by
+    // the synchronization engine. Instrumenting the instruction a second time
+    // as a race access both misstates the language semantics and creates two
+    // competing patches at one physical instruction.
+    if (is_ordered_ordinary_sync_site(ordered_sync_sites, container.name, in_kernel,
+                                      site.text_offset))
+      continue;
     if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
       continue;
     const bool group = site.address_space_hint == ConSanFlatAddressSpaceHint::Group;
@@ -579,7 +643,9 @@ void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const C
 }
 
 void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanFlatProvenanceMode mode,
-                           rj_code_arch_t arch, ConSanResult &result) {
+                           rj_code_arch_t arch,
+                           const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
+                           ConSanResult &result) {
   SkippedMoiLdsCounts skipped_lds_counts;
   for (const ConSanLdsSite &site : kernel.lds_sites) {
     if (is_moi_native_lds_candidate(site, arch)) {
@@ -593,6 +659,8 @@ void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanFlatProvenanceM
   warn_skipped_moi_lds_candidates(kernel.name, true, skipped_lds_counts, result);
   SkippedMoiFlatCounts skipped_flat_counts;
   for (const ConSanFlatSite &site : kernel.flat_sites) {
+    if (is_ordered_ordinary_sync_site(ordered_sync_sites, kernel.name, true, site.text_offset))
+      continue;
     if (is_moi_flat_candidate(site, mode)) {
       result.moi_candidates.push_back(
           make_moi_candidate(kernel.name, true, kernel.descriptor_file_offset, site,
@@ -608,7 +676,9 @@ void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanFlatProvenanceM
 }
 
 void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvenanceMode mode,
-                           rj_code_arch_t arch, ConSanResult &result) {
+                           rj_code_arch_t arch,
+                           const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
+                           ConSanResult &result) {
   SkippedMoiLdsCounts skipped_lds_counts;
   for (const ConSanLdsSite &site : function.lds_sites) {
     if (is_moi_native_lds_candidate(site, arch)) {
@@ -622,6 +692,8 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
   warn_skipped_moi_lds_candidates(function.name, false, skipped_lds_counts, result);
   SkippedMoiFlatCounts skipped_flat_counts;
   for (const ConSanFlatSite &site : function.flat_sites) {
+    if (is_ordered_ordinary_sync_site(ordered_sync_sites, function.name, false, site.text_offset))
+      continue;
     if (is_moi_flat_candidate(site, mode)) {
       result.moi_candidates.push_back(make_moi_candidate(function.name, false, std::nullopt, site,
                                                          function.uses_gfx1250_cluster_workgroup_id,
@@ -643,15 +715,15 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
                   lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits, lhs.dst_vgpr,
                   lhs.addr_vgpr, lhs.data_vgpr, lhs.second_data_vgpr,
                   lhs.uses_gfx1250_cluster_workgroup_id, lhs.raw_op, lhs.raw_saddr, lhs.raw_vaddr,
-                  lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset, lhs.raw_segment, lhs.raw_scope,
-                  lhs.raw_th, lhs.mnemonic) ==
+                  lhs.raw_scale_offset, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
+                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
          std::tie(rhs.in_kernel, rhs.container_entry_text_offset, rhs.gfx1250_vgpr_msb_mode,
                   rhs.source, rhs.kind, rhs.direct_to_lds, rhs.flat_address_space_hint,
                   rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits, rhs.dst_vgpr,
                   rhs.addr_vgpr, rhs.data_vgpr, rhs.second_data_vgpr,
                   rhs.uses_gfx1250_cluster_workgroup_id, rhs.raw_op, rhs.raw_saddr, rhs.raw_vaddr,
-                  rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset, rhs.raw_segment, rhs.raw_scope,
-                  rhs.raw_th, rhs.mnemonic);
+                  rhs.raw_scale_offset, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
+                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
 }
 
 [[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
@@ -711,12 +783,12 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic,
                                                        rj_code_arch_t arch) {
-  // CDNA3, CDNA4, and RDNA4 B96 are admitted as family capabilities. Their
-  // native spellings share the qualified three-dword resource plan and
-  // fixed-register lowering.
-  // RDNA3/RDNA3.5 encode B96, but the qualified RDNA3 ConSan subset does not
-  // admit that width.
-  if (is_rdna4_family_arch(arch) && equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
+  // RDNA3, RDNA4, and CDNA5 B96 share the qualified three-dword resource plan
+  // and fixed-register lowering. The gfx11 spelling differs only in its
+  // completion wait, which remains part of the relocated guest sequence.
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+       is_rdna4_family_arch(arch)) &&
+      equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
     return true;
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       equals_any(mnemonic, {"ds_read_b96", "ds_write_b96"}))
@@ -807,9 +879,15 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
       candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
   if (!rdna4_encoding && !cdna4_encoding)
     return false;
-  if (!candidate.raw_ioffset || (*candidate.raw_ioffset != 0 && arch != ROCJITSU_CODE_ARCH_CDNA5))
+  if (!candidate.raw_ioffset)
     return false;
-  if (!candidate.addr_vgpr || *candidate.addr_vgpr >= 255)
+  if (*candidate.raw_ioffset != 0 && !is_rdna4_family_arch(arch))
+    return false;
+  if (is_rdna4_family_arch(arch) && (!candidate.raw_saddr || !candidate.raw_scale_offset))
+    return false;
+  const bool scalar_vector_address = is_rdna4_family_arch(arch) && candidate.raw_saddr &&
+                                     !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
+  if (!candidate.addr_vgpr || (*candidate.addr_vgpr >= 255 && !scalar_vector_address))
     return false;
   if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
     return false;
@@ -1102,29 +1180,6 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     }
   }
   return true;
-}
-
-[[nodiscard]] bool append_atomic_event_index_store(std::vector<uint32_t> &words,
-                                                   uint64_t counter_address,
-                                                   uint64_t event_index_address,
-                                                   uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t address_lo_vgpr = scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-
-  const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
-      address_lo_vgpr, static_cast<uint32_t>(counter_address), arch);
-  const auto mov_address_hi = instrumentation::build_v_mov_b32_literal(
-      address_hi_vgpr, static_cast<uint32_t>(counter_address >> 32u), arch);
-  const auto mov_one = instrumentation::build_v_mov_b32_literal(value_vgpr, 1u, arch);
-  const auto atomic_add = instrumentation::build_flat_atomic_add_u32(
-      address_lo_vgpr, value_vgpr, value_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  InstructionSequence sequence(words);
-  if (!sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add) ||
-      !append_moi_global_atomic_wait(words, arch)) {
-    return false;
-  }
-  return append_store_u32_vgpr(words, event_index_address, value_vgpr, scratch_vgpr, arch);
 }
 
 [[nodiscard]] bool append_atomic_fetch_add_one_u32(std::vector<uint32_t> &words,

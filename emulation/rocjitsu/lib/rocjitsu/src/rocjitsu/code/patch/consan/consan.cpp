@@ -74,10 +74,11 @@ namespace {
   return load.kind == ConSanSyncEventKind::OrdinaryMemory &&
          load.operation == ConSanSyncOperation::OrdinaryLoad && load.width_bits == 32u &&
          load.confidence == ConSanSemanticConfidence::Conservative && load.raw_scope &&
-         (*load.raw_scope == 2u || *load.raw_scope == 3u) &&
+         (*load.raw_scope >= 1u && *load.raw_scope <= 3u) &&
          cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
          (cache.mnemonic == "global_inv" || cache.mnemonic == "buffer_inv" ||
+          (*load.raw_scope == 1u && cache.mnemonic == "buffer_gl0_inv") ||
           (allow_rdna3_cache_pair_member &&
            (cache.mnemonic == "buffer_gl1_inv" || cache.mnemonic == "buffer_gl0_inv"))) &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&

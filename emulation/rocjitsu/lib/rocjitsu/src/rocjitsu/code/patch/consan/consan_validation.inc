@@ -3728,7 +3728,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     const std::vector<size_t> cas_positions = positions(*version_cas);
     const std::vector<size_t> owner_positions = positions(*owner_store);
     const size_t owner_between =
-        cas_positions.size() == 2u
+        cas_positions.size() >= 2u
             ? std::ranges::count_if(owner_positions,
                                     [&](size_t position) {
                                       return cas_positions.front() < position &&
@@ -3743,8 +3743,21 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     const bool claimed_acquire_release_arch =
         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
         arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
-    bool valid = cas_positions.size() == 2u &&
-                 (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
+    const ConSanAtomicSite *site = atomic_site_for(patch.anchor_offset);
+    const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
+    const bool claimed_compare_exchange = compare_exchange && cas_positions.size() == 3u;
+    const size_t publication_begin =
+        claimed_compare_exchange ? cas_positions[1] : cas_positions.front();
+    const size_t publisher_owner_count =
+        cas_positions.size() >= 2u ? std::ranges::count_if(owner_positions,
+                                                           [&](size_t position) {
+                                                             return publication_begin < position &&
+                                                                    position < cas_positions.back();
+                                                           })
+                                   : 0u;
+    bool valid = ((!compare_exchange && cas_positions.size() == 2u) || claimed_compare_exchange) &&
+                 (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u)) &&
+                 (!claimed_compare_exchange || publisher_owner_count == 1u);
 
     constexpr std::array<size_t, 12> kTokenPayloadOffsets = {
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
@@ -3783,7 +3796,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
         return false;
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
-             cas_positions.front() < store_positions.front() &&
+             publication_begin < store_positions.front() &&
              std::ranges::any_of(owner_positions, [&](size_t owner_position) {
                return store_positions.front() < owner_position &&
                       owner_position < cas_positions.back();
@@ -3806,8 +3819,6 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     const size_t wait_store_count = positions(std::array<uint32_t, 1>{*wait_store}).size();
     valid &= wait_store_count >= 2u;
 
-    const ConSanAtomicSite *site = atomic_site_for(patch.anchor_offset);
-    const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
     if (compare_exchange) {
       if (!site->data_vgpr || !site->dst_vgpr) {
         valid = false;
@@ -3822,8 +3833,27 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
         } else {
           const std::array<uint32_t, 2> success_sequence = {*success, *narrow};
           const std::vector<size_t> success_positions = positions(success_sequence);
-          valid &= success_positions.size() == 1u && !cas_positions.empty() &&
-                   success_positions.front() < cas_positions.front();
+          const bool guest_offset_valid =
+              patch.relocated_guest_instruction_offset &&
+              *patch.relocated_guest_instruction_offset >= patch.trampoline_offset &&
+              (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) %
+                      sizeof(uint32_t) ==
+                  0u;
+          const size_t guest_position =
+              guest_offset_valid ? static_cast<size_t>((*patch.relocated_guest_instruction_offset -
+                                                        patch.trampoline_offset) /
+                                                       sizeof(uint32_t))
+                                 : body_words.size();
+          // The release slot must already be odd when the guest CAS exposes
+          // its new value. Both post-guest outcome qualifications precede the
+          // failed-comparison rollback, and only then may successor metadata
+          // be staged and committed.
+          valid &= claimed_compare_exchange && guest_offset_valid &&
+                   guest_position < body_words.size() && success_positions.size() == 2u &&
+                   cas_positions.front() < guest_position &&
+                   guest_position < success_positions.front() &&
+                   success_positions.front() < success_positions.back() &&
+                   success_positions.back() < cas_positions[1];
         }
       }
     }
@@ -3832,6 +3862,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
                           "semantics (cas=" +
                           std::to_string(cas_positions.size()) +
                           " owner_between=" + std::to_string(owner_between) +
+                          " publisher_owner=" + std::to_string(publisher_owner_count) +
                           " token_loads=" + (token_loads_valid ? "yes" : "no") +
                           " snapshot_stores=" + (snapshot_stores_valid ? "yes" : "no") +
                           " waits=" + std::to_string(wait_store_count) + ")");

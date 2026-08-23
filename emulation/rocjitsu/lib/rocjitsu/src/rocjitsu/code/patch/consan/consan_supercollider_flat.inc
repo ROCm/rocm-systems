@@ -682,8 +682,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                         instruction->size());
             cursor += static_cast<uint64_t>(instruction->size());
           }
+          const uint64_t displaced_size = displaced_words.size() * sizeof(uint32_t);
+          BasicBlock *entry_block = block_for_offset(block_index, site.text_offset);
+          const bool single_entry_window =
+              entry_block != nullptr && site.text_offset >= entry_block->start_offset() &&
+              site.text_offset <= entry_block->end_offset() &&
+              displaced_size <= entry_block->end_offset() - site.text_offset;
           if (displaced_words.size() >= kLdsCheckTrapIndirectJumpWords &&
-              displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
+              displaced_size <= std::numeric_limits<uint32_t>::max() &&
+              single_entry_window) {
             FlatCheckTrapCandidate direct =
                 make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
                                /*use_local_cave=*/false, /*use_appended_cave=*/true, scalar_scratch,

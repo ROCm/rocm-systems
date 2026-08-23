@@ -319,6 +319,8 @@ constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
     return "trampoline-branch-relay-reservoir";
   case rocjitsu::ConSanPatchKind::TrampolineNopBranchRelay:
     return "trampoline-nop-branch-relay";
+  case rocjitsu::ConSanPatchKind::InlineScalarClauseNopRewrite:
+    return "inline-scalar-clause-nop-rewrite";
   case rocjitsu::ConSanPatchKind::TrampolineMoiIndirectBranchIsland:
     return "trampoline-moi-indirect-branch-island";
   case rocjitsu::ConSanPatchKind::TrampolineNop:

@@ -1602,8 +1602,12 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
 TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback) {
   constexpr auto store =
       cdna5::build_vflat(cdna5::kFlatStoreD16HiB8Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  const auto maybe_high = instrumentation::build_s_cselect_b32(
+      /*sdst=*/1u, /*ssrc0=*/1u, /*ssrc1=*/8u, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_high);
   std::vector<uint32_t> text_words = {
       0xBE8001EBu,              // s_mov_b64 s[0:1], src_shared_base
+      *maybe_high,              // s_cselect_b32 s1, s1, s8
       0xD5810000u, 0x00000080u, // v_mov_b32_e64 v0, 0
       0xD5810001u, 0x00000001u, // v_mov_b32_e64 v1, s1
       store[0],    store[1],    store[2],
@@ -1639,7 +1643,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
-  const auto rewritten_words = patched_words_at_file_offset<18>(result, 0x114);
+  const auto rewritten_words = patched_words_at_file_offset<18>(result, 0x118);
   EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
                                                                   ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(rewritten_words[1], store[0]);

@@ -1404,9 +1404,17 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   EXPECT_EQ(patch.spilled_vgpr_count, 7u);
   EXPECT_EQ(patch.required_private_segment_size, 60u);
   EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
-                               &ConSanPatchInfo::kind),
-            1u);
+  const auto fence_it = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
+                                          &ConSanPatchInfo::kind);
+  ASSERT_NE(fence_it, result.patches.end());
+  EXPECT_EQ(fence_it->owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+  uint32_t shared_private_size = 0u;
+  for (const ConSanPatchInfo &item : result.patches) {
+    if (item.owner_descriptor_file_offsets == plan.owner_descriptor_file_offsets) {
+      shared_private_size = std::max(shared_private_size, item.required_private_segment_size);
+    }
+  }
+  ASSERT_GT(shared_private_size, 0u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1415,7 +1423,7 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 76u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, shared_private_size);
     } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
     }
@@ -2223,6 +2231,26 @@ TEST(ConSanMoi, Gfx1201MoiEnginesAdmitNativeB96Accesses) {
       });
 }
 
+TEST(ConSanMoi, Gfx1100MoiEnginesAdmitNativeB96Accesses) {
+  constexpr auto store =
+      rdna4::build_vds(rdna4::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});
+  constexpr auto load =
+      rdna4::build_vds(rdna4::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 4});
+  constexpr auto aliasing_load =
+      rdna4::build_vds(rdna4::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 0});
+  constexpr std::array<NativeB96Access, 3> accesses = {
+      NativeB96Access{store, "ds_store_b96", false},
+      NativeB96Access{load, "ds_load_b96", false},
+      NativeB96Access{aliasing_load, "ds_load_b96", true},
+  };
+
+  expect_moi_engines_admit_native_b96_accesses(
+      ROCJITSU_CODE_ARCH_RDNA3, accesses, [](const auto &text_words) {
+        return make_rdna3_lds_code_object(text_words, "gfx1100_native_b96_access",
+                                          kRdna4Wave64AllVgprsGranulated, /*wave32=*/true);
+      });
+}
+
 TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
   constexpr std::array<uint32_t, 3> text_words = {0xDB78000Cu,
                                                   0x00000100u, // ds_store_b96 v0, v[1:3] offset:12
@@ -2247,10 +2275,8 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
     SCOPED_TRACE(mnemonic);
     EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA4));
     EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA5));
-    // RDNA3 and RDNA3.5 hardware encode B96, but ConSan's RDNA3 subset does
-    // not admit that width.
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
-    EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3));
+    EXPECT_TRUE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_RDNA3_5));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA3));
     EXPECT_FALSE(consan_moi_supports_native_lds_mnemonic(mnemonic, ROCJITSU_CODE_ARCH_CDNA4));
   }
@@ -3057,8 +3083,12 @@ TEST(ConSanMoi, LdsCellRangesRoundUnalignedBytesToFourByteGranules) {
 }
 
 TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
-  const std::array<uint32_t, 9> text_words = {
+  const auto maybe_high = instrumentation::build_s_cselect_b32(
+      /*sdst=*/1u, /*ssrc0=*/1u, /*ssrc1=*/8u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_high);
+  const std::array<uint32_t, 10> text_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      *maybe_high,                           // s_cselect_b32 s1, s1, s8
       0xD5810000u, 0x00000080u,              // v_mov_b32_e64 v0, 0
       0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]

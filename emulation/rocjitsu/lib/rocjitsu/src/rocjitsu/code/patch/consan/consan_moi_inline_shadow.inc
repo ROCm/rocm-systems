@@ -1072,6 +1072,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             candidate.text_offset + displaced_words.size() * sizeof(uint32_t);
         if (displaced_words.size() >= kIndirectIslandWords &&
             displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max() &&
+            moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
+                                              displaced_end - candidate.text_offset) &&
             !relocation_overlaps_synchronization(candidate.text_offset + candidate.size,
                                                  displaced_end)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
@@ -2772,18 +2774,17 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   words.push_back(*save_exec);
   words.push_back(*save_scc);
   words.push_back(*save_vcc);
-  if (candidate_requires_gfx1250_flat_offset_materialization(candidate)) {
+  if (candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
     if (!preserved_lds_byte_offset_vgpr) {
-      errors.emplace_back("ConSan MOI sampled FLAT offset has no preserved address pair");
+      errors.emplace_back("ConSan MOI sampled FLAT address has no preserved address pair");
       return std::nullopt;
     }
-    const auto add = instrumentation::build_v_add_u64_signed_i24(*preserved_lds_byte_offset_vgpr,
-                                                                 *candidate.raw_ioffset, arch);
-    if (!add) {
-      errors.emplace_back("ConSan MOI sampled probe could not materialize FLAT offset");
+    if (!append_materialize_gfx12_flat_access_address(words, candidate,
+                                                      *preserved_lds_byte_offset_vgpr,
+                                                      *preserved_lds_byte_offset_vgpr, arch)) {
+      errors.emplace_back("ConSan MOI sampled probe could not materialize FLAT address");
       return std::nullopt;
     }
-    words.insert(words.end(), add->begin(), add->end());
   }
   if (runtime_sampled) {
     if (runtime_workgroup_gate_in_body) {
@@ -3412,10 +3413,10 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
   }
-  const bool materialize_flat_offset =
-      candidate_requires_gfx1250_flat_offset_materialization(candidate);
+  const bool materialize_flat_address =
+      candidate_requires_gfx12_flat_address_materialization(candidate, arch);
   if (!preserved_lds_byte_offset_vgpr &&
-      (moi_load_clobbers_address(candidate) || materialize_flat_offset)) {
+      (moi_load_clobbers_address(candidate) || materialize_flat_address)) {
     if (!options.scratch_vgpr)
       return std::nullopt;
     preserved_lds_byte_offset_vgpr =
@@ -3425,7 +3426,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       return std::nullopt;
     words.push_back(build_v_mov_b32_e32(*preserved_lds_byte_offset_vgpr,
                                         vector_source_vgpr(*lds_byte_offset_vgpr), arch));
-    if (materialize_flat_offset) {
+    if (materialize_flat_address &&
+        !candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch)) {
       words.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(*preserved_lds_byte_offset_vgpr + 1u),
           vector_source_vgpr(static_cast<uint16_t>(*lds_byte_offset_vgpr + 1u)), arch));

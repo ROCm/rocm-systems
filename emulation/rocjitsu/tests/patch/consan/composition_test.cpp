@@ -1074,12 +1074,19 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("sampled barrier sync skipped dense relay") != std::string::npos &&
+    return warning.find("sampled barrier sync fell back from dense relay") != std::string::npos &&
            warning.find("no liveness-safe relocatable host") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
-            0u);
+            kBarrierCount);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+                                           patch.covered_sync_event_count == 2u;
+                                  }),
+            kBarrierCount);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
