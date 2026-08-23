@@ -6058,6 +6058,38 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_jakub_inline_fault_targets_reader_retirement(self) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-pipelined-reader-retirement-inline",
+        )
+
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        self.assertIn("fp16_wmma_tiled_kernel", site)
+        self.assertIn("ELb1ELb0ELNS_8SyncModeE0E", site)
+        self.assertIn("pc=0x0000000000000ddc", site)
+        self.assertIn("occurrence=2", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn(
+            "stores for the replacement stage immediately follow",
+            fault["reach_witness"]["evidence"],
+        )
+
+        policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "pass")
+        self.assertEqual(
+            policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+        )
+        self.assertEqual(trials, [{}])
+
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]

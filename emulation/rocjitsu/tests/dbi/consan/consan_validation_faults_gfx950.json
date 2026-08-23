@@ -48,6 +48,31 @@
         }
       ]
     },
+    "jakub-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop-pipelined-reader-retirement-inline",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected site is a distinct reader-retirement barrier in the unconditional PipelinedProd16x8 loop. Peer LDS reads and their lgkm wait precede it, and stores for the replacement stage immediately follow it. The separately precommitted later publication-edge trial demonstrated that this loop exposes Inline Shadow conflicts while preserving all four numeric oracles, so this exact-one reuse-edge mutation is prospectively required to diagnose and pass the oracle."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:120a833f9c345de1|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4ELb0EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000ddc|mnemonic=s_barrier|occurrence=2"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "detected",
+              "oracle": "pass",
+              "environment": {
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+              }
+            }
+          }
+        }
+      ]
+    },
     "tree-atomic-or": {
       "faults": [
         {
