@@ -10742,6 +10742,53 @@ TEST(ConSanMoi, Rdna4AccessHeavyCompactSplitBarrierReservesEveryMemberEntry) {
   }));
 }
 
+TEST(ConSanMoi, CdnaSparseAccessDenseSpillRetainsEveryAccessAcrossTargets) {
+  constexpr uint32_t kAccessCount = 130u;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE("arch=" + std::to_string(arch));
+    std::vector<uint32_t> text_words(8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, arch));
+    for (uint32_t index = 0u; index < kAccessCount; ++index) {
+      const auto access = arch == ROCJITSU_CODE_ARCH_CDNA3
+                              ? build_cdna3_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                         (index % 64u) * sizeof(uint32_t), arch)
+                              : build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                         (index % 64u) * sizeof(uint32_t), arch);
+      ASSERT_TRUE(access);
+      text_words.insert(text_words.end(), access->begin(), access->end());
+    }
+    text_words.push_back(build_s_endpgm(arch));
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.force_vgpr_spill = true;
+    options.moi_init_owner_epoch = true;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(256u, 0u, 0u, 0u);
+    options.moi_runtime_sample_stride = 2u;
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = kAccessCount;
+
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "cdna3_sparse_access_dense_spill")
+            : make_cdna4_lds_code_object(text_words, "cdna4_sparse_access_dense_spill");
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                                 &ConSanPatchInfo::kind),
+              kAccessCount)
+        << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(
+        std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind != ConSanResourceSiteKind::Access ||
+                 plan.source == ConSanRegisterAllocationSource::SpillRequired;
+        }));
+  }
+}
+
 TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountLimit) {
   // A generated object can strand a small barrier inventory too. Keep this
   // below the count-based compact threshold so branch reach, rather than the

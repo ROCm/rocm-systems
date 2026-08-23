@@ -105,9 +105,11 @@ return point and must not be converted into repeated unbounded waits.
 
 The durable behavioral disposition is already cross-target.  The adjacent
 `ReusedLdsGemmPipeline` pair owns Qwen's same-storage reader-retirement edge,
-and `HeterogeneousObject` owns its multi-kernel attribution shape; both run
+`HeterogeneousObject` owns its multi-kernel attribution shape, and
+`RecordReplaySparseSpillPressure` owns its many-site sparse-selection plus
+spill-backed-access shape; they run
 correct/no-diagnostic and incorrect/required-diagnostic members through all
-four engines on CDNA3/4/5 and RDNA3/4, plus physical CDNA4.  The compiler
+declared applicable engines on CDNA3/4/5 and RDNA3/4, plus physical CDNA4.  The compiler
 kernarg-preload variant separately covers the generated CDNA3/CDNA4 entry
 shape.  The remaining Qwen gap is completion and performance evidence for the
 full gfx1250 emulation row, not an uncovered device-observable synchronization
@@ -134,12 +136,26 @@ gfx1201, and gfx1250 in 3.92 seconds, and all four physical-gfx950 rows in 1.28
 seconds. A five-target host regression requires the cached selection and full
 gfx1250 cluster-coordinate mix.
 
+The follow-on `RecordReplaySparseSpillPressure` pair retains the same
+stride-two selected/rejected workgroup behavior, raises the inventory to 130
+ordered LDS sites, preserves broad scalar liveness, and occupies every odd
+VGPR so that 128 access probes require spill-backed scratch. Its adjacent
+members differ only by the publication edge and check every selected and
+rejected workgroup result exactly. Baseline and Record/Replay pass all 20
+simulator rows plus all four physical-gfx950 rows. On CDNA3/CDNA4, static
+coverage is 130/130 accesses plus 1/1 barrier, all 128 spill plans are emitted,
+and clean replay is lossless. The reduction exposed compact spill-dense groups
+using per-site returns whose enlarged bodies stranded later probes; the shared
+return-PC path now applies to spill-backed dense groups on every family. A
+focused CDNA3/CDNA4 host regression requires all 130 access sites without
+freezing the current spill representation.
+
 The portable run also exposed an RDNA4 compact-barrier defect: access growth
 pushed both split-barrier bodies beyond direct branch reach, but reservation
 allocated one entry for the logical pair while lowering required independent
 signal and wait entries. A focused host regression now retains 130 access
 patches and both barrier records, and the corrected gfx1201 correct/incorrect
-device rows pass. All 780 `ConSanMoi.*` host tests pass. Qwen and TP2
+device rows pass. All 781 `ConSanMoi.*` host tests pass. Qwen and TP2
 Record/Replay remain orange until fresh full E2E runs prove final oracle,
 replay, and teardown completion; this reduction materially strengthens the
 quick cross-target gate but is not itself an E2E cell promotion.

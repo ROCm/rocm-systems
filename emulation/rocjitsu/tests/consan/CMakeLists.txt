@@ -447,6 +447,7 @@ function(rj_add_consan_device_conformance_cases)
         "FullBankStreamK|full_bank_streamk|ConSanDeviceFullBankStreamKTest|atomics"
         "RecordReplayLongRangeFullPressure|record_replay_long_range_full_pressure|ConSanDeviceRecordReplayLongRangeFullPressureTest|record-replay-only"
         "RecordReplaySparseDensePipeline|record_replay_sparse_dense_pipeline|ConSanDeviceRecordReplaySparseDensePipelineTest|record-replay-only"
+        "RecordReplaySparseSpillPressure|record_replay_sparse_spill_pressure|ConSanDeviceRecordReplaySparseSpillPressureTest|record-replay-only"
         "SuperColliderDenseThreshold|supercollider_dense_threshold|ConSanDeviceSuperColliderDenseThresholdTest|supercollider-only"
         "SampledIndependentScalarProofs|sampled_independent_scalar_proofs|ConSanDeviceSampledIndependentScalarProofsTest|sampled-only"
     )
@@ -668,7 +669,10 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
-                _workload_name STREQUAL "RecordReplaySparseDensePipeline"
+                (
+                    _workload_name STREQUAL "RecordReplaySparseDensePipeline"
+                    OR _workload_name STREQUAL "RecordReplaySparseSpillPressure"
+                )
                 AND _mode_value STREQUAL "record-replay"
             )
                 # Keep one workgroup selected while exercising the cached
@@ -1048,6 +1052,7 @@ function(rj_add_consan_device_fixture_targets target)
         "full_bank_streamk|cdna_full_bank_streamk_test.hip"
         "record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
         "record_replay_sparse_dense_pipeline|record_replay_sparse_dense_pipeline_test.hip"
+        "record_replay_sparse_spill_pressure|record_replay_sparse_spill_pressure_test.hip"
         "supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         "sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
     )
@@ -1254,6 +1259,28 @@ function(rj_add_consan_device_fixture_targets target)
             list(
                 APPEND _workload_compile_definitions
                 RJ_CONSAN_SPARSE_DENSE_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_SPARSE_SPILL_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "record_replay_sparse_spill_pressure"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_SPARSE_SPILL_MODERN_LDS=1
             )
         endif()
         if(

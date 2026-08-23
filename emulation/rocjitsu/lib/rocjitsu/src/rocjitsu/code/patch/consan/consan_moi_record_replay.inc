@@ -314,12 +314,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           group.candidates.size() == 1u &&
           local_entry_islands->has_reachable(group.candidates.front()->text_offset,
                                              group_entry_island_words);
-      // gfx1250 also uses the shared call relay as a code-size optimization for
-      // nearby sites. On RDNA4, keep the simpler per-site relay whenever it is
-      // reachable and use dense routing only to recover otherwise-stranded
-      // sites.
+      const bool has_spill_backed_access =
+          std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
+            const ConSanCandidateResourcePlan *plan =
+                resource_plan_for_candidate(result, *candidate);
+            return plan != nullptr && plan->source == ConSanRegisterAllocationSource::SpillRequired;
+          });
+      // gfx1250 uses the shared call relay as a code-size optimization for
+      // nearby sites. Spill-backed access bodies need the same return-PC path
+      // on every family: a compact wave64 object can otherwise append enough
+      // save/probe/restore bodies to strand later returns even though every
+      // original site can still reach its nearby entry slot. Keep the simpler
+      // per-site relay for moderate non-spilling RDNA3/RDNA4/CDNA3/CDNA4
+      // objects and use dense routing only for stranded or spill-dense groups.
+      const bool prefer_dense_neighbors =
+          arch == ROCJITSU_CODE_ARCH_CDNA5 || has_spill_backed_access;
       if (!explicit_anchors_fit || singleton_has_direct_island ||
-          (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
+          (!(prefer_dense_neighbors && has_dense_neighbors) && !has_stranded_entry))
         continue;
       std::vector<uint64_t> anchors;
       anchors.reserve(group.candidates.size());
@@ -1081,7 +1092,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         if (displaced_words.size() >= candidate_entry_island_words &&
             displaced_size <= std::numeric_limits<uint32_t>::max() &&
             moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
-                                              displaced_size)) {
+                                             displaced_size)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,
