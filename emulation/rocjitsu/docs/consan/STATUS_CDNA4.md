@@ -1869,15 +1869,18 @@ expected diagnostic was relabeled.
 
 The adjacent checked-in `CdnaDirectToLdsPublication` correct/incorrect device
 pair reduces this behavior without depending on the prototype layout. Both
-members use a direct global-to-LDS producer and a peer DS reader; the incorrect
-member removes only their publication barrier. Baseline and all four engines
+members use disjoint B32 and native `buffer_load_dwordx4 ... lds` producers
+plus peer DS readers; the correct member checks all five delivered dwords per
+lane exactly, and the incorrect member removes only their publication barrier.
+The same source retains the applicable B32 semantic transport on gfx942, whose
+compiler/ISA subset rejects the B128 LDS modifier. Baseline and all four engines
 now contribute 20 green RocJitsu rows on gfx942/gfx950 and 10 green physical
 gfx950 rows. The correct member requires exact results and no diagnostic, while
 the incorrect member requires the publication conflict. The focused
 `ConSan.InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite` host regression pins the
-architectural operand contract: documented CDNA3/CDNA4 dword, dwordx3, and
-dwordx4 forms with zero raw VDATA are LDS writes, while undocumented dwordx2
-and nonzero-VDATA forms are rejected. The implementation materializes the
+architectural operand contract: documented CDNA4 dword and dwordx4 forms with
+zero raw VDATA are LDS writes, while undocumented dwordx2 and nonzero-VDATA
+forms are rejected. The implementation materializes the
 implicit destination as `M0 + physical_lane_id * stride` under all-lane EXEC,
 then restores the guest EXEC state.
 
