@@ -455,6 +455,7 @@ function(rj_add_consan_device_conformance_cases)
     if(_device_TARGET STREQUAL "gfx950")
         list(
             APPEND _device_workloads
+            "CdnaTransposePublication|cdna_transpose_publication|ConSanDeviceCdnaTransposePublicationTest"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
     endif()
@@ -994,6 +995,7 @@ function(rj_add_consan_device_fixture_targets target)
     if(target STREQUAL "gfx950")
         list(
             APPEND _device_workload_sources
+            "cdna_transpose_publication|cdna_transpose_publication_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
     endif()
