@@ -25,21 +25,25 @@ GPU. It needs no model, data set, external workload repository, or prebuilt
 test artifact.
 
 The fixtures reduce device-level properties observed in attention, reduction,
-framework state machines, generated-model, and Stream-K-style workloads. They
-cover cross-wave LDS handoff, barrier and fence publication, shared helpers
-with multiple kernel owners, three-dimensional workgroup identity, dynamic
-private stacks, adjacent subword writes with overlapping reads, fetch-add,
-atomic-OR, release-CAS publication, language-level release-store publication,
-module load/unload/reload, compiler-generated kernarg preloads, mixed private
-owners, long-range live-SCC control, and multi-stage selection/reduction
-shapes. Target extensions include native 96-bit LDS tuple publication on
-CDNA3/CDNA4 and RDNA4/CDNA5, including an address/destination alias distilled
-from framework kernels; wave32 Top-K prefix exchange; native CDNA4 b64-to-b16
-transpose reads; and CDNA5 sparse and scaled matrix pipelines. Every semantic scenario has adjacent correct and
-incorrect workloads: the correct member checks exact host-computed output and
-forbids diagnostics, while the incorrect member changes the intended ordering
-property and requires the applicable sanitizer evidence while retaining an
-independent control oracle wherever possible.
+training, framework state machines, generated-model, and Stream-K-style
+workloads. They cover cross-wave LDS handoff, barrier and fence publication,
+shared helpers with multiple kernel owners, three-dimensional workgroup
+identity, dynamic private stacks, adjacent subword writes with overlapping
+reads, fetch-add, atomic-OR, release-CAS publication, language-level
+release-store publication, four-wave mixed-precision backward reduction,
+deterministic in-place state restore/replay, module load/unload/reload, two
+independent graph streams and packed graph/executable parameter updates,
+compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
+control, and multi-stage selection/reduction shapes. Target extensions include
+native 96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA4/CDNA5, including
+an address/destination alias distilled from framework kernels; wave32 Top-K
+prefix exchange; native CDNA4 b64-to-b16 transpose reads; and CDNA5 clustered
+dispatch, asynchronous transfer, high-bank LDS, sparse matrix, and scaled
+matrix pipelines. Every semantic scenario has adjacent correct and incorrect
+workloads: the correct member checks exact host-computed output and forbids
+diagnostics, while the incorrect member changes the intended ordering property
+and requires the applicable sanitizer evidence while retaining an independent
+control oracle wherever possible.
 
 The contract is deliberately independent of the current prototype. Tests may
 require that the intended code object was instrumented, that semantic evidence
@@ -54,10 +58,10 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,192 simulator cases and 487 physical
-cases, for 2,679 total. The 2026-08-23 whole-matrix CTest qualification on the
-current reference host passes every row in 157.71 seconds at `-j64`, with
-3,003.90 seconds of aggregate CTest process duration.
+current registered matrix contains 2,342 simulator cases and 517 physical
+cases, for 2,859 total. The current whole-matrix qualification evidence and
+its wall, CPU, and aggregate process-duration accounting are maintained in
+[PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
 The initial target-capability disposition is:
 
