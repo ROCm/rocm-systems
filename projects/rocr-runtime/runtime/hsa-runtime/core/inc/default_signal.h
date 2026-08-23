@@ -63,7 +63,8 @@ class BusyWaitSignal : public Signal {
   }
 
   /// @brief See base class Signal.
-  explicit BusyWaitSignal(SharedSignal* abi_block, bool enableIPC);
+  explicit BusyWaitSignal(SharedSignal* abi_block, bool enableIPC,
+                          bool device_resident_value = false);
 
   // Below are various methods corresponding to the APIs, which load/store the
   // signal value or modify the existing signal value automically and with
@@ -175,6 +176,13 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
   /// @brief See base class Signal.
   explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false)
       : LocalSignal(initial_value, enableIPC), BusyWaitSignal(signal(), enableIPC) {}
+
+  /// @brief Same signal, with the ABI block - and so the value word - placed in
+  /// device_agent's local memory.  See LocalSignal's matching constructor and
+  /// hsa_amd_signal_create_v2() with
+  /// HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD.
+  DefaultSignal(hsa_signal_value_t initial_value, core::Agent& device_agent)
+      : LocalSignal(initial_value, device_agent), BusyWaitSignal(signal(), false, true) {}
 
  protected:
   bool _IsA(rtti_t id) const {
