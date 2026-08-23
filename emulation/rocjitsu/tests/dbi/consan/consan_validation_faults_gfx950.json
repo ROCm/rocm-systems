@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "target": "gfx950",
+  "evidence_model": "reviewed against fresh target-specific inventories",
+  "review_required": false,
+  "workloads": {
+    "d128-pressure": {
+      "faults": [
+        {
+          "id": "barrier-drop-redundant-fast-context",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "The selected site is the first of two consecutive s_barrier instructions in the unconditional FullKvDoubleBuffered16Key FastContext loop executed by the fault command. The adjacent second barrier at occurrence 2 remains, so this distinct exact-one mutation is prospectively expected to be a semantically redundant qualified miss."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:1cc23eaceeb81f21|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv4_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001c394|mnemonic=s_barrier|occurrence=1"
+          },
+          "profiles": {
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

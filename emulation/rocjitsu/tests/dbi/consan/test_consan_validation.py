@@ -5964,6 +5964,36 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(dpp_supercollider["oracle"], "pass")
         self.assertEqual(trials, [{}])
 
+    def test_gfx950_d128_pressure_inline_fault_is_redundant_barrier_miss(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
+        fault = validation._load_fault(
+            path,
+            "gfx950",
+            workload,
+            "barrier-drop-redundant-fast-context",
+        )
+
+        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        self.assertIn("FullKvDoubleBuffered16Key", site)
+        self.assertIn("FastContextPolicy", site)
+        self.assertIn("pc=0x000000000001c394", site)
+        self.assertIn("occurrence=1", site)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn(
+            "adjacent second barrier", fault["reach_witness"]["evidence"]
+        )
+
+        policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(policy["detector"], "not_detected")
+        self.assertEqual(policy["oracle"], "pass")
+        self.assertEqual(trials, [{}])
+
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]
