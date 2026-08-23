@@ -26,6 +26,11 @@ import rccl_perf_gate as gate  # noqa: E402
 COMMAND = "/perf-regression"
 REPOSITORY = "ROCm/rocm-systems"
 FORK = "outsider/rocm-systems"
+# A real collision pair: both abbreviate to 7065f5e, found in 25 ms. Mixed
+# characters also stop a prefix check passing for a substring check.
+HEAD_SHA = "7065f5e55eb81912b4144bdba1da53b8ff9de059"
+COLLIDING_SHA = "7065f5eab40bc198b0a4d2811c105e1c4780f54d"
+SHARED_PREFIX = "7065f5e"
 
 
 class FakeApi:
@@ -80,6 +85,9 @@ class GateCommandTest(unittest.TestCase):
             f"> {COMMAND}",
             f"see {COMMAND} docs",
             f"{COMMAND}\nrm -rf /",
+            # Would parse as a valid vouch without the multi-line guard.
+            f"{COMMAND}\n{HEAD_SHA}",
+            f"lgtm\n{COMMAND} {HEAD_SHA}",
             "/perf-regressions",
             "",
         ]
@@ -105,7 +113,6 @@ class GateCommandTest(unittest.TestCase):
         self.assertIsNone(gate.parse_gate_command("hello", COMMAND))
 
 
-@unittest.skipUnless(shutil.which("git"), "git is required for check-ref-format")
 class ValidateRefTest(unittest.TestCase):
     def test_accepts_ordinary_branch_names(self) -> None:
         for ref in ("develop", "users/pvallem/some-branch", "release/rocm-7.0"):
@@ -118,8 +125,18 @@ class ValidateRefTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gate.validate_ref(ref)
 
-    def test_rejects_sbatch_export_separators_git_would_accept(self) -> None:
-        for ref in ("develop,BASH_ENV=/tmp/x", "feature,x", "a=b"):
+    def test_rejects_shell_metacharacters_git_would_accept(self) -> None:
+        # These reach a shell in ROCm/cvs through `sbatch --export`.
+        for ref in (
+            "develop,BASH_ENV=/tmp/x",
+            "feature,x",
+            "a=b",
+            "develop`id`",
+            "develop$(id)",
+            "develop|id",
+            "develop&id",
+            "develop'x",
+        ):
             with self.subTest(ref=ref):
                 self.assertEqual(
                     gate.git_output("check-ref-format", f"refs/heads/{ref}"), ""
@@ -128,7 +145,6 @@ class ValidateRefTest(unittest.TestCase):
                     gate.validate_ref(ref)
 
 
-@unittest.skipUnless(shutil.which("git"), "git is required for check-ref-format")
 class ResolveRequestTest(unittest.TestCase):
     def _resolve(self, api: FakeApi, event: dict) -> gate.GateRequest:
         return gate.resolve_request(
@@ -147,7 +163,7 @@ class ResolveRequestTest(unittest.TestCase):
                 permission_path(): permission,
                 f"/repos/{REPOSITORY}/pulls/9950": {
                     "head": {
-                        "sha": "a" * 40,
+                        "sha": HEAD_SHA,
                         "repo": None if head_repo is None else {"full_name": head_repo},
                     },
                     "base": {"ref": base_ref},
@@ -161,7 +177,7 @@ class ResolveRequestTest(unittest.TestCase):
             self._api({"permission": "write"}), comment_event(COMMAND)
         )
         self.assertTrue(request.authorized)
-        self.assertEqual(request.head_sha, "a" * 40)
+        self.assertEqual(request.head_sha, HEAD_SHA)
         self.assertEqual(request.base_ref, "develop")
         self.assertEqual(request.pr_number, "9950")
         self.assertEqual(request.requester, "octocat")
@@ -220,7 +236,7 @@ class ResolveRequestTest(unittest.TestCase):
 
     def test_fork_author_cannot_vouch_for_themselves(self) -> None:
         api = self._api({"permission": "write"}, head_repo=FORK, author="octocat")
-        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        request = self._resolve(api, comment_event(f"{COMMAND} {HEAD_SHA}"))
         self.assertFalse(request.authorized)
         self.assertEqual(request.deny_reason, "fork_author_self")
 
@@ -229,17 +245,35 @@ class ResolveRequestTest(unittest.TestCase):
         request = self._resolve(api, comment_event(COMMAND))
         self.assertFalse(request.authorized)
         self.assertEqual(request.deny_reason, "fork_needs_vouch")
-        self.assertIn(f"{COMMAND} {'a' * 40}", request.reason)
+        self.assertIn(f"{COMMAND} {HEAD_SHA}", request.reason)
 
     def test_fork_with_a_stale_sha_is_told_the_current_head(self) -> None:
         api = self._api({"permission": "write"}, head_repo=FORK, author="outsider")
-        request = self._resolve(api, comment_event(f"{COMMAND} {'b' * 40}"))
+        request = self._resolve(api, comment_event(f"{COMMAND} {COLLIDING_SHA}"))
         self.assertFalse(request.authorized)
         self.assertEqual(request.deny_reason, "sha_stale")
-        self.assertIn("a" * 40, request.reason)
+        self.assertIn(HEAD_SHA, request.reason)
+
+    def test_an_abbreviated_vouch_does_not_authorize_a_fork(self) -> None:
+        """A fork author can author two commits sharing a 7-char prefix."""
+        for vouched in (SHARED_PREFIX, HEAD_SHA[:12], HEAD_SHA[:39]):
+            with self.subTest(vouched=vouched):
+                api = self._api(
+                    {"permission": "write"}, head_repo=FORK, author="outsider"
+                )
+                request = self._resolve(api, comment_event(f"{COMMAND} {vouched}"))
+                self.assertFalse(request.authorized)
+                self.assertEqual(request.deny_reason, "sha_stale")
+                self.assertIn(HEAD_SHA, request.reason)
+
+    def test_a_vouch_must_be_the_whole_sha_not_a_substring_of_it(self) -> None:
+        api = self._api({"permission": "write"}, head_repo=FORK, author="outsider")
+        request = self._resolve(api, comment_event(f"{COMMAND} {HEAD_SHA[3:]}"))
+        self.assertFalse(request.authorized)
+        self.assertEqual(request.deny_reason, "sha_stale")
 
     def test_fork_with_a_matching_sha_runs(self) -> None:
-        for vouched in ("a" * 7, "a" * 40, "A" * 40):
+        for vouched in (HEAD_SHA, HEAD_SHA.upper()):
             with self.subTest(vouched=vouched):
                 api = self._api(
                     {"permission": "write"}, head_repo=FORK, author="outsider"
@@ -247,17 +281,17 @@ class ResolveRequestTest(unittest.TestCase):
                 request = self._resolve(api, comment_event(f"{COMMAND} {vouched}"))
                 self.assertTrue(request.authorized)
                 self.assertEqual(request.head_repo, FORK)
-                self.assertEqual(request.vouched_sha, vouched.lower())
+                self.assertEqual(request.vouched_sha, HEAD_SHA)
 
     def test_fork_requester_without_write_access_is_denied_first(self) -> None:
         api = self._api({"permission": "read"}, head_repo=FORK, author="outsider")
-        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        request = self._resolve(api, comment_event(f"{COMMAND} {HEAD_SHA}"))
         self.assertFalse(request.authorized)
         self.assertEqual(request.deny_reason, "not_writer")
 
     def test_deleted_fork_is_refused_outright(self) -> None:
         api = self._api({"permission": "admin"}, head_repo=None)
-        request = self._resolve(api, comment_event(f"{COMMAND} {'a' * 40}"))
+        request = self._resolve(api, comment_event(f"{COMMAND} {HEAD_SHA}"))
         self.assertFalse(request.authorized)
         self.assertEqual(request.deny_reason, "head_repo_gone")
 
@@ -289,7 +323,7 @@ class ResolveRequestTest(unittest.TestCase):
 class VerdictTest(unittest.TestCase):
     def test_clean_detector_run_passes(self) -> None:
         verdict = gate.compute_verdict("success", "success", "0")
-        self.assertEqual((verdict.publish, verdict.state), (True, "success"))
+        self.assertEqual(verdict.state, "success")
 
     def test_detected_regression_stays_advisory(self) -> None:
         verdict = gate.compute_verdict("success", "failure", "1")
@@ -315,13 +349,22 @@ class VerdictTest(unittest.TestCase):
 
     def test_detector_evicted_by_another_pr_stays_pending(self) -> None:
         verdict = gate.compute_verdict("success", "cancelled", "")
-        self.assertTrue(verdict.publish)
         self.assertEqual(verdict.state, "pending")
 
-    def test_superseded_run_does_not_publish(self) -> None:
+    def test_cancelled_build_stays_pending_instead_of_going_silent(self) -> None:
+        # Publishing nothing would leave resolve's "queued" pending status on
+        # the PR forever with no explanation.
         verdict = gate.compute_verdict("cancelled", "skipped", "")
-        self.assertFalse(verdict.publish)
-        self.assertEqual(verdict.outputs()["publish"], "false")
+        self.assertEqual(verdict.state, "pending")
+        self.assertIn("re-request", verdict.description)
+
+    def test_a_cancelled_build_never_reports_failure(self) -> None:
+        # Nothing failed and nothing was measured, so the gate must not blame
+        # the PR for a cancellation it did not cause.
+        for detect_result in ("skipped", "cancelled", "success"):
+            with self.subTest(detect_result=detect_result):
+                verdict = gate.compute_verdict("cancelled", detect_result, "")
+                self.assertNotIn(verdict.state, ("failure", "error"))
 
 
 class GateRequestOutputTest(unittest.TestCase):
@@ -338,9 +381,9 @@ class GateRequestOutputTest(unittest.TestCase):
 
     def test_vouched_sha_and_deny_reason_are_exported(self) -> None:
         request = gate.GateRequest(
-            True, "ok", head_repo=FORK, vouched_sha="a" * 7, deny_reason=""
+            True, "ok", head_repo=FORK, vouched_sha=HEAD_SHA, deny_reason=""
         )
-        self.assertEqual(request.outputs()["vouched_sha"], "a" * 7)
+        self.assertEqual(request.outputs()["vouched_sha"], HEAD_SHA)
         self.assertEqual(request.outputs()["deny_reason"], "")
 
     def test_a_denied_request_never_leaks_a_vouched_sha(self) -> None:
@@ -384,6 +427,30 @@ class BuildDecisionTest(unittest.TestCase):
     def test_dispatch_run_honours_the_input(self) -> None:
         self.assertTrue(gate.should_build_rccl("workflow_dispatch", "0", "1"))
         self.assertFalse(gate.should_build_rccl("workflow_dispatch", "1", "0"))
+
+
+class FetchBaseTest(unittest.TestCase):
+    """A fork checkout leaves `origin` pointing at the fork, not upstream."""
+
+    def _argv(self, base_ref: str, remote: str) -> list[str]:
+        with mock.patch.object(gate.subprocess, "run") as run:
+            gate.fetch_base(base_ref, remote)
+        return list(run.call_args.args[0])
+
+    def test_fetches_the_upstream_url_not_the_origin_remote(self) -> None:
+        argv = self._argv("develop", "https://github.com/ROCm/rocm-systems")
+        self.assertEqual(argv[:2], ["git", "fetch"])
+        self.assertIn("https://github.com/ROCm/rocm-systems", argv)
+        self.assertNotIn("origin", argv)
+
+    def test_force_overwrites_the_forks_stale_remote_tracking_ref(self) -> None:
+        argv = self._argv("develop", "https://example/upstream")
+        self.assertIn("+refs/heads/develop:refs/remotes/origin/develop", argv)
+
+    def test_a_failed_fetch_is_not_swallowed(self) -> None:
+        with mock.patch.object(gate.subprocess, "run") as run:
+            gate.fetch_base("develop", "https://example/upstream")
+        self.assertTrue(run.call_args.kwargs["check"])
 
 
 class CleanupConfigTest(unittest.TestCase):
@@ -439,7 +506,7 @@ class OutputTest(unittest.TestCase):
             )
 
     def test_comment_includes_the_report_body(self) -> None:
-        verdict = gate.Verdict(True, "success", "Perf gate passed")
+        verdict = gate.Verdict("success", "Perf gate passed")
         body = gate.render_comment(
             "c" * 40, verdict, "https://example/run", "| a | b |"
         )
@@ -448,12 +515,12 @@ class OutputTest(unittest.TestCase):
         self.assertIn("| a | b |", body)
 
     def test_a_missing_report_is_called_out_instead_of_shown_as_clean(self) -> None:
-        verdict = gate.Verdict(True, "success", "Perf gate passed")
+        verdict = gate.Verdict("success", "Perf gate passed")
         body = gate.render_comment("c" * 40, verdict, "https://example/run")
         self.assertIn("No perf table", body)
 
     def test_an_oversized_report_is_truncated_below_the_comment_limit(self) -> None:
-        verdict = gate.Verdict(True, "success", "Perf gate passed")
+        verdict = gate.Verdict("success", "Perf gate passed")
         body = gate.render_comment(
             "c" * 40, verdict, "https://example/run", "x" * 100000
         )
@@ -609,12 +676,12 @@ class MainCommandTest(unittest.TestCase):
     def test_verdict_never_stamps_a_status_for_a_dispatch_run(self) -> None:
         self.assertEqual(self._verdict(PR_NUMBER=""), 0)
         self.assertEqual(self.api.posts, [])
-        self.assertEqual(self._outputs()["publish"], "true")
 
-    def test_verdict_of_a_superseded_run_publishes_nothing(self) -> None:
+    def test_verdict_of_a_cancelled_build_stamps_pending_on_the_pr(self) -> None:
         self.assertEqual(self._verdict(PR_NUMBER="9950", BUILD_RESULT="cancelled"), 0)
-        self.assertEqual(self.api.posts, [])
-        self.assertEqual(self._outputs()["publish"], "false")
+        path, payload = self.api.posts[0]
+        self.assertEqual(path, f"/repos/{REPOSITORY}/statuses/{'e' * 40}")
+        self.assertEqual(payload["state"], "pending")
 
     def test_enforce_fails_only_on_a_failure_or_error_state(self) -> None:
         for state, expected in (
@@ -665,6 +732,53 @@ class MainCommandTest(unittest.TestCase):
         self.assertEqual(self._outputs()["deny_reason"], "")
         self.assertFalse(self.comment.exists())
 
+    def test_resolve_still_explains_itself_when_the_pr_lookup_blows_up(self) -> None:
+        # Without containment the PR gets a red run and no explanation at all.
+        self.api.responses[permission_path()] = {"permission": "admin"}
+        self.api.responses[f"/repos/{REPOSITORY}/pulls/9950"] = urllib.error.HTTPError(
+            "https://api.github.com", 502, "Bad Gateway", {}, None
+        )
+        self.assertEqual(self._resolve(comment_event(COMMAND)), 1)
+        self.assertEqual(self._outputs()["authorized"], "false")
+        self.assertEqual(self._outputs()["deny_reason"], "resolve_error")
+        self.assertIn("could not resolve", self.comment.read_text(encoding="utf-8"))
+
+    def test_resolve_contains_an_error_type_main_does_not_catch(self) -> None:
+        self.api.responses[permission_path()] = {"permission": "admin"}
+        event = comment_event(COMMAND)
+        event["issue"]["number"] = None
+        self.assertEqual(self._resolve(event), 1)
+        self.assertEqual(self._outputs()["deny_reason"], "resolve_error")
+
+    def test_build_emits_the_config_path_before_it_copies(self) -> None:
+        # A copy that dies part-way still has to leave a cleanable path behind.
+        configs = self.directory / "configs"
+        configs.mkdir()
+        code = self._main(
+            ["build", "--output", str(self.output)],
+            GITHUB_EVENT_NAME="issue_comment",
+            RCCL_CHANGED="1",
+            RCCL_CI_ROOT=str(self.directory),
+            GITHUB_RUN_ID="42",
+            SOURCE_CONFIG_JSON=str(self.directory / "absent.json"),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self._outputs()["config_json"], str(configs / "ci_detect_run_42.json")
+        )
+
+    def test_build_without_rccl_changes_passes_the_shared_config_through(self) -> None:
+        shared = "/it-share/rccl-ci/configs/ci_detect_prod.json"
+        code = self._main(
+            ["build", "--output", str(self.output)],
+            GITHUB_EVENT_NAME="issue_comment",
+            RCCL_CHANGED="0",
+            RCCL_CI_ROOT=str(self.directory),
+            SOURCE_CONFIG_JSON=shared,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(self._outputs()["config_json"], shared)
+
     def test_cleanup_config_refuses_a_path_this_run_did_not_create(self) -> None:
         configs = self.directory / "configs"
         configs.mkdir()
@@ -681,4 +795,7 @@ class MainCommandTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # Skipping instead would hide the whole authorization surface behind a tick.
+    if not shutil.which("git"):
+        sys.exit("git is required: it backs validate_ref in every resolve test")
     unittest.main()

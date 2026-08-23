@@ -1,14 +1,11 @@
-# TODO(AIMVT-285): the Slurm scripts (rccl_build.sbatch, submit_and_poll.sh,
-# format_report.py) are an unpinned ROCm/cvs working copy; vendor them in-tree.
+# NOT a required check: a commit status has no `skipped` state, so requiring it
+# blocks every PR that never runs it. A regression does not fail the run either.
 
-# DO NOT make STATUS_CONTEXT a required check yet: a commit status has no
-# `skipped` state, so PRs that never trigger this would block forever (AIMVT-285).
+# Fork PRs need a second repo writer to comment `/perf-regression <full sha>`;
+# that limits who, not what runs. AIMVT-285: gate these behind an environment.
 
-# Fork PRs run only when a second repo writer vouches for an exact head SHA with
-# `/perf-regression <sha>`; that limits who, not what the code can do on-runner.
-
-# Advisory: a detected regression does not fail the gate, only build/infra errors
-# do. Logic is in .github/scripts/rccl_perf_gate.py. See AIMVT-285.
+# TODO(AIMVT-285): rccl_build.sbatch, submit_and_poll.sh and format_report.py
+# are an unpinned ROCm/cvs working copy; vendor them in-tree.
 name: RCCL Perf Regression Gate
 
 on:
@@ -47,8 +44,7 @@ env:
 permissions: {}
 
 jobs:
-  # Without this the required check sits as a bare "expected" with no hint that
-  # a comment is what runs it.
+  # Seeds the status so the PR shows how to run the gate.
   rccl-perf-hint:
     name: 'RCCL perf gate: pending hint'
     # Fork PRs get a read-only token, so a statuses POST would 403.
@@ -76,8 +72,7 @@ jobs:
 
   rccl-perf-resolve:
     name: 'RCCL perf gate: authorize and resolve'
-    # Coarse pre-filter only, so an unrelated comment does not start a runner.
-    # The exact match and live write-permission check are in rccl_perf_gate.py.
+    # Coarse pre-filter; the exact match and permission check are in the helper.
     if: >
       github.event_name == 'workflow_dispatch' ||
       ( github.event.issue.pull_request &&
@@ -153,17 +148,14 @@ jobs:
   rccl-perf-build:
     name: 'RCCL perf gate: build reference and candidate'
     needs: rccl-perf-resolve
-    # Last line of defence before code reaches the self-hosted runner: repeat the
-    # same-repo / vouched-fork test so a helper bug alone cannot get past it.
-    if: >
-      needs.rccl-perf-resolve.outputs.authorized == 'true' &&
-      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
-        needs.rccl-perf-resolve.outputs.vouched_sha != '' )
+    if: needs.rccl-perf-resolve.outputs.authorized == 'true'
     concurrency:
       # Per-PR so PRs don't cancel each other; job-level concurrency can't read
       # `needs`, so the key comes from the event.
       group: rccl-perf-gate-build-${{ github.event.issue.number || github.ref }}
-      cancel-in-progress: true
+      # Never cancel, for the same reason as detect: this holds a Slurm
+      # allocation and `sbatch --wait` would orphan it, still holding nodes.
+      cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     timeout-minutes: 60
     permissions:
@@ -171,57 +163,68 @@ jobs:
     outputs:
       config_json: ${{ steps.build.outputs.config_json }}
     steps:
+      # PR code from an earlier run shares this workspace. checkout's cleaner
+      # readdir()s through a symlink at its `path:` into the target directory.
+      - name: Delete workspace symlinks left by earlier runs
+        run: find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -type l -delete
+
       # @v4 to match ainic_test_runner.yml on this same self-hosted runner;
       # newer checkout majors need a Node runtime we have not confirmed there.
-      - name: Checkout head (pinned SHA, full history)
+      - name: Check out CI scripts (pinned, trusted)
         uses: actions/checkout@v4
         with:
-          # Vouched fork code still runs on a persistent runner and can leave
-          # state in $HOME, $RUNNER_TEMP and /it-share/; a SHA pin is not a sandbox.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          path: .perf-gate-ci
+          persist-credentials: false
+
+      # Accepted risk (CodeQL actions/untrusted-checkout): building this code is
+      # the point. A SHA pin is not a sandbox -- it can write $HOME, /it-share.
+      - name: Check out the candidate (PR head, untrusted)
+        uses: actions/checkout@v4
+        with:
           repository: ${{ needs.rccl-perf-resolve.outputs.head_repo }}
           ref: ${{ needs.rccl-perf-resolve.outputs.head_sha }}
           fetch-depth: 0
+          path: candidate
           persist-credentials: false
 
       - name: Fetch base branch and detect changed paths
         id: paths
-        # Only comment runs infer the build from changed paths, and a dispatched
-        # tag has no refs/heads/<name> to fetch.
+        # Dispatch takes the build from its input, and a tag has no branch to fetch.
         if: github.event_name == 'issue_comment'
+        working-directory: candidate
         env:
           BASE_REF: ${{ needs.rccl-perf-resolve.outputs.base_ref }}
         run: |
-          python3 .github/scripts/rccl_perf_gate.py changed-paths \
-            --output "${GITHUB_OUTPUT}"
+          python3 "${GITHUB_WORKSPACE}/.perf-gate-ci/.github/scripts/rccl_perf_gate.py" \
+            changed-paths --output "${GITHUB_OUTPUT}"
 
       - name: Build reference + candidate librccl (single build node)
         id: build
         env:
           RCCL_CHANGED: ${{ steps.paths.outputs.rccl_changed }}
           BUILD_RCCL: ${{ inputs.build_rccl || '0' }}
-          CANDIDATE_SRC: ${{ github.workspace }}
+          CANDIDATE_SRC: ${{ github.workspace }}/candidate
           BASE_REF: ${{ needs.rccl-perf-resolve.outputs.base_ref }}
           SOURCE_CONFIG_JSON: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
         run: |
-          python3 .github/scripts/rccl_perf_gate.py build \
+          python3 .perf-gate-ci/.github/scripts/rccl_perf_gate.py build \
             --output "${GITHUB_OUTPUT}"
 
       - name: Clean up per-run config copy on build failure
-        # detect never runs, so nothing else removes this file from NFS. Cancel
-        # is the normal path here: re-requesting the gate cancels this job.
+        # detect never runs, so nothing else removes this file from NFS.
         if: failure() || cancelled()
         continue-on-error: true
         env:
           CONFIG_JSON: ${{ steps.build.outputs.config_json }}
-        run: python3 .github/scripts/rccl_perf_gate.py cleanup-config
+        run: python3 .perf-gate-ci/.github/scripts/rccl_perf_gate.py cleanup-config
 
   rccl-perf-detect:
     name: 'RCCL perf gate: A/B detect'
     needs: [rccl-perf-resolve, rccl-perf-build]
     if: >
       needs.rccl-perf-resolve.outputs.authorized == 'true' &&
-      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
-        needs.rccl-perf-resolve.outputs.vouched_sha != '' ) &&
       needs.rccl-perf-build.result == 'success'
     concurrency:
       # Thresholds are only valid on the pinned nodes, which host one A/B job at
@@ -235,8 +238,11 @@ jobs:
     outputs:
       exit_code: ${{ steps.detect.outputs.exit_code }}
     steps:
+      - name: Delete workspace symlinks left by earlier runs
+        run: find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -type l -delete
+
       # path: confines checkout's clean to this subdir, so the build job's
-      # workspace root (CANDIDATE_SRC) survives. @v4 for this runner, as above.
+      # candidate/ tree survives. @v4 for this runner, as above.
       - name: Check out CI scripts
         uses: actions/checkout@v4
         with:
@@ -257,8 +263,7 @@ jobs:
             --output "${GITHUB_OUTPUT}"
 
       - name: Render report
-        # Best-effort: a render hiccup must not turn an advisory regression into
-        # a merge-blocking failure.
+        # Best-effort: a render hiccup must not fail the gate.
         if: always()
         continue-on-error: true
         run: |
@@ -300,10 +305,7 @@ jobs:
     name: 'RCCL perf gate: verdict and report'
     needs: [rccl-perf-resolve, rccl-perf-build, rccl-perf-detect]
     # always(): the commit status must be resolved even when build/detect fail.
-    if: >
-      always() && needs.rccl-perf-resolve.outputs.authorized == 'true' &&
-      ( needs.rccl-perf-resolve.outputs.head_repo == github.repository ||
-        needs.rccl-perf-resolve.outputs.vouched_sha != '' )
+    if: always() && needs.rccl-perf-resolve.outputs.authorized == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -345,7 +347,7 @@ jobs:
             --output "${GITHUB_OUTPUT}"
 
       - name: Post / update PR comment
-        if: needs.rccl-perf-resolve.outputs.pr_number != '' && steps.verdict.outputs.publish == 'true'
+        if: needs.rccl-perf-resolve.outputs.pr_number != ''
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
@@ -354,9 +356,7 @@ jobs:
           path: comment.md
 
       - name: Enforce result (fail the workflow on build/infra failure)
-        # Skipped for superseded runs so a concurrency cancellation is not
-        # reported as a failure.
-        if: always() && steps.verdict.outputs.publish == 'true'
+        if: always()
         env:
           STATE: ${{ steps.verdict.outputs.state }}
         run: python3 .github/scripts/rccl_perf_gate.py enforce
@@ -368,7 +368,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out CI scripts
+        uses: actions/checkout@v6
         with:
           sparse-checkout: .github/scripts
           persist-credentials: false

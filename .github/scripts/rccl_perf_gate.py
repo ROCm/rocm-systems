@@ -33,17 +33,19 @@ MAXIMUM_REPORT_LENGTH = 60000
 RCCL_PATH_PREFIX = "projects/rccl/"
 RUN_CONFIG_PREFIX = "ci_detect_run_"
 RUN_CONFIG_SUFFIX = ".json"
-# sbatch --export takes a comma-separated NAME=VALUE list, so a ref carrying
-# either separator would corrupt it; git itself accepts both.
-REF_FORBIDDEN_CHARACTERS = ",="
+# `git check-ref-format` accepts backticks, $(), | and &, and the ref reaches a
+# shell in another repo via `sbatch --export`, so allowlist rather than deny.
+REF_ALLOWED_RE = re.compile(r"[A-Za-z0-9._/-]+")
 REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# Loose so a short SHA still gets an explanation; fork_vouch_denial does the
+# binding.
 VOUCHED_SHA_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 # author_association is too coarse: COLLABORATOR includes read and triage.
 WRITE_PERMISSIONS = frozenset({"admin", "maintain", "write"})
 
 
 class PermissionReadError(Exception):
-    """The requester's permission level could not be read, so we fail closed."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -74,21 +76,15 @@ class GateRequest:
 
 @dataclass(frozen=True)
 class Verdict:
-    publish: bool
     state: str
     description: str
 
     def outputs(self) -> dict[str, str]:
-        return {
-            "publish": "true" if self.publish else "false",
-            "state": self.state,
-            "desc": self.description,
-        }
+        return {"state": self.state, "desc": self.description}
 
 
 class GitHubApi:
-    # Duplicates rocjitsu_corpus_translation_comment.py. Sharing it means
-    # editing a rocjitsu-owned workflow's path filter; tracked in AIMVT-285.
+    # Duplicates rocjitsu_corpus_translation_comment.py; sharing it is AIMVT-285.
     def __init__(self, repository: str, token: str, api_url: str) -> None:
         if REPOSITORY_RE.fullmatch(repository) is None:
             raise ValueError(f"invalid GitHub repository: {repository!r}")
@@ -258,11 +254,13 @@ def fork_vouch_denial(
                 level="warning",
                 deny_reason="fork_needs_vouch",
             )
-    if vouched and not head_sha.startswith(vouched):
+    # Exact 40 chars: at 7 the fork author can author two commits sharing a
+    # prefix, so an abbreviation does not identify the commit that was read.
+    if vouched and vouched != head_sha.lower():
         return GateRequest(
             False,
-            f"`{vouched}` is not the current head. Re-comment "
-            f"`{command} {head_sha}` if you vouch for what is there now.",
+            f"`{vouched}` is not this pull request's full head SHA. Re-comment "
+            f"`{command} {head_sha}` to vouch for the commit that is there now.",
             level="warning",
             deny_reason="sha_stale",
         )
@@ -286,10 +284,8 @@ def parse_gate_command(body: str, command: str) -> str | None:
 
 def validate_ref(ref: str) -> str:
     """Reject a branch name git or `sbatch --export` could not carry safely."""
-    if not ref:
-        raise ValueError("branch name is empty")
-    if any(character in ref for character in REF_FORBIDDEN_CHARACTERS):
-        raise ValueError(f"branch name may not contain ',' or '=': {ref!r}")
+    if REF_ALLOWED_RE.fullmatch(ref) is None:
+        raise ValueError(f"branch name is empty or not [A-Za-z0-9._/-]: {ref!r}")
     result = subprocess.run(
         ["git", "check-ref-format", f"refs/heads/{ref}"],
         capture_output=True,
@@ -308,7 +304,6 @@ def set_commit_status(
     state: str,
     description: str,
     target_url: str,
-    dry_run: bool = False,
 ) -> None:
     payload = {
         "state": state,
@@ -316,9 +311,6 @@ def set_commit_status(
         "target_url": target_url,
         "description": description[:MAXIMUM_DESCRIPTION_LENGTH],
     }
-    if dry_run:
-        print(f"[dry-run] POST /repos/{repository}/statuses/{sha} {payload}")
-        return
     api.create(f"/repos/{repository}/statuses/{sha}", payload)
 
 
@@ -338,7 +330,11 @@ def cvs_revision(rccl_ci_root: str) -> str:
 
 
 def fetch_base(base_ref: str, remote: str) -> None:
-    """Fetch by URL: after a fork checkout `origin` is the fork, not upstream."""
+    """Fetch by URL: after a fork checkout `origin` is the fork, not upstream.
+
+    Anonymous, because every checkout sets `persist-credentials: false`; this
+    therefore depends on the base repository staying public.
+    """
     subprocess.run(
         [
             "git",
@@ -381,29 +377,21 @@ def cleanup_run_config(config_json: str, rccl_ci_root: str, run_id: str) -> bool
 
 
 def compute_verdict(build_result: str, detect_result: str, detect_code: str) -> Verdict:
-    """Map job results onto a commit-status state.
-
-    Advisory: a detected regression (detector exit 1) still passes; only build
-    failures and detector/infra errors fail the gate.
-    """
+    """Map job results onto a commit-status state; detector exit 1 still passes."""
+    # `cancelled` covers a human cancel, a concurrency eviction and a job-level
+    # timeout alike: nothing was measured, so ask rather than blame this PR.
     if build_result == "cancelled":
-        # Superseded by a newer run, which now owns this SHA's status/comment.
-        return Verdict(publish=False, state="", description="")
+        return Verdict("pending", "Build did not finish; re-request the gate")
     if build_result != "success":
-        return Verdict(True, "failure", f"Build job {build_result}")
+        return Verdict("failure", f"Build job {build_result}")
     if detect_result == "cancelled":
-        # Another PR entering the global lock evicts a queued detector. Nothing
-        # was measured, so stay pending rather than blaming this PR.
-        return Verdict(
-            True, "pending", "Detector cancelled (nodes busy); re-request the gate"
-        )
+        return Verdict("pending", "Detector cancelled (nodes busy); re-request")
     if detect_result == "skipped":
-        return Verdict(True, "error", "Detector skipped")
+        return Verdict("error", "Detector skipped")
     if detect_code not in {"0", "1"}:
-        return Verdict(
-            True, "failure", f"Detector infra error (exit {detect_code or 'unknown'})"
-        )
-    return Verdict(True, "success", "Perf gate passed")
+        code = detect_code or "unknown"
+        return Verdict("failure", f"Detector infra error (exit {code})")
+    return Verdict("success", "Perf gate passed")
 
 
 def render_comment(
@@ -472,14 +460,24 @@ def _command_resolve(args: argparse.Namespace) -> int:
     event: dict[str, Any] = {}
     if args.event is not None and args.event.exists():
         event = json.loads(args.event.read_text(encoding="utf-8"))
-    request = resolve_request(
-        event_name,
-        event,
-        _api(),
-        repository,
-        os.environ.get("PERF_COMMAND", "/perf-regression"),
-        dict(os.environ),
-    )
+    try:
+        request = resolve_request(
+            event_name,
+            event,
+            _api(),
+            repository,
+            os.environ.get("PERF_COMMAND", "/perf-regression"),
+            dict(os.environ),
+        )
+    except Exception as error:
+        # Deliberately broad: an escaping exception would leave deny_reason
+        # empty, which silently skips the step that explains this on the PR.
+        request = GateRequest(
+            False,
+            f"The perf gate could not resolve this request: {error}",
+            level="error",
+            deny_reason="resolve_error",
+        )
     write_outputs(args.output, request.outputs())
     if request.deny_reason and args.comment is not None:
         args.comment.write_text(render_deny_comment(request), encoding="utf-8")
@@ -500,7 +498,6 @@ def _command_set_status(args: argparse.Namespace) -> int:
         args.state,
         args.description,
         os.environ.get("TARGET_URL", ""),
-        dry_run=args.dry_run,
     )
     return 0
 
@@ -588,10 +585,6 @@ def _command_verdict(args: argparse.Namespace) -> int:
         os.environ.get("DETECT_CODE", ""),
     )
     write_outputs(args.output, verdict.outputs())
-    if not verdict.publish:
-        print("Build cancelled (superseded) -- not publishing status/comment.")
-        return 0
-
     head_sha = os.environ.get("HEAD_SHA", "")
     run_url = os.environ.get("TARGET_URL", "")
     # Dispatch has no PR, so nothing here measured a PR's code: stamping the
@@ -605,7 +598,6 @@ def _command_verdict(args: argparse.Namespace) -> int:
             verdict.state,
             verdict.description,
             run_url,
-            dry_run=args.dry_run,
         )
     report = ""
     if args.report is not None and args.report.exists():
@@ -664,7 +656,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     status = add("set-status", "Set the gate's commit status on a SHA")
     status.add_argument("--state", required=True)
     status.add_argument("--description", required=True)
-    status.add_argument("--dry-run", action="store_true")
 
     add("changed-paths", "Fetch the base ref and detect RCCL changes", output=True)
     add("build", "Build the reference + candidate librccl via Slurm", output=True)
@@ -674,7 +665,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     verdict = add("verdict", "Compute the verdict and publish it", output=True)
     verdict.add_argument("--report", type=Path, default=None)
     verdict.add_argument("--comment", type=Path, default=Path("comment.md"))
-    verdict.add_argument("--dry-run", action="store_true")
 
     add("enforce", "Exit non-zero when the verdict was a failure or error")
 
