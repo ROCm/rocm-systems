@@ -32,6 +32,7 @@ constexpr uint32_t kValuesPerGroup = 32;
 enum class Workload {
   ClusterSync,
   MultiCluster,
+  WideCluster,
   TdmWait,
   ClusterMulticast,
 };
@@ -49,6 +50,8 @@ WorkloadConfig workload_config(Workload workload) {
     return {"consan_gfx1250_cluster_sync", 1, 2, 0x51000000u};
   case Workload::MultiCluster:
     return {"consan_gfx1250_multi_cluster", 2, 2, 0x52000000u};
+  case Workload::WideCluster:
+    return {"consan_gfx1250_wide_cluster", 1, 4, 0x53000000u};
   case Workload::TdmWait:
     return {"consan_gfx1250_tdm_wait", 1, 2, 0x5d000000u};
   case Workload::ClusterMulticast:
@@ -328,6 +331,8 @@ void run_cluster_workload(Workload workload, bool correct) {
       EXPECT_EQ(host_observed[group], 0x51000000u | group) << "group=" << group;
     if (correct && workload == Workload::MultiCluster)
       EXPECT_EQ(host_observed[group], 0x52000000u | group) << "group=" << group;
+    if (correct && workload == Workload::WideCluster)
+      EXPECT_EQ(host_observed[group], 0x53000000u | group) << "group=" << group;
     if (correct && workload == Workload::TdmWait) {
       for (uint32_t lane = 0; lane < kValuesPerGroup; ++lane)
         EXPECT_EQ(host_observed[group * kValuesPerGroup + lane],
@@ -357,6 +362,12 @@ TEST(ConSanDeviceGfx1250MultiClusterTest, Correct) {
 }
 TEST(ConSanDeviceGfx1250MultiClusterTest, Incorrect) {
   run_cluster_workload(Workload::MultiCluster, false);
+}
+TEST(ConSanDeviceGfx1250WideClusterTest, Correct) {
+  run_cluster_workload(Workload::WideCluster, true);
+}
+TEST(ConSanDeviceGfx1250WideClusterTest, Incorrect) {
+  run_cluster_workload(Workload::WideCluster, false);
 }
 TEST(ConSanDeviceGfx1250TdmWaitTest, Correct) { run_cluster_workload(Workload::TdmWait, true); }
 TEST(ConSanDeviceGfx1250TdmWaitTest, Incorrect) { run_cluster_workload(Workload::TdmWait, false); }

@@ -64,8 +64,8 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,698 simulator cases and 557 physical
-cases, for 3,255 total. The current whole-matrix qualification evidence and
+current registered matrix contains 2,708 simulator cases and 557 physical
+cases, for 3,265 total. The current whole-matrix qualification evidence and
 its wall, CPU, and aggregate process-duration accounting are maintained in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
@@ -81,7 +81,7 @@ The initial target-capability disposition is:
 | Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, and language-level release store plus acquire-CAS workloads. |
 | Top-K prefix and permutation | Covered on all five targets: RDNA3/RDNA4/CDNA5 use wave32 atomic-return reservation and broadcast with paired LDS loads, while CDNA3/CDNA4 use the corresponding wave64 ballot/rank and paired-read form under the same exact prefix/payload oracle. |
 | Native CDNA4 transpose publication | Covered in gfx950 simulation and on the physical GPU by `ds_read_b64_tr_b16` with the exact 16-lane transpose oracle. The instruction is not native gfx942. |
-| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, multicast, sparse SWMMAC, and scaled WMMA. A distinct AsyncDataCopier reduction covers every supported B8/B32/B64/B128 LDS-to-global async-store width and `s_wait_asynccnt`; store-from-LDS is no longer a gap. Wider/32-byte fragments, larger clusters, and a distinct remote-cluster operation remain extensions. |
+| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two- and four-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, multicast, sparse SWMMAC, and scaled WMMA. A distinct AsyncDataCopier reduction covers every supported B8/B32/B64/B128 LDS-to-global async-store width and `s_wait_asynccnt`; store-from-LDS is no longer a gap. Wider/32-byte fragments and a distinct remote-cluster operation remain extensions. |
 | Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are covered on every architecture where ConSan admits them. |
 
 “Tracked gap” is preferable to a fixture that merely recognizes the current

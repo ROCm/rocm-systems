@@ -487,6 +487,7 @@ function(rj_add_consan_device_conformance_cases)
             APPEND _device_workloads
             "Gfx1250ClusterSync|gfx1250_cluster|ConSanDeviceGfx1250ClusterSyncTest"
             "Gfx1250MultiCluster|gfx1250_cluster|ConSanDeviceGfx1250MultiClusterTest"
+            "Gfx1250WideCluster|gfx1250_cluster|ConSanDeviceGfx1250WideClusterTest"
             "Gfx1250TdmWait|gfx1250_cluster|ConSanDeviceGfx1250TdmWaitTest"
             "Gfx1250ClusterMulticast|gfx1250_cluster|ConSanDeviceGfx1250ClusterMulticastTest"
             "Gfx1250HighBankLdsAddress|gfx1250_high_bank_lds_address|ConSanDeviceGfx1250HighBankLdsAddressTest"

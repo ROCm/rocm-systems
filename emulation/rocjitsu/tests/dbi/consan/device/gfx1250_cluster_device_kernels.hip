@@ -149,6 +149,16 @@ consan_gfx1250_multi_cluster_incorrect(const uint32_t *, uint32_t *observed, uin
   local_cluster_publication<false>(observed, control, 0x52000000u);
 }
 
+extern "C" __global__ void consan_gfx1250_wide_cluster_correct(const uint32_t *, uint32_t *observed,
+                                                               uint32_t *control) {
+  local_cluster_publication<true>(observed, control, 0x53000000u);
+}
+
+extern "C" __global__ void
+consan_gfx1250_wide_cluster_incorrect(const uint32_t *, uint32_t *observed, uint32_t *control) {
+  local_cluster_publication<false>(observed, control, 0x53000000u);
+}
+
 extern "C" __global__ void consan_gfx1250_tdm_wait_correct(const uint32_t *input,
                                                            uint32_t *observed, uint32_t *control) {
   tdm_publication<true>(input, observed, control, false);
