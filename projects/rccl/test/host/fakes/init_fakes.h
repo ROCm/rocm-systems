@@ -31,6 +31,7 @@
 // -------------------------------------------------------------------------
 const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);  // scripts one var
+void SetMicroEnvAbsent(const char* name);                // scripts one var as unset
 void ClearMicroEnv();                                    // back to real getenv
 
 // Controllable GIN error state: ncclGinQueryLastError() reports this. Tests set

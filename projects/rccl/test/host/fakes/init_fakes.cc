@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -29,9 +30,11 @@
 namespace {
 // Scripted environment overrides. When a name is present, its value (which may
 // be an explicit "absent" -> nullptr) is returned; otherwise fall through to
-// the real getenv so unrelated reads keep working.
-std::unordered_map<std::string, std::string>& microEnvMap() {
-  static std::unordered_map<std::string, std::string> m;
+// the real getenv so unrelated reads keep working. A nullopt entry is that
+// explicit absence: it masks whatever the real environment holds, which is what
+// lets a test cover an `if (getenv(...) == NULL)` arm hermetically.
+std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
+  static std::unordered_map<std::string, std::optional<std::string>> m;
   return m;
 }
 // The real libc getenv, resolved past our interposing definition below so the
@@ -48,7 +51,7 @@ const char* micro_getenv(const char* name) {
     auto& m = microEnvMap();
     auto it = m.find(name);
     if (it != m.end()) {
-      return it->second.c_str();
+      return it->second ? it->second->c_str() : nullptr;
     }
   }
   return real_getenv(name);
@@ -66,6 +69,12 @@ extern "C" char* getenv(const char* name) {
 void SetMicroEnv(const char* name, const char* value) {
   if (name != nullptr && value != nullptr) {
     microEnvMap()[name] = value;
+  }
+}
+
+void SetMicroEnvAbsent(const char* name) {
+  if (name != nullptr) {
+    microEnvMap()[name] = std::nullopt;
   }
 }
 

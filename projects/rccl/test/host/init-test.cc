@@ -23,9 +23,11 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
 // Pull in alloc.h now so its macros are visible to be #undef'd before init.cc's
@@ -119,7 +121,15 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 // ===========================================================================
 class InitMicrotest : public ::testing::Test {
  protected:
-  void TearDown() override { ResetInitFakes(); }
+  void TearDown() override {
+    ResetInitFakes();
+    // ctaPolicyEnv (init.cc:143) is file-scope static that getEnvCtaPolicyOnce
+    // only ever assigns or OR-accumulates -- it is never cleared. Production is
+    // protected by the call_once at init.cc:3067; tests calling the helper
+    // directly are not, and envConfigOverride reads it at init.cc:3068. Reset it
+    // here so no test can leak a policy into another under --gtest_shuffle.
+    ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
+  }
 };
 
 namespace {
@@ -186,6 +196,178 @@ TEST_F(InitMicrotest, CtaPolicyIsValid_AboveMax_False) {
   const int maxPolicy =
       NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO;
   EXPECT_FALSE(ctaPolicyIsValid(maxPolicy + 1));
+}
+
+// ===========================================================================
+// getEnvCtaPolicyOnce (init.cc:144) -- parses NCCL_CTA_POLICY into the static
+// ctaPolicyEnv. Two mutually exclusive syntaxes: a legacy leading digit
+// (0/1/2) and a '|'-separated mode list ("EFFICIENCY|ZERO").
+//
+// Production reaches it only via std::call_once (init.cc:3067), and the
+// EnvConfigOverride_* tests below already burn that flag for the process --
+// so these tests call the helper DIRECTLY, which is exactly what the
+// #include-the-.cc model exists to enable.
+// ===========================================================================
+namespace {
+// INFO() (debug.h:50) is gated on ncclDebugLevel, which nccl_fakes.cc pins to
+// NCCL_LOG_NONE -- so INFO never reaches the stderr-writing ncclDebugLog fake
+// and CaptureLog would see nothing. Raise the level/mask for the scope of a
+// capture, then put both back. (WARN is ungated, which is why the other
+// log-asserting suites need no such guard.)
+class ScopedInfoLogging {
+ public:
+  ScopedInfoLogging() : level_(ncclDebugLevel), mask_(ncclDebugMask) {
+    ncclDebugLevel = NCCL_LOG_INFO;
+    ncclDebugMask = NCCL_ALL;
+  }
+  ~ScopedInfoLogging() {
+    ncclDebugLevel = level_;
+    ncclDebugMask = mask_;
+  }
+  ScopedInfoLogging(const ScopedInfoLogging&) = delete;
+  ScopedInfoLogging& operator=(const ScopedInfoLogging&) = delete;
+
+ private:
+  int level_;
+  uint64_t mask_;
+};
+
+// Drives the unit from a known-clean ctaPolicyEnv with NCCL_CTA_POLICY set to
+// `value`; nullptr scripts the variable as *absent*. Returns the resulting
+// ctaPolicyEnv. The reset matters because the unit only ever assigns or
+// OR-accumulates -- see the fixture TearDown.
+int RunCtaPolicyEnv(const char* value) {
+  ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
+  if (value) SetMicroEnv("NCCL_CTA_POLICY", value);
+  else       SetMicroEnvAbsent("NCCL_CTA_POLICY");
+  getEnvCtaPolicyOnce();
+  return ctaPolicyEnv;
+}
+
+// As above, but returns everything the parse wrote to stderr. Several inputs
+// are state-indistinguishable ("7" and an unset variable both leave UNDEF), so
+// the diagnostic is the only thing that separates them.
+std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
+  ScopedInfoLogging info;
+  return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
+}
+
+bool LogHas(const std::string& log, const char* needle) {
+  return log.find(needle) != std::string::npos;
+}
+}  // namespace
+
+// --- env unset: the early return at init.cc:146. SetMicroEnvAbsent masks the
+// real environment, so this holds even on a host that exports the variable. ---
+TEST_F(InitMicrotest, GetEnvCtaPolicy_Unset_LeavesPolicyUndefined) {
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, RunCtaPolicyEnv(nullptr));
+}
+
+// --- legacy single-digit syntax (init.cc:149-163) ---
+TEST_F(InitMicrotest, GetEnvCtaPolicy_DigitZero_SelectsDefault) {
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, RunCtaPolicyEnv("0"));
+}
+TEST_F(InitMicrotest, GetEnvCtaPolicy_DigitOne_SelectsEfficiency) {
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, RunCtaPolicyEnv("1"));
+}
+TEST_F(InitMicrotest, GetEnvCtaPolicy_DigitTwo_SelectsZero) {
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, RunCtaPolicyEnv("2"));
+}
+
+// LATENT BUG (init.cc:160-162): the switch `default:` arm logs "Using DEFAULT
+// instead" but never assigns NCCL_CTA_POLICY_DEFAULT, so ctaPolicyEnv is left
+// UNDEF and envConfigOverride (init.cc:3068) then skips the override entirely.
+// The message and the behaviour disagree.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownDigit_LogsDefaultButLeavesUnset) {
+  int policy = NCCL_CONFIG_UNDEF_INT;
+  const std::string log = RunCtaPolicyEnvCapturingLog("7", &policy);
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);  // pins today's behaviour
+  EXPECT_TRUE(LogHas(log, "Unknown CTA policy"));
+
+  // WHEN FIXED (assign DEFAULT in the `default:` arm), this is the test:
+  // EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, policy);
+}
+
+// --- combine syntax (init.cc:164-186) -- one token, each strcasecmp arm ---
+TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedDefault_SelectsDefault) {
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, RunCtaPolicyEnv("DEFAULT"));
+}
+TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedEfficiency_SelectsEfficiencyAndLogsParse) {
+  int policy = NCCL_CONFIG_UNDEF_INT;
+  const std::string log = RunCtaPolicyEnvCapturingLog("EFFICIENCY", &policy);
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, policy);
+  EXPECT_TRUE(LogHas(log, "Parsed environment variable NCCL_CTA_POLICY"));
+}
+TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedZero_SelectsZero) {
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, RunCtaPolicyEnv("ZERO"));
+}
+
+// Second and later recognized tokens take the `|=` arm at init.cc:176.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_TwoNamedModes_AccumulatesBoth) {
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
+            RunCtaPolicyEnv("EFFICIENCY|ZERO"));
+}
+// Comparison is strcasecmp, so spelling case is irrelevant.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_MixedCaseModes_AccumulatesBoth) {
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
+            RunCtaPolicyEnv("efficiency|ZeRo"));
+}
+// An unrecognized token is reported and skipped; the recognized ones around it
+// still apply, covering the skip (174-F), first-assign and accumulate arms in
+// a single parse.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownTokenAmongValid_IgnoresOnlyTheUnknown) {
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_DEFAULT,
+            RunCtaPolicyEnv("ZERO|BOGUS|DEFAULT"));
+}
+// Nothing recognized at all -> both the per-token and the summary diagnostic.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndWarnsTwice) {
+  int policy = NCCL_CONFIG_UNDEF_INT;
+  const std::string log = RunCtaPolicyEnvCapturingLog("BOGUS", &policy);
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
+  EXPECT_TRUE(LogHas(log, "Ignoring"));
+  EXPECT_TRUE(LogHas(log, "No valid CTA policies found"));
+}
+// Empty string: isdigit('\0') is false so it takes the combine arm, but strtok
+// yields no token at all -- the while loop body never runs.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_EmptyString_ParsesNoTokens) {
+  int policy = NCCL_CONFIG_UNDEF_INT;
+  const std::string log = RunCtaPolicyEnvCapturingLog("", &policy);
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
+  EXPECT_TRUE(LogHas(log, "No valid CTA policies found"));
+}
+
+// LATENT BUG (init.cc:149): isdigit(env[0]) short-circuits the ENTIRE combine
+// syntax, so a leading digit makes everything after the first character
+// unreachable -- "0|EFFICIENCY" silently drops EFFICIENCY with no diagnostic.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_LeadingDigitDropsCombinedModes) {
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, RunCtaPolicyEnv("0|EFFICIENCY"));  // pins today
+
+  // WHEN FIXED (take the legacy arm only for a 1-char value, or parse digits as
+  // tokens), this is the test:
+  // EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_EFFICIENCY,
+  //           RunCtaPolicyEnv("0|EFFICIENCY"));
+}
+
+// LATENT BUG (init.cc:168-173): tokens are compared with strcasecmp but never
+// trimmed, so the natural spelling "DEFAULT | ZERO" yields "DEFAULT " and
+// " ZERO" -- both unknown. Nothing is applied and the user gets only the
+// generic "No valid CTA policies" line.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_SpacesAroundPipe_NoTokensRecognized) {
+  EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, RunCtaPolicyEnv("DEFAULT | ZERO"));  // pins today
+
+  // WHEN FIXED (trim each token before strcasecmp), this is the test:
+  // EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT | NCCL_CTA_POLICY_ZERO,
+  //           RunCtaPolicyEnv("DEFAULT | ZERO"));
+}
+
+// The unit never clears ctaPolicyEnv, so a second call ORs into the first --
+// which is precisely why production guards it with call_once, and why
+// RunCtaPolicyEnv resets before each parse.
+TEST_F(InitMicrotest, GetEnvCtaPolicy_CalledTwice_AccumulatesAcrossCalls) {
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, RunCtaPolicyEnv("EFFICIENCY"));
+  SetMicroEnv("NCCL_CTA_POLICY", "ZERO");
+  getEnvCtaPolicyOnce();  // deliberately NOT reset in between
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
 }
 
 // --- parseCommConfig (init.cc:3041) -- one validation arm per test.
