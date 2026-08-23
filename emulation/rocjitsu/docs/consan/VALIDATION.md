@@ -510,6 +510,14 @@ decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
 tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
 `record-replay`, `sampled`, and `inline-shadow`.
 
+On `gfx1250`, TP2 keeps all three source modes but gives each a fresh process
+and report lifetime: `tp2-family` is the fault-qualified prefill row,
+`tp2-decode` is the exact decode row, and `tp2-combined` is the exact combined
+row. Their union is the same prefill/decode/combined denominator as the
+ordinary all-mode TP2 row retained on the other targets. This process
+partition is emulator readiness policy; it does not reduce model inputs,
+parameters, tensor shapes, or numerical oracles.
+
 ### Canonical Qwen artifact preparation
 
 Qwen validation must not reuse an untracked VMFB whose compiler pipeline and

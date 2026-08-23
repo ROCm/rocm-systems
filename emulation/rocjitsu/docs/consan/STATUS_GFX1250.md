@@ -49,7 +49,7 @@ preserve an earlier green claim.
 | **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Recompiling the unchanged source with the current O3 pipeline removes obsolete giant runtime transpose initializers: the exact full 151,936-logit baseline now passes in 64.49 seconds with the original 2.9-GB parameters. Record/Replay is statically complete at 846/846 accesses plus 80/80 barriers, transforms in 90 ms, and reaches execution, but remains dispatch-active after 28 launches at the bounded 180-second limit and therefore has no final replay/oracle verdict. Preserve this as an explicit emulator-throughput deferral rather than repeatedly extending the wait | 🟧 The canonical O3 artifact is statically complete at 846/846 accesses plus 74/74 applicable barriers and transforms in 61 ms. It remains compute-active through 310 launches, including the final 2,374-cluster output kernel, at the bounded 180-second limit; no final oracle or teardown verdict is available | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
-| **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
+| **P2 Sharktank TP2 family** | 🟧 The exact prefill, decode, and combined modes now have separate source-faithful gfx1250 rows; bounded diagnostics pass all three oracles in 19.82, 65.70, and 49.16 seconds, and an all-mode eight-thread baseline passes in 121.97 seconds. Split-row SuperCollider qualification remains | 🟧 The canonical split prefill baseline is accepted in 17.35 seconds. Record/Replay completely instruments both rank objects at 460/460 accesses and 48/48 barriers each, with no unsupported or resource-failed sites, but remains in execution at the 180-second bound. Decode and combined clean/fault qualification remain; the cell stays orange at the isolated instrumented-throughput frontier | 🟧 The same three exact baseline modes pass; split-row Sampled qualification remains | 🟧 The same three exact baseline modes pass; split-row Inline Shadow qualification remains |
 | **P4 hip-moi D128 block attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 19.85 seconds with complete 18/18 access coverage; prior paired 1.56x retained | 🟩 Current clean-revision row passes both exact oracles in 21.98 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.11x retained | 🟩 Current clean-revision row passes both exact oracles in 20.37 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.13x retained | 🟩 Current clean-revision row passes both exact oracles in 33.57 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.09x retained |
 | **P4 hip-moi D128 pressure attention** | 🟩 Current clean-revision row passes all four exact host-reference oracles in 60.15 seconds with complete 24/24 access coverage; prior paired 1.84x retained | 🟩 Current clean-revision row passes all four exact oracles in 73.84 seconds with complete 24/24 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.33x and reviewed-fault bundle retained | 🟩 Current clean-revision row passes all four exact oracles in 61.22 seconds with complete 24/24 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.12x retained | 🟩 Current clean-revision row passes all four exact oracles in 117.48 seconds with complete 24/24 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.29x retained |
 | **P4 hip-moi WMMA attention** | 🟩 Current clean-revision row passes both exact host-reference oracles in 15.46 seconds with complete 18/18 access coverage; prior paired 1.78x retained | 🟩 Current clean-revision row passes both exact oracles in 16.91 seconds with complete 18/18 accesses plus 8/8 barriers, zero diagnostics, and a complete dynamic verdict; prior paired 1.17x retained | 🟩 Current clean-revision row passes both exact oracles in 15.22 seconds with complete 18/18 accesses plus 8/8 applicable barriers and a complete dynamic verdict; prior paired 1.15x retained | 🟩 Current clean-revision row passes both exact oracles in 19.91 seconds with complete 18/18 accesses plus 4/4 barriers and a complete dynamic verdict; prior paired 1.17x retained |
@@ -97,6 +97,44 @@ kernarg-preload variant separately covers the generated CDNA3/CDNA4 entry
 shape.  The remaining Qwen gap is completion and performance evidence for the
 full gfx1250 emulation row, not an uncovered device-observable synchronization
 contract.
+
+### 2026-08-23 TP2 mode-isolation readiness and Record/Replay bound
+
+The earlier current-tip TP2 assessment attributed a greater-than-600-second
+timeout to the uninstrumented all-mode baseline. Bounded mode isolation with
+the same source, parameters, exact cross-entropy oracles, and eight-thread
+RocJitsu launcher disproves that diagnosis. Prefill, decode, and combined pass
+independently in 19.82, 65.70, and 49.16 seconds; their measured inference
+times are 6.98, 30.02, and 21.48 seconds. One all-mode process also passes all
+three oracles in 121.97 seconds. No model, tensor shape, parameter, or oracle
+was reduced.
+
+The executable gfx1250 manifest now gives those modes independent bounded
+rows. `tp2-family` retains the reviewed prefill fault identity, while
+`tp2-decode` and `tp2-combined` retain the other two exact oracles. Other
+targets keep the existing all-mode row. A focused host regression proves the
+target scoping, the exact prefill/decode/combined partition, and each
+180-second bound, so a future edit cannot silently drop a mode or recreate the
+single-process denominator.
+
+Canonical artifact
+`/home/ossci/xx/consan-validation/prep-20260823-gfx1250-tp2-prefill-rr-mt8-v2`
+accepts the split prefill baseline in 17.35 seconds. Record/Replay then
+discovers, selects, and patches all 460 accesses and 48 barriers in each of the
+two rank objects, with no unsupported, resource-failed, placement-failed, or
+expert-omitted site. Each rank allocates a 251,936,952-byte bounded report and
+emits a valid 1,962,864-byte replacement, but the workload remains in execution
+at 180 seconds and therefore has no oracle, replay, or teardown verdict. The
+cell stays orange; the return point is instrumented emulator throughput, not a
+longer blind timeout.
+
+This readiness change exposes no new device-observable synchronization
+semantic. `Gfx1250Fp16WmmaPipeline` owns the target-native matrix/LDS
+publication shape, while the cross-target heterogeneous-object and module
+lifecycle pairs own independent multi-object attribution and teardown. The new
+host manifest regression is therefore the faithful durable test for the mode
+partition; manufacturing another device race solely around Python process
+lifetime would not add behavioral coverage.
 
 ### 2026-08-21 fixed-stack Inline scalar-route regression
 

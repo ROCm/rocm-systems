@@ -2495,6 +2495,51 @@ class ConSanValidationTest(unittest.TestCase):
             256,
         )
         self.assertEqual(
+            {
+                workload_id: workloads[workload_id]["sharktank_mode"]
+                for workload_id in (
+                    "tp2-family",
+                    "tp2-decode",
+                    "tp2-combined",
+                )
+            },
+            {
+                "tp2-family": "prefill",
+                "tp2-decode": "decode",
+                "tp2-combined": "combined",
+            },
+        )
+        self.assertTrue(
+            all(
+                workloads[workload_id]["run_timeout_seconds"] == 180
+                for workload_id in (
+                    "tp2-family",
+                    "tp2-decode",
+                    "tp2-combined",
+                )
+            )
+        )
+        for workload_id, expected_mode in (
+            ("tp2-family", "prefill"),
+            ("tp2-decode", "decode"),
+            ("tp2-combined", "combined"),
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1250",
+                validation.WORKLOAD_BY_ID[workload_id],
+                "clean",
+                Path("/output.json"),
+            )
+            self.assertEqual(command[command.index("--mode") + 1], expected_mode)
+        gfx950_workloads = {
+            workload["id"]: workload
+            for workload in validation._manifest("gfx950")["workloads"]
+        }
+        self.assertEqual(gfx950_workloads["tp2-family"]["sharktank_mode"], "all")
+        self.assertNotIn("tp2-decode", gfx950_workloads)
+        self.assertNotIn("tp2-combined", gfx950_workloads)
+        self.assertEqual(
             workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1260
         )
         self.assertEqual(
@@ -2529,6 +2574,10 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-prefill", 60),
                 ("gfx950", "tp1-decode-combined", 300),
                 ("gfx1250", "tp1-decode-combined", 180),
+                ("gfx950", "tp2-family", 30),
+                ("gfx1250", "tp2-family", 180),
+                ("gfx1250", "tp2-decode", 180),
+                ("gfx1250", "tp2-combined", 180),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
                 ("gfx950", "pytorch-torch-histc", 300),

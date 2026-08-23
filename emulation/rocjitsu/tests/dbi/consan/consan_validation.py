@@ -1123,6 +1123,46 @@ WORKLOADS = (
         fault_families=("barrier-drop",),
     ),
     Workload(
+        id="tp2-decode",
+        priority="P2",
+        corpus="iree-test-suites",
+        kind="sharktank",
+        warm_timing_mode="host-json",
+        relative_path="iree-test-suites/sharktank_models/llama3.1/test_llama.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload="tp2",
+        sharktank_mode="decode",
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        # The reviewed family fault lives in the prefill specialization. This
+        # row preserves the independent decode oracle and coverage denominator.
+        fault_families=(),
+        targets=("gfx1250",),
+        run_timeout_seconds=180,
+    ),
+    Workload(
+        id="tp2-combined",
+        priority="P2",
+        corpus="iree-test-suites",
+        kind="sharktank",
+        warm_timing_mode="host-json",
+        relative_path="iree-test-suites/sharktank_models/llama3.1/test_llama.py",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload="tp2",
+        sharktank_mode="combined",
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        # As above, this is an exact supporting mode of the one TP2 family
+        # cell, not a second independently fault-qualified family.
+        fault_families=(),
+        targets=("gfx1250",),
+        run_timeout_seconds=180,
+    ),
+    Workload(
         id="clip-bf16",
         priority="P3",
         corpus="iree-test-suites",
@@ -1858,6 +1898,15 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "tp1-prefill": {
             "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,
+        },
+        # Running all three TP2 modes in one instrumented process retains two
+        # 252-MB rank report buffers across independent model lifecycles and
+        # exceeds the emulator bound. Keep the reviewed family fault on
+        # prefill, while the adjacent target-only rows retain decode and
+        # combined as separate exact, fully covered processes.
+        "tp2-family": {
+            "sharktank_mode": "prefill",
+            "run_timeout_seconds": 180,
         },
         # Preserve all six exact problems and all 16 generated solutions per
         # problem, but give each exact size an independent numeric oracle,
