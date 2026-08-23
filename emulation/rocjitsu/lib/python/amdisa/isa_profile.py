@@ -638,6 +638,22 @@ class IsaProfile(ABC):
         del enc_name, inst_name, src0_size_bits
         return DppOpcodeRule.ALLOW
 
+    def supports_sdwa_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        """Return whether an opcode supports the architecture's SDWA form.
+
+        Most profiles can use the alternate encodings listed in the MR ISA
+        directly. Profiles may override this when the architecture manual has
+        a more complete opcode rule than the available XML.
+        """
+        del enc_name, inst_name
+        return has_modifier_encoding
+
     @property
     def vop3_cmp_sdst_size_bits(self) -> int | None:
         """Explicit VOP3 compare destination width, if target-specific."""
@@ -864,8 +880,9 @@ _FLAT_MODIFIERS = [
         'flat_offset',
         is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            'int flat_offset = inst->offset | (inst->pad_12 << 12);'
+            'if (inst->seg == 0) flat_offset = inst->offset;'
+            'else if (flat_offset & 0x1000) flat_offset -= 0x2000;'
         ),
     ),
     EncodingModifier('sc0'),
@@ -895,8 +912,9 @@ _FLAT_MODIFIERS_GLC = [
         'flat_offset',
         is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            'int flat_offset = inst->offset | (inst->pad_12 << 12);'
+            'if (inst->seg == 0) flat_offset = inst->offset;'
+            'else if (flat_offset & 0x1000) flat_offset -= 0x2000;'
         ),
     ),
     EncodingModifier('glc'),
@@ -1451,6 +1469,19 @@ class CdnaProfile(_AmdgpuProfileBase):
         if self.dpp_64bit_input_row_select_only and src0_size_bits == 64:
             return DppOpcodeRule.ROW_SELECT_ONLY
         return base_rule
+
+    def supports_sdwa_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        # CDNA's SDWA limitation table permits V_PK_FMAC_F16, and the hardware
+        # encoding is exercised by LLVM, but the MR ISA omits its SDWA alternate.
+        if enc_name.upper() == 'ENC_VOP2' and inst_name == 'V_PK_FMAC_F16':
+            return True
+        return has_modifier_encoding
 
 
 class Cdna4Profile(CdnaProfile):

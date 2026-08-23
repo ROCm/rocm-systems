@@ -905,6 +905,12 @@ class CodeGenerator:
         ):
             return 'amdgpu::sdwa::SourceModifierFormat::NONE'
 
+        # GFX9 accepts the SDWA modifier bits for V_PK_FMAC_F16, but its packed
+        # operation ignores source negate and absolute-value modifiers. Source
+        # selection and sign extension remain active through the NONE format.
+        if sem.name == 'V_PK_FMAC_F16':
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
         suffix = {
             'FMT_NUM_F16': 'F16',
             'FMT_NUM_BF16': 'BF16',
@@ -1316,7 +1322,14 @@ class CodeGenerator:
         )
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
-        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+        has_modifier_encoding = self._instruction_supports_modifier_encoding(
+            inst, enc_name, 'sdwa'
+        )
+        return self.isa_spec.profile.supports_sdwa_opcode(
+            enc_name,
+            inst.name,
+            has_modifier_encoding=has_modifier_encoding,
+        )
 
     def _instruction_supports_literal_encoding(
         self, inst: Instruction, parent_enc_name: str, width: int
@@ -2895,6 +2908,51 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            if (
+                enc_upper == 'ENC_DS'
+                and {'offset0', 'offset1', 'gds'} <= enc_field_names
+            ):
+                split_offset_opcodes = []
+                for inst in inst_enc.insts:
+                    sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics
+                        else None
+                    )
+                    if sem is not None and sem.semantic_class in (
+                        'ds_read2',
+                        'ds_write2',
+                        'ds_atomic2',
+                    ):
+                        split_offset_opcodes.append(inst.opcode)
+                if split_offset_opcodes:
+                    public_members.append(
+                        cgen.Line('bool uses_split_ds_offsets() const;')
+                    )
+                    class_func_impls.append(
+                        cgen.Line(
+                            self._opcode_predicate_helper_impl(
+                                inst_enc,
+                                'uses_split_ds_offsets',
+                                sorted(set(split_offset_opcodes)),
+                            )
+                        )
+                    )
+                split_offset_condition = (
+                    'uses_split_ds_offsets()' if split_offset_opcodes else 'false'
+                )
+                modifier_lines += (
+                    f'if ({split_offset_condition}) {{'
+                    'if (inst->offset0) modifiers_ += " offset0:"'
+                    ' + std::to_string(inst->offset0);'
+                    'if (inst->offset1) modifiers_ += " offset1:"'
+                    ' + std::to_string(inst->offset1);'
+                    '} else {'
+                    'const uint32_t offset = inst->offset0 | (inst->offset1 << 8);'
+                    'if (offset) modifiers_ += " offset:" + std::to_string(offset);'
+                    '}'
+                    'if (inst->gds) modifiers_ += " gds";'
+                )
             dpp8_modifier_line = ''
             if dpp8_struct is not None:
                 dpp8_modifier_line = (
@@ -9971,7 +10029,11 @@ class CodeGenerator:
                             _src_input_ops = [
                                 o
                                 for o in inst.operands
-                                if o.is_input and not o.fieldless
+                                # Read/write destinations such as V_FMAC's
+                                # accumulator are semantic inputs, but they are
+                                # not the encoded src0/src1 fields modified by
+                                # DPP or SDWA.
+                                if o.is_input and not o.is_output and not o.fieldless
                             ]
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
