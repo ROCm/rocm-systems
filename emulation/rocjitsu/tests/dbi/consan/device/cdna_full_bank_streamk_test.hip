@@ -1,17 +1,22 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// CDNA Stream-K last-arriver publication at the E2E failure resource shape:
-/// all 256 ordinary VGPRs, a dynamic private frame, and LDS accesses in a
-/// shared noinline helper. MFMA/AccVGPR boundary pressure is kept in the
-/// adjacent MFMA pair because v255 and a live accumulator cannot coexist in
-/// CDNA's unified physical register file.
+/// Stream-K last-arriver publication at the E2E failure resource shape: a
+/// complete 256-register low VGPR bank, a dynamic private frame, and LDS
+/// accesses in a shared noinline helper. CDNA keeps its native cache/atomic
+/// sequence; wave32 targets use the compiler's agent-scope acquire/release
+/// lowering. CDNA MFMA/AccVGPR and gfx1250's upper VGPR bank remain in their
+/// adjacent capability-specific pairs.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
+#if defined(RJ_CONSAN_FULL_BANK_STREAMK_WAVE32)
+constexpr uint32_t kWaveSize = 32u;
+#else
 constexpr uint32_t kWaveSize = 64u;
+#endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
 
 struct DeviceState {
@@ -32,6 +37,9 @@ __device__ __noinline__ uint32_t consume_partial(volatile uint32_t *address) {
 }
 
 __device__ __forceinline__ uint32_t fetch_add_acq_rel(uint32_t *address) {
+#if defined(RJ_CONSAN_FULL_BANK_STREAMK_WAVE32)
+  return __hip_atomic_fetch_add(address, 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+#else
   const uint32_t one = 1u;
   uint32_t old = 0u;
   asm volatile("buffer_wbl2 sc1\n\t"
@@ -44,10 +52,10 @@ __device__ __forceinline__ uint32_t fetch_add_acq_rel(uint32_t *address) {
                : "v"(address), "v"(one)
                : "memory");
   return old;
+#endif
 }
 
-__global__
-__launch_bounds__(kThreadCount) void cdna_full_bank_streamk_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(kThreadCount) void full_bank_streamk_for_consan(DeviceState *state) {
   __shared__ volatile uint32_t partials[2];
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid & (kWaveSize - 1u);
@@ -84,14 +92,14 @@ uint32_t expected_private_value(uint32_t tid) {
   return 0xc5000000u ^ (tid * 17u + (tid * 3u + 1u) % count);
 }
 
-void run_cdna_full_bank_streamk(bool synchronize) {
+void run_full_bank_streamk(bool synchronize) {
   DeviceState initial{};
   initial.synchronize = synchronize ? 1u : 0u;
   initial.handoff[1] = 1u;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(DeviceState)));
   HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
-  cdna_full_bank_streamk_for_consan<<<1, kThreadCount>>>(device_state);
+  full_bank_streamk_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -110,7 +118,7 @@ void run_cdna_full_bank_streamk(bool synchronize) {
     EXPECT_EQ(result.observed, 0xa17u);
 }
 
-TEST(ConSanDeviceCdnaFullBankStreamkTest, Correct) { run_cdna_full_bank_streamk(true); }
-TEST(ConSanDeviceCdnaFullBankStreamkTest, Incorrect) { run_cdna_full_bank_streamk(false); }
+TEST(ConSanDeviceFullBankStreamKTest, Correct) { run_full_bank_streamk(true); }
+TEST(ConSanDeviceFullBankStreamKTest, Incorrect) { run_full_bank_streamk(false); }
 
 } // namespace

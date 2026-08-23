@@ -415,6 +415,7 @@ function(rj_add_consan_device_conformance_cases)
         "AtomicCasPublication|atomic_cas_publication|ConSanDeviceAtomicCasPublicationTest|atomics"
         "AtomicStorePublication|atomic_store_publication|ConSanDeviceAtomicStorePublicationTest|atomics"
         "StreamKLastArriver|streamk_last_arriver|ConSanDeviceStreamKLastArriverTest|atomics"
+        "RcclPartialBarrier|rccl_partial_barrier|ConSanDeviceRcclPartialBarrierTest|atomics"
         "TreeAtomicOr|tree_atomic_or|ConSanDeviceTreeAtomicOrTest|atomics"
         "AccessHeavyStreamK|access_heavy_streamk|ConSanDeviceAccessHeavyStreamKTest"
         "DoubleBufferedPipeline|double_buffered_pipeline|ConSanDeviceDoubleBufferedPipelineTest"
@@ -436,24 +437,25 @@ function(rj_add_consan_device_conformance_cases)
         "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
         "LongRangeLiveScc|long_range_live_scc|ConSanDeviceLongRangeLiveSccTest"
         "SampledMultiRangeBudget|sampled_multi_range_budget|ConSanDeviceSampledMultiRangeBudgetTest|sampled-only"
+        "LargeTextRelay|large_text_relay|ConSanDeviceLargeTextRelayTest"
+        "TopKPrefix|topk_prefix|ConSanDeviceTopKPrefixTest|atomics"
+        "SubwordSccRoute|subword_scc_route|ConSanDeviceSubwordSccRouteTest"
+        "ClobberingLdsReduction|clobbering_lds_reduction|ConSanDeviceClobberingLdsReductionTest"
+        "FullBankStreamK|full_bank_streamk|ConSanDeviceFullBankStreamKTest|atomics"
+        "RecordReplayLongRangeFullPressure|record_replay_long_range_full_pressure|ConSanDeviceRecordReplayLongRangeFullPressureTest|record-replay-only"
+        "SuperColliderDenseThreshold|supercollider_dense_threshold|ConSanDeviceSuperColliderDenseThresholdTest|supercollider-only"
+        "SampledIndependentScalarProofs|sampled_independent_scalar_proofs|ConSanDeviceSampledIndependentScalarProofsTest|sampled-only"
     )
     if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
         list(
             APPEND _device_workloads
             "CdnaMfmaPipeline|cdna_mfma_pipeline|ConSanDeviceCdnaMfmaPipelineTest"
             "CdnaDirectToLdsPublication|cdna_direct_to_lds_publication|ConSanDeviceCdnaDirectToLdsPublicationTest"
-            "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
             "CdnaB96Boundary|cdna_b96_boundary|ConSanDeviceCdnaB96BoundaryTest"
             "CdnaDenseSccRoutes|cdna_dense_scc_routes|ConSanDeviceCdnaDenseSccRoutesTest|no-record-replay"
-            "CdnaIndependentScalarProofs|cdna_sampled_independent_scalar_proofs|ConSanDeviceCdnaSampledIndependentScalarProofsTest|sampled-only"
-            "CdnaB16SccRoute|cdna_b16_scc_route|ConSanDeviceCdnaB16SccRouteTest"
-            "CdnaClobberingLdsReduction|cdna_clobbering_lds_reduction|ConSanDeviceCdnaClobberingLdsReductionTest"
             "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
-            "CdnaWave64LargeText|cdna_wave64_large_text|ConSanDeviceCdnaWave64LargeTextTest"
-            "CdnaRecordReplayLongRangeFullPressure|cdna_record_replay_long_range_full_pressure|ConSanDeviceCdnaRecordReplayLongRangeFullPressureTest|record-replay-only"
             "CdnaMixedPersistentState|cdna_mixed_persistent_state|ConSanDeviceCdnaMixedPersistentStateTest"
             "CdnaKernargPreloadPrivateState|cdna_kernarg_preload_private_state|ConSanDeviceCdnaMixedPersistentStateTest|sampled-only"
-            "CdnaSuperColliderDenseThreshold|cdna_supercollider_dense_threshold|ConSanDeviceCdnaSuperColliderDenseThresholdTest|supercollider-only"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx950")
@@ -463,13 +465,6 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
     endif()
-    if(_device_TARGET STREQUAL "gfx1201" OR _device_TARGET STREQUAL "gfx1250")
-        list(
-            APPEND _device_workloads
-            "RdnaB96Boundary|rdna_b96_boundary|ConSanDeviceRdnaB96BoundaryTest"
-            "OrderedAtomicScope|ordered_atomic_scope|ConSanDeviceOrderedAtomicScopeTest|atomics"
-        )
-    endif()
     if(
         _device_TARGET STREQUAL "gfx1100"
         OR _device_TARGET STREQUAL "gfx1201"
@@ -477,7 +472,13 @@ function(rj_add_consan_device_conformance_cases)
     )
         list(
             APPEND _device_workloads
-            "Wave32TopKPrefix|wave32_topk_prefix|ConSanDeviceWave32TopKPrefixTest|atomics"
+            "RdnaB96Boundary|rdna_b96_boundary|ConSanDeviceRdnaB96BoundaryTest"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1201" OR _device_TARGET STREQUAL "gfx1250")
+        list(
+            APPEND _device_workloads
+            "OrderedAtomicScope|ordered_atomic_scope|ConSanDeviceOrderedAtomicScopeTest|atomics"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1250")
@@ -491,6 +492,8 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250SparseFp8Pipeline|gfx1250_sparse_fp8_pipeline|ConSanDeviceGfx1250SparseFp8PipelineTest"
             "Gfx1250ScaledWmmaPipeline|gfx1250_scaled_wmma_pipeline|ConSanDeviceGfx1250ScaledWmmaPipelineTest"
             "Gfx1250GlobalAsyncToLds|gfx1250_global_async_to_lds|ConSanDeviceGfx1250GlobalAsyncToLdsTest"
+            "Gfx1250GlobalAsyncFromLds|gfx1250_global_async_from_lds|ConSanDeviceGfx1250GlobalAsyncFromLdsTest"
+            "Gfx1250LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1201")
@@ -658,7 +661,7 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
-                _workload_name STREQUAL "CdnaIndependentScalarProofs"
+                _workload_name STREQUAL "SampledIndependentScalarProofs"
                 AND _mode_value STREQUAL "sampled"
             )
                 # Exercise persistent dispatch identity together with the two
@@ -737,7 +740,11 @@ function(rj_add_consan_device_conformance_cases)
             endif()
 
             if(
-                _workload_name STREQUAL "CdnaClobberingLdsReduction"
+                _workload_name STREQUAL "ClobberingLdsReduction"
+                AND (
+                    _device_TARGET STREQUAL "gfx942"
+                    OR _device_TARGET STREQUAL "gfx950"
+                )
                 AND _mode_value STREQUAL "inline-shadow"
             )
                 # Preserve the E2E resource cliff: live ordinary and
@@ -984,6 +991,7 @@ function(rj_add_consan_device_fixture_targets target)
         "atomic_cas_publication|atomic_cas_publication_test.hip"
         "atomic_store_publication|atomic_store_publication_test.hip"
         "streamk_last_arriver|streamk_last_arriver_test.hip"
+        "rccl_partial_barrier|rccl_partial_barrier_test.hip"
         "tree_atomic_or|tree_atomic_or_test.hip"
         "access_heavy_streamk|access_heavy_streamk_test.hip"
         "double_buffered_pipeline|double_buffered_pipeline_test.hip"
@@ -1005,24 +1013,25 @@ function(rj_add_consan_device_fixture_targets target)
         "group_flat_wide|group_flat_wide_test.hip"
         "long_range_live_scc|long_range_live_scc_test.hip"
         "sampled_multi_range_budget|sampled_multi_range_budget_test.hip"
+        "large_text_relay|cdna_wave64_large_text_test.hip"
+        "topk_prefix|wave32_topk_prefix_test.hip"
+        "subword_scc_route|cdna_b16_scc_route_test.hip"
+        "clobbering_lds_reduction|cdna_clobbering_lds_reduction_test.hip"
+        "full_bank_streamk|cdna_full_bank_streamk_test.hip"
+        "record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
+        "supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
+        "sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
     )
     if(target STREQUAL "gfx942" OR target STREQUAL "gfx950")
         list(
             APPEND _device_workload_sources
             "cdna_mfma_pipeline|cdna_mfma_pipeline_test.hip"
             "cdna_direct_to_lds_publication|cdna_direct_to_lds_publication_test.hip"
-            "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
             "cdna_b96_boundary|cdna_b96_boundary_test.hip"
             "cdna_dense_scc_routes|cdna_dense_scc_routes_test.hip"
-            "cdna_sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
-            "cdna_b16_scc_route|cdna_b16_scc_route_test.hip"
-            "cdna_clobbering_lds_reduction|cdna_clobbering_lds_reduction_test.hip"
             "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
-            "cdna_wave64_large_text|cdna_wave64_large_text_test.hip"
-            "cdna_record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
             "cdna_mixed_persistent_state|cdna_mixed_persistent_state_test.hip"
             "cdna_kernarg_preload_private_state|cdna_mixed_persistent_state_test.hip"
-            "cdna_supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         )
     endif()
     if(target STREQUAL "gfx950")
@@ -1032,15 +1041,21 @@ function(rj_add_consan_device_fixture_targets target)
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
     endif()
-    if(target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+    if(
+        target STREQUAL "gfx1100"
+        OR target STREQUAL "gfx1201"
+        OR target STREQUAL "gfx1250"
+    )
         list(
             APPEND _device_workload_sources
             "rdna_b96_boundary|rdna_b96_boundary_test.hip"
-            "ordered_atomic_scope|ordered_atomic_scope_test.hip"
         )
     endif()
-    if(target STREQUAL "gfx1100" OR target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
-        list(APPEND _device_workload_sources "wave32_topk_prefix|wave32_topk_prefix_test.hip")
+    if(target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        list(
+            APPEND _device_workload_sources
+            "ordered_atomic_scope|ordered_atomic_scope_test.hip"
+        )
     endif()
     if(target STREQUAL "gfx1250")
         list(
@@ -1049,6 +1064,8 @@ function(rj_add_consan_device_fixture_targets target)
             "gfx1250_sparse_fp8_pipeline|gfx1250_sparse_fp8_pipeline_test.hip"
             "gfx1250_scaled_wmma_pipeline|gfx1250_scaled_wmma_pipeline_test.hip"
             "gfx1250_global_async_to_lds|gfx1250_global_async_to_lds_test.hip"
+            "gfx1250_global_async_from_lds|gfx1250_global_async_from_lds_test.hip"
+            "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1201")
@@ -1080,6 +1097,181 @@ function(rj_add_consan_device_fixture_targets target)
             list(
                 APPEND _workload_compile_definitions
                 RJ_CONSAN_DEVICE_FENCE_BARRIER_ONLY=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "gfx950_large_lds_pipeline"
+            AND target STREQUAL "gfx1250"
+        )
+            # HIP target built-ins are unavailable to the host compilation
+            # pass. Keep the shared source's launcher constants identical to
+            # its gfx1250 device constants with an explicit two-pass marker.
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_LARGE_LDS_GFX1250=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "large_text_relay"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_LARGE_TEXT_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "topk_prefix"
+            AND (target STREQUAL "gfx942" OR target STREQUAL "gfx950")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_TOPK_WAVE64=1
+                RJ_CONSAN_TOPK_LEGACY_LDS=1
+            )
+        elseif(
+            _workload_name STREQUAL "topk_prefix"
+            AND target STREQUAL "gfx1100"
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_TOPK_LEGACY_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "subword_scc_route"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_SUBWORD_SCC_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "subword_scc_route"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_SUBWORD_SCC_MODERN_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "clobbering_lds_reduction"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_CLOBBERING_REDUCTION_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "clobbering_lds_reduction"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_CLOBBERING_REDUCTION_MODERN_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "full_bank_streamk"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_FULL_BANK_STREAMK_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "record_replay_long_range_full_pressure"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "record_replay_long_range_full_pressure"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_RECORD_REPLAY_PRESSURE_MODERN_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "supercollider_dense_threshold"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_DENSE_THRESHOLD_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "supercollider_dense_threshold"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_DENSE_THRESHOLD_MODERN_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "sampled_independent_scalar_proofs"
+            AND (
+                target STREQUAL "gfx1100"
+                OR target STREQUAL "gfx1201"
+                OR target STREQUAL "gfx1250"
+            )
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_INDEPENDENT_SCALAR_WAVE32=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "sampled_independent_scalar_proofs"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_INDEPENDENT_SCALAR_MODERN_LDS=1
+            )
+        endif()
+        if(
+            _workload_name STREQUAL "large_text_relay"
+            AND (target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        )
+            list(
+                APPEND _workload_compile_definitions
+                RJ_CONSAN_LARGE_TEXT_MODERN_LDS=1
             )
         endif()
         if(

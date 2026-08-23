@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 /// Large-LDS, eight-wave pipeline distilled from the gfx950 HipKittens BF16
-/// GEMM. It keeps the workload's 160 KiB group segment, 32 publication stages,
-/// wide producer stores, scalar consumer reads, and repeated dispatches while
-/// replacing MFMA arithmetic with a compact exact oracle.
+/// GEMM and transported to CDNA5 with its native wave size, DS instruction
+/// spellings, wait, and wider LDS address. It keeps the workload's 160 KiB
+/// group segment, 32 publication stages, wide producer stores, scalar consumer
+/// reads, and repeated dispatches while replacing MFMA arithmetic with a
+/// compact exact oracle.
 
 #include "consan_device_test_support.h"
 
@@ -12,7 +14,28 @@
 
 namespace {
 
+// Target built-ins are device-pass-only in HIP. CMake deliberately supplies
+// this companion definition to both passes so the host launcher and device
+// launch bounds cannot silently disagree about wave and workgroup sizes.
+#if defined(RJ_CONSAN_LARGE_LDS_GFX1250)
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx1250__)
+#error "RJ_CONSAN_LARGE_LDS_GFX1250 requires a gfx1250 device compilation"
+#endif
+constexpr uint32_t kWaveSize = 32u;
+constexpr uint32_t kLdsAddressMask = 0xfffffu;
+#define RJ_CONSAN_LARGE_LDS_STORE_B128 "ds_store_b128"
+#define RJ_CONSAN_LARGE_LDS_LOAD_B32 "ds_load_b32"
+#define RJ_CONSAN_LARGE_LDS_WAIT "s_wait_dscnt 0\n\t"
+#else
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx950__)
+#error "The default large-LDS pipeline variant requires a gfx950 device compilation"
+#endif
 constexpr uint32_t kWaveSize = 64u;
+constexpr uint32_t kLdsAddressMask = 0xffffu;
+#define RJ_CONSAN_LARGE_LDS_STORE_B128 "ds_write_b128"
+#define RJ_CONSAN_LARGE_LDS_LOAD_B32 "ds_read_b32"
+#define RJ_CONSAN_LARGE_LDS_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#endif
 constexpr uint32_t kThreadCount = 8u * kWaveSize;
 constexpr uint32_t kStages = 32u;
 constexpr uint32_t kDispatches = 2u;
@@ -29,24 +52,21 @@ struct DeviceState {
   uint32_t control[kThreadCount];
 };
 
-__device__ __forceinline__ void store_lds_b128(volatile uint4 *address, uint4 value) {
-  const uint32_t lds_address =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+__device__ __forceinline__ void store_lds_b128(uint32_t lds_address, uint4 value) {
   register uint32_t value0 asm("v20") = value.x;
   register uint32_t value1 asm("v21") = value.y;
   register uint32_t value2 asm("v22") = value.z;
   register uint32_t value3 asm("v23") = value.w;
-  asm volatile("ds_write_b128 %0, v[20:23]\n\t" RJ_CONSAN_DEVICE_CAVE
+  asm volatile(RJ_CONSAN_LARGE_LDS_STORE_B128 " %0, v[20:23]\n\t" RJ_CONSAN_DEVICE_CAVE
                :
                : "v"(lds_address), "v"(value0), "v"(value1), "v"(value2), "v"(value3)
                : "v20", "v21", "v22", "v23", "memory");
 }
 
-__device__ __forceinline__ uint32_t load_lds_b32(volatile uint32_t *address) {
-  const uint32_t lds_address =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+__device__ __forceinline__ uint32_t load_lds_b32(uint32_t lds_address) {
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t" RJ_CONSAN_DEVICE_CAVE "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_LARGE_LDS_LOAD_B32
+               " %0, %1\n\t" RJ_CONSAN_DEVICE_CAVE RJ_CONSAN_LARGE_LDS_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
@@ -61,16 +81,17 @@ __host__ __device__ __forceinline__ uint4 stage_value(uint32_t stage, uint32_t l
 template <bool Synchronize, uint32_t Stage>
 __device__ __forceinline__ void run_large_lds_stage(volatile LargeLdsStorage *storage, uint32_t tid,
                                                     uint32_t lane, uint32_t &accumulator) {
+  uint32_t stage_address;
+  stage_address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&storage->staged[Stage][lane]) &
+                                        kLdsAddressMask);
   if (tid < kWaveSize)
-    store_lds_b128(&storage->staged[Stage][lane], stage_value(Stage, lane));
+    store_lds_b128(stage_address, stage_value(Stage, lane));
   if constexpr (Synchronize || Stage != kStages / 2u)
     __syncthreads();
 
-  volatile uint32_t *words =
-      reinterpret_cast<volatile uint32_t *>(const_cast<uint4 *>(&storage->staged[Stage][lane]));
-  const uint32_t first = load_lds_b32(words + 0u);
-  const uint32_t second = load_lds_b32(words + 1u);
-  const uint32_t third = load_lds_b32(words + 2u);
+  const uint32_t first = load_lds_b32(stage_address + 0u);
+  const uint32_t second = load_lds_b32(stage_address + 4u);
+  const uint32_t third = load_lds_b32(stage_address + 8u);
   accumulator ^= consan_device_test::rotate_left(first, (Stage % 13u) + 1u);
   accumulator ^= consan_device_test::rotate_left(second, (Stage % 17u) + 1u);
   accumulator ^= consan_device_test::rotate_left(third, (Stage % 19u) + 1u);
@@ -135,5 +156,9 @@ void run_gfx950_large_lds_pipeline(bool synchronize) {
 TEST(ConSanDeviceGfx950LargeLdsPipelineTest, Correct) { run_gfx950_large_lds_pipeline(true); }
 
 TEST(ConSanDeviceGfx950LargeLdsPipelineTest, Incorrect) { run_gfx950_large_lds_pipeline(false); }
+
+#undef RJ_CONSAN_LARGE_LDS_STORE_B128
+#undef RJ_CONSAN_LARGE_LDS_LOAD_B32
+#undef RJ_CONSAN_LARGE_LDS_WAIT
 
 } // namespace

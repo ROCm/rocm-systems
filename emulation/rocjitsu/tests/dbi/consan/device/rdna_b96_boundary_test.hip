@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// Native 12-byte LDS tuple publication. The aliasing store source/address and
-/// load destination/address are retained from framework-generated
-/// RDNA4/CDNA5 kernels: instrumentation must preserve the shared operand before
-/// relocating either B96 access.
+/// load destination/address are retained from framework-generated gfx11/gfx12
+/// kernels: instrumentation must preserve the shared operand before relocating
+/// either B96 access.
 
 #include "consan_device_test_support.h"
 
@@ -12,6 +12,12 @@ namespace {
 
 constexpr uint32_t kWaveSize = 32u;
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
+
+#if defined(__gfx1100__)
+#define RJ_CONSAN_B96_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#else
+#define RJ_CONSAN_B96_WAIT "s_wait_dscnt 0\n\t"
+#endif
 
 struct DeviceState {
   uint32_t synchronize;
@@ -37,7 +43,7 @@ __device__ __forceinline__ uint3 load_b96_with_aliasing_address(uint32_t address
   uint32_t value1 = 0u;
   uint32_t value2 = 0u;
   asm volatile("v_mov_b32 v4, %3\n\t"
-               "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE "s_wait_dscnt 0\n\t"
+               "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE RJ_CONSAN_B96_WAIT
                "v_mov_b32 %0, v4\n\t"
                "v_mov_b32 %1, v5\n\t"
                "v_mov_b32 %2, v6\n\t"
@@ -103,5 +109,7 @@ void run_rdna_b96_boundary(bool synchronize) {
 
 TEST(ConSanDeviceRdnaB96BoundaryTest, Correct) { run_rdna_b96_boundary(true); }
 TEST(ConSanDeviceRdnaB96BoundaryTest, Incorrect) { run_rdna_b96_boundary(false); }
+
+#undef RJ_CONSAN_B96_WAIT
 
 } // namespace

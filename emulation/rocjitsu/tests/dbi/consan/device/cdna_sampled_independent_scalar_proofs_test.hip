@@ -3,14 +3,34 @@
 
 /// Independent Sampled EXEC-save and dispatch-identity placement under the
 /// scalar-pressure shape distilled from hip-moi's D128 attention workload.
+/// Target-native wave size, LDS, wait, and barrier spellings retain the same
+/// two-owner proof across CDNA3/4/5 and RDNA3/4.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
+#if defined(RJ_CONSAN_INDEPENDENT_SCALAR_WAVE32)
+constexpr uint32_t kWaveSize = 32u;
+#else
 constexpr uint32_t kWaveSize = 64u;
+#endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
 constexpr uint32_t kAccessCount = 18u;
+
+#if defined(RJ_CONSAN_INDEPENDENT_SCALAR_MODERN_LDS)
+#define RJ_CONSAN_INDEPENDENT_SCALAR_STORE "ds_store_b32"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_LOAD "ds_load_b32"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_WAIT "s_wait_dscnt 0\n\t"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_BARRIER                                                       \
+  "s_barrier_signal -1\n\t"                                                                        \
+  "s_barrier_wait -1\n\t"
+#else
+#define RJ_CONSAN_INDEPENDENT_SCALAR_STORE "ds_write_b32"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_LOAD "ds_read_b32"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#define RJ_CONSAN_INDEPENDENT_SCALAR_BARRIER "s_barrier\n\t"
+#endif
 
 struct DeviceState {
   uint32_t synchronize;
@@ -26,15 +46,17 @@ struct DeviceState {
 __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+  asm volatile(RJ_CONSAN_INDEPENDENT_SCALAR_STORE " %0, %1\n\t"
+               :
+               : "v"(lds_address), "v"(value)
+               : "memory");
 }
 
 __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *address) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_INDEPENDENT_SCALAR_LOAD " %0, %1\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
@@ -84,7 +106,7 @@ __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *add
       "s89"
 
 __global__
-__launch_bounds__(kThreadCount) void cdna_liveness_dead_exec_for_consan(DeviceState *state) {
+__launch_bounds__(kThreadCount) void independent_liveness_dead_exec_for_consan(DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount][kAccessCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -100,47 +122,46 @@ __launch_bounds__(kThreadCount) void cdna_liveness_dead_exec_for_consan(DeviceSt
 
   uint32_t access_marker = 0u;
   uint32_t barrier_marker = 0u;
-  asm volatile(RJ_CONSAN_LIVE_SGPR_USES "s_cmp_eq_u32 %4, %4\n\t"
-                                        "ds_write_b32 %2, %3 offset:0\n\t"
-                                        "ds_write_b32 %2, %3 offset:4\n\t"
-                                        "ds_write_b32 %2, %3 offset:8\n\t"
-                                        "ds_write_b32 %2, %3 offset:12\n\t"
-                                        "ds_write_b32 %2, %3 offset:16\n\t"
-                                        "ds_write_b32 %2, %3 offset:20\n\t"
-                                        "ds_write_b32 %2, %3 offset:24\n\t"
-                                        "ds_write_b32 %2, %3 offset:28\n\t"
-                                        "ds_write_b32 %2, %3 offset:32\n\t"
-                                        "ds_write_b32 %2, %3 offset:36\n\t"
-                                        "ds_write_b32 %2, %3 offset:40\n\t"
-                                        "ds_write_b32 %2, %3 offset:44\n\t"
-                                        "ds_write_b32 %2, %3 offset:48\n\t"
-                                        "ds_write_b32 %2, %3 offset:52\n\t"
-                                        "ds_write_b32 %2, %3 offset:56\n\t"
-                                        "ds_write_b32 %2, %3 offset:60\n\t"
-                                        "ds_write_b32 %2, %3 offset:64\n\t"
-                                        "ds_write_b32 %2, %3 offset:68\n\t"
-                                        "s_cbranch_scc0 1f\n\t"
-                                        "v_mov_b32 %0, 0xd1000001\n\t"
-                                        "s_branch 2f\n\t"
-                                        "1: v_mov_b32 %0, 0xd1000000\n\t"
-                                        "2: s_cmp_eq_u32 %4, 1\n\t"
-                                        "s_cbranch_scc0 3f\n\t"
-                                        "s_cmp_eq_u32 %4, 0\n\t"
-                                        "s_barrier\n\t"
-                                        "3: s_cbranch_scc1 4f\n\t"
-                                        "v_mov_b32 %1, 0xd3000000\n\t"
-                                        "s_branch 5f\n\t"
-                                        "4: v_mov_b32 %1, 0xd3000001\n\t"
-                                        "5:\n\t"
-                                        ".rept 36000\n\t"
-                                        "s_mov_b32 s8, s8\n\t"
-                                        ".endr\n\t" RJ_CONSAN_LIVE_SGPR_USES
-                                        // Raise the owner's complete scalar tail without making
-                                        // this def-only range live across an instrumented site.
-                                        "s_mov_b64 s[82:83], 0\n\t"
-                                        "s_mov_b64 s[84:85], 0\n\t"
-                                        "s_mov_b64 s[86:87], 0\n\t"
-                                        "s_mov_b64 s[88:89], 0\n\t"
+  asm volatile(RJ_CONSAN_LIVE_SGPR_USES
+               "s_cmp_eq_u32 %4, %4\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:0\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:4\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:8\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:12\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:16\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:20\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:24\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:28\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:32\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:36\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:40\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:44\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:48\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:52\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:56\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:60\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+               " %2, %3 offset:64\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_STORE " %2, %3 offset:68\n\t"
+               "s_cbranch_scc0 1f\n\t"
+               "v_mov_b32 %0, 0xd1000001\n\t"
+               "s_branch 2f\n\t"
+               "1: v_mov_b32 %0, 0xd1000000\n\t"
+               "2: s_cmp_eq_u32 %4, 1\n\t"
+               "s_cbranch_scc0 3f\n\t"
+               "s_cmp_eq_u32 %4, 0\n\t" RJ_CONSAN_INDEPENDENT_SCALAR_BARRIER
+               "3: s_cbranch_scc1 4f\n\t"
+               "v_mov_b32 %1, 0xd3000000\n\t"
+               "s_branch 5f\n\t"
+               "4: v_mov_b32 %1, 0xd3000001\n\t"
+               "5:\n\t"
+               ".rept 36000\n\t"
+               "s_mov_b32 s8, s8\n\t"
+               ".endr\n\t" RJ_CONSAN_LIVE_SGPR_USES
+               // Raise the owner's complete scalar tail without making
+               // this def-only range live across an instrumented site.
+               "s_mov_b64 s[82:83], 0\n\t"
+               "s_mov_b64 s[84:85], 0\n\t"
+               "s_mov_b64 s[86:87], 0\n\t"
+               "s_mov_b64 s[88:89], 0\n\t"
                : "=&v"(access_marker), "=&v"(barrier_marker)
                : "v"(warmup_address), "v"(value), "s"(synchronize)
                : RJ_CONSAN_LIVE_SGPR_CLOBBERS, "memory");
@@ -158,7 +179,7 @@ __launch_bounds__(kThreadCount) void cdna_liveness_dead_exec_for_consan(DeviceSt
 // this independent owner. That choice must not erase or strengthen the EXEC
 // proof already established for the first owner.
 __global__
-__launch_bounds__(kThreadCount) void cdna_dispatch_pressure_for_consan(DeviceState *state) {
+__launch_bounds__(kThreadCount) void independent_dispatch_pressure_for_consan(DeviceState *state) {
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid & (kWaveSize - 1u);
@@ -174,7 +195,7 @@ __launch_bounds__(kThreadCount) void cdna_dispatch_pressure_for_consan(DeviceSta
   state->dispatch_control[tid] = 0xd6000000u | tid;
 }
 
-void run_cdna_sampled_independent_scalar_proofs(bool synchronize) {
+void run_sampled_independent_scalar_proofs(bool synchronize) {
   DeviceState initial{};
   initial.synchronize = synchronize ? 1u : 0u;
   DeviceState *device_state = nullptr;
@@ -182,8 +203,8 @@ void run_cdna_sampled_independent_scalar_proofs(bool synchronize) {
   HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
   // At stride two, these two-workgroup launches guarantee that one workgroup
   // remains sampled independent of the persistent dispatch identity.
-  cdna_liveness_dead_exec_for_consan<<<2, kThreadCount>>>(device_state);
-  cdna_dispatch_pressure_for_consan<<<2, kThreadCount>>>(device_state);
+  independent_liveness_dead_exec_for_consan<<<2, kThreadCount>>>(device_state);
+  independent_dispatch_pressure_for_consan<<<2, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -207,12 +228,17 @@ void run_cdna_sampled_independent_scalar_proofs(bool synchronize) {
   }
 }
 
-TEST(ConSanDeviceCdnaSampledIndependentScalarProofsTest, Correct) {
-  run_cdna_sampled_independent_scalar_proofs(true);
+TEST(ConSanDeviceSampledIndependentScalarProofsTest, Correct) {
+  run_sampled_independent_scalar_proofs(true);
 }
 
-TEST(ConSanDeviceCdnaSampledIndependentScalarProofsTest, Incorrect) {
-  run_cdna_sampled_independent_scalar_proofs(false);
+TEST(ConSanDeviceSampledIndependentScalarProofsTest, Incorrect) {
+  run_sampled_independent_scalar_proofs(false);
 }
 
 } // namespace
+
+#undef RJ_CONSAN_INDEPENDENT_SCALAR_STORE
+#undef RJ_CONSAN_INDEPENDENT_SCALAR_LOAD
+#undef RJ_CONSAN_INDEPENDENT_SCALAR_WAIT
+#undef RJ_CONSAN_INDEPENDENT_SCALAR_BARRIER

@@ -35,16 +35,20 @@ runtime-computed indexed LDS addressing and zero-stride aliasing,
 deterministic in-place state restore/replay, module load/unload/reload, two
 independent graph streams and packed graph/executable parameter updates,
 compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
-control, and multi-stage selection/reduction shapes. Target extensions include
-native 96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA4/CDNA5, including
-an address/destination alias distilled from framework kernels; wave32 Top-K
-prefix exchange; native CDNA4 b64-to-b16 transpose reads; and CDNA5 clustered
-dispatch, asynchronous transfer, high-bank LDS, sparse matrix, and scaled
-matrix pipelines. Every semantic scenario has adjacent correct and incorrect
-workloads: the correct member checks exact host-computed output and forbids
-diagnostics, while the incorrect member changes the intended ordering property
-and requires the applicable sanitizer evidence while retaining an independent
-control oracle wherever possible.
+control, reusable RCCL-style partial barriers, full-low-bank Stream-K,
+large-text relay pressure, live-SCC subword traffic, tied-address/result LDS
+loads, and multi-stage selection/reduction shapes. The Top-K reservation
+contract now spans wave64 and wave32 targets. Target extensions include native
+96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including an
+address/destination alias distilled from framework kernels; native CDNA4
+b64-to-b16 transpose reads; and CDNA5 clustered dispatch, high-bank LDS,
+sparse/scaled matrix pipelines, 160-KiB LDS, and asynchronous transfer in both
+global-to-LDS and B8/B32/B64/B128 LDS-to-global directions. Every semantic
+scenario has adjacent correct and incorrect workloads: the correct member
+checks exact host-computed output and forbids diagnostics, while the incorrect
+member changes the intended ordering property and requires the applicable
+sanitizer evidence while retaining an independent control oracle wherever
+possible.
 
 The contract is deliberately independent of the current prototype. Tests may
 require that the intended code object was instrumented, that semantic evidence
@@ -59,8 +63,8 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,392 simulator cases and 527 physical
-cases, for 2,919 total. The current whole-matrix qualification evidence and
+current registered matrix contains 2,648 simulator cases and 547 physical
+cases, for 3,195 total. The current whole-matrix qualification evidence and
 its wall, CPU, and aggregate process-duration accounting are maintained in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
@@ -71,12 +75,12 @@ The initial target-capability disposition is:
 | Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms. |
 | Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
-| Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA4/CDNA5, including address/destination aliasing. |
+| Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including address/destination aliasing. |
 | Multi-owner helpers, multidimensional dispatch identity, dynamic private stacks, and module lifecycle | Covered on all five targets and physical CDNA4, including compiler-generated kernarg-preload and mixed-owner variants. |
 | Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, and language-level release store plus acquire-CAS workloads. |
-| Wave32 prefix and permutation | Covered on RDNA3/RDNA4/CDNA5 by atomic-return reservation, `ds_bpermute`, paired LDS loads, and exact prefix/payload oracles. |
+| Top-K prefix and permutation | Covered on all five targets: RDNA3/RDNA4/CDNA5 use wave32 atomic-return reservation and broadcast with paired LDS loads, while CDNA3/CDNA4 use the corresponding wave64 ballot/rank and paired-read form under the same exact prefix/payload oracle. |
 | Native CDNA4 transpose publication | Covered in gfx950 simulation and on the physical GPU by `ds_read_b64_tr_b16` with the exact 16-lane transpose oracle. The instruction is not native gfx942. |
-| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, multicast, sparse SWMMAC, and scaled WMMA. Store-from-LDS, wider fragments, and larger clusters remain extensions. |
+| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two-CTA cluster barriers, two-cluster identity/isolation, direct-to-LDS async load/wait, multicast, sparse SWMMAC, and scaled WMMA. A distinct AsyncDataCopier reduction covers every supported B8/B32/B64/B128 LDS-to-global async-store width and `s_wait_asynccnt`; store-from-LDS is no longer a gap. Wider/32-byte fragments, larger clusters, and a distinct remote-cluster operation remain extensions. |
 | Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are covered on every architecture where ConSan admits them. |
 
 “Tracked gap” is preferable to a fixture that merely recognizes the current

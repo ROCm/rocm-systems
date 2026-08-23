@@ -1,16 +1,32 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Wave64 cross-wave LDS publication in a code object large enough to require
+/// Cross-wave LDS publication in a code object large enough to require
 /// SuperCollider relay reservoirs. The long scalar block is distilled from
-/// large generated PyTorch kernels and keeps their relocation geometry.
+/// large generated PyTorch kernels and keeps their relocation geometry. The
+/// behavioral contract is shared across wave64 CDNA3/4 and wave32
+/// RDNA3/4/CDNA5, using each generation's native LDS spelling and wait.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
+#if defined(RJ_CONSAN_LARGE_TEXT_WAVE32)
+constexpr uint32_t kWaveSize = 32u;
+#else
 constexpr uint32_t kWaveSize = 64u;
+#endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
+
+#if defined(RJ_CONSAN_LARGE_TEXT_MODERN_LDS)
+#define RJ_CONSAN_LARGE_TEXT_STORE "ds_store_b32 %0, %1\n\t"
+#define RJ_CONSAN_LARGE_TEXT_LOAD "ds_load_b32 %0, %1\n\t"
+#define RJ_CONSAN_LARGE_TEXT_WAIT "s_wait_dscnt 0\n\t"
+#else
+#define RJ_CONSAN_LARGE_TEXT_STORE "ds_write_b32 %0, %1\n\t"
+#define RJ_CONSAN_LARGE_TEXT_LOAD "ds_read_b32 %0, %1\n\t"
+#define RJ_CONSAN_LARGE_TEXT_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#endif
 
 struct DeviceState {
   uint32_t synchronize;
@@ -22,23 +38,21 @@ struct DeviceState {
 __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+  asm volatile(RJ_CONSAN_LARGE_TEXT_STORE : : "v"(lds_address), "v"(value) : "memory");
 }
 
 __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *address) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_LARGE_TEXT_LOAD RJ_CONSAN_LARGE_TEXT_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
   return value;
 }
 
-__global__
-__launch_bounds__(kThreadCount) void cdna_wave64_large_text_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(kThreadCount) void large_text_relay_for_consan(DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -65,13 +79,13 @@ __launch_bounds__(kThreadCount) void cdna_wave64_large_text_for_consan(DeviceSta
   state->control[tid] = 0xc2000000u | tid;
 }
 
-void run_cdna_wave64_large_text(bool synchronize) {
+void run_large_text_relay(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  cdna_wave64_large_text_for_consan<<<1, kThreadCount>>>(device_state);
+  large_text_relay_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -86,8 +100,12 @@ void run_cdna_wave64_large_text(bool synchronize) {
       EXPECT_EQ(state.observed[lane], 0xc1000000u | lane) << "lane=" << lane;
 }
 
-TEST(ConSanDeviceCdnaWave64LargeTextTest, Correct) { run_cdna_wave64_large_text(true); }
+TEST(ConSanDeviceLargeTextRelayTest, Correct) { run_large_text_relay(true); }
 
-TEST(ConSanDeviceCdnaWave64LargeTextTest, Incorrect) { run_cdna_wave64_large_text(false); }
+TEST(ConSanDeviceLargeTextRelayTest, Incorrect) { run_large_text_relay(false); }
 
 } // namespace
+
+#undef RJ_CONSAN_LARGE_TEXT_STORE
+#undef RJ_CONSAN_LARGE_TEXT_LOAD
+#undef RJ_CONSAN_LARGE_TEXT_WAIT

@@ -176,7 +176,7 @@ struct VmFixture {
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
                         uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
-                        bool wave32 = true) {
+                        bool wave32 = true, bool encode_sgpr_count = true) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -189,8 +189,10 @@ struct VmFixture {
     assert(vgpr_granule != 0 && vgprs % vgpr_granule == 0);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                     ((vgprs / vgpr_granule) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((sgprs / 8) - 1));
+    if (encode_sgpr_count) {
+      AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                      ((sgprs / 8) - 1));
+    }
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
     kd.group_segment_fixed_size = group_segment_fixed_size;
@@ -2878,8 +2880,17 @@ constexpr uint32_t sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0, uint32_t ssr
 constexpr uint32_t s_add_u32(uint32_t sdst, uint32_t s0, uint32_t s1) {
   return sop2(0, sdst, s0, s1);
 }
+constexpr uint32_t s_sub_u32(uint32_t sdst, uint32_t s0, uint32_t s1) {
+  return sop2(1, sdst, s0, s1);
+}
 constexpr uint32_t s_add_i32(uint32_t sdst, uint32_t s0, uint32_t s1) {
   return sop2(2, sdst, s0, s1);
+}
+constexpr uint32_t s_lshl_b32(uint32_t sdst, uint32_t s0, uint32_t s1) {
+  return sop2(8, sdst, s0, s1);
+}
+constexpr uint32_t s_lshr_b32(uint32_t sdst, uint32_t s0, uint32_t s1) {
+  return sop2(10, sdst, s0, s1);
 }
 // SOPC: encoding[31:23]=0x17E, op[22:16], ssrc1[15:8], ssrc0[7:0]
 constexpr uint32_t sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
@@ -3001,6 +3012,48 @@ TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
 
   run_case(false, 0x00007F7Fu);
   run_case(true, 0x00007E7Eu);
+}
+
+// GFX11 exposes s0:s105 as ordinary scalar registers. A zero descriptor field
+// selects that fixed RDNA pool rather than an eight-register allocation.
+// ConSan's sampled workgroup gate deliberately places its quotient/residue
+// temporaries at the top of the pool under scalar pressure, so execute the
+// exact modulo-two arithmetic shape at s103:s104 in two concurrent waves.
+// Treating s104 as an alias, truncating the fixed pool at 104 registers, or
+// mishandling its SALU dependencies changes the final residue from one or
+// corrupts the neighboring wave's low registers.
+TEST(Rdna3DispatchTest, HighOrdinarySgprsExecuteSampledResidueArithmetic) {
+  using namespace enc;
+  constexpr uint32_t kGfx11Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {
+      s_sub_u32(SGPR(104), INLINE_CONST(0), INLINE_CONST(48)),
+      s_mov_b32(SGPR(103), INLINE_CONST(1)),
+      s_sub_u32(SGPR(104), SGPR(104), SGPR(103)),
+      s_lshr_b32(SGPR(103), SGPR(104), INLINE_CONST(1)),
+      s_lshl_b32(SGPR(103), SGPR(103), INLINE_CONST(1)),
+      s_sub_u32(SGPR(104), SGPR(104), SGPR(103)),
+      s_mov_b32(SGPR(0), SGPR(104)),
+      kGfx11Endpgm,
+  };
+
+  VmFixture f("rdna3", /*num_cus=*/1, /*num_wf_slots=*/2, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/112);
+  auto *snap = f.capture_halts();
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/112,
+                               /*vgprs=*/32, /*user_sgprs=*/2,
+                               /*group_segment_fixed_size=*/0,
+                               /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                               /*extra_compute_pgm_rsrc1=*/0, /*wave32=*/true,
+                               /*encode_sgpr_count=*/false);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, /*workgroup_size=*/32, /*grid_size=*/64);
+
+  ASSERT_NO_THROW(f.engine->run());
+  ASSERT_EQ(snap->snapshots().size(), 2u);
+  for (const test::WavefrontSnapshot &wave : snap->snapshots()) {
+    EXPECT_EQ(wave.sgpr(0), 1u);
+    EXPECT_EQ(wave.sgpr(104), 1u);
+  }
 }
 
 TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {

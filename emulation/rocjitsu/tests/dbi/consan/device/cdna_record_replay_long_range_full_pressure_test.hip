@@ -4,14 +4,35 @@
 /// Record/Replay cross-wave LDS publication in a long, full-resource-pressure
 /// code object. The shape is distilled from generated PyTorch TopK kernels;
 /// the adjacent Correct/Incorrect cases retain a user-visible synchronization
-/// contract without prescribing how an implementation reaches the access.
+/// contract across CDNA3/4/5 and RDNA3/4 without prescribing how an
+/// implementation reaches the access.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
+#if defined(RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAVE32)
+constexpr uint32_t kWaveSize = 32u;
+#else
 constexpr uint32_t kWaveSize = 64u;
+#endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
+
+#if defined(RJ_CONSAN_RECORD_REPLAY_PRESSURE_MODERN_LDS)
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_STORE "ds_store_b32"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_LOAD "ds_load_b32"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT "s_wait_dscnt 0\n\t"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER                                                   \
+  "s_barrier_signal -1\n\t"                                                                        \
+  "s_barrier_wait -1\n\t"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER_REPEATS "128"
+#else
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_STORE "ds_write_b32"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_LOAD "ds_read_b32"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER "s_barrier\n\t"
+#define RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER_REPEATS "4682"
+#endif
 
 struct DeviceState {
   uint32_t synchronize;
@@ -24,8 +45,8 @@ __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *add
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_RECORD_REPLAY_PRESSURE_LOAD
+               " %0, %1\n\t" RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
@@ -35,15 +56,17 @@ __device__ __forceinline__ uint32_t load_lds_without_cave(volatile uint32_t *add
 __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+  asm volatile(RJ_CONSAN_RECORD_REPLAY_PRESSURE_STORE " %0, %1\n\t"
+               :
+               : "v"(lds_address), "v"(value)
+               : "memory");
 }
 
-// Keep the complete ordinary CDNA scalar bank live at the first LDS access.
-// These physical self-moves preserve any compiler-assigned guest values. The
-// highest ordinary guest reference remains s89: the compiler's six-register
-// CDNA allocation tail then makes the complete owner tail s96, leaving
-// s96:s97 growable for Record/Replay's persistent dispatch identity without
-// touching physical VCC at s90:s91. Compiler-reserved s32:s35 are physically
+// Keep a broad scalar bank live at the first LDS access. These physical
+// self-moves preserve any compiler-assigned guest values. On CDNA the highest
+// ordinary guest reference remains s89, below physical VCC at s90:s91. The
+// same portable low-bank pressure is valuable on wave32 targets even though
+// their architectural tail differs. Compiler-reserved s32:s35 are physically
 // read and preserved but deliberately omitted from the clobber declaration.
 #define RJ_CONSAN_FULL_SCALAR_USES                                                                 \
   ".irp r,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,"           \
@@ -53,9 +76,9 @@ __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *addres
   "s_mov_b32 s\\r, s\\r\n\t"                                                                       \
   ".endr\n\t"
 
-// Make the compiler descriptor allocate the same complete s0:s89 guest tail
-// that the emitted physical references require. The low ABI inputs remain
-// available to the compiler; the asm itself preserves every listed register.
+// Make the compiler descriptor allocate the same s0:s89 guest tail that the
+// emitted physical references require. The low ABI inputs remain available to
+// the compiler; the asm itself preserves every listed register.
 #define RJ_CONSAN_FULL_SCALAR_CLOBBERS                                                             \
   "s8", "s9", "s10", "s11", "s12", "s13", "s14", "s15", "s16", "s17", "s18", "s19", "s20", "s21",  \
       "s22", "s23", "s24", "s25", "s26", "s27", "s28", "s29", "s30", "s31", "s36", "s37", "s38",   \
@@ -64,9 +87,10 @@ __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *addres
       "s65", "s66", "s67", "s68", "s69", "s70", "s71", "s72", "s73", "s74", "s75", "s76", "s77",   \
       "s78", "s79", "s80", "s81", "s82", "s83", "s84", "s85", "s86", "s87", "s88", "s89"
 
-// One live register in every adjacent VGPR pair rules out descriptor-grown
-// contiguous probe scratch without changing guest values. This is the compact
-// device-code analogue of TopK's FP64 vector pressure.
+// One live register in every adjacent VGPR pair of the portable low bank rules
+// out descriptor-grown contiguous probe scratch without changing guest
+// values. This is the compact device-code analogue of TopK's FP64 vector
+// pressure. gfx1250's separate high-bank pair covers its additional bank.
 #define RJ_CONSAN_FULL_VECTOR_USES                                                                 \
   ".irp r,1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,"         \
   "57,59,61,63,65,67,69,71,73,75,77,79,81,83,85,87,89,91,93,95,97,99,101,103,105,107,109,"         \
@@ -77,8 +101,8 @@ __device__ __forceinline__ void store_lds_without_cave(volatile uint32_t *addres
   "v_mov_b32 v\\r, v\\r\n\t"                                                                       \
   ".endr\n\t"
 
-__global__ __launch_bounds__(
-    kThreadCount) void cdna_record_replay_long_range_full_pressure_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(kThreadCount) void record_replay_long_range_full_pressure_for_consan(
+    DeviceState *state) {
   __shared__ uint32_t warmup[kThreadCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -93,8 +117,9 @@ __global__ __launch_bounds__(
   // instruction-reservoir donors. Executing their relocated copies also makes
   // this a dynamic correctness contract rather than only a patch-inventory
   // assertion.
-  asm volatile("s_waitcnt lgkmcnt(0)\n\t" RJ_CONSAN_FULL_SCALAR_USES RJ_CONSAN_FULL_VECTOR_USES
-               "ds_write_b32 %0, %1\n\t"
+  asm volatile(RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT RJ_CONSAN_FULL_SCALAR_USES
+                   RJ_CONSAN_FULL_VECTOR_USES RJ_CONSAN_RECORD_REPLAY_PRESSURE_STORE
+               " %0, %1\n\t"
                ".rept 100000\n\t"
                "s_mov_b32 s20, s20\n\t"
                ".endr\n\t" RJ_CONSAN_FULL_VECTOR_USES RJ_CONSAN_FULL_SCALAR_USES
@@ -112,31 +137,29 @@ __global__ __launch_bounds__(
   state->control[tid] = 0xc6000000u | tid;
 }
 
-// Keep a dormant user kernel in the same code object whose barrier inventory
-// reserves more than one SOPP hop of seven-word Record/Replay islands. The
-// behavioral pair below never launches it: its contract is that an unrelated
-// E2E-shaped synchronization inventory must not make the exercised long-range
-// access uninstrumentable or corrupt its result. This remains independent of
-// the implementation used to bridge the generated layout. Defining it after
-// the exercised kernel also keeps its canonical barrier representative near
-// the generated relay bank, so both synchronization sites remain valid static
-// coverage obligations.
-__global__ void cdna_record_replay_long_barrier_inventory_for_consan() {
-  asm volatile(".rept 4682\n\t"
-               "s_barrier\n\t"
-               ".endr\n\t"
+// Keep a dormant user kernel in the same code object with a dense E2E-shaped
+// synchronization inventory. The behavioral pair below never launches it:
+// unrelated synchronization sites must not make the exercised long-range
+// access uninstrumentable or corrupt its result. Modern split barriers expose
+// every signal/wait pair as two static sites, so their bounded inventory still
+// exercises dense planning without dominating this quick checked-in contract.
+// Legacy monolithic barriers retain the larger TopK-derived inventory that the
+// analyzer canonicalizes to its representative synchronization obligation.
+__global__ void record_replay_long_barrier_inventory_for_consan() {
+  asm volatile(".rept " RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER_REPEATS
+               "\n\t" RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER ".endr\n\t"
                :
                :
                : "memory");
 }
 
-void run_cdna_record_replay_long_range_full_pressure(bool synchronize) {
+void run_record_replay_long_range_full_pressure(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
-  cdna_record_replay_long_range_full_pressure_for_consan<<<1, kThreadCount>>>(device_state);
+  record_replay_long_range_full_pressure_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -151,12 +174,18 @@ void run_cdna_record_replay_long_range_full_pressure(bool synchronize) {
       EXPECT_EQ(state.observed[lane], 0xc5000000u | lane) << "lane=" << lane;
 }
 
-TEST(ConSanDeviceCdnaRecordReplayLongRangeFullPressureTest, Correct) {
-  run_cdna_record_replay_long_range_full_pressure(true);
+TEST(ConSanDeviceRecordReplayLongRangeFullPressureTest, Correct) {
+  run_record_replay_long_range_full_pressure(true);
 }
 
-TEST(ConSanDeviceCdnaRecordReplayLongRangeFullPressureTest, Incorrect) {
-  run_cdna_record_replay_long_range_full_pressure(false);
+TEST(ConSanDeviceRecordReplayLongRangeFullPressureTest, Incorrect) {
+  run_record_replay_long_range_full_pressure(false);
 }
 
 } // namespace
+
+#undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_STORE
+#undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_LOAD
+#undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_WAIT
+#undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER
+#undef RJ_CONSAN_RECORD_REPLAY_PRESSURE_BARRIER_REPEATS

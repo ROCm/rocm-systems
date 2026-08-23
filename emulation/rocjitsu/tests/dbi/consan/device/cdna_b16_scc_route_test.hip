@@ -1,17 +1,37 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// A live SCC value crossing a dense-routed 16-bit LDS store. This shape is
+/// A live SCC value crossing dense-routed 16-bit LDS stores. This shape is
 /// distilled from hip-moi's D128 attention-pressure kernel, where a late
-/// ds_write_b16 sits between a scalar comparison and its conditional branch.
+/// subword store sits between a scalar comparison and its conditional branch.
+/// The same contract uses wave64 CDNA3/4 and wave32 RDNA3/4/CDNA5 native LDS
+/// forms.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
+#if defined(RJ_CONSAN_SUBWORD_SCC_WAVE32)
+constexpr uint32_t kWaveSize = 32u;
+#else
 constexpr uint32_t kWaveSize = 64u;
+#endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
 constexpr uint32_t kAccessCount = 18u;
+
+#if defined(RJ_CONSAN_SUBWORD_SCC_MODERN_LDS)
+#define RJ_CONSAN_SUBWORD_SCC_STORE_B32 "ds_store_b32"
+#define RJ_CONSAN_SUBWORD_SCC_LOAD_B32 "ds_load_b32"
+#define RJ_CONSAN_SUBWORD_SCC_LOAD_U16 "ds_load_u16"
+#define RJ_CONSAN_SUBWORD_SCC_STORE_B16 "ds_store_b16"
+#define RJ_CONSAN_SUBWORD_SCC_WAIT "s_wait_dscnt 0\n\t"
+#else
+#define RJ_CONSAN_SUBWORD_SCC_STORE_B32 "ds_write_b32"
+#define RJ_CONSAN_SUBWORD_SCC_LOAD_B32 "ds_read_b32"
+#define RJ_CONSAN_SUBWORD_SCC_LOAD_U16 "ds_read_u16"
+#define RJ_CONSAN_SUBWORD_SCC_STORE_B16 "ds_write_b16"
+#define RJ_CONSAN_SUBWORD_SCC_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#endif
 
 struct DeviceState {
   uint32_t synchronize;
@@ -24,15 +44,17 @@ struct DeviceState {
 __device__ __forceinline__ void store_lds_b32(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+  asm volatile(RJ_CONSAN_SUBWORD_SCC_STORE_B32 " %0, %1\n\t"
+               :
+               : "v"(lds_address), "v"(value)
+               : "memory");
 }
 
 __device__ __forceinline__ uint32_t load_lds_b32(volatile uint32_t *address) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_SUBWORD_SCC_LOAD_B32 " %0, %1\n\t" RJ_CONSAN_SUBWORD_SCC_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
@@ -43,15 +65,14 @@ __device__ __forceinline__ uint32_t load_lds_u16(volatile uint16_t *address) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_u16 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile(RJ_CONSAN_SUBWORD_SCC_LOAD_U16 " %0, %1\n\t" RJ_CONSAN_SUBWORD_SCC_WAIT
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
   return value;
 }
 
-__global__ __launch_bounds__(kThreadCount) void cdna_b16_scc_route_for_consan(DeviceState *state) {
+__global__ __launch_bounds__(kThreadCount) void subword_scc_route_for_consan(DeviceState *state) {
   __shared__ uint16_t warmup[kThreadCount][kAccessCount];
   __shared__ uint32_t tile[kWaveSize];
   const uint32_t tid = threadIdx.x;
@@ -66,25 +87,24 @@ __global__ __launch_bounds__(kThreadCount) void cdna_b16_scc_route_for_consan(De
   asm volatile( // Keep the guest SCC false while a matching dense-route
                 // comparison is true, so either value leaking across the
                 // instrumented stores is observable at the consumer.
-      "s_cmp_lg_u32 %3, %3\n\t"
-      "ds_write_b16 %1, %2 offset:0\n\t"
-      "ds_write_b16 %1, %2 offset:2\n\t"
-      "ds_write_b16 %1, %2 offset:4\n\t"
-      "ds_write_b16 %1, %2 offset:6\n\t"
-      "ds_write_b16 %1, %2 offset:8\n\t"
-      "ds_write_b16 %1, %2 offset:10\n\t"
-      "ds_write_b16 %1, %2 offset:12\n\t"
-      "ds_write_b16 %1, %2 offset:14\n\t"
-      "ds_write_b16 %1, %2 offset:16\n\t"
-      "ds_write_b16 %1, %2 offset:18\n\t"
-      "ds_write_b16 %1, %2 offset:20\n\t"
-      "ds_write_b16 %1, %2 offset:22\n\t"
-      "ds_write_b16 %1, %2 offset:24\n\t"
-      "ds_write_b16 %1, %2 offset:26\n\t"
-      "ds_write_b16 %1, %2 offset:28\n\t"
-      "ds_write_b16 %1, %2 offset:30\n\t"
-      "ds_write_b16 %1, %2 offset:32\n\t"
-      "ds_write_b16 %1, %2 offset:34\n\t"
+      "s_cmp_lg_u32 %3, %3\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:0\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:2\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:4\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:6\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:8\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:10\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:12\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:14\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:16\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:18\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:20\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:22\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:24\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:26\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:28\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:30\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16
+      " %1, %2 offset:32\n\t" RJ_CONSAN_SUBWORD_SCC_STORE_B16 " %1, %2 offset:34\n\t"
       "s_cbranch_scc1 1f\n\t"
       "v_mov_b32 %0, 0xb1000001\n\t"
       "s_branch 2f\n\t"
@@ -112,13 +132,13 @@ __global__ __launch_bounds__(kThreadCount) void cdna_b16_scc_route_for_consan(De
   state->control[tid] = 0xb3000000u | tid;
 }
 
-void run_cdna_b16_scc_route(bool synchronize) {
+void run_subword_scc_route(bool synchronize) {
   DeviceState initial{};
   initial.synchronize = synchronize ? 1u : 0u;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(DeviceState)));
   HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
-  cdna_b16_scc_route_for_consan<<<1, kThreadCount>>>(device_state);
+  subword_scc_route_for_consan<<<1, kThreadCount>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -138,7 +158,13 @@ void run_cdna_b16_scc_route(bool synchronize) {
   }
 }
 
-TEST(ConSanDeviceCdnaB16SccRouteTest, Correct) { run_cdna_b16_scc_route(true); }
-TEST(ConSanDeviceCdnaB16SccRouteTest, Incorrect) { run_cdna_b16_scc_route(false); }
+TEST(ConSanDeviceSubwordSccRouteTest, Correct) { run_subword_scc_route(true); }
+TEST(ConSanDeviceSubwordSccRouteTest, Incorrect) { run_subword_scc_route(false); }
 
 } // namespace
+
+#undef RJ_CONSAN_SUBWORD_SCC_STORE_B32
+#undef RJ_CONSAN_SUBWORD_SCC_LOAD_B32
+#undef RJ_CONSAN_SUBWORD_SCC_LOAD_U16
+#undef RJ_CONSAN_SUBWORD_SCC_STORE_B16
+#undef RJ_CONSAN_SUBWORD_SCC_WAIT
