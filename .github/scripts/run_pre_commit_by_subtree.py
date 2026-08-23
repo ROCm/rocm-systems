@@ -89,28 +89,6 @@ def validate_subtrees(subtrees: List[str]) -> None:
             )
 
 
-def check_subtrees_materialised(raw_files: List[str], subtrees: List[str]) -> List[str]:
-    """Return onboarded subtrees that own changed files but are not on disk.
-
-    The gate's file list is a git tree diff, which sparse-checkout does not
-    filter; the files themselves arrive only if pr_detect_changed_subtrees.py
-    named the subtree. When it does not -- the subtree is missing from
-    repos-config.json, or get_changed_files returned a partial page and the
-    caller could not tell -- every path is dropped as "not present in sparse
-    checkout" and the job exits 0 having checked nothing.
-
-    A subtree's own config is the cheapest proof that its cone was checked
-    out. Using it rather than the changed files themselves means a PR that
-    only DELETES files here is still fine: the config is present, the files
-    legitimately are not.
-    """
-    missing = []
-    for subtree in sorted(group_files_by_subtree(raw_files, subtrees)):
-        if not os.path.isfile(config_for(subtree)):
-            missing.append(subtree)
-    return missing
-
-
 def group_files_by_subtree(
     files: List[str], subtrees: List[str]
 ) -> Dict[str, List[str]]:
@@ -128,6 +106,28 @@ def group_files_by_subtree(
         else:
             logger.debug("ignoring %s (no onboarded subtree owns it)", path)
     return groups
+
+
+def check_subtrees_materialised(raw_files: List[str], subtrees: List[str]) -> List[str]:
+    """Return onboarded subtrees that own changed files but are not on disk.
+
+    The gate's file list is a git tree diff, which sparse-checkout does not
+    filter; the files themselves arrive only if pr_detect_changed_subtrees.py
+    named the subtree. When it does not -- the subtree is missing from
+    repos-config.json, or get_changed_files returned a partial page and the
+    caller could not tell -- every path is dropped as "not present in sparse
+    checkout" and the job exits 0 having checked nothing.
+
+    A subtree's own config is the cheapest proof that its cone was checked
+    out. Keying off it rather than the changed files means a PR that only
+    DELETES files here is not mistaken for a missing checkout: the config is
+    present, and those files are legitimately absent.
+    """
+    missing: List[str] = []
+    for subtree in sorted(group_files_by_subtree(raw_files, subtrees)):
+        if not os.path.isfile(config_for(subtree)):
+            missing.append(subtree)
+    return missing
 
 
 def read_paths(path: str) -> List[str]:
