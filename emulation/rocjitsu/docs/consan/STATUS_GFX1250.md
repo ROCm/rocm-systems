@@ -468,7 +468,11 @@ SuperCollider, Record/Replay, Sampled, and Inline Shadow order.  The hook
 SHA-256 is
 `f2c2da60da4e3e3c60bf778b370de3f4c34f9cab59115ca3eceeb0f9c4141208`.
 This clean refresh preserves the previously accepted paired-overhead and fault
-evidence rather than replacing it.
+evidence rather than replacing it. The checked-in all-target
+`FlatAtomicPublication` pair additionally preserves gfx1250's native
+instruction-scoped `flat_atomic_add_u32` release and returning/acquire forms;
+its adjacent incorrect member acquires an unrelated ready object, and all 60
+baseline/all-engine rows pass.
 
 ### 2026-08-20 WMMA-attention clean revalidation
 
@@ -497,7 +501,10 @@ barriers and 10/10 atomics for Sampled; and 4/4 barriers plus 10/10 atomics for
 Inline Shadow.  Record/Replay emits zero diagnostics.  The hook SHA-256 is
 `f2c2da60da4e3e3c60bf778b370de3f4c34f9cab59115ca3eceeb0f9c4141208`.
 This clean refresh preserves the previously accepted paired-overhead and fault
-evidence rather than replacing it.
+evidence rather than replacing it. The same native gfx1250 FLAT-atomic
+publication shape now has adjacent exact correct/incorrect coverage in
+`FlatAtomicPublication`, generalized to every supported architecture and
+physical gfx950 rather than remaining only an E2E manifest identity.
 
 ### 2026-08-20 D128 block timeout revalidation
 

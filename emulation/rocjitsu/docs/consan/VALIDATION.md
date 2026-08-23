@@ -37,8 +37,9 @@ independent graph streams and packed graph/executable parameter updates,
 compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
 control, reusable RCCL-style partial barriers, full-low-bank Stream-K,
 large-text relay pressure, live-SCC subword traffic, tied-address/result LDS
-loads, E2E-derived adjacent and stride-64 dual-address B64 LDS transfers, and
-multi-stage selection/reduction shapes. The Top-K reservation
+loads, E2E-derived adjacent and stride-64 dual-address B64 LDS transfers,
+target-native FLAT-atomic release/acquire publication, and multi-stage
+selection/reduction shapes. The Top-K reservation
 contract now spans wave64 and wave32 targets. Target extensions include native
 96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including an
 address/destination alias distilled from framework kernels; native CDNA4
@@ -65,8 +66,8 @@ CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
 RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
 path is part of this tier. CDNA4 additionally runs the identical contract on a
 physical `gfx950`, followed by an ordered uninstrumented health check. The
-current registered matrix contains 2,728 simulator cases and 557 physical
-cases, for 3,285 total. The current whole-matrix qualification evidence and
+current registered matrix contains 2,778 simulator cases and 567 physical
+cases, for 3,345 total. The current whole-matrix qualification evidence and
 its wall, CPU, and aggregate process-duration accounting are maintained in
 [PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
@@ -79,7 +80,7 @@ The initial target-capability disposition is:
 | 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
 | Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including address/destination aliasing. |
 | Multi-owner helpers, multidimensional dispatch identity, dynamic private stacks, and module lifecycle | Covered on all five targets and physical CDNA4, including compiler-generated kernarg-preload and mixed-owner variants. |
-| Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, and language-level release store plus acquire-CAS workloads. |
+| Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, language-level release store plus acquire-CAS, and a target-native FLAT-atomic publication pair. The latter retains CDNA3/4 `flat_atomic_add`, RDNA3 `flat_atomic_add_u32`, and RDNA4/CDNA5 instruction-scoped `flat_atomic_add_u32` release/add and returning/acquire forms in the final objects. |
 | Top-K prefix and permutation | Covered on all five targets: RDNA3/RDNA4/CDNA5 use wave32 atomic-return reservation and broadcast with paired LDS loads, while CDNA3/CDNA4 use the corresponding wave64 ballot/rank and paired-read form under the same exact prefix/payload oracle. |
 | Native CDNA4 transpose publication | Covered in gfx950 simulation and on the physical GPU by `ds_read_b64_tr_b16` with the exact 16-lane transpose oracle. The instruction is not native gfx942. |
 | CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two- and four-CTA cluster barriers, two-cluster identity/isolation, Composable Kernel-derived B8/B32/B64/B128 direct-to-LDS cluster loads followed by one async-count wait, ordinary and multicast delivery, sparse SWMMAC, scaled WMMA, and native K=32 FP16 WMMA consuming a 32-byte per-lane LDS fragment. The cluster correct members compare every delivered byte/word exactly; their incorrect members retain the transfers and remove only the cluster publication edge. AsyncDataCopier reductions independently cover every supported width in both ordinary global-to-LDS and LDS-to-global directions plus `s_wait_asynccnt`. The PyTorch/Triton reduction executes two native `tensor_load_to_lds`, one `tensor_store_from_lds`, and three tensor-count waits in an exact three-wave add pipeline. Its explicit LDS marker/read owns the incorrect member's diagnostic; it does not overclaim descriptor-sized TDM-range instrumentation. Synchronous `cluster_load_b*` reads global address space and returns a workgroup broadcast rather than touching LDS, so it is outside ConSan's general race model and is not a missing device contract. |
