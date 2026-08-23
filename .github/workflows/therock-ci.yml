@@ -74,7 +74,13 @@ jobs:
           pip install pydantic pytest requests
 
       - name: Run TheRock CI unit tests
-        run: python -m pytest .github/scripts/tests/therock_configure_ci_test.py
+        # Files are named explicitly rather than passing the directory: the
+        # directory also holds test_pr_merge_sync_patches.py, which has never
+        # been collected by CI and is not in scope for this job.
+        run: |
+          python -m pytest \
+            .github/scripts/tests/therock_configure_ci_test.py \
+            .github/scripts/tests/test_run_pre_commit_by_subtree.py
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
