@@ -723,7 +723,10 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
     return true;
   return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
          ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-          equals_any(mnemonic, {"ds_read_i8", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"}));
+          equals_any(mnemonic,
+                     {"ds_read_i8", "ds_read_u8_d16", "ds_read_u8_d16_hi", "ds_read_i8_d16",
+                      "ds_read_i8_d16_hi", "ds_read_u16_d16", "ds_read_u16_d16_hi",
+                      "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"}));
 }
 
 [[nodiscard]] std::optional<uint32_t>

@@ -32,6 +32,52 @@
 
 namespace consan_device_test {
 
+// Target-native scalar LDS operations without a relocation cave. Large-text
+// and access-dense fixtures use these deliberately: their behavioral stimulus
+// includes sites that a rewriter must reach without source-provided padding.
+__device__ __forceinline__ void store_lds_word_without_cave(volatile uint32_t *address,
+                                                            uint32_t value) {
+  const uint32_t lds_address =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
+  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+#else
+  asm volatile("ds_store_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
+#endif
+}
+
+__device__ __forceinline__ uint32_t load_lds_word_without_cave(volatile uint32_t *address) {
+  const uint32_t lds_address =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
+  uint32_t value = 0u;
+#if defined(__gfx942__) || defined(__gfx950__)
+  asm volatile("ds_read_b32 %0, %1\n\t"
+               "s_waitcnt lgkmcnt(0)\n\t"
+               : "=v"(value)
+               : "v"(lds_address)
+               : "memory");
+#elif defined(__gfx1250__)
+  asm volatile("ds_read_b32 %0, %1\n\t"
+               "s_wait_dscnt 0\n\t"
+               : "=v"(value)
+               : "v"(lds_address)
+               : "memory");
+#elif defined(__gfx1201__)
+  asm volatile("ds_load_b32 %0, %1\n\t"
+               "s_wait_dscnt 0\n\t"
+               : "=v"(value)
+               : "v"(lds_address)
+               : "memory");
+#else
+  asm volatile("ds_load_b32 %0, %1\n\t"
+               "s_waitcnt lgkmcnt(0)\n\t"
+               : "=v"(value)
+               : "v"(lds_address)
+               : "memory");
+#endif
+  return value;
+}
+
 // A small register-rich epilogue distilled from fused attention/GEMM kernels.
 // Keeping the independent values live across one scheduling boundary models
 // the handoff from an LDS stage to elementwise device code without prescribing

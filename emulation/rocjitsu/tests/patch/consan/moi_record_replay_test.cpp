@@ -2886,12 +2886,36 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
 
   constexpr auto read_i8 =
       cdna4::build_ds(cdna4::kDsReadI8Ds, {.offset0 = 0x21, .addr = 8, .vdst = 12});
+  constexpr auto read_u8_d16 =
+      cdna4::build_ds(cdna4::kDsReadU8D16Ds, {.offset0 = 0x22, .addr = 8, .vdst = 12});
+  constexpr auto read_u8_d16_hi =
+      cdna4::build_ds(cdna4::kDsReadU8D16HiDs, {.offset0 = 0x23, .addr = 8, .vdst = 12});
+  constexpr auto read_i8_d16 =
+      cdna4::build_ds(cdna4::kDsReadI8D16Ds, {.offset0 = 0x24, .addr = 8, .vdst = 12});
+  constexpr auto read_i8_d16_hi =
+      cdna4::build_ds(cdna4::kDsReadI8D16HiDs, {.offset0 = 0x25, .addr = 8, .vdst = 12});
+  constexpr auto read_u16_d16 =
+      cdna4::build_ds(cdna4::kDsReadU16D16Ds, {.offset0 = 0x26, .addr = 8, .vdst = 12});
+  constexpr auto read_u16_d16_hi =
+      cdna4::build_ds(cdna4::kDsReadU16D16HiDs, {.offset0 = 0x27, .addr = 8, .vdst = 12});
   constexpr auto write_b8_d16_hi =
       cdna4::build_ds(cdna4::kDsWriteB8D16HiDs, {.offset0 = 0x12, .addr = 5, .data0 = 9});
   constexpr auto write_b16_d16_hi =
       cdna4::build_ds(cdna4::kDsWriteB16D16HiDs, {.offset0 = 0x34, .addr = 6, .data0 = 10});
   check(read_i8[0], read_i8[1], "ds_read_i8", ConSanLdsAccessKind::Read, 8u, 0x21u,
         /*addr=*/8u, /*vdst=*/12u);
+  check(read_u8_d16[0], read_u8_d16[1], "ds_read_u8_d16", ConSanLdsAccessKind::Read, 8u, 0x22u,
+        /*addr=*/8u, /*vdst=*/12u);
+  check(read_u8_d16_hi[0], read_u8_d16_hi[1], "ds_read_u8_d16_hi", ConSanLdsAccessKind::Read, 8u,
+        0x23u, /*addr=*/8u, /*vdst=*/12u);
+  check(read_i8_d16[0], read_i8_d16[1], "ds_read_i8_d16", ConSanLdsAccessKind::Read, 8u, 0x24u,
+        /*addr=*/8u, /*vdst=*/12u);
+  check(read_i8_d16_hi[0], read_i8_d16_hi[1], "ds_read_i8_d16_hi", ConSanLdsAccessKind::Read, 8u,
+        0x25u, /*addr=*/8u, /*vdst=*/12u);
+  check(read_u16_d16[0], read_u16_d16[1], "ds_read_u16_d16", ConSanLdsAccessKind::Read, 16u, 0x26u,
+        /*addr=*/8u, /*vdst=*/12u);
+  check(read_u16_d16_hi[0], read_u16_d16_hi[1], "ds_read_u16_d16_hi", ConSanLdsAccessKind::Read,
+        16u, 0x27u, /*addr=*/8u, /*vdst=*/12u);
   check(write_b8_d16_hi[0], write_b8_d16_hi[1], "ds_write_b8_d16_hi", ConSanLdsAccessKind::Write,
         8u, 0x12u, /*addr=*/5u, /*data0=*/9u);
   check(write_b16_d16_hi[0], write_b16_d16_hi[1], "ds_write_b16_d16_hi", ConSanLdsAccessKind::Write,

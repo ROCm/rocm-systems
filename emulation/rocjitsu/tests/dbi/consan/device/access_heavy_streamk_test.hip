@@ -5,40 +5,24 @@
 /// two-tile Stream-K workload. Each phase has eight distinct producer stores,
 /// eight matching consumer loads, and one workgroup barrier. The incorrect
 /// member removes only the middle publication edge while retaining the same
-/// 80 static LDS access sites and five static barrier sites.
+/// 80 static LDS access sites and five static barrier sites. The contract is
+/// wave-size independent and runs on every supported architecture.
 
 #include "consan_device_test_support.h"
 
 namespace {
 
-constexpr uint32_t kWaveSize = 64u;
-constexpr uint32_t kThreadCount = 2u * kWaveSize;
+constexpr uint32_t kMaximumWaveSize = 64u;
+constexpr uint32_t kMaximumThreadCount = 2u * kMaximumWaveSize;
 constexpr uint32_t kPhaseCount = 5u;
 constexpr uint32_t kSlotCount = 8u;
 
 struct DeviceState {
   uint32_t synchronize;
-  uint32_t output[kWaveSize];
-  uint32_t control[kThreadCount];
+  uint32_t wave_size;
+  uint32_t output[kMaximumWaveSize];
+  uint32_t control[kMaximumThreadCount];
 };
-
-__device__ __forceinline__ void store_phase_word(volatile uint32_t *address, uint32_t value) {
-  const uint32_t lds_address =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  asm volatile("ds_write_b32 %0, %1\n\t" : : "v"(lds_address), "v"(value) : "memory");
-}
-
-__device__ __forceinline__ uint32_t load_phase_word(volatile uint32_t *address) {
-  const uint32_t lds_address =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-  uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t"
-               "s_waitcnt lgkmcnt(0)\n\t"
-               : "=v"(value)
-               : "v"(lds_address)
-               : "memory");
-  return value;
-}
 
 __host__ __device__ __forceinline__ uint32_t phase_word(uint32_t phase, uint32_t slot,
                                                         uint32_t lane) {
@@ -47,7 +31,8 @@ __host__ __device__ __forceinline__ uint32_t phase_word(uint32_t phase, uint32_t
 
 template <uint32_t Phase, uint32_t Slot>
 __device__ __forceinline__ void publish_phase_slots(volatile uint32_t *storage, uint32_t lane) {
-  store_phase_word(storage + Slot * kWaveSize + lane, phase_word(Phase, Slot, lane));
+  consan_device_test::store_lds_word_without_cave(storage + Slot * kMaximumWaveSize + lane,
+                                                  phase_word(Phase, Slot, lane));
   if constexpr (Slot + 1u < kSlotCount)
     publish_phase_slots<Phase, Slot + 1u>(storage, lane);
 }
@@ -55,8 +40,9 @@ __device__ __forceinline__ void publish_phase_slots(volatile uint32_t *storage, 
 template <uint32_t Phase, uint32_t Slot>
 __device__ __forceinline__ void consume_phase_slots(volatile uint32_t *storage, uint32_t lane,
                                                     uint32_t &accumulator) {
-  accumulator ^= consan_device_test::rotate_left(load_phase_word(storage + Slot * kWaveSize + lane),
-                                                 (Phase + Slot) % 31u + 1u);
+  accumulator ^= consan_device_test::rotate_left(
+      consan_device_test::load_lds_word_without_cave(storage + Slot * kMaximumWaveSize + lane),
+      (Phase + Slot) % 31u + 1u);
   if constexpr (Slot + 1u < kSlotCount)
     consume_phase_slots<Phase, Slot + 1u>(storage, lane, accumulator);
 }
@@ -64,7 +50,7 @@ __device__ __forceinline__ void consume_phase_slots(volatile uint32_t *storage, 
 template <uint32_t Phase>
 __device__ __forceinline__ void run_phase(volatile uint32_t *storage, DeviceState *state,
                                           uint32_t wave, uint32_t lane, uint32_t &accumulator) {
-  volatile uint32_t *phase_storage = storage + Phase * kSlotCount * kWaveSize;
+  volatile uint32_t *phase_storage = storage + Phase * kSlotCount * kMaximumWaveSize;
   if (wave == 0u && lane == 0u)
     publish_phase_slots<Phase, 0u>(phase_storage, lane);
 
@@ -80,11 +66,11 @@ __device__ __forceinline__ void run_phase(volatile uint32_t *storage, DeviceStat
 }
 
 __global__
-__launch_bounds__(kThreadCount) void cdna_streamk_two_tile_for_consan(DeviceState *state) {
-  __shared__ volatile uint32_t storage[kPhaseCount][kSlotCount][kWaveSize];
+__launch_bounds__(kMaximumThreadCount) void access_heavy_streamk_for_consan(DeviceState *state) {
+  __shared__ volatile uint32_t storage[kPhaseCount][kSlotCount][kMaximumWaveSize];
   const uint32_t tid = threadIdx.x;
-  const uint32_t lane = tid & (kWaveSize - 1u);
-  const uint32_t wave = tid / kWaveSize;
+  const uint32_t lane = tid % warpSize;
+  const uint32_t wave = tid / warpSize;
   state->control[tid] = 0xc8000000u | tid;
 
   uint32_t accumulator = 0u;
@@ -104,29 +90,33 @@ uint32_t expected_output(uint32_t lane) {
   return accumulator;
 }
 
-void run_cdna_streamk_two_tile(bool synchronize) {
+void run_access_heavy_streamk(bool synchronize) {
+  const uint32_t wave_size = consan_device_test::active_wave_size();
+  const uint32_t thread_count = 2u * wave_size;
   DeviceState initial{};
   initial.synchronize = synchronize ? 1u : 0u;
+  initial.wave_size = wave_size;
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(DeviceState)));
   HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
-  cdna_streamk_two_tile_for_consan<<<1, kThreadCount>>>(device_state);
+  access_heavy_streamk_for_consan<<<1, thread_count>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
   DeviceState result{};
   HIP_ASSERT(hipMemcpy(&result, device_state, sizeof(DeviceState), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_state));
-  for (uint32_t tid = 0u; tid < kThreadCount; ++tid)
+  EXPECT_EQ(result.wave_size, wave_size);
+  for (uint32_t tid = 0u; tid < thread_count; ++tid)
     EXPECT_EQ(result.control[tid], 0xc8000000u | tid) << "thread=" << tid;
   if (synchronize) {
-    for (uint32_t lane = 0u; lane < kWaveSize; ++lane)
+    for (uint32_t lane = 0u; lane < wave_size; ++lane)
       EXPECT_EQ(result.output[lane], lane == 0u ? expected_output(lane) : 0u) << "lane=" << lane;
   }
 }
 
-TEST(ConSanDeviceCdnaStreamkTwoTileTest, Correct) { run_cdna_streamk_two_tile(true); }
+TEST(ConSanDeviceAccessHeavyStreamKTest, Correct) { run_access_heavy_streamk(true); }
 
-TEST(ConSanDeviceCdnaStreamkTwoTileTest, Incorrect) { run_cdna_streamk_two_tile(false); }
+TEST(ConSanDeviceAccessHeavyStreamKTest, Incorrect) { run_access_heavy_streamk(false); }
 
 } // namespace
