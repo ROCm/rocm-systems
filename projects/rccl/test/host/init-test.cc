@@ -18,6 +18,7 @@
 
 // Standard headers used by the test body; their include guards make init.cc's
 // transitive re-includes no-ops.
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -55,11 +56,21 @@
 // ncclCalloc redirector: lets a test fail the Nth allocation so the
 // NCCLCHECK(ncclCalloc(...)) early-return arms become reachable. ncclCalloc is a
 // macro (alloc.h), so retargeting it here -- the same trick the PARAM
-// redirectors above use -- intercepts only RCCL's own allocation sites in the
-// UUT. Interposing libc malloc instead would also catch gtest's and
-// libstdc++'s allocations, and they would consume the failure counter before
-// the code under test ever ran. Defaults to fully transparent; armed per test
-// via g_callocFailAt and reset in the fixture TearDown.
+// redirectors above use -- intercepts RCCL's ncclCalloc call sites rather than
+// every heap allocation. Interposing libc malloc instead would also catch
+// gtest's and libstdc++'s allocations, and they would consume the failure
+// counter before the code under test ever ran.
+//
+// Scope caveat: the #define is textual and stays live for the rest of this TU,
+// so g_callocCallIndex counts EVERY ncclCalloc the running test reaches --
+// including ones in a test body and inside commAlloc/devCommSetup. "0-based call
+// index" therefore means "Nth ncclCalloc in this test", which equals "Nth in the
+// UUT" only when the UUT is the first caller. True for the P2pSchedule tests
+// that use it; verify before relying on it elsewhere.
+//
+// Reset lives in the fixture TearDown, not ResetInitFakes(): these two are
+// static to this TU and ResetInitFakes() is compiled in init_fakes.cc, which
+// cannot see them.
 static int g_callocCallIndex = 0;
 static int g_callocFailAt = -1;  // -1 = never fail; otherwise 0-based call index
 template <typename... Args>
@@ -149,13 +160,18 @@ class InitMicrotest : public ::testing::Test {
     // Worse, onceEnvCtaPolicy (init.cc:3066) is a function-local once_flag no
     // test can reset, so a host value would be latched by whichever test runs
     // envConfigOverride first -- an order-dependent failure under
-    // --gtest_shuffle. Mask every name init.cc reads through ncclGetEnv/getenv
+    // --gtest_shuffle. Mask every name the BINARY reads through ncclGetEnv/getenv
     // so no test depends on the ambient environment.
+    //
+    // The list spans every real TU this target links, not just init.cc --
+    // NCCL_HOSTID is read by the real utils.cc (getHostHash) and reaches the unit
+    // under test via fillInfo, latched behind its own once_flag. Re-derive with:
+    //   grep -n 'ncclGetEnv(\|getenv(' src/init.cc src/misc/{utils,argcheck,archinfo}.cc
     ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
     for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
                              "NCCL_COMM_ID", "NCCL_LAUNCH_MODE", "NCCL_NET", "NCCL_PAT_ENABLE",
                              "NCCL_TOPO_DUMP_FILE", "HSA_FORCE_FINE_GRAIN_PCIE",
-                             "HSA_NO_SCRATCH_RECLAIM", "ROCSHMEM_HEAP_SIZE"}) {
+                             "HSA_NO_SCRATCH_RECLAIM", "ROCSHMEM_HEAP_SIZE", "NCCL_HOSTID"}) {
       SetMicroEnvAbsent(name);
     }
   }
@@ -477,6 +493,13 @@ class P2pScheduleComm {
   P2pScheduleComm(int nNodes, int node, int localRank, int nRanks, int maxLocalRanks,
                   std::initializer_list<int> localRanksPerNode)
       : nodeRanks_(localRanksPerNode.size()), comm_(new ncclComm{}) {
+    // Both UUT loops iterate to comm->nNodes while nodeRanks_ is sized from the
+    // list, so a mismatch would read past the end -- UB in the harness that
+    // would be misattributed to the unit. Fail loudly instead. (nRanks is NOT
+    // checked against sum(localRanksPerNode): two tests deliberately make them
+    // disagree to reach the groupCount and round mismatch arms.)
+    assert(nNodes <= static_cast<int>(localRanksPerNode.size()) &&
+           "P2pScheduleComm: nNodes exceeds the localRanksPerNode list");
     rankTables_.reserve(localRanksPerNode.size());  // keep .data() pointers stable
     int nextRank = 0, i = 0;
     for (int lr : localRanksPerNode) {
@@ -518,11 +541,43 @@ class P2pScheduleComm {
 // After each node either the condition was false (divisibility already held) or
 // gcd made it hold; and since every new groupSize divides the previous one, it
 // still divides every earlier node's localRanks. So on exit groupSize divides
-// ALL localRanks and the 1331 check can never be true. The only escape is
-// groupSize == 0, which SIGFPEs at line 1316 first. Verified against the Euclid
-// implementation at src/include/utils.h:105 for negative and zero inputs too.
-// Do not try to flip this branch -- reaching it requires a state the function's
-// own preceding loop makes impossible.
+// ALL localRanks and the 1331 check can never be true. Verified against the
+// Euclid implementation at src/include/utils.h:105 for negative and zero inputs
+// too. Do not try to flip this branch -- reaching it requires a state the
+// function's own preceding loop makes impossible.
+//
+// The escape hatch is groupSize == 0, which crashes before 1331 can be reached
+// -- at 1316 (`localRanks % groupSize`) normally, or at 1321
+// (`localRank % groupSize`) when nNodes == 0 and the normalization loop never
+// runs. That is operator-triggerable, not theoretical: ncclLoadParam does a bare
+// strtoll with no range check (param.cc:96), so NCCL_P2P_SCHEDULE_GROUP_SIZE=0
+// SIGFPEs, and so does any multiple of 2^32, which narrows to 0 on the
+// int64_t -> int conversion at 1313. Negative values do not crash but produce a
+// negative nGroups; both are pinned by the two tests below. The source bug is
+// pre-existing on develop and out of scope for this test-only change.
+
+// Pins the escape hatch the dead-code argument above leans on. A negative
+// NCCL_P2P_SCHEDULE_GROUP_SIZE does not crash -- it yields a negative nGroups,
+// so ncclCalloc is asked for a wildly out-of-range size and fails.
+TEST_F(InitMicrotest, P2pSchedule_NegativeGroupSizeParam_FailsInAllocation) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(-2) : deft;
+  };
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4, 4});
+  EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
+}
+
+// ...and the crashing half. Death tests fork, so this neither corrupts the
+// parent nor depends on the SIGFPE being catchable.
+TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(0) : deft;
+  };
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
+                    /*maxLocalRanks=*/4, {4, 4});
+  EXPECT_DEATH(ncclP2pSchedule(c.get()), "");
+}
 
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
   // nNodes == 1 -> groupSize comes from maxLocalRanks, not the param.
@@ -541,12 +596,25 @@ TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
 TEST_F(InitMicrotest, P2pSchedule_MultiNode_UsesGroupSizeParam) {
   // nNodes > 1 takes the ncclParamGroupSize() arm; comm->node=1 makes the
   // `n < comm->node` group-offset branch fire on node 0.
+  //
+  // localRank=1 matters: with localRank=0 both `local` (localRank % groupSize)
+  // and `group` (localRank / groupSize) are identically 0, which hides the whole
+  // group-level walk from any assertion. Asserting the full schedule here is
+  // what kills the sendGroup/recvGroup swap and the `n < comm->node` deletion --
+  // return-code assertions cannot see either.
   g_loadParam = [](const char* env, int64_t deft) {
     return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(2) : deft;
   };
-  P2pScheduleComm c(/*nNodes=*/2, /*node=*/1, /*localRank=*/0, /*nRanks=*/8,
+  P2pScheduleComm c(/*nNodes=*/2, /*node=*/1, /*localRank=*/1, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
-  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  // groupSize=2, nGroups=4, group=2 after the node-1 offset, local=1.
+  const int expectSend[8] = {5, 4, 7, 6, 3, 2, 1, 0};
+  const int expectRecv[8] = {5, 4, 3, 2, 7, 6, 1, 0};
+  for (int r = 0; r < 8; ++r) {
+    EXPECT_EQ(expectSend[r], c.sendRank(r)) << "send round " << r;
+    EXPECT_EQ(expectRecv[r], c.recvRank(r)) << "recv round " << r;
+  }
 }
 
 TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
@@ -566,10 +634,20 @@ TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
   EXPECT_TRUE(LogHas(log, "group size used is 2")) << "actual log:\n" << log;
 }
 
-TEST_F(InitMicrotest, P2pSchedule_EmptyNode_TakesLessThanArmAndSkipsGroupLoop) {
-  // localRanks=0 on node 1: 0 % 4 == 0 (first arm false) but 0 < 4 (second arm
-  // true) -- the only way to reach the second disjunct. It also makes
-  // nGroupsInNode 0, so the inner group loop is entered zero times.
+// The `|| localRanks < groupSize` disjunct at init.cc:1316 is EFFECTIVELY DEAD,
+// like the check at :1331. For any non-negative localRanks < groupSize the first
+// disjunct has already fired (localRanks % groupSize == localRanks != 0), and
+// the one case it uniquely adds is localRanks == 0 -- where gcd(groupSize, 0)
+// == groupSize (utils.h:105, plain Euclid) makes taking the arm a no-op.
+// Deleting the disjunct is an equivalent mutant for every reachable input. (It
+// IS load-bearing for negative localRanks, since gcd(4,-4) returns -4, but
+// localRanks is a rank count and can never be negative in production.)
+//
+// So this test does not claim to observe that disjunct. What it does pin is the
+// nGroupsInNode == 0 case skipping the inner group loop entirely.
+TEST_F(InitMicrotest, P2pSchedule_EmptyNode_SkipsGroupLoop) {
+  // localRanks=0 on node 1 -> nGroupsInNode = 0/4 = 0, so the inner loop at
+  // init.cc:1337 is entered zero times and contributes no groups.
   g_loadParam = [](const char* env, int64_t deft) {
     return std::strcmp(env, "P2P_SCHEDULE_GROUP_SIZE") == 0 ? int64_t(4) : deft;
   };
@@ -578,26 +656,36 @@ TEST_F(InitMicrotest, P2pSchedule_EmptyNode_TakesLessThanArmAndSkipsGroupLoop) {
   EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
 }
 
-TEST_F(InitMicrotest, P2pSchedule_NonPow2Groups_SkipsOutOfRangeDeltas) {
+TEST_F(InitMicrotest, P2pSchedule_NonPow2Groups_ScheduleContents) {
   // nGroups=3 but nGroupsPow2=4, so the delta walk visits a value >= nGroups
   // and takes the false arm of `if (groupDelta < nGroups)`. groupSize divides
-  // cleanly here, so no gcd shrink is involved.
-  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/6,
+  // cleanly here, so no gcd shrink is involved. localRank=3 gives local=1,
+  // group=1 -- a non-power-of-2 nGroups is what makes the `+ nGroups` wrap bias
+  // at init.cc:1355 observable, and only a content assertion can see it.
+  P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/3, /*nRanks=*/6,
                     /*maxLocalRanks=*/2, {6});
-  EXPECT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  const int expectSend[6] = {3, 2, 5, 4, 1, 0};
+  const int expectRecv[6] = {3, 2, 1, 0, 5, 4};
+  for (int r = 0; r < 6; ++r) {
+    EXPECT_EQ(expectSend[r], c.sendRank(r)) << "send round " << r;
+    EXPECT_EQ(expectRecv[r], c.recvRank(r)) << "recv round " << r;
+  }
 }
 
+// LATENT BUG (init.cc:1346): this `return ncclInternalError` fires before the
+// free() at init.cc:1370-1371, leaking both groupToNode and groupToLocal. This
+// is the LIVE one of the two leaking returns (:1334 sits behind the dead branch
+// above); LSan attributes 16 bytes to this test.
 TEST_F(InitMicrotest, P2pSchedule_GroupCountMismatch_ReturnsInternalError) {
   // nRanks=8 with only 4 local ranks -> nGroups=2 but groupCount=1.
-  // NOTE: this path returns before the free() at init.cc:1370-1371 and leaks
-  // both groupToNode and groupToLocal.
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4});
-  std::string log;
   ncclResult_t res = ncclSuccess;
-  log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
   EXPECT_EQ(ncclInternalError, res);
-  EXPECT_TRUE(LogHas(log, "Group creation failed"));
+  EXPECT_TRUE(LogHas(log, "Group creation failed")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, P2pSchedule_RoundMismatch_ReturnsInternalError) {
@@ -605,11 +693,11 @@ TEST_F(InitMicrotest, P2pSchedule_RoundMismatch_ReturnsInternalError) {
   // only emits 4 rounds and the final round==nRanks check fails.
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/6,
                     /*maxLocalRanks=*/4, {4});
-  std::string log;
   ncclResult_t res = ncclSuccess;
-  log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
   EXPECT_EQ(ncclInternalError, res);
-  EXPECT_TRUE(LogHas(log, "P2p schedule creation has bugs"));
+  EXPECT_TRUE(LogHas(log, "P2p schedule creation has bugs")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, P2pSchedule_FirstCallocFails_ReturnsSystemError) {
@@ -619,8 +707,10 @@ TEST_F(InitMicrotest, P2pSchedule_FirstCallocFails_ReturnsSystemError) {
   EXPECT_EQ(ncclSystemError, ncclP2pSchedule(c.get()));
 }
 
+// LATENT BUG (init.cc:1328): the NCCLCHECK embedded in the second ncclCalloc
+// returns with groupToNode already allocated and never freed -- a third leaking
+// return path, reachable in production under memory pressure during init.
 TEST_F(InitMicrotest, P2pSchedule_SecondCallocFails_ReturnsSystemError) {
-  // NOTE: this path returns with groupToNode already allocated and never freed.
   g_callocFailAt = 1;  // groupToLocal
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
                     /*maxLocalRanks=*/4, {4});
@@ -741,10 +831,12 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_TwoNamedModes_AccumulatesBoth) {
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
             RunCtaPolicyEnv("EFFICIENCY|ZERO"));
 }
-// Comparison is strcasecmp, so spelling case is irrelevant.
+// Comparison is strcasecmp, so spelling case is irrelevant. All THREE tokens are
+// lower/mixed-cased deliberately: with DEFAULT spelled all-caps everywhere else,
+// `strcasecmp(token,"DEFAULT") -> strcmp` survives the whole suite.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_MixedCaseModes_AccumulatesBoth) {
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO,
-            RunCtaPolicyEnv("efficiency|ZeRo"));
+            RunCtaPolicyEnv("default|efficiency|ZeRo"));
 }
 // An unrecognized token is reported and skipped; the recognized ones around it
 // still apply, covering the skip (174-F), first-assign and accumulate arms in
@@ -1283,9 +1375,23 @@ TEST(InitMicrotestIsolated, NcclInit_BootstrapNetInitFailure_ReturnsSystemError)
   // If isolation failed (cached ncclInit success), the valid-args path would
   // reach ncclAsyncLaunch -> fail-loud abort -> child crash -> RED. Green proves
   // ncclInit genuinely failed via bootstrapNetInit.
+  //
+  // The env mask lives in the lambda, not in InitMicrotest::SetUp: the child
+  // re-execs and runs THIS lambda directly off a marker env var, never through
+  // gtest, so no fixture SetUp ever executes there. Converting this to a TEST_F
+  // would mask the parent (which does not run the body) and leave the child --
+  // which reaches initOnceFunc's HSA_* reads and envConfigOverride's
+  // NCCL_CTA_POLICY read -- still exposed to the real environment.
   RUN_ISOLATED_TEST(
       "Init_NcclInit_BootstrapNetInitFailure",
       []() {
+        for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
+                                 "NCCL_COMM_ID", "NCCL_LAUNCH_MODE", "NCCL_NET",
+                                 "NCCL_PAT_ENABLE", "NCCL_TOPO_DUMP_FILE",
+                                 "HSA_FORCE_FINE_GRAIN_PCIE", "HSA_NO_SCRATCH_RECLAIM",
+                                 "ROCSHMEM_HEAP_SIZE", "NCCL_HOSTID"}) {
+          SetMicroEnvAbsent(name);
+        }
         g_bootstrapNetInitFail = true;
         ncclComm_t nc = nullptr;
         ncclUniqueId id{};

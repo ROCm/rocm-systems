@@ -10,10 +10,10 @@
 // satisfied by the fake layers (hip_fakes / nccl_fakes / init_fakes) or by the
 // real host-only oracle TUs (argcheck.cc / archinfo.cc / utils.cc).
 //
-// This header is intentionally thin at bring-up: it re-exports the shared HIP
-// and NCCL fake seams and adds the init-only controllable seams. It grows as
-// the GPU decision inventory + per-test matrix are completed (see
-// init_coverage_plan.md).
+// It re-exports the shared HIP and NCCL fake seams and adds the init-only
+// controllable seams, growing as more of init.cc comes under test. The workflow
+// for adding one is in test/host/MICROTEST_README.md ("Adding more controllable
+// seams").
 
 #ifndef RCCL_TEST_HOST_INIT_FAKES_H_
 #define RCCL_TEST_HOST_INIT_FAKES_H_
