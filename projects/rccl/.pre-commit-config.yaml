@@ -10,9 +10,11 @@
 # hands hooks toplevel-relative paths, so the `^projects/rccl/` prefix is
 # required from any cwd.
 
-# Vendored sources, mirroring the "external" entries in .clang-format-ignore.
-# That file governs clang-format only, so without this the whitespace hooks
-# would rewrite upstream NVTX headers and conflict on the next sync.
+# Files .clang-format-ignore already protects, re-stated here because that file
+# governs clang-format only -- without this the whitespace hooks would rewrite
+# them. Five are its "external" entries (upstream NVTX, DOCA GPUNetIO and
+# friends), which would conflict on the next sync; src/nccl.h.in is its
+# "special files" entry, a template the build generates src/nccl.h from.
 exclude: |
   (?x)^projects/rccl/(
     src/include/nvtx3/
