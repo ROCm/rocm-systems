@@ -2371,10 +2371,12 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
       EXPECT_EQ(inventory.sampled_watchpoint_count, 16u);
     } else if (engine == ConSanMoiEngine::InlineShadow) {
       EXPECT_TRUE(inventory.inline_diagnostic_count_adaptive);
-      EXPECT_EQ(inventory.diagnostic_count,
-                inventory.access_range_count * kConSanMoiInlineShadowDiagnosticHeadroomPerAccess);
       EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
                                                 consan_moi_exact_shadow::granule_bytes);
+      const uint64_t dispatch_banks =
+          consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
+      EXPECT_EQ(inventory.diagnostic_count, inventory.access_range_count * dispatch_banks *
+                                                kConSanMoiInlineShadowDiagnosticHeadroomPerAccess);
       EXPECT_EQ(inventory.inline_atomic_release_count,
                 kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
       EXPECT_EQ(inventory.inline_causal_snapshot_count,
@@ -2384,6 +2386,29 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
     }
     EXPECT_TRUE(plan_consan_moi_auto_report(inventory).complete());
   }
+}
+
+TEST(ConSanMoi, InlineAutoReportBudgetsDiagnosticsAcrossDispatchBanks) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.max_patches = 1u << 20u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  const ConSanMoiAutoReportInventory inventory =
+      inventory_consan_moi_auto_report(result, options, bytes);
+  const uint64_t dispatch_banks =
+      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
+  ASSERT_GT(dispatch_banks, 1u);
+  ASSERT_EQ(inventory.access_range_count, 2u);
+  EXPECT_EQ(inventory.diagnostic_count, inventory.access_range_count * dispatch_banks *
+                                            kConSanMoiInlineShadowDiagnosticHeadroomPerAccess);
+
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.diagnostic_capacity, inventory.diagnostic_count);
+  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, dispatch_banks);
 }
 
 TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {

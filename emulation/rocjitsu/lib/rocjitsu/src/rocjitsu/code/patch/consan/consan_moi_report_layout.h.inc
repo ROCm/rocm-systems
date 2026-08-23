@@ -217,9 +217,9 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_acquired_epoch_token_count = 0;
   uint64_t inline_compact_token_mapping_count = 0;
   /// Automatic inventories request one wave of diagnostic headroom per
-  /// logical range. Large objects may reduce only that headroom to the
-  /// largest capacity fitting the frozen report ceiling. Runtime saturation
-  /// remains visible and fail-closed.
+  /// logical range in every exact-shadow dispatch bank. Large objects may
+  /// reduce only that headroom to the largest capacity fitting the frozen
+  /// report ceiling. Runtime saturation remains visible and fail-closed.
   bool inline_diagnostic_count_adaptive = false;
 };
 

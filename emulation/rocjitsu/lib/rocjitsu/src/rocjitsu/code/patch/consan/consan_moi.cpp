@@ -1217,8 +1217,14 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.inline_causal_snapshot_count = ordering_capacity;
     inventory.inline_acquired_epoch_token_count =
         std::max<uint64_t>(ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
+    // The report buffer belongs to the code object rather than to one
+    // dispatch. Keep one wave of diagnostics for every exact-shadow dispatch
+    // bank so repeated or concurrent launches do not exhaust a capacity that
+    // was sized for only the first launch.
+    const uint64_t inline_dispatch_banks =
+        consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
     const uint64_t diagnostic_headroom = util::saturating_mul(
-        inventory.access_range_count,
+        util::saturating_mul(inventory.access_range_count, inline_dispatch_banks),
         static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
     inventory.diagnostic_count =
         std::max({inventory.diagnostic_count, diagnostic_headroom,
