@@ -18,6 +18,7 @@ struct DeviceState {
   uint32_t published_wave_total;
   uint32_t histogram[kBinCount];
   float fp32_histogram[kBinCount];
+  double fp64_histogram[kBinCount];
   uint32_t scatter[kBinCount];
   alignas(uint32_t) __hip_bfloat16 bf16_scatter[kBinCount];
   uint32_t packed_bf16_scatter[kPackedBf16BinCount];
@@ -48,6 +49,7 @@ __device__ __forceinline__ void relaxed_native_packed_bf16_add(uint32_t *address
 __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState *state) {
   __shared__ uint32_t bins[kBinCount];
   __shared__ float fp32_bins[kBinCount];
+  __shared__ double fp64_bins[kBinCount];
   __shared__ uint32_t wave_total;
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid % warpSize;
@@ -55,12 +57,18 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   if (tid < kBinCount) {
     bins[tid] = 0u;
     fp32_bins[tid] = 0.0f;
+    fp64_bins[tid] = 0.0;
   }
   __syncthreads();
 
   const uint32_t bin = (5u * tid + 3u) & (kBinCount - 1u);
   atomicAdd(&bins[bin], 1u);
   atomicAdd(&fp32_bins[bin], 1.0f);
+  // PyTorch histc's gfx950 FP64 specialization uses this native
+  // collision-heavy ds_add_f64 shape.  CDNA3/CDNA5 lower it natively too;
+  // RDNA3/RDNA4 transport the same exact arithmetic contract through their
+  // compiler-selected 64-bit LDS compare/exchange loop.
+  atomicAdd(&fp64_bins[bin], 1.0);
   (void)__hip_atomic_fetch_add(&state->scatter[bin], tid + 1u, __ATOMIC_RELAXED,
                                __HIP_MEMORY_SCOPE_AGENT);
   // PyTorch-style scatter accumulation is an arithmetic collision, not a
@@ -101,6 +109,7 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   if (tid < kBinCount) {
     state->histogram[tid] = bins[tid];
     state->fp32_histogram[tid] = fp32_bins[tid];
+    state->fp64_histogram[tid] = fp64_bins[tid];
     asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
   }
 }
@@ -139,6 +148,8 @@ void run_histogram_scatter(bool synchronize) {
     if (synchronize) {
       EXPECT_EQ(state.histogram[bin], expected_histogram[bin]) << "bin=" << bin;
       EXPECT_EQ(state.fp32_histogram[bin], static_cast<float>(expected_histogram[bin]))
+          << "bin=" << bin;
+      EXPECT_EQ(state.fp64_histogram[bin], static_cast<double>(expected_histogram[bin]))
           << "bin=" << bin;
     }
   }
