@@ -131,15 +131,27 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 // Note: ncclGdrCopy is defined by init.cc itself (= NULL by default), so
 // devCommSetup()'s `ncclGdrCopy != NULL` check takes the host-workFifo arm.
 
-// ASan defaults break two tests below: its allocator ABORTS on an allocation above
-// its 1 TiB cap instead of returning NULL (killing the binary mid-run at
-// NegativeGroupSizeParam), and it installs its own SIGFPE handler so
-// KilledBySignal(SIGFPE) can never match. No smaller negative avoids the first --
-// any negative int widens to >= 2^63. Reachable via install.sh --address-sanitizer;
-// the standalone test/host CMake has no sanitizer branch, so it cannot reproduce it.
+// ASan defaults break three tests below. Two are fixed here: its allocator ABORTS on
+// an allocation above its 1 TiB cap instead of returning NULL (killing the binary
+// mid-run at NegativeGroupSizeParam -- no smaller negative avoids it, any negative int
+// widens to >= 2^63), and it intercepts SIGFPE so KilledBySignal(SIGFPE) cannot match.
+// The third is SIGSEGV, handled by DEATH_BY_SEGV below rather than handle_segv=0:
+// that option would disable ASan's null-deref reporting process-wide to fix one test.
+// Reachable via install.sh --address-sanitizer; the standalone CMake has no sanitizer
+// branch (nor an ASan rpath), so run_host_tests.sh cannot reproduce any of it.
 extern "C" const char* __asan_default_options() {
   return "allocator_may_return_null=1:handle_sigfpe=0";
 }
+
+// ASan turns a SIGSEGV into a report plus exit(1), so the signal predicate never
+// matches under it. Match the exit instead there; the plain build keeps the stronger
+// predicate. Under ASan this loses only the _exit(1) mutant (indistinguishable from
+// ASan's own exit); abort, the upstream-segv and the real fix all still fail the test.
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
+#else
+#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
+#endif
 
 // ===========================================================================
 // Fixture: resets all init-layer fakes between tests (TearDown). Tests that
@@ -269,7 +281,7 @@ class ScopedDebugLogging {
 }  // namespace
 
 // ===========================================================================
-// showVersion (:1009) -- the once-per-process banner, emitted at VERSION or INFO
+// showVersion (init.cc:1009) -- the once-per-process banner, emitted at VERSION or INFO
 // depending on ncclDebugLevel. decodeHipVer/fmtExtVer are real header-inline code;
 // only gethostname, dladdr, hipRuntimeGetVersion and getROCmVersion are seams.
 // ===========================================================================
@@ -382,6 +394,7 @@ TEST_F(InitMicrotest, ShowVersion_HipRuntimeMatchesCompileTime_OmitsRuntime) {
     return hipSuccess;
   };
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "HIP version")) << "actual log:\n" << log;  // fails on an empty log
   EXPECT_FALSE(LogHas(log, "HIP runtime")) << "actual log:\n" << log;
 }
 
@@ -392,6 +405,7 @@ TEST_F(InitMicrotest, ShowVersion_RocmRuntimeMatchesCompileTime_OmitsRuntime) {
   g_rocmVersionMinor = ROCM_VERSION_MINOR;
   g_rocmVersionPatch = ROCM_VERSION_PATCH;
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  EXPECT_TRUE(LogHas(log, "ROCm version")) << "actual log:\n" << log;  // fails on an empty log
   EXPECT_FALSE(LogHas(log, "ROCm runtime")) << "actual log:\n" << log;
 }
 #endif
@@ -399,18 +413,20 @@ TEST_F(InitMicrotest, ShowVersion_RocmRuntimeMatchesCompileTime_OmitsRuntime) {
 TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
   SetGethostnameFail(true);
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  // Label + value, so substituting a literal for the fallback is observable.
-  EXPECT_TRUE(LogHas(log, "Hostname     : Unknown")) << "actual log:\n" << log;
+  // Trailing \n matters: LogHas is a substring check, so without it "UnknownHostX"
+  // would still match. Hostname is followed by \n in the format string itself.
+  EXPECT_TRUE(LogHas(log, "Hostname     : Unknown\n")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {
   SetDladdrFail(true);
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  EXPECT_TRUE(LogHas(log, "Librccl path : Unknown")) << "actual log:\n" << log;
+  // Librccl path is the last field, so the terminator here is the logger's own \n.
+  EXPECT_TRUE(LogHas(log, "Librccl path : Unknown\n")) << "actual log:\n" << log;
 }
 
 // ===========================================================================
-// setupChannel (:1183) -- rotates a channel's ring to start at the local rank and
+// setupChannel (init.cc:1183) -- rotates a channel's ring to start at the local rank and
 // builds the userRanks/rankToIndex maps. initChannel is faked, and unlike the real
 // one (channel.cc:61-62) it does NOT allocate those two arrays -- the builder owns them.
 // ===========================================================================
@@ -564,7 +580,7 @@ TEST_F(InitMicrotest, SetupChannel_NonZeroChannelId_UsesThatChannel) {
 }
 
 // ===========================================================================
-// commGetSplitInfo (:2485) + getParentRanks (:2528) -- who ends up in a split or
+// commGetSplitInfo (init.cc:2485) + getParentRanks (:2528) -- who ends up in a split or
 // shrunk comm. commGetSplitInfo allgathers each rank's (color,key), keeps matching
 // colours, and INSERTION-SORTS by key; getParentRanks is pure integer logic.
 // ===========================================================================
@@ -589,6 +605,10 @@ void InstallSplitInfoTable(int selfRank, std::vector<std::pair<int, int>> colorK
       ADD_FAILURE() << "allgather element size " << size << ", expected "
                     << sizeof(commSplitInfo);
       return ncclInternalError;
+    }
+    if (selfRank < 0 || selfRank >= static_cast<int>(colorKey.size())) {
+      ADD_FAILURE() << "selfRank " << selfRank << " outside the " << colorKey.size()
+                    << "-entry table: the own-slot oracle would be silently skipped";
     }
     auto* info = static_cast<commSplitInfo*>(allData);
     for (size_t i = 0; i < colorKey.size(); ++i) {
@@ -1282,7 +1302,7 @@ TEST_F(InitMicrotest, GetVersion_ReturnsVersionCode) {
   EXPECT_EQ(NCCL_VERSION_CODE, v);
 }
 // ===========================================================================
-// ncclCommGetUniqueId (:4160) -- mints a grow handle, hands it back as a uniqueId.
+// ncclCommGetUniqueId (init.cc:4160) -- mints a grow handle, hands it back as a uniqueId.
 // bootstrapGetUniqueId was a fail-loud abort; bcastGrowHandle had no fake at all and
 // only linked because --gc-sections dropped this whole function.
 // ===========================================================================
@@ -1349,6 +1369,20 @@ TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_PropagatesError) {
 // neutralizes it), so those lines carry no logic and the guard is 2/4 by design:
 // *newcomm != NULL needs a successful child-comm init, and newcomm == NULL is
 // UNREACHABLE because it crashes at :4113 first -- a symptom of the bug below.
+TEST_F(InitMicrotest, CommShrink_NotReadyComm_ReturnsInvalidArgument) {
+  // The sibling readiness check, at init.cc:4044 inside ncclCommInitChildComm.
+  // rank 1 so the self-exclusion bsearch at init.cc:4039 does not reject first.
+  ReadyComm rc;
+  rc.get()->rank = 1;
+  rc.get()->asyncResult = ncclInProgress;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, &out,
+                                /*config=*/nullptr, /*shrinkFlags=*/0));
+  EXPECT_EQ(nullptr, out);
+}
+
 TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitPath) {
   ReadyComm rc;
   ncclComm_t out = nullptr;  // stays null -> the guard takes its FALSE arm
@@ -1373,7 +1407,7 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   // (debug.h:40), so the text reaches the child's stderr.
   EXPECT_EXIT(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
                                   /*config=*/nullptr, /*shrinkFlags=*/0),
-              ::testing::KilledBySignal(SIGSEGV), "newcomm argument is NULL");
+              DEATH_BY_SEGV, "newcomm argument is NULL");
 
   // WHEN FIXED (guard the Recorder call at init.cc:4113 the way `fail:` guards
   // its own store), this is the test:
@@ -1383,7 +1417,7 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
 }
 
 // ===========================================================================
-// ncclGetErrorString (:4369) -- a pure switch, no seams. Full strings, not
+// ncclGetErrorString (init.cc:4369) -- a pure switch, no seams. Full strings, not
 // substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped
 // "(run with ...)" hint, both of which users read in production.
 // ===========================================================================
