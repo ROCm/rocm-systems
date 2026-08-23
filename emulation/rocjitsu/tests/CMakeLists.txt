@@ -489,6 +489,7 @@ add_executable(
     vector_add_test.cpp
     cdna4_sim_test.cpp
     xcd_distribution_test.cpp
+    xcd_shard_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp

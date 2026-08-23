@@ -271,3 +271,38 @@ void TestFabricRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }
+
+// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
+// table generated from the vendored IFOE_TELEM_ID_* headers, so these run
+// without a device and catch id->name drift when the headers are re-synced.
+
+// Literals (independent of the vendored macros) spanning the table — first,
+// mid-table, and last entry — so a reorder or drop anywhere is caught.
+static constexpr uint64_t kFirstTelemId = 0x1;
+static constexpr uint64_t kMidTelemId = 0x6000001;
+static constexpr uint64_t kLastTelemId = 0x6001011;
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
+  const char* name = nullptr;
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
+  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
+  const char* name = nullptr;
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
+  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
+  ASSERT_STREQ(name, "UNKNOWN");
+}
