@@ -375,6 +375,25 @@ def test_ds_atomic_generator_only_writes_back_explicit_return_destination() -> N
     assert 'd->is_load = true;' in returning
 
 
+@pytest.mark.parametrize(
+    ('name', 'expected'),
+    [
+        ('DS_PK_ADD_F16', 'amdgpu::AtomicOp::PK_F16_ADD'),
+        ('FLAT_ATOMIC_PK_ADD_F16', 'amdgpu::AtomicOp::PK_F16_ADD'),
+        ('BUFFER_ATOMIC_PK_ADD_BF16', 'amdgpu::AtomicOp::PK_BF16_ADD'),
+        ('GLOBAL_ATOMIC_PK_ADD_BF16', 'amdgpu::AtomicOp::PK_BF16_ADD'),
+        ('GLOBAL_ATOMIC_ADD_F32', 'amdgpu::AtomicOp::FADD'),
+    ],
+)
+def test_atomic_generator_preserves_packed_float_format(
+    name: str, expected: str
+) -> None:
+    sem = InstructionSemantics(
+        name, 'ds_atomic', operation='fadd', elem_size=4, num_elems=1
+    )
+    assert CodeGenerator._atomic_op_enum(sem) == expected
+
+
 def _generated_constructor_body(cpp: str, class_name: str) -> str:
     start = cpp.index(f'{class_name}::{class_name}(')
     end = cpp.index('\n\n', start)

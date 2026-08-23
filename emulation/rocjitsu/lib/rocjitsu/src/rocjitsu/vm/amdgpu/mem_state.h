@@ -62,6 +62,8 @@ enum class AtomicOp : uint8_t {
   INC,            ///< Increment (wrapping).
   DEC,            ///< Decrement (wrapping).
   FADD,           ///< Floating-point add.
+  PK_F16_ADD,     ///< Independent packed FP16 adds in the low/high halves.
+  PK_BF16_ADD,    ///< Independent packed BF16 adds in the low/high halves.
   FMIN,           ///< Floating-point minimum.
   FMAX,           ///< Floating-point maximum.
   APPEND,         ///< LDS append counter.

@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "util/data_types.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -27,6 +28,30 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+uint32_t apply_packed_float_atomic_add(AtomicOp op, uint32_t old_value, uint32_t source_value) {
+  auto component = [](uint32_t value, uint32_t shift) {
+    return static_cast<uint16_t>(value >> shift);
+  };
+  auto pack = [](uint16_t low, uint16_t high) {
+    return static_cast<uint32_t>(low) | (static_cast<uint32_t>(high) << 16);
+  };
+
+  switch (op) {
+  case AtomicOp::PK_F16_ADD:
+    return pack(util::f32_to_f16(util::f16_to_f32(component(old_value, 0)) +
+                                 util::f16_to_f32(component(source_value, 0))),
+                util::f32_to_f16(util::f16_to_f32(component(old_value, 16)) +
+                                 util::f16_to_f32(component(source_value, 16))));
+  case AtomicOp::PK_BF16_ADD:
+    return pack(util::f32_to_bf16(util::bf16_to_f32(component(old_value, 0)) +
+                                  util::bf16_to_f32(component(source_value, 0))),
+                util::f32_to_bf16(util::bf16_to_f32(component(old_value, 16)) +
+                                  util::bf16_to_f32(component(source_value, 16))));
+  default:
+    throw std::invalid_argument("packed floating-point atomic add requires a packed add operation");
+  }
+}
 
 namespace {
 
@@ -331,6 +356,8 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
   const uint32_t src_stride = atomic_source_stride(d, d.store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX);
+  const bool is_packed_fp =
+      d.atomic_op == AtomicOp::PK_F16_ADD || d.atomic_op == AtomicOp::PK_BF16_ADD;
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
@@ -347,7 +374,11 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
             std::memcpy(&old_val, line_data + offset, 4);
 
             uint32_t new_val;
-            if (is_fp) {
+            if (is_packed_fp) {
+              uint32_t src_val;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              new_val = apply_packed_float_atomic_add(d.atomic_op, old_val, src_val);
+            } else if (is_fp) {
               float old_f = std::bit_cast<float>(old_val);
               float src_f;
               std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
@@ -400,6 +431,8 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   const uint32_t src_stride = atomic_source_stride(d, store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX);
+  const bool is_packed_fp =
+      d.atomic_op == AtomicOp::PK_F16_ADD || d.atomic_op == AtomicOp::PK_BF16_ADD;
 
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
     uint32_t addr = 0;
@@ -440,7 +473,11 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
       uint32_t new_val;
-      if (is_fp) {
+      if (is_packed_fp) {
+        uint32_t src_val;
+        std::memcpy(&src_val, &store_data[lane * src_stride], 4);
+        new_val = apply_packed_float_atomic_add(d.atomic_op, old_val, src_val);
+      } else if (is_fp) {
         float old_f = std::bit_cast<float>(old_val);
         float src_f;
         std::memcpy(&src_f, &store_data[lane * src_stride], 4);

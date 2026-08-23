@@ -32,6 +32,12 @@ enum class [[nodiscard]] MemoryAccessCompletion {
 
 using MemoryAccessDeferredCompletion = std::function<void()>;
 
+/// @brief Apply one packed two-component 16-bit floating-point atomic add.
+/// @param op PK_F16_ADD or PK_BF16_ADD.
+/// @return The independently rounded low/high component sums.
+[[nodiscard]] uint32_t apply_packed_float_atomic_add(AtomicOp op, uint32_t old_value,
+                                                     uint32_t source_value);
+
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
 /// @details Models the memory access pipeline as two FIFO queues:

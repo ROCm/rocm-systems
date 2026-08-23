@@ -100,6 +100,7 @@
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 
 #include "simdojo/sim/simulation.h"
 #include "util/bit.h"
@@ -139,6 +140,15 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(old_force_scalar); }
 
   bool old_force_scalar;
+};
+
+class TestMemoryInstruction : public Instruction {
+public:
+  explicit TestMemoryInstruction(std::unique_ptr<DynamicInstState> state)
+      : Instruction("test_mem", nullptr) {
+    flags_ |= MEMORY_OP;
+    set_data(std::move(state));
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -1123,8 +1133,77 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
 }
 
 // ---------------------------------------------------------------------------
-// L2 cache tests
+// Memory-pipeline and L2-cache tests
 // ---------------------------------------------------------------------------
+
+TEST(MemoryPipelineAtomicTest, PackedFloatAddsUpdateBothHalvesAcrossGlobalAndLdsCollisions) {
+  struct Case {
+    amdgpu::AtomicOp op;
+    uint32_t source;
+    uint32_t expected;
+  };
+  constexpr std::array cases = {
+      Case{amdgpu::AtomicOp::PK_F16_ADD, 0x40003C00u, 0x48004400u},
+      Case{amdgpu::AtomicOp::PK_BF16_ADD, 0x40003F80u, 0x41004080u},
+  };
+
+  for (const Case &test_case : cases) {
+    for (amdgpu::MemPipelineTag pipeline_tag : {amdgpu::GLOBAL_MEM, amdgpu::LOCAL_MEM}) {
+      SCOPED_TRACE(::testing::Message() << "op=" << static_cast<uint32_t>(test_case.op)
+                                        << " pipeline=" << static_cast<uint32_t>(pipeline_tag));
+      amdgpu::GpuMemory memory("packed_atomic_mem");
+      amdgpu::L2Cache l2("packed_atomic_l2");
+      l2.set_backing_memory(&memory);
+
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      auto compute_unit = amdgpu::ComputeUnitCore::create("packed_atomic_cu", config, &memory, &l2);
+      ASSERT_NE(compute_unit, nullptr);
+      auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(0xFu);
+
+      constexpr uint64_t kGlobalAddress = 0x2000;
+      constexpr uint32_t kLdsOffset = 0x100;
+      const uint64_t address =
+          pipeline_tag == amdgpu::GLOBAL_MEM ? kGlobalAddress : wave->lds_base() + kLdsOffset;
+      if (pipeline_tag == amdgpu::GLOBAL_MEM)
+        memory.write32(address, 0u);
+      else
+        compute_unit->lds().write32(static_cast<uint32_t>(address), 0u);
+
+      auto state = std::make_unique<amdgpu::VectorMemState>(pipeline_tag);
+      state->elem_size = sizeof(uint32_t);
+      state->num_elems = 1;
+      state->is_load = false;
+      state->atomic_op = test_case.op;
+      state->lane_mask = wave->exec();
+      state->exec_mask = wave->exec();
+      state->wf_size = wave->wf_size();
+      state->store_data.resize(state->wf_size * sizeof(uint32_t));
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        state->per_lane_addr[lane] = address;
+        std::memcpy(&state->store_data[lane * sizeof(uint32_t)], &test_case.source,
+                    sizeof(test_case.source));
+      }
+
+      if (pipeline_tag == amdgpu::GLOBAL_MEM) {
+        amdgpu::GlobalMemPipeline pipeline(&compute_unit->l1_vector(), compute_unit->l2());
+        pipeline.issue(new TestMemoryInstruction(std::move(state)), *wave);
+        EXPECT_EQ(memory.read32(address), test_case.expected);
+      } else {
+        amdgpu::LocalMemPipeline pipeline;
+        pipeline.issue(new TestMemoryInstruction(std::move(state)), *wave);
+        EXPECT_EQ(compute_unit->lds().read32(static_cast<uint32_t>(address)), test_case.expected);
+      }
+      EXPECT_TRUE(wave->wait_counters().empty());
+    }
+  }
+}
 
 TEST(L2CacheTest, UcStoreInvalidatesResidentLineBeforeAtomicRmw) {
   amdgpu::GpuMemory mem("test_mem");

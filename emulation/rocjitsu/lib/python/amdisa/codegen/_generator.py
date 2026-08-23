@@ -7101,6 +7101,22 @@ class CodeGenerator:
         'barrier_arrive': 'amdgpu::AtomicOp::BARRIER_ARRIVE',
     }
 
+    @classmethod
+    def _atomic_op_enum(cls, sem: InstructionSemantics) -> str:
+        """Return the memory-pipeline operation for an atomic instruction.
+
+        Packed 16-bit floating-point adds share the generic ``fadd`` semantic
+        operation with scalar FP32/FP64 atomics.  Preserve the element format
+        carried by their mnemonic so the memory pipeline can update the two
+        16-bit components independently.
+        """
+        name = sem.name.upper()
+        if '_PK_ADD_BF16' in name:
+            return 'amdgpu::AtomicOp::PK_BF16_ADD'
+        if '_PK_ADD_F16' in name:
+            return 'amdgpu::AtomicOp::PK_F16_ADD'
+        return cls._ATOMIC_OP_ENUM[sem.operation]
+
     def _buffer_payload_exec_expr(self) -> str:
         if self.isa_spec.profile.buffer_payload_reads_use_effective_exec_mask:
             return 'd->exec_mask'
@@ -7118,7 +7134,7 @@ class CodeGenerator:
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
             return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled flat_atomic variant ({sem.name})'
 
-        op_enum = self._ATOMIC_OP_ENUM[sem.operation]
+        op_enum = self._atomic_op_enum(sem)
         esz = sem.elem_size or 4
         data_dwords = sem.num_elems or 1  # number of dwords of operand data
 
@@ -7165,7 +7181,7 @@ class CodeGenerator:
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
             return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled buffer_atomic variant ({sem.name})'
 
-        op_enum = self._ATOMIC_OP_ENUM[sem.operation]
+        op_enum = self._atomic_op_enum(sem)
         esz = sem.elem_size or 4
         data_dwords = sem.num_elems or 1
 
@@ -7210,7 +7226,7 @@ class CodeGenerator:
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
             return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_atomic variant ({sem.name})'
 
-        op_enum = self._ATOMIC_OP_ENUM[sem.operation]
+        op_enum = self._atomic_op_enum(sem)
         esz = sem.elem_size or 4
         data_dwords = sem.num_elems or 1
 

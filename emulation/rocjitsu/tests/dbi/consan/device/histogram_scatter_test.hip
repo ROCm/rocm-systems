@@ -5,9 +5,12 @@
 
 #include "consan_device_test_support.h"
 
+#include <hip/hip_bf16.h>
+
 namespace {
 
 constexpr uint32_t kBinCount = 8u;
+constexpr uint32_t kPackedBf16BinCount = 4u;
 
 struct DeviceState {
   uint32_t synchronize;
@@ -16,8 +19,31 @@ struct DeviceState {
   uint32_t histogram[kBinCount];
   float fp32_histogram[kBinCount];
   uint32_t scatter[kBinCount];
+  alignas(uint32_t) __hip_bfloat16 bf16_scatter[kBinCount];
+  uint32_t packed_bf16_scatter[kPackedBf16BinCount];
+  uint32_t packed_bf16_executed;
   uint32_t control[128];
 };
+
+__device__ __forceinline__ void relaxed_native_packed_bf16_add(uint32_t *address,
+                                                               uint32_t packed_value) {
+#if defined(__gfx942__) || defined(__gfx950__)
+  asm volatile("global_atomic_pk_add_bf16 %0, %1, off\n\t"
+               "s_waitcnt vmcnt(0)\n\t"
+               :
+               : "v"(address), "v"(packed_value)
+               : "memory");
+#elif defined(__gfx1201__) || defined(__gfx1250__)
+  asm volatile("global_atomic_pk_add_bf16 %0, %1, off scope:SCOPE_DEV\n\t"
+               "s_wait_storecnt 0\n\t"
+               :
+               : "v"(address), "v"(packed_value)
+               : "memory");
+#else
+  (void)address;
+  (void)packed_value;
+#endif
+}
 
 __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState *state) {
   __shared__ uint32_t bins[kBinCount];
@@ -37,6 +63,19 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   atomicAdd(&fp32_bins[bin], 1.0f);
   (void)__hip_atomic_fetch_add(&state->scatter[bin], tid + 1u, __ATOMIC_RELAXED,
                                __HIP_MEMORY_SCOPE_AGENT);
+  // PyTorch-style scatter accumulation is an arithmetic collision, not a
+  // publication edge.  Keep that distinction visible in the source: the HIP
+  // scalar BF16 atomicAdd wrapper requests acquire-release ordering, whereas
+  // the workload idiom only requires a relaxed device-scope RMW.
+  (void)__scoped_atomic_fetch_add(reinterpret_cast<__bf16 *>(&state->bf16_scatter[bin]),
+                                  static_cast<__bf16>(1.0f), __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_DEVICE);
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1201__) || defined(__gfx1250__)
+  relaxed_native_packed_bf16_add(&state->packed_bf16_scatter[tid % kPackedBf16BinCount],
+                                 0x40003f80u);
+  if (tid == 0u)
+    state->packed_bf16_executed = 1u;
+#endif
   state->control[tid] = 0x79000000u | tid;
   asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
 
@@ -94,11 +133,26 @@ void run_histogram_scatter(bool synchronize) {
     EXPECT_EQ(state.published_wave_total, wave_size);
   for (uint32_t bin = 0; bin < kBinCount; ++bin) {
     EXPECT_EQ(state.scatter[bin], expected_scatter[bin]) << "bin=" << bin;
+    EXPECT_EQ(__bfloat162float(state.bf16_scatter[bin]),
+              static_cast<float>(expected_histogram[bin]))
+        << "bin=" << bin;
     if (synchronize) {
       EXPECT_EQ(state.histogram[bin], expected_histogram[bin]) << "bin=" << bin;
       EXPECT_EQ(state.fp32_histogram[bin], static_cast<float>(expected_histogram[bin]))
           << "bin=" << bin;
     }
+  }
+  if (state.packed_bf16_executed != 0u) {
+    EXPECT_EQ(state.packed_bf16_executed, 1u);
+    const uint32_t additions = thread_count / kPackedBf16BinCount;
+    const uint32_t expected =
+        static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16(additions))) |
+        (static_cast<uint32_t>(__bfloat16_as_ushort(__float2bfloat16(2u * additions))) << 16u);
+    for (uint32_t bin = 0; bin < kPackedBf16BinCount; ++bin)
+      EXPECT_EQ(state.packed_bf16_scatter[bin], expected) << "bin=" << bin;
+  } else {
+    for (uint32_t bin = 0; bin < kPackedBf16BinCount; ++bin)
+      EXPECT_EQ(state.packed_bf16_scatter[bin], 0u) << "bin=" << bin;
   }
 }
 
