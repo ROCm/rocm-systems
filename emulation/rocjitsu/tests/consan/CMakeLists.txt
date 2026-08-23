@@ -484,6 +484,7 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250ClusterMulticast|gfx1250_cluster|ConSanDeviceGfx1250ClusterMulticastTest"
             "Gfx1250HighBankLdsAddress|gfx1250_high_bank_lds_address|ConSanDeviceGfx1250HighBankLdsAddressTest"
             "Gfx1250SparseFp8Pipeline|gfx1250_sparse_fp8_pipeline|ConSanDeviceGfx1250SparseFp8PipelineTest"
+            "Gfx1250ScaledWmmaPipeline|gfx1250_scaled_wmma_pipeline|ConSanDeviceGfx1250ScaledWmmaPipelineTest"
             "Gfx1250GlobalAsyncToLds|gfx1250_global_async_to_lds|ConSanDeviceGfx1250GlobalAsyncToLdsTest"
         )
     endif()
@@ -1011,6 +1012,7 @@ function(rj_add_consan_device_fixture_targets target)
             APPEND _device_workload_sources
             "gfx1250_high_bank_lds_address|gfx1250_high_bank_lds_address_test.hip"
             "gfx1250_sparse_fp8_pipeline|gfx1250_sparse_fp8_pipeline_test.hip"
+            "gfx1250_scaled_wmma_pipeline|gfx1250_scaled_wmma_pipeline_test.hip"
             "gfx1250_global_async_to_lds|gfx1250_global_async_to_lds_test.hip"
         )
     endif()
