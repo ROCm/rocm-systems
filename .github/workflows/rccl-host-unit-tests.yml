@@ -6,10 +6,12 @@ name: RCCL host unit tests
 # JIRA ID: AICOMRCCL-1711
 #
 # Invoked by TheRock CI (.github/workflows/therock-ci.yml), which gates this on
-# `run_linux_rccl_ci` -- i.e. only when projects/rccl/ changed. That workflow has
-# no `paths:` filter of its own, so its required `TheRock CI Summary` check always
-# reports; folding in here is what makes a host-test failure block a merge without
-# stalling PRs that never touch RCCL.
+# `run_rccl_host_tests` -- projects/rccl/ changes PLUS this file's own path, so
+# editing this workflow still exercises it (check_rccl_host_test_changes() in
+# .github/scripts/therock_configure_ci.py). That workflow has no `paths:` filter
+# of its own, so its required `TheRock CI Summary` check always reports; folding
+# in here is what makes a host-test failure block a merge without stalling PRs
+# that never touch RCCL.
 #
 # Not triggered directly on `pull_request`: doing so alongside the TheRock CI call
 # would run the whole pipeline twice on every RCCL PR.

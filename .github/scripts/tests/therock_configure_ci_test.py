@@ -353,15 +353,33 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
         self.assertEqual(outputs["run_rccl_host_tests"], "false")
 
+    def test_rccl_host_tests_workflow_constant_is_wired_up(self):
+        """RCCL_HOST_TESTS_WORKFLOW is matched by exact string compare, so a
+        rename would silently disable the self-test property while every other
+        test here still passed (the rename PR has no reason to touch this
+        script). Pin the constant to the real file and to therock-ci.yml's
+        uses: target so such a rename fails loudly right here."""
+        repo_root = Path(__file__).parent.parent.parent.parent
+        workflow = repo_root / therock_configure_ci.RCCL_HOST_TESTS_WORKFLOW
+        self.assertTrue(
+            workflow.is_file(),
+            f"RCCL_HOST_TESTS_WORKFLOW points at a missing file: {workflow}",
+        )
+
+        caller = (repo_root / ".github/workflows/therock-ci.yml").read_text()
+        self.assertIn(
+            f"uses: ./{therock_configure_ci.RCCL_HOST_TESTS_WORKFLOW}",
+            caller,
+            "therock-ci.yml does not invoke RCCL_HOST_TESTS_WORKFLOW",
+        )
+
     @patch("therock_configure_ci.get_modified_paths")
     def test_rccl_host_tests_triggered_by_own_workflow(self, mock_get_modified):
         """Editing the host-test workflow runs the host tests, so it stays
         self-testing -- but must NOT pull in the multi-hour GPU job."""
         args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
 
-        mock_get_modified.return_value = [
-            ".github/workflows/rccl-host-unit-tests.yml"
-        ]
+        mock_get_modified.return_value = [therock_configure_ci.RCCL_HOST_TESTS_WORKFLOW]
 
         outputs = therock_configure_ci.run(args)
         self.assertEqual(outputs["run_rccl_host_tests"], "true")
