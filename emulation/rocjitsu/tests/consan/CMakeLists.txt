@@ -496,6 +496,7 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250Fp16WmmaPipeline|gfx1250_fp16_wmma_pipeline|ConSanDeviceGfx1250Fp16WmmaPipelineTest"
             "Gfx1250GlobalAsyncToLds|gfx1250_global_async_to_lds|ConSanDeviceGfx1250GlobalAsyncToLdsTest"
             "Gfx1250GlobalAsyncFromLds|gfx1250_global_async_from_lds|ConSanDeviceGfx1250GlobalAsyncFromLdsTest"
+            "Gfx1250TensorDescriptorPipeline|gfx1250_tensor_descriptor_pipeline|ConSanDeviceGfx1250TensorDescriptorPipelineTest"
             "Gfx1250LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
     endif()
@@ -1070,6 +1071,7 @@ function(rj_add_consan_device_fixture_targets target)
             "gfx1250_fp16_wmma_pipeline|gfx1250_fp16_wmma_pipeline_test.hip"
             "gfx1250_global_async_to_lds|gfx1250_global_async_to_lds_test.hip"
             "gfx1250_global_async_from_lds|gfx1250_global_async_from_lds_test.hip"
+            "gfx1250_tensor_descriptor_pipeline|gfx1250_tensor_descriptor_pipeline_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
     endif()
