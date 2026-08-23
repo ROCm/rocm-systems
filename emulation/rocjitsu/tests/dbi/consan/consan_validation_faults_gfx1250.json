@@ -88,8 +88,8 @@
           },
           "profiles": {
             "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "detected",
+              "oracle": "pass"
             },
             "record-replay": {
               "detector": "not_detected",
@@ -108,6 +108,37 @@
               "environment": {
                 "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
               }
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-dpp-phase",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "In the executed prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD specialization, the unconditional DPP-phase signal/wait at .text+0x87b0/.text+0x87f8 dominates the later .text+0x90ac store and .text+0x90dc load runtime witnesses recorded by the current-source Sampled fault bundle."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|kind=barrier|pc=0x00000000000087b0|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|event=barrier|pc=0x00000000000087b0|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:a78b10652108d8d6|kernel=prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD|event=barrier|pc=0x00000000000087f8|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "record-replay": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "sampled": {
+              "detector": "not_detected",
+              "oracle": "pass"
+            },
+            "inline-shadow": {
+              "detector": "not_detected",
+              "oracle": "pass"
             }
           }
         }

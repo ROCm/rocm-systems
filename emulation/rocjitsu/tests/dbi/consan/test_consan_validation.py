@@ -5896,7 +5896,9 @@ class ConSanValidationTest(unittest.TestCase):
             policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
         )
 
-    def test_gfx1250_tp2_fault_uses_executed_attention_publication(self) -> None:
+    def test_gfx1250_tp2_faults_distinguish_publication_and_dpp_phase(
+        self,
+    ) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["tp2-family"]
         fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
@@ -5916,12 +5918,43 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/workspace"), "gfx1250", workload, "fault", Path("/unused")
         )
         self.assertEqual(command[command.index("--mode") + 1], "prefill")
+        supercollider, trials = validation._fault_trials(fault, "supercollider")
+        self.assertEqual(supercollider["detector"], "detected")
+        self.assertEqual(supercollider["oracle"], "pass")
+        self.assertEqual(trials, [{}])
         sampled, trials = validation._fault_trials(fault, "sampled")
         self.assertEqual(sampled["detector"], "detected")
         self.assertEqual(sampled["oracle"], "pass")
         self.assertEqual(
             sampled["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
         )
+        self.assertEqual(trials, [{}])
+
+        dpp_fault = validation._load_fault(
+            path, "gfx1250", workload, "barrier-drop-dpp-phase"
+        )
+        dpp_environment = dpp_fault["environment"]
+        self.assertIn(
+            f"kernel={kernel}", dpp_environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        )
+        self.assertIn(
+            "pc=0x00000000000087b0",
+            dpp_environment["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+        self.assertIn(
+            "pc=0x00000000000087f8",
+            dpp_environment["RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"],
+        )
+        self.assertEqual(
+            dpp_fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn(".text+0x90ac", dpp_fault["reach_witness"]["evidence"])
+        dpp_supercollider, trials = validation._fault_trials(
+            dpp_fault, "supercollider"
+        )
+        self.assertEqual(dpp_supercollider["detector"], "not_detected")
+        self.assertEqual(dpp_supercollider["oracle"], "pass")
         self.assertEqual(trials, [{}])
 
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
