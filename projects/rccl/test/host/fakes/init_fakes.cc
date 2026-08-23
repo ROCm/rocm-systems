@@ -278,6 +278,13 @@ ncclResult_t g_amdSmiInitResult         = ncclSuccess;
 std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather =
     [](void*, void*, int) { return ncclInternalError; };
 
+// ncclCommGetUniqueId() seams; the stubs live in bootstrap_stubs.cc.
+ncclResult_t g_bootstrapGetUniqueIdResult = ncclSuccess;
+ncclResult_t g_bcastGrowHandleResult      = ncclSuccess;
+uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
+int g_bcastGrowHandleCalls                = 0;
+bool g_bcastGrowHandleIsRoot              = false;
+
 // setupChannel() seam; the stub itself lives in nccl_stubs.cc.
 ncclResult_t g_initChannelResult        = ncclSuccess;
 // showVersion() seam; the getROCmVersion stub also lives in nccl_stubs.cc.
@@ -334,6 +341,11 @@ void ResetInitFakes() {
   g_ncclMemManagerInitResult = ncclSuccess;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
+  g_bootstrapGetUniqueIdResult = ncclSuccess;
+  g_bcastGrowHandleResult = ncclSuccess;
+  g_bootstrapHandleMagic = 0xB007ULL;
+  g_bcastGrowHandleCalls = 0;
+  g_bcastGrowHandleIsRoot = false;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;

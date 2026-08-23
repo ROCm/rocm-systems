@@ -93,6 +93,18 @@ extern bool g_bootstrapNetInitFail;
 extern std::function<ncclResult_t(void* commState, void* allData, int size)>
     g_bootstrapAllGather;
 
+// ncclCommGetUniqueId() seams. bootstrapGetUniqueId was a fail-loud abort;
+// bcastGrowHandle had no fake at all (it lives in src/bootstrap.cc, which this
+// target does not compile) and only linked because --gc-sections dropped the
+// whole function. Both default to success; on success bootstrapGetUniqueId
+// stamps g_bootstrapHandleMagic into handle->magic so a test can prove the
+// handle is what ends up memcpy'd into the caller's ncclUniqueId.
+extern ncclResult_t g_bootstrapGetUniqueIdResult;
+extern ncclResult_t g_bcastGrowHandleResult;
+extern uint64_t g_bootstrapHandleMagic;
+extern int g_bcastGrowHandleCalls;   // lets a test assert it was reached
+extern bool g_bcastGrowHandleIsRoot; // and with which role
+
 // setupChannel() seam. initChannel() (src/channel.cc:16) is unreachable host-only
 // -- strong streams, memory stacks, ncclCudaCallocAsync -- so it stays faked, but
 // injectable so a test can cover both the NCCLCHECK early-return arm and the

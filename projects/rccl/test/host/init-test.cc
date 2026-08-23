@@ -18,6 +18,7 @@
 
 // Standard headers used by the test body; their include guards make init.cc's
 // transitive re-includes no-ops.
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -1197,6 +1198,159 @@ TEST_F(InitMicrotest, GetVersion_ReturnsVersionCode) {
   EXPECT_EQ(ncclSuccess, ncclGetVersion_impl(&v));
   EXPECT_EQ(NCCL_VERSION_CODE, v);
 }
+// ===========================================================================
+// ncclCommGetUniqueId (init.cc:4160) -- mints a grow handle and hands it back
+// as an ncclUniqueId. Both of its bootstrap dependencies needed new fakes:
+// bootstrapGetUniqueId was a fail-loud abort, and bcastGrowHandle had none at
+// all (it lives in src/bootstrap.cc, which this target does not compile) --
+// the binary only linked because --gc-sections dropped this whole function.
+// ===========================================================================
+
+TEST_F(InitMicrotest, CommGetUniqueId_NullComm_ReturnsInvalidArgument) {
+  ncclUniqueId id{};
+  EXPECT_EQ(ncclInvalidArgument, ncclCommGetUniqueId_impl(nullptr, &id));
+}
+
+TEST_F(InitMicrotest, CommGetUniqueId_NullUniqueId_ReturnsInvalidArgument) {
+  ReadyComm rc;
+  EXPECT_EQ(ncclInvalidArgument, ncclCommGetUniqueId_impl(rc.get(), nullptr));
+}
+
+TEST_F(InitMicrotest, CommGetUniqueId_HappyPath_CopiesHandleAndBroadcastsAsRoot) {
+  ReadyComm rc;
+  ncclUniqueId id{};
+  std::memset(&id, 0xAB, sizeof(id));  // poison: the memset at init.cc:4171 must clear it
+  g_bootstrapHandleMagic = 0xFEEDFACEULL;
+
+  ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId_impl(rc.get(), &id));
+
+  // The handle bootstrapGetUniqueId stamped is what lands in the caller's id.
+  ncclBootstrapHandle out{};
+  std::memcpy(&out, &id, sizeof(out));
+  EXPECT_EQ(0xFEEDFACEULL, out.magic);
+  // init.cc:4171 zeroes the WHOLE id first, so the bytes past the handle are 0,
+  // not the 0xAB poison.
+  for (size_t i = sizeof(ncclBootstrapHandle); i < sizeof(ncclUniqueId); ++i) {
+    ASSERT_EQ('\0', id.internal[i]) << "id byte " << i << " was not cleared";
+  }
+  EXPECT_EQ(1, g_bcastGrowHandleCalls);
+  EXPECT_TRUE(g_bcastGrowHandleIsRoot) << "the id owner broadcasts as root";
+}
+
+TEST_F(InitMicrotest, CommGetUniqueId_BootstrapGetUniqueIdFails_Propagates) {
+  ReadyComm rc;
+  ncclUniqueId id{};
+  g_bootstrapGetUniqueIdResult = ncclSystemError;
+  EXPECT_EQ(ncclSystemError, ncclCommGetUniqueId_impl(rc.get(), &id));
+  EXPECT_EQ(0, g_bcastGrowHandleCalls) << "must not broadcast a handle it failed to mint";
+}
+
+TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_Propagates) {
+  ReadyComm rc;
+  ncclUniqueId id{};
+  g_bcastGrowHandleResult = ncclInternalError;
+  EXPECT_EQ(ncclInternalError, ncclCommGetUniqueId_impl(rc.get(), &id));
+  EXPECT_EQ(1, g_bcastGrowHandleCalls);
+}
+
+// --- ncclCommShrink exit path (init.cc:4147-4156) ---
+// NOTE: the NVTX3_RANGE_ADD_PAYLOAD at init.cc:4152-4153 expands to NOTHING in
+// this binary -- the preamble above neutralizes it -- so those two lines carry
+// no logic here and their `if (newcomm && *newcomm)` TRUE arm is not worth
+// contriving (it would need a full successful child-comm init). The guard
+// itself and the shared exit path ARE real, and this covers them.
+//
+// Two of the guard's four arms stay uncovered, both for stated reasons:
+//   *newcomm != NULL  -- needs a successful child-comm init (out of scope).
+//   newcomm == NULL   -- UNREACHABLE, and that is a symptom of the bug below:
+//                        a null newcomm crashes at init.cc:4113 inside
+//                        ncclCommInitChildComm, so control never arrives here.
+TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitPath) {
+  ReadyComm rc;
+  ncclComm_t out = nullptr;  // stays null -> the guard takes its FALSE arm
+  int exclude[1] = {0};
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                /*config=*/nullptr, /*shrinkFlags=*/0));
+  EXPECT_EQ(nullptr, out) << "a failed shrink must not hand back a comm";
+}
+
+// LATENT BUG (init.cc:4113) -- NULL-POINTER DEREFERENCE, reachable from the
+// PUBLIC API. ncclCommInitChildComm validates its out-param at init.cc:4032:
+//
+//     NCCLCHECKGOTO(PtrCheck(newcomm, caller, "newcomm"), res, exit);
+//
+// ...and that check jumps to `exit:`, which then does, unconditionally:
+//
+//     Recorder::instance().record(..., *newcomm);      // init.cc:4113
+//
+// So passing NULL for newcomm SEGFAULTS instead of returning ncclInvalidArgument
+// -- the null check is itself what routes into the dereference. The author knew
+// the pointer can be null: the `fail:` path two lines down guards it correctly
+// (`if (newcomm) *newcomm = NULL;`, init.cc:4125). Only `exit:` is missing the
+// guard.
+//
+// Reachable as ncclCommShrink(comm, list, count, NULL, ...) and equally as
+// ncclCommSplit(comm, color, key, NULL, config), which share this helper. The
+// argument is evaluated at the call site, so the no-op Recorder fake does not
+// mask it -- this reproduces the production crash faithfully.
+//
+// Pinned as a death test rather than dropped, so the fix flips it to the
+// EXPECT_EQ below.
+TEST_F(InitMicrotest, CommShrink_NullNewcomm_DerefsNullOnExitPath) {
+  ReadyComm rc;
+  int exclude[1] = {0};
+  EXPECT_DEATH(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                   /*config=*/nullptr, /*shrinkFlags=*/0),
+               "");
+
+  // WHEN FIXED (guard the Recorder call at init.cc:4113 the way `fail:` guards
+  // its own store), this is the test:
+  // ncclComm_t* nullOut = nullptr;
+  // EXPECT_EQ(ncclInvalidArgument,
+  //           ncclCommShrink_impl(rc.get(), exclude, 1, nullOut, nullptr, 0));
+}
+
+// --- ncclGetErrorString (init.cc:4369) -- a pure switch, no seams needed. One
+// case per ncclResult_t plus the default. Table-driven so a new enumerator
+// added to nccl.h without a matching case is caught by the count assertion
+// below rather than silently falling into "unknown result code". ---
+TEST_F(InitMicrotest, GetErrorString_EveryResultCode_HasDistinctMessage) {
+  const struct { ncclResult_t code; const char* needle; } kCases[] = {
+      {ncclSuccess, "no error"},
+      {ncclUnhandledCudaError, "unhandled cuda error"},
+      {ncclSystemError, "unhandled system error"},
+      {ncclInternalError, "internal error"},
+      {ncclInvalidArgument, "invalid argument"},
+      {ncclInvalidUsage, "invalid usage"},
+      {ncclRemoteError, "remote process exited"},
+      {ncclInProgress, "NCCL operation in progress"},
+      {ncclTimeout, "timeout"},
+  };
+  std::vector<std::string> seen;
+  for (const auto& c : kCases) {
+    const char* msg = ncclGetErrorString_impl(c.code);
+    ASSERT_NE(nullptr, msg) << "code " << c.code;
+    EXPECT_TRUE(LogHas(msg, c.needle)) << "code " << c.code << " -> \"" << msg << '"';
+    EXPECT_FALSE(LogHas(msg, "unknown result code"))
+        << "code " << c.code << " fell through to the default arm";
+    seen.emplace_back(msg);
+  }
+  // Every mapped code must produce its OWN string; a copy-paste slip that made
+  // two cases return the same message would otherwise pass the needle checks.
+  std::sort(seen.begin(), seen.end());
+  EXPECT_EQ(seen.end(), std::unique(seen.begin(), seen.end()))
+      << "two result codes share a message";
+}
+
+TEST_F(InitMicrotest, GetErrorString_UnmappedCode_FallsBackToUnknown) {
+  // ncclNumResults is one past the last mapped enumerator, so it must hit the
+  // default arm rather than any case.
+  EXPECT_STREQ("unknown result code",
+               ncclGetErrorString_impl(static_cast<ncclResult_t>(ncclNumResults)));
+  EXPECT_STREQ("unknown result code", ncclGetErrorString_impl(static_cast<ncclResult_t>(-1)));
+}
+
 TEST_F(InitMicrotest, GetAsyncError_NullComm_ReturnsInvalidArgument) {
   ncclResult_t e = ncclSuccess;
   EXPECT_EQ(ncclInvalidArgument, ncclCommGetAsyncError_impl(nullptr, &e));
