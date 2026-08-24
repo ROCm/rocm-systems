@@ -117,24 +117,20 @@ static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepI
 // ============================================================================
 static int acclDatatypeSize(const char* dt) {
   if (!dt) return 4;
+  // Must match ncclDatatypeToString() in src/collectives.cc.
+  // ncclUint8 falls through to "Unknown" there (same enum value as
+  // ncclChar in NCCL, but distinct in RCCL).
   static const struct { const char* name; int size; } table[] = {
-    {"ncclInt8",        1}, {"ncclUint8",       1},
+    {"ncclInt8",        1},
     {"ncclFloat8e4m3",  1}, {"ncclFloat8e5m2",  1},
     {"ncclFloat16",     2}, {"ncclBfloat16",    2},
     {"ncclInt32",       4}, {"ncclUint32",      4}, {"ncclFloat32", 4},
     {"ncclInt64",       8}, {"ncclUint64",      8}, {"ncclFloat64", 8},
+    {"Unknown",         1},
   };
   for (size_t i = 0; i < sizeof(table)/sizeof(table[0]); i++) {
     if (strcmp(dt, table[i].name) == 0) return table[i].size;
   }
-  if (strstr(dt, "8e4m3") || strstr(dt, "8e5m2") ||
-      strstr(dt, "int8") || strstr(dt, "Int8") ||
-      strstr(dt, "uint8") || strstr(dt, "Uint8"))
-    return 1;
-  if (strstr(dt, "16"))
-    return 2;
-  if (strstr(dt, "64"))
-    return 8;
   return 4;
 }
 
@@ -144,12 +140,15 @@ static int acclDatatypeSize(const char* dt) {
 static double acclBusBwFactor(const char* func, int nRanks) {
   if (!func || nRanks <= 1) return 1.0;
   double n = (double)nRanks;
+  // Strings must match ncclFuncToString() in src/collectives.cc
   if (strcmp(func, "AllReduce") == 0)       return 2.0 * (n - 1.0) / n;
   if (strcmp(func, "ReduceScatter") == 0)   return (n - 1.0) / n;
   if (strcmp(func, "AllGather") == 0)       return (n - 1.0) / n;
   if (strcmp(func, "Broadcast") == 0)       return 1.0;
   if (strcmp(func, "Reduce") == 0)          return 1.0;
-  if (strcmp(func, "AllToAll") == 0)        return (n - 1.0) / n;
+  if (strcmp(func, "AlltoAll") == 0)        return (n - 1.0) / n;
+  if (strcmp(func, "AlltoAllPivot") == 0)   return (n - 1.0) / n;
+  if (strcmp(func, "AlltoAllGda") == 0)     return (n - 1.0) / n;
   return 1.0;
 }
 
