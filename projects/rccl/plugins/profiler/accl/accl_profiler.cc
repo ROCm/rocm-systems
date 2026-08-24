@@ -258,7 +258,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   int nKernelEvents = 0;
   int hasGpuTiming = 0;
 
-  for (uint32_t ch = 0; ch < coll->nChannels && ch < ACCL_MAX_CHANNELS; ch++) {
+  for (uint32_t ch = 0; ch < ACCL_MAX_CHANNELS; ch++) {
     struct acclKernelChInfo* kch = &coll->kernelCh[ch];
     if (kch->tsStartUs == 0) continue;
     if (kch->tsStopUs == 0) continue;
