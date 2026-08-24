@@ -28,6 +28,9 @@ static size_t gMinMsgSize = 0;  // ACCL_PROFILER_MIN_SIZE_BYTES
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
+// Forward declarations for cross-referenced pool functions
+static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
+
 // ============================================================================
 // Per-communicator pool allocators
 // ============================================================================
@@ -47,12 +50,22 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
     if (pass == 0) {
       // Pool full — reclaim slots stuck by teardown (collStopped but
       // nKernelChCompleted < nChannels, so acclShouldFinalize never fired).
+      // Only reclaim if no stop events are still in flight (started == completed
+      // for both channels and proxy ops) to avoid racing with handlers that
+      // still hold a pointer to the coll.
       int reclaimed = 0;
       for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-        if (ctx->collPoolUsed[i] && ctx->collPool[i].collStopped
-            && !ctx->collPool[i].finalized) {
-          ctx->collPool[i].finalized = 1;
-          pthread_mutex_destroy(&ctx->collPool[i].mutex);
+        struct acclCollInfo* c = &ctx->collPool[i];
+        if (ctx->collPoolUsed[i] && c->collStopped && !c->finalized
+            && c->nKernelChStarted == c->nKernelChCompleted
+            && c->nProxyOpsStarted == c->nProxyOpsCompleted) {
+          for (int j = 0; j < c->nProxyOps; j++) {
+            int idx = c->proxyOpIndices[j];
+            if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
+              acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+          }
+          c->finalized = 1;
+          pthread_mutex_destroy(&c->mutex);
           ctx->collPoolUsed[i] = 0;
           reclaimed++;
         }
