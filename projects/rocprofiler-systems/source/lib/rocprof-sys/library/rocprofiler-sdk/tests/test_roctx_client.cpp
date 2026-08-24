@@ -9,7 +9,6 @@
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/marker/api_id.h>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -214,7 +213,8 @@ protected:
         const auto& ctrl = client->get_session();
         ctrl->subscribe({ .on_pause  = [this]() { stop_count++; },
                           .on_resume = [this]() { start_count++; },
-                          .name      = "test_counters" });
+                          .name      = "test_counters",
+                          .scopes    = { rocprofsys::control::scope::global } });
 
         return client;
     }
@@ -851,7 +851,8 @@ protected:
         const auto& ctrl = client->get_session();
         ctrl->subscribe({ .on_pause  = [this]() { stop_count++; },
                           .on_resume = [this]() { start_count++; },
-                          .name      = "test_counters" });
+                          .name      = "test_counters",
+                          .scopes    = { rocprofsys::control::scope::global } });
 
         return client;
     }
@@ -1017,9 +1018,9 @@ protected:
         other_trigger(other_trigger&&)                 = delete;
         other_trigger& operator=(other_trigger&&)      = delete;
 
-        void set_action(rocprofsys::control::action a) const
+        void set_action(rocprofsys::control::action act) const
         {
-            m_session.set_action(trigger_name, a);
+            m_session.set_action(trigger_name, act);
         }
 
     private:
@@ -1049,7 +1050,7 @@ protected:
 
 TEST_F(roctx_marker_gating_test, should_write_true_when_session_fully_active)
 {
-    auto client = make_client();
+    const auto client = make_client();
     EXPECT_TRUE(observed_should_write(*client));
 }
 

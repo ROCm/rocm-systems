@@ -44,8 +44,10 @@ public:
 
     scope_set(std::initializer_list<scope> scopes) noexcept
     {
-        for(auto _s : scopes)
-            m_bits.set(static_cast<std::size_t>(_s));
+        for(const auto event_scope : scopes)
+        {
+            m_bits.set(static_cast<std::size_t>(event_scope));
+        }
     }
 
     [[nodiscard]] bool contains(scope event_scope) const noexcept
@@ -57,7 +59,12 @@ public:
     [[nodiscard]] bool all_of(Predicate&& pred) const
     {
         for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
-            if(m_bits.test(i) && !pred(static_cast<scope>(i))) return false;
+        {
+            if(m_bits.test(i) && !pred(static_cast<scope>(i)))
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -65,12 +72,17 @@ public:
     [[nodiscard]] bool any_of(Predicate&& pred) const
     {
         for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
-            if(m_bits.test(i) && pred(static_cast<scope>(i))) return true;
+        {
+            if(m_bits.test(i) && pred(static_cast<scope>(i)))
+            {
+                return true;
+            }
+        }
         return false;
     }
 
 private:
-    std::bitset<SCOPE_COUNT> m_bits{};
+    std::bitset<SCOPE_COUNT> m_bits;
 };
 
 struct subscriber
@@ -78,7 +90,7 @@ struct subscriber
     std::function<void()> on_pause;
     std::function<void()> on_resume;
     std::string           name;
-    scope_set             scopes = {};
+    scope_set             scopes;
 };
 
 class session

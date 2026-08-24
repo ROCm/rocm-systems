@@ -397,8 +397,8 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 // for ENV_NAME -- std::string{} can be constructed from either.
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
     [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
+        auto       _env_name = std::string{ ENV_NAME };                                      \
+        const auto _ret      = _config->insert<TYPE, TYPE>(                                  \
             _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
             std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
                                         __VA_ARGS__ });                                      \

@@ -5,14 +5,13 @@
 
 #include <gtest/gtest.h>
 #include <string>
-#include <vector>
+#include <utility>
 
 namespace
 {
 using rocprofsys::control::action;
 using rocprofsys::control::scope;
 using rocprofsys::control::session;
-using rocprofsys::control::subscriber;
 
 // Minimal trigger stub: registers under a fixed name and scope, and exposes
 // set_action() so a test can drive a later action change.
@@ -34,7 +33,7 @@ public:
     mock_trigger(mock_trigger&&)                 = delete;
     mock_trigger& operator=(mock_trigger&&)      = delete;
 
-    void set_action(action a) const { m_session.set_action(m_name, a, m_scope); }
+    void set_action(action act) const { m_session.set_action(m_name, act, m_scope); }
 
 private:
     session&    m_session;
@@ -45,7 +44,7 @@ private:
 class session_scope_test : public ::testing::Test
 {
 protected:
-    session s{};
+    session s;
 };
 }  // namespace
 
@@ -61,10 +60,10 @@ TEST_F(session_scope_test, subscriber_not_resumed_while_a_listened_scope_is_stil
 
     int resume_count = 0;
     int pause_count  = 0;
-    s.subscribe({ [&pause_count]() { ++pause_count; },
-                  [&resume_count]() { ++resume_count; },
-                  "scoped_sub",
-                  { scope::global, scope::sampling } });
+    s.subscribe({ .on_pause  = [&pause_count]() { ++pause_count; },
+                  .on_resume = [&resume_count]() { ++resume_count; },
+                  .name      = "scoped_sub",
+                  .scopes    = { scope::global, scope::sampling } });
 
     // Both scopes paused initially - resuming just the global scope must not
     // fire the subscriber's on_resume, since sampling is still paused.
@@ -85,10 +84,10 @@ TEST_F(session_scope_test, subscriber_paused_immediately_when_any_listened_scope
                                          action::trace };
 
     int pause_count = 0;
-    s.subscribe({ [&pause_count]() { ++pause_count; },
-                  []() {},
-                  "scoped_sub",
-                  { scope::global, scope::sampling } });
+    s.subscribe({ .on_pause  = [&pause_count]() { ++pause_count; },
+                  .on_resume = []() {},
+                  .name      = "scoped_sub",
+                  .scopes    = { scope::global, scope::sampling } });
 
     sampling_trigger.set_action(action::pause);
     EXPECT_EQ(pause_count, 1) << "any listened scope pausing must pause the subscriber";
@@ -103,8 +102,10 @@ TEST_F(session_scope_test, single_scope_subscriber_unaffected_by_other_scope)
 
     int pause_count  = 0;
     int resume_count = 0;
-    s.subscribe({ [&pause_count]() { ++pause_count; },
-                  [&resume_count]() { ++resume_count; }, "global_only_sub" });
+    s.subscribe({ .on_pause  = [&pause_count]() { ++pause_count; },
+                  .on_resume = [&resume_count]() { ++resume_count; },
+                  .name      = "global_only_sub",
+                  .scopes    = { scope::global } });
 
     sampling_trigger.set_action(action::pause);
     sampling_trigger.set_action(action::trace);
