@@ -422,7 +422,7 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if _is_accum_counter(bucket.name):
+                if bucket.name.endswith("_ACCUM"):
                     continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
@@ -553,7 +553,7 @@ class OmniSoC_Base:
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if _is_accum_counter(counter) and not is_tcc_channel_counter(counter):
+            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
@@ -878,11 +878,6 @@ class CounterFile:
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)
-
-
-def _is_accum_counter(counter: str) -> bool:
-    """Return whether a counter requires a paired level-event slot."""
-    return counter.endswith("_ACCUM") or counter.endswith("_ACCUM_sum")
 
 
 def _trial_counter_file_with_extra(
