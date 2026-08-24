@@ -411,11 +411,12 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   ACCL_INFO("ACCL Profiler: finalize rank=%d output=%s", ctx->rank, ctx->outputPath);
 
   // Drain any coll slots still in use (orphaned by teardown).
+  // Don't emit records for these — they have incomplete data that
+  // would show as busbw=0 regressions in the report.
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
-      if (!coll->finalized)
-        acclFinalizeCollective(coll);
+      coll->finalized = 1;
       pthread_mutex_destroy(&coll->mutex);
       ctx->collPoolUsed[i] = 0;
     }
