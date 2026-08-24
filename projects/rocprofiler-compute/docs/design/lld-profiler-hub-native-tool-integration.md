@@ -157,11 +157,9 @@ only `src/lib` is common to both:
 
 - Full / install build (TheRock CI): top-level `CMakeLists.txt` reaches it via
   `add_subdirectory(src/lib)`.
-- Runtime fallback build: `src/utils/native_tool_finder.py` configures `src/lib` directly
-  when no installed artifact is found, never running the top-level `CMakeLists.txt`. The
-  helper serves two consumers — this tool and the `torch_trace_collector` extension — which
-  differ in the artifact they look for, the target they build and the options they configure
-  with, so `src/lib` is reached this way for either.
+- Runtime fallback build: the Python layer configures `src/lib` directly
+  (`src/utils/native_tool_finder.py`) when no installed library is found, never running the
+  top-level `CMakeLists.txt`.
 
 `src/lib/CMakeLists.txt` is a standalone `project()`, so it configures either way, and the
 guard resolves the monorepo root via `git rev-parse --show-toplevel` regardless of entry

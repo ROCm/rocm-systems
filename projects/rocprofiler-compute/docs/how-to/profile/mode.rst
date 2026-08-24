@@ -19,7 +19,13 @@ Profiling
 Use the ``rocprof-compute`` executable to acquire all necessary performance monitoring
 data through analysis of compute workloads.
 
-Profiling with ROCm Compute Profiler provides the following benefits:
+Profiling with ROCm Compmkdir build && cd build
+
+cmake -D CMAKE_INSTALL_PREFIX=${INSTALL_DIR}/rocprofiler-compute -D PYTHON_DEPS=${INSTALL_DIR}/python-libs -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D MOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
+
+make install
+
+ctest -R "torch" --verboseute Profiler provides the following benefits:
 
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
@@ -955,12 +961,11 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-Torch trace is collected by ``torch_trace_collector``, a C++ extension built for a
-specific PyTorch version. Profiling loads
-``torch_trace_collector-<torch-version>.so`` for the workload PyTorch version from
-``<prefix>/lib*/rocprofiler-compute/``, or from ``src/lib/_build/lib/`` when that
-file is not installed. If no matching collector is found, profiling stops with an
-error that lists the supported PyTorch versions and the workload version.
+``--torch-trace`` uses ``torch_trace_collector``, a C++ extension built for a
+specific PyTorch version. Profiling requires a matching
+``torch_trace_collector-<torch-version>.so``. If none is available, profiling
+stops with an error that lists the supported PyTorch versions and the workload
+version.
 
 Output
 ------
