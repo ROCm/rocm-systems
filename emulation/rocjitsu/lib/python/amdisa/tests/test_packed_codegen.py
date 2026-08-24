@@ -15,6 +15,7 @@ from amdisa.codegen.execute.packed import (
     gen_pk_binop_f32,
     gen_pk_fmac_vop2,
     gen_pk_fmac_vop3,
+    gen_pk_lshl_add_u64,
     gen_pk_ternary,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
@@ -287,6 +288,29 @@ def test_cdna_pk_f32_reads_all_register_pairs():
     assert 'const uint32_t s0_lo_w = s0_pair_w.lo' in cpp
     assert 'const uint32_t s0_hi_w = s0_pair_w.hi' in cpp
     assert 'encoding_value_ >= 256' not in cpp
+
+
+def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
+    assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
+    assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
+    assert 'Public semantics cover shift counts 0..4' in cpp
+    assert 'only avoids host undefined behavior for unsupported values' in cpp
+    assert (
+        'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
+        in cpp
+    )
+    assert (
+        'amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi'
+        in cpp
+    )
+    assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
+    assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+    assert 'inst_.neg' not in cpp
+    assert 'inst_.clamp' not in cpp
 
 
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():

@@ -5021,7 +5021,8 @@ VPkLshlAddU64Vop3p::VPkLshlAddU64Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_lshl_add_u64_e64_dpp"
                 : "v_pk_lshl_add_u64",
-            reinterpret_cast<const OpEncoding *>(inst), nullptr),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),

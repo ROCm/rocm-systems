@@ -52,7 +52,6 @@
     "V_PK_SUB_NC_U64",
     "V_PK_MAX_NUM_F64",
     "V_PK_MIN_NUM_F64",
-    "V_PK_LSHL_ADD_U64",
     "V_WMMA_F64_16X16X4_F64"
   ],
   "encodings": [
