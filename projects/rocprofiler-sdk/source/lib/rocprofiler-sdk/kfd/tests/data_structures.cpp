@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <gtest/gtest.h>
 
@@ -129,4 +130,15 @@ TEST(DoorbellMap, window_open_resolve_close_and_slot_helpers)
         EXPECT_FALSE(o.w) << "disabled -> open_window opens nothing";
         signal_less_disable_latch().store(false);  // reset for other tests
     }
+}
+
+// The T-CLK per-SKU allowlist (section 5.9): gfx950 is discharged; every other SKU
+// is gated off until its own T-CLK Tier-1 screen passes. gfx12 is deliberately off.
+TEST(TclkGate, only_gfx950_is_validated)
+{
+    EXPECT_TRUE(tclk_validated_sku(90500)) << "gfx950 (MI350) discharged, section 5.9(e)";
+    EXPECT_FALSE(tclk_validated_sku(90400)) << "gfx942 not screened";
+    EXPECT_FALSE(tclk_validated_sku(120000)) << "gfx12.0.0 pending its own T-CLK run";
+    EXPECT_FALSE(tclk_validated_sku(120001)) << "gfx12.0.1 pending its own T-CLK run";
+    EXPECT_FALSE(tclk_validated_sku(0)) << "unknown SKU gated off";
 }
