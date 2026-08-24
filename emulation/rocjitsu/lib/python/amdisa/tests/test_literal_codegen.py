@@ -150,14 +150,15 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
     assert not CodeGenerator._rejects_unencoded_vop3p_literal64(implied)
 
 
-def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
+def test_gfx1250_packed_f32_reader_delegates_to_pair_reader():
     source = CodeGenerator._emit_cdna5_matrix_fmt_helpers().execution[0]
 
     reader_start = source.index('PkF32Words read_pk_f32_words')
     reader_end = source.index('\n}', reader_start)
     reader = source[reader_start:reader_end]
     assert 'literal64_value' not in reader
-    assert 'return {lo, lo};' in reader
+    assert 'read_lane_pair32(operand, lane)' in reader
+    assert 'return {pair.lo, pair.hi};' in reader
 
 
 def test_literal_fixups_require_generated_machine_inst_struct():
@@ -799,7 +800,7 @@ def test_simd_ternary_literal_operand_name_for_inline_literal_forms():
     # Every inline-literal FMA entry reads its literal from `simm32`.
     assert simd_ternary_literal_operand_name('v_fmaak_f32_vop2') == 'simm32'
     assert simd_ternary_literal_operand_name('v_fmamk_f32_vop2') == 'simm32'
-    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') == 'simm32'
+    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') is None
 
 
 def test_simd_ternary_literal_operand_name_none_for_accumulate_and_unknown():

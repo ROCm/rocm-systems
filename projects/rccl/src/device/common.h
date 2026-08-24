@@ -273,10 +273,13 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     // the nextExtends warp rotation stays correct. alignas(16) keeps bcastPacks >= 1.
     static_assert(sizeof(struct ncclDevWorkBcast) % 16 == 0 && sizeof(struct ncclDevWorkBcast) >= 16,
                   "ncclDevWorkBcast must be a non-zero multiple of the 16B pack size");
-    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
+    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast) / 16; // 3 packs/work
     bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
     for (int pk = tid; pk < nPacks; pk += tn) {
-      if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
+      if (isBcast) {
+        dstWork = pk / bcastPacks;
+        packInWork = pk - dstWork * bcastPacks;
+      }
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
       ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
@@ -315,7 +318,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      tid -= 2*WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
+      tid -= 2 * WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {
@@ -352,7 +355,9 @@ template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int US
           int UserRegMode = 0>
 struct RunWorkBatch;
 
-// Specialized for P2p in sendrecv.h
+// Specialized for P2p in sendrecv.h. The add_unroll.sh hipify pass appends the trailing
+// USE_ACC/COLL_UNROLL/Pipeline/UserRegMode template parameters; UserRegMode selects the
+// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, gfx942/gfx950 only).
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE>;
 

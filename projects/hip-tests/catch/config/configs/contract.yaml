@@ -1509,6 +1509,12 @@ contract:
   Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable:
     <<: *level_0
     tags: [device_lifecycle]
+  Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected:
+    <<: *level_0
+    tags: [device_lifecycle]
   Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeavesDeviceUsable:
     <<: *level_0
     tags: [device_reset]

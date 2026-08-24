@@ -97,6 +97,12 @@ public:
   /// @brief Return true if a memory range is a KFD doorbell mapping.
   [[nodiscard]] virtual bool is_doorbell_range(const void *addr, size_t length) const = 0;
 
+  /// @brief Perform an ordinary fixed mmap while retiring replaced client doorbell views.
+  /// @details Simulator-backed drivers remove overlapping client views from KFD ownership before
+  /// the mapping is replaced. Drivers without simulated execution pass the mmap through unchanged.
+  virtual void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags,
+                                                     int fd, off_t offset) = 0;
+
   /// @brief Return true if this driver should synthesize /dev/dri/renderD@p minor.
   [[nodiscard]] virtual bool handles_drm_render_minor(uint32_t minor) const = 0;
 

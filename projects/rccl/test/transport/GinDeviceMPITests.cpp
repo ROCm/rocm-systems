@@ -131,6 +131,20 @@ ncclDevCommRequirements defaultGinReqs() {
   return r;
 }
 
+// Multi-context trigger for the Tier-1 *_MultiContext tests. Returns the
+// requested context count N (>=2) parsed from NCCL_GIN_NCONTEXTS, clamped to
+// NCCL_GIN_MAX_CONTEXTS; returns 0 when the var is unset or <=1 so the caller
+// can skip and keep the default suite single-context. NCCL_GIN_NCONTEXTS is the
+// same knob the runtime uses to provision contexts, so setting it both triggers
+// the test and makes the runtime grant the contexts.
+int ginEnvContextCount() {
+  const char* e = std::getenv("NCCL_GIN_NCONTEXTS");
+  if (!e || !*e) return 0;
+  int n = std::atoi(e);
+  if (n <= 1) return 0;
+  return std::min(n, NCCL_GIN_MAX_CONTEXTS);
+}
+
 // Standard single-CTA GIN kernel launch (thread 0 issues, whole CTA waits/flushes).
 constexpr int kGinKernelBlocks  = 1;
 constexpr int kGinKernelThreads = 32;
@@ -293,12 +307,52 @@ class GinMPIDeviceTests : public MPITestBase {
       }
     }
   }
+
+  // Tier-1 test bodies, parameterized by GIN context count. Each is defined
+  // out-of-line just before its TEST_F (after that test's kernels are declared).
+  // The single-context TEST_F calls run*(1); the *_MultiContext sibling passes
+  // the count from NCCL_GIN_NCONTEXTS (see ginEnvContextCount()).
+  void runPutBasicAndOffsets(int nContexts);
+  void runPutValueInline(int nContexts);
+  void runWaitCounterAndSignal(int nContexts);
+  void runVASignalPut(int nContexts);
 };
+
+// Context-aware producer/consumer for Put_BasicAndOffsets: one block per GIN
+// context (ctx = blockIdx.x), each writing into its own slot at base =
+// ctx*slotStride and signaling sigIdx in its own per-context signal pool.
+// Launched with 1 block this reproduces the original single-context behavior.
+__global__ void putMultiCtxProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes, size_t slotStride,
+    ncclGinSignal_t sigIdx, int peer,
+    struct ncclDevComm devComm) {
+  const int    ctx  = (int)blockIdx.x;
+  const size_t base = (size_t)ctx * slotStride;
+  ncclGin gin{devComm, ctx};
+  if (threadIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), peer,
+            dstWin, base + dstOff,
+            srcWin, base + srcOff,
+            bytes,
+            ncclGin_SignalInc{sigIdx});
+  }
+  gin.flush(ncclCoopCta());
+}
+
+__global__ void putMultiCtxConsumerKernel(
+    ncclGinSignal_t sigIdx, uint64_t expectedSignalValue,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, (int)blockIdx.x};
+  gin.waitSignal(ncclCoopCta(), sigIdx, expectedSignalValue);
+}
 
 // Smallest end-to-end exercise of the device put -> proxy -> IB -> peer
 // signal chain, with non-zero src/dst/signal offsets so address-arithmetic
-// regressions surface as a verification mismatch.
-TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
+// regressions surface as a verification mismatch. Runs nContexts contexts in
+// parallel (one block each); nContexts=1 is the default single-context path.
+void GinMPIDeviceTests::runPutBasicAndOffsets(int nContexts) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -314,14 +368,15 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   ncclCommCount(comm, &nRanks);
   ASSERT_EQ(2, nRanks);
 
-  // 8 KiB symmetric buffers; 4 KiB transfer at non-zero src/dst offsets;
+  // 8 KiB per-context slot; 4 KiB transfer at non-zero src/dst offsets;
   // signal at non-zero index. Forces every offset to be exercised.
-  constexpr size_t kBufBytes      = 8 * 1024;
+  constexpr size_t kSlotStride    = 8 * 1024;
   constexpr size_t kTransferBytes = 4 * 1024;
   constexpr size_t kSrcOff        = 4 * 1024;
   constexpr size_t kDstOff        = 2 * 1024;
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int kPeer = 1;
+  const size_t kBufBytes = (size_t)nContexts * kSlotStride;
 
   // Allocate symmetric src/dst on every rank.
   void* dSrc = nullptr;
@@ -344,9 +399,11 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
     if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
   });
 
-  // Bring up GIN with 2 signals so kSigIdx=1 is a valid in-pool index.
+  // Bring up GIN with nContexts contexts and 2 signals so kSigIdx=1 is a valid
+  // in-pool index within each per-context signal pool.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount     = nContexts;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
@@ -354,11 +411,21 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  // Stage source pattern in [kSrcOff, kSrcOff+kTransferBytes); rest is zero.
+  if ((int)devComm.ginContextCount < nContexts) {
+    GTEST_SKIP() << "Test requires >= " << nContexts << " GIN contexts, got "
+                 << (int)devComm.ginContextCount
+                 << " (set NCCL_GIN_NCONTEXTS=" << nContexts << ")";
+  }
+
+  // Stage per-context source patterns in [base+kSrcOff, +kTransferBytes); rest
+  // is zero. The +ctx salt makes a stray cross-context landing a value mismatch.
   std::vector<uint8_t> hostSrc(kBufBytes, 0);
   std::vector<uint8_t> hostDst(kBufBytes, 0);
-  for (size_t i = 0; i < kTransferBytes; i++) {
-    hostSrc[kSrcOff + i] = static_cast<uint8_t>(0x40 + (i & 0xFF));
+  for (int ctx = 0; ctx < nContexts; ctx++) {
+    const size_t base = (size_t)ctx * kSlotStride;
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      hostSrc[base + kSrcOff + i] = static_cast<uint8_t>(0x40 + ((i + ctx) & 0xFF));
+    }
   }
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
@@ -366,15 +433,15 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   // Sync so neither rank launches its kernel before setup is done globally.
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 0 puts payload + bumps signal; rank 1 waits on the same signal.
+  // Rank 0 puts payload + bumps signal on each context; rank 1 waits per ctx.
   if (rank == 0) {
-    putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+    putMultiCtxProducerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff,
         dstWin, kDstOff,
-        kTransferBytes, kSigIdx, kPeer,
+        kTransferBytes, kSlotStride, kSigIdx, kPeer,
         devComm);
   } else {
-    putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+    putMultiCtxConsumerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -382,27 +449,40 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   // Sync before verify; both ranks have finished their kernel.
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 1 verifies: payload landed exactly in [kDstOff, +kTransferBytes),
-  // and bytes before/after that range are still zero.
+  // Rank 1 verifies each context's slot independently: payload landed exactly
+  // in [base+kDstOff, +kTransferBytes), and bytes before/after are still zero.
   if (rank == 1) {
     std::vector<uint8_t> hostResult(kBufBytes, 0);
     ASSERT_EQ(hipSuccess,
               hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
 
-    for (size_t i = 0; i < kTransferBytes; i++) {
-      const uint8_t expected = static_cast<uint8_t>(0x40 + (i & 0xFF));
-      ASSERT_EQ(expected, hostResult[kDstOff + i])
-          << "byte " << i << " in [dstOff, dstOff+xfer) differs";
-    }
-    for (size_t i = 0; i < kDstOff; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " before dstOff was unexpectedly written";
-    }
-    for (size_t i = kDstOff + kTransferBytes; i < kBufBytes; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " after dstOff+xfer was unexpectedly written";
+    for (int ctx = 0; ctx < nContexts; ctx++) {
+      const size_t base = (size_t)ctx * kSlotStride;
+      for (size_t i = 0; i < kTransferBytes; i++) {
+        const uint8_t expected = static_cast<uint8_t>(0x40 + ((i + ctx) & 0xFF));
+        ASSERT_EQ(expected, hostResult[base + kDstOff + i])
+            << "ctx " << ctx << " byte " << i << " in [dstOff, dstOff+xfer) differs";
+      }
+      for (size_t i = 0; i < kDstOff; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " before dstOff was unexpectedly written";
+      }
+      for (size_t i = kDstOff + kTransferBytes; i < kSlotStride; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " after dstOff+xfer was unexpectedly written";
+      }
     }
   }
+}
+
+TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
+  runPutBasicAndOffsets(/*nContexts=*/1);
+}
+
+TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
+  int n = ginEnvContextCount();
+  if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
+  runPutBasicAndOffsets(n);
 }
 
 // Same wire-level put as Put_BasicAndOffsets, but requires the two ranks to
@@ -517,31 +597,37 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
 
 // Producer: putValue carries the 8-byte payload inside the GFD itself
 // (no source MR is dereferenced); also bumps a signal so the receiver
-// can wait synchronously.
+// can wait synchronously. Context-aware: one block per GIN context
+// (ctx = blockIdx.x), each writing value+ctx into its own slot at
+// base = ctx*slotStride. Launched with 1 block this is the original path.
 __global__ void putValueInlineProducerKernel(
-    ncclWindow_t dstWin, size_t dstOff,
+    ncclWindow_t dstWin, size_t dstOff, size_t slotStride,
     uint64_t value, ncclGinSignal_t sigIdx, int peer,
     struct ncclDevComm devComm) {
-  ncclGin gin{devComm, /*ginContext=*/0};
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
+  const int    ctx  = (int)blockIdx.x;
+  const size_t base = (size_t)ctx * slotStride;
+  ncclGin gin{devComm, ctx};
+  if (threadIdx.x == 0) {
     gin.putValue<uint64_t>(ncclTeamWorld(devComm), peer,
-                           dstWin, dstOff, value,
+                           dstWin, base + dstOff, value + (uint64_t)ctx,
                            ncclGin_SignalInc{sigIdx});
   }
   gin.flush(ncclCoopCta());
 }
 
-// Consumer: just waits for the inline-value signal.
+// Consumer: just waits for the inline-value signal on its own context.
 __global__ void putValueInlineConsumerKernel(
     ncclGinSignal_t sigIdx, uint64_t expectedSignalValue,
     struct ncclDevComm devComm) {
-  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclGin gin{devComm, (int)blockIdx.x};
   gin.waitSignal(ncclCoopCta(), sigIdx, expectedSignalValue);
 }
 
 // Sends a single 8-byte uint64_t inline (no source buffer / MR involved)
-// and verifies it lands intact at the requested offset on the peer.
-TEST_F(GinMPIDeviceTests, PutValue_Inline) {
+// and verifies it lands intact at the requested offset on the peer. Runs
+// nContexts contexts in parallel, each reconstructing an independent inline
+// value (hostGpuCtx->inlines is per-context); nContexts=1 is the default path.
+void GinMPIDeviceTests::runPutValueInline(int nContexts) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -559,11 +645,12 @@ TEST_F(GinMPIDeviceTests, PutValue_Inline) {
 
   // kValue exercises all three pieces of the inline 4+2+2 byte split,
   // so any field-reconstruction regression in the host proxy surfaces.
-  constexpr size_t   kBufBytes = 4 * 1024;
-  constexpr size_t   kDstOff   = 1 * 1024;
-  constexpr uint64_t kValue    = 0x123456789ABCDEF0ULL;
+  constexpr size_t   kSlotStride = 4 * 1024;
+  constexpr size_t   kDstOff     = 1 * 1024;
+  constexpr uint64_t kValue      = 0x123456789ABCDEF0ULL;
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int kPeer = 1;
+  const size_t kBufBytes = (size_t)nContexts * kSlotStride;
 
   // Allocate symmetric dst on every rank (no src needed: value is inline).
   void* dDst = nullptr;
@@ -580,9 +667,11 @@ TEST_F(GinMPIDeviceTests, PutValue_Inline) {
     if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
   });
 
-  // Bring up GIN with 2 signals so kSigIdx=1 is valid.
+  // Bring up GIN with nContexts contexts and 2 signals so kSigIdx=1 is valid
+  // within each per-context signal pool.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount     = nContexts;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
@@ -590,44 +679,64 @@ TEST_F(GinMPIDeviceTests, PutValue_Inline) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
+  if ((int)devComm.ginContextCount < nContexts) {
+    GTEST_SKIP() << "Test requires >= " << nContexts << " GIN contexts, got "
+                 << (int)devComm.ginContextCount
+                 << " (set NCCL_GIN_NCONTEXTS=" << nContexts << ")";
+  }
+
   // Zero dst so any spurious write outside the 8-byte landing surfaces.
   std::vector<uint8_t> hostDst(kBufBytes, 0);
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 0 sends the inline value + signal; rank 1 waits.
+  // Rank 0 sends the inline value + signal on each context; rank 1 waits.
   if (rank == 0) {
-    putValueInlineProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-        dstWin, kDstOff, kValue, kSigIdx, kPeer, devComm);
+    putValueInlineProducerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
+        dstWin, kDstOff, kSlotStride, kValue, kSigIdx, kPeer, devComm);
   } else {
-    putValueInlineConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+    putValueInlineConsumerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 1 verifies the 8 bytes at dstOff match kValue and nothing else moved.
+  // Rank 1 verifies, per context, the 8 bytes at base+dstOff match kValue+ctx
+  // and nothing else in the slot moved.
   if (rank == 1) {
     std::vector<uint8_t> hostResult(kBufBytes, 0);
     ASSERT_EQ(hipSuccess,
               hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
 
-    uint64_t got = 0;
-    std::memcpy(&got, hostResult.data() + kDstOff, sizeof(got));
-    ASSERT_EQ(kValue, got)
-        << "inline value mismatch (4+2+2 split likely corrupted)";
+    for (int ctx = 0; ctx < nContexts; ctx++) {
+      const size_t base = (size_t)ctx * kSlotStride;
+      uint64_t got = 0;
+      std::memcpy(&got, hostResult.data() + base + kDstOff, sizeof(got));
+      ASSERT_EQ(kValue + (uint64_t)ctx, got)
+          << "ctx " << ctx << " inline value mismatch (4+2+2 split likely corrupted)";
 
-    for (size_t i = 0; i < kDstOff; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " before dstOff was unexpectedly written";
-    }
-    for (size_t i = kDstOff + sizeof(uint64_t); i < kBufBytes; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " after dstOff+8 was unexpectedly written";
+      for (size_t i = 0; i < kDstOff; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " before dstOff was unexpectedly written";
+      }
+      for (size_t i = kDstOff + sizeof(uint64_t); i < kSlotStride; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " after dstOff+8 was unexpectedly written";
+      }
     }
   }
+}
+
+TEST_F(GinMPIDeviceTests, PutValue_Inline) {
+  runPutValueInline(/*nContexts=*/1);
+}
+
+TEST_F(GinMPIDeviceTests, PutValue_Inline_MultiContext) {
+  int n = ginEnvContextCount();
+  if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
+  runPutValueInline(n);
 }
 
 // Producer: thread 0 issues a zero-byte gin.signal (no src/dst windows).
@@ -886,16 +995,21 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
 // CounterInc bumps rank 0's counter when the IB CQE for the put is
 // observed by the local proxy (gin_host_proxy.cc:147-152). One put,
 // two completion sites.
+// Context-aware: one block per GIN context (ctx = blockIdx.x), each putting
+// into its own slot at base = ctx*slotStride and using sigIdx/cntIdx in its
+// own per-context pools. Launched with 1 block this is the original path.
 __global__ void waitCounterAndSignalProducerKernel(
     ncclWindow_t srcWin, size_t srcOff,
     ncclWindow_t dstWin, size_t dstOff,
-    size_t bytes,
+    size_t bytes, size_t slotStride,
     ncclGinSignal_t sigIdx, ncclGinCounter_t cntIdx, int peer,
     struct ncclDevComm devComm) {
-  ncclGin gin{devComm, /*ginContext=*/0};
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
+  const int    ctx  = (int)blockIdx.x;
+  const size_t base = (size_t)ctx * slotStride;
+  ncclGin gin{devComm, ctx};
+  if (threadIdx.x == 0) {
     gin.put(ncclTeamWorld(devComm), peer,
-            dstWin, dstOff, srcWin, srcOff, bytes,
+            dstWin, base + dstOff, srcWin, base + srcOff, bytes,
             ncclGin_SignalInc{sigIdx},        // remote: bump peer's signal cell
             ncclGin_CounterInc{cntIdx});      // local: bump cntIdx on IB CQE
   }
@@ -912,7 +1026,7 @@ __global__ void waitCounterAndSignalProducerKernel(
 __global__ void waitCounterAndSignalConsumerKernel(
     ncclGinSignal_t sigIdx, uint64_t expectedSignalValue,
     struct ncclDevComm devComm) {
-  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclGin gin{devComm, (int)blockIdx.x};
   gin.waitSignal(ncclCoopCta(), sigIdx, expectedSignalValue);
 }
 
@@ -925,7 +1039,7 @@ __global__ void waitCounterAndSignalConsumerKernel(
 // Together with the post-sync host-side payload check on rank 1, this
 // proves the same put delivered (a) bytes, (b) remote signal, and
 // (c) local counter -- all driven by one gin.put.
-TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
+void GinMPIDeviceTests::runWaitCounterAndSignal(int nContexts) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -941,17 +1055,18 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
   ncclCommCount(comm, &nRanks);
   ASSERT_EQ(2, nRanks);
 
-  // 8 KiB symmetric buffers; 4 KiB payload at non-zero src/dst offsets so
+  // 8 KiB per-context slot; 4 KiB payload at non-zero src/dst offsets so
   // the put is a realistic data move. Both signal and counter indices are
   // non-zero so a regression that drops the index multiplier would land
   // at cell 0 and the waits would never observe the bump.
-  constexpr size_t kBufBytes      = 8 * 1024;
+  constexpr size_t kSlotStride    = 8 * 1024;
   constexpr size_t kTransferBytes = 4 * 1024;
   constexpr size_t kSrcOff        = 4 * 1024;
   constexpr size_t kDstOff        = 2 * 1024;
   constexpr ncclGinSignal_t  kSigIdx = 1;
   constexpr ncclGinCounter_t kCntIdx = 1;
   constexpr int kPeer = 1;
+  const size_t kBufBytes = (size_t)nContexts * kSlotStride;
 
   // Symmetric src + dst on every rank (window registration is collective
   // for SYMMETRIC-mode windows).
@@ -975,9 +1090,11 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
   });
 
   // ginSignalCount=2 and ginCounterCount=2 so kSigIdx=1 and kCntIdx=1 are
-  // both in range. railGinBarrierCount=1 covers the 1-CTA launch.
+  // both in range within each per-context pool. railGinBarrierCount=1 covers
+  // the launch; ginContextCount=nContexts provisions the contexts.
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount     = nContexts;
   reqs.ginSignalCount      = 2;
   reqs.ginCounterCount     = 2;
   ncclDevComm devComm{};
@@ -986,13 +1103,22 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  // Deterministic byte pattern in src so the post-sync data check on
-  // rank 1 catches wrong-bytes / wrong-offset regressions. Both ranks
-  // zero their dst as a baseline.
+  if ((int)devComm.ginContextCount < nContexts) {
+    GTEST_SKIP() << "Test requires >= " << nContexts << " GIN contexts, got "
+                 << (int)devComm.ginContextCount
+                 << " (set NCCL_GIN_NCONTEXTS=" << nContexts << ")";
+  }
+
+  // Deterministic per-context byte pattern in src so the post-sync data check
+  // on rank 1 catches wrong-bytes / wrong-offset / cross-context regressions.
+  // Both ranks zero their dst as a baseline.
   std::vector<uint8_t> hostSrc(kBufBytes, 0);
   std::vector<uint8_t> hostDst(kBufBytes, 0);
-  for (size_t i = 0; i < kTransferBytes; i++) {
-    hostSrc[kSrcOff + i] = static_cast<uint8_t>(0x40 + (i & 0xFF));
+  for (int ctx = 0; ctx < nContexts; ctx++) {
+    const size_t base = (size_t)ctx * kSlotStride;
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      hostSrc[base + kSrcOff + i] = static_cast<uint8_t>(0x40 + ((i + ctx) & 0xFF));
+    }
   }
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
@@ -1000,16 +1126,16 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
   // Sync so neither rank launches before setup is done globally.
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 0 puts + bumps remote signal + bumps local counter; rank 1 waits
-  // for the signal. Each side's gin wait IS its assertion (counter on
-  // rank 0, signal on rank 1); the host-side memcmp on rank 1 below
-  // verifies the payload.
+  // Rank 0 puts + bumps remote signal + bumps local counter on each context;
+  // rank 1 waits for the signal. Each side's gin wait IS its assertion
+  // (counter on rank 0, signal on rank 1); the host-side memcmp on rank 1
+  // below verifies the payload.
   if (rank == 0) {
-    waitCounterAndSignalProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+    waitCounterAndSignalProducerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff,
-        kTransferBytes, kSigIdx, kCntIdx, kPeer, devComm);
+        kTransferBytes, kSlotStride, kSigIdx, kCntIdx, kPeer, devComm);
   } else {
-    waitCounterAndSignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+    waitCounterAndSignalConsumerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -1017,29 +1143,42 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
   // Sync so rank 1's verify isn't racing rank 0's kernel completion.
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Rank 1 verifies the payload landed at [kDstOff, kDstOff+kTransferBytes)
-  // and nothing outside that range was touched.
+  // Rank 1 verifies, per context, the payload landed at
+  // [base+kDstOff, +kTransferBytes) and nothing outside that range was touched.
   if (rank == 1) {
     std::vector<uint8_t> hostResult(kBufBytes, 0);
     ASSERT_EQ(hipSuccess,
               hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < kDstOff; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " before dstOff was unexpectedly written";
-    }
-    for (size_t i = 0; i < kTransferBytes; i++) {
-      ASSERT_EQ(hostSrc[kSrcOff + i], hostResult[kDstOff + i])
-          << "payload byte " << i << " mismatched";
-    }
-    for (size_t i = kDstOff + kTransferBytes; i < kBufBytes; i++) {
-      ASSERT_EQ(0u, hostResult[i])
-          << "byte " << i << " after dstOff+kTransferBytes was unexpectedly written";
+    for (int ctx = 0; ctx < nContexts; ctx++) {
+      const size_t base = (size_t)ctx * kSlotStride;
+      for (size_t i = 0; i < kDstOff; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " before dstOff was unexpectedly written";
+      }
+      for (size_t i = 0; i < kTransferBytes; i++) {
+        ASSERT_EQ(hostSrc[base + kSrcOff + i], hostResult[base + kDstOff + i])
+            << "ctx " << ctx << " payload byte " << i << " mismatched";
+      }
+      for (size_t i = kDstOff + kTransferBytes; i < kSlotStride; i++) {
+        ASSERT_EQ(0u, hostResult[base + i])
+            << "ctx " << ctx << " byte " << i << " after dstOff+kTransferBytes was unexpectedly written";
+      }
     }
   }
 
   // Final sync so collective teardown (ScopeGuards) see both ranks past
   // the verification phase.
   MPI_Barrier(MPI_COMM_WORLD);
+}
+
+TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
+  runWaitCounterAndSignal(/*nContexts=*/1);
+}
+
+TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
+  int n = ginEnvContextCount();
+  if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
+  runWaitCounterAndSignal(n);
 }
 
 // Collective kernel: every rank runs the same code. The barrier composes
@@ -3706,7 +3845,40 @@ __global__ void vaSignalWaitReadConsumerKernel(
   }
 }
 
-TEST_F(GinMPIDeviceTests, VASignal_Put) {
+// Context-aware VA-signal producer/consumer for VASignal_Put: one block per
+// GIN context (ctx = blockIdx.x). Each context owns a payload slot at
+// ctx*payloadStride and a distinct VA signal cell at sigOff+ctx*sigStride
+// inside the shared sigWin. Dedicated (not the shared putVASignal* kernels,
+// which VASignal_StrictOrderingFlag reuses with a fixed signature). Launched
+// with 1 block this matches the original single-context behavior.
+__global__ void putVAMultiCtxProducerKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, size_t bytes, size_t payloadStride,
+    ncclWindow_t sigWin, size_t sigOff, size_t sigStride, int peer,
+    struct ncclDevComm devComm) {
+  const int    ctx  = (int)blockIdx.x;
+  const size_t base = (size_t)ctx * payloadStride;
+  const size_t so   = sigOff + (size_t)ctx * sigStride;
+  ncclGin gin{devComm, ctx};
+  if (threadIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), peer,
+            dstWin, base,
+            srcWin, base,
+            bytes,
+            ncclGin_VASignalInc{sigWin, so});   // <-- VA signal (window,offset)
+  }
+  gin.flush(ncclCoopCta());
+}
+
+__global__ void putVAMultiCtxConsumerKernel(
+    ncclWindow_t sigWin, size_t sigOff, size_t sigStride, uint64_t expectedSignalValue,
+    struct ncclDevComm devComm) {
+  const int ctx = (int)blockIdx.x;
+  ncclGin gin{devComm, ctx};
+  gin.waitSignal(ncclCoopCta(), sigWin, sigOff + (size_t)ctx * sigStride,
+                 expectedSignalValue);          // <-- VA wait
+}
+
+void GinMPIDeviceTests::runVASignalPut(int nContexts) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (auto reason = vaSignalTestSkipReason(); !reason.empty())
@@ -3722,13 +3894,15 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
   ncclCommCount(comm, &nRanks);
   ASSERT_EQ(2, nRanks);
 
-  constexpr size_t kBytes    = 4096;
-  constexpr size_t kSigBytes = 64;     // one 8B signal cell lives at offset 0
-  constexpr size_t kSigOff   = 0;
-  constexpr int    kPeer     = 1;
+  constexpr size_t kSlotBytes = 4096;  // per-context payload slot
+  constexpr size_t kSigStride = 64;    // per-context 8B VA signal cell
+  constexpr size_t kSigOff    = 0;
+  constexpr int    kPeer      = 1;
   constexpr uint64_t kExpectedSignal = 1;  // SignalInc from 0 on producer put
+  const size_t kBytes    = (size_t)nContexts * kSlotBytes;
+  const size_t kSigBytes = (size_t)nContexts * kSigStride;
 
-  // Separate buffers for payload (src/dst) and the VA signal cell.
+  // Separate buffers for payload (src/dst) and the VA signal cells.
   void* dSrc = nullptr; void* dDst = nullptr; void* dSig = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
@@ -3756,6 +3930,7 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount     = nContexts;
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
@@ -3763,20 +3938,31 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  // Stage payload; zero the destination and the VA signal cell on every rank
-  // (the signal is incremented from 0 -> 1 by the producer's put).
+  if ((int)devComm.ginContextCount < nContexts) {
+    GTEST_SKIP() << "Test requires >= " << nContexts << " GIN contexts, got "
+                 << (int)devComm.ginContextCount
+                 << " (set NCCL_GIN_NCONTEXTS=" << nContexts << ")";
+  }
+
+  // Stage per-context payload; zero the destination and every VA signal cell on
+  // every rank (each signal is incremented from 0 -> 1 by its producer put).
   std::vector<uint8_t> hs(kBytes, 0), hd(kBytes, 0), hsig(kSigBytes, 0);
-  for (size_t i = 0; i < kBytes; i++) hs[i] = static_cast<uint8_t>(0x37 + (i & 0x1F));
+  for (int ctx = 0; ctx < nContexts; ctx++) {
+    const size_t base = (size_t)ctx * kSlotBytes;
+    for (size_t i = 0; i < kSlotBytes; i++)
+      hs[base + i] = static_cast<uint8_t>(0x37 + ((i + ctx) & 0x1F));
+  }
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hs.data(),   kBytes,    hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hd.data(),   kBytes,    hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSig, hsig.data(), kSigBytes, hipMemcpyHostToDevice));
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0)
-    putVASignalProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(srcWin, dstWin, kBytes, sigWin, kSigOff, kPeer, devComm);
+    putVAMultiCtxProducerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
+        srcWin, dstWin, kSlotBytes, kSlotBytes, sigWin, kSigOff, kSigStride, kPeer, devComm);
   else
-    putVASignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-        sigWin, kSigOff, kExpectedSignal, devComm);
+    putVAMultiCtxConsumerKernel<<<nContexts, kGinKernelThreads, 0, stream>>>(
+        sigWin, kSigOff, kSigStride, kExpectedSignal, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   {
@@ -3787,6 +3973,16 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
     ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
     ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, 1, hs, r);
   }
+}
+
+TEST_F(GinMPIDeviceTests, VASignal_Put) {
+  runVASignalPut(/*nContexts=*/1);
+}
+
+TEST_F(GinMPIDeviceTests, VASignal_Put_MultiContext) {
+  int n = ginEnvContextCount();
+  if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
+  runVASignalPut(n);
 }
 
 // ---------------------------------------------------------------------------
