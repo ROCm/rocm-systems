@@ -249,12 +249,8 @@ RCCL_PARAM_DECLARE(DdaEnable);
 
 // Per-collective DDA AlltoAll VMM/IPC caps. These match ddaVmmMax[AlltoAll]
 // in the arch tables; tests use the names as the expected table values.
-constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
-constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
-constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 
 // gfx942's DDA-IPC cap for AR/AG/RS, i.e. its ddaVmmMax[AllReduce] table entry.
-constexpr size_t kDdaGfx942ThresholdBytes = 8388608; // 8 MiB
 
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
 // meaning "the user did not set this". 0 already means "disable this tier", so

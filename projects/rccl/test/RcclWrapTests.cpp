@@ -2748,15 +2748,15 @@ TEST(RcclDdaTierThresholds, NoAttachedTable_ResolvesViaArchName)
             ncclComm comm{};
             InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
             ASSERT_EQ(comm.archThresholds, nullptr);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), kDdaGfx942ThresholdBytes);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), kDdaAlltoAllGfx942ThresholdBytes);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
 
             InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
             const rcclArchThresholds* table = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(table, nullptr);
             EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAlltoAll), table->ddaLLMax[ncclFuncAlltoAll]);
             EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAlltoAll), table->ddaLL128Max[ncclFuncAlltoAll]);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), kDdaAlltoAllGfx1250ThresholdBytes);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]);
         },
         {});
 }
