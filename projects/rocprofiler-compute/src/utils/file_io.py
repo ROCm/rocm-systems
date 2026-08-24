@@ -246,17 +246,25 @@ def load_kernel_short_names(
     workload_path: str,
     tool_data_records: list[dict[str, Any]],
 ) -> dict[str, str]:
-    """Map a workload's kernel names to the short names profiling captured.
-
-    Counter collection writes the pair to ``kernel_symbols_*.csv.gz``. A
-    PC-sampling-only run has no rocpd database to write one from, so its
-    results JSON carries the pair instead. A workload holding both was a
-    counter run, and the CSV already covers every kernel it dispatched.
-    """
+    """Map a workload's kernel names to the short names profiling captured."""
     symbol_csv_paths = sorted(Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB))
-    if symbol_csv_paths:
-        return _read_kernel_short_names(symbol_csv_paths)
-    return _collect_kernel_short_names(tool_data_records)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_csv_paths:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data["kernel_symbols"]
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(
+        [pd.read_csv(symbol_csv_path) for symbol_csv_path in symbol_csv_paths],
+        ignore_index=True,
+    ).dropna(subset=["Kernel_Name", "Kernel_Short_Name"])
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
 
 
 def process_pc_sampling_kernel_traces(
@@ -426,30 +434,6 @@ def is_single_panel_config(
         console_warning(
             "Found multiple panel config sets but incomplete for all archs."
         )
-
-
-def _read_kernel_short_names(symbol_csv_paths: list[Path]) -> dict[str, str]:
-    """Fold the profiled kernel symbol CSVs into one mapping.
-
-    A symbol is written once per process and once per profiling run, and the
-    short name is a function of the symbol, so the repeats all agree.
-    """
-    symbols = pd.concat(
-        [pd.read_csv(symbol_csv_path) for symbol_csv_path in symbol_csv_paths],
-        ignore_index=True,
-    ).dropna(subset=["Kernel_Name", "Kernel_Short_Name"])
-    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
-
-
-def _collect_kernel_short_names(
-    tool_data_records: list[dict[str, Any]],
-) -> dict[str, str]:
-    """Read the same mapping out of the PC sampling results JSON."""
-    return {
-        symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
-        for tool_data in tool_data_records
-        for symbol in tool_data["kernel_symbols"]
-    }
 
 
 def _renumber_dispatch_ids_across_processes(

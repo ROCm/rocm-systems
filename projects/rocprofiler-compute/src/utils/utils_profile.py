@@ -305,8 +305,6 @@ def run_prof(
     marker_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_marker_api_trace.csv"
     )
-    # Written straight to the workload dir: analyze reads it, and out/ is
-    # removed once the counter CSV has been relabeled.
     kernel_symbols_csv = csv_compression.compressed_name(
         Path(workload_dir) / f"kernel_symbols_{fbase}.csv"
     )

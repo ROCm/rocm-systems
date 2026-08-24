@@ -47,8 +47,6 @@ SELECT
 FROM regions
 ORDER BY start
 """
-# Per-kernel data, so it gets its own file rather than a column on the
-# per-counter rows the counter query streams.
 KERNEL_SYMBOLS_QUERY = """
 SELECT
     display_name as Kernel_Name,

@@ -2648,14 +2648,14 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
 def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
     """Return one exported ISA file as its header and its rows.
 
-    *kernel_row* is the kernel's own ``kernel.csv`` row, which names its folder.
+    The folder is named after the kernel's row in ``kernel.csv``.
     """
     export_path = (
         result_path
         / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
         / ISA_WORKLOAD_NAME
         / ISA_WORKLOAD_SUB_NAME
-        / f"{kernel_row['short_name']}_{kernel_row['kernel_uuid']}"
+        / f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
     with export_path.open(newline="", encoding="utf-8") as export_file:
@@ -2710,7 +2710,7 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
 
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert per_kernel_isa_paths(result_path) == sorted(
-        f"vector_copy/run/{kernel_row.short_name}_{kernel_row.kernel_uuid}"
+        f"vector_copy/run/{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
         f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
         for kernel_row in kernel_frame.itertuples()
         for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
@@ -2871,7 +2871,7 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
         f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
-        f"_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -2894,7 +2894,7 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
     assert per_kernel_isa_paths(result_path) == [
         f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
-        f"_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
