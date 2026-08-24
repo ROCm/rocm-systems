@@ -516,7 +516,7 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   EXPECT_EQ(fx.cu->read_sgpr(base + 20), 0xABCDEF01u);
 }
 
-TEST(ScalarOperandSelectorsTest, ClassifiesRegisterPairLowWords) {
+TEST(ScalarOperandSelectorsTest, Classifies64BitRegisterSources) {
   EXPECT_TRUE(is_src_scalar_register_pair(0));
   EXPECT_TRUE(is_src_scalar_register_pair(kVccSelectorFirst));
   EXPECT_TRUE(is_src_scalar_register_pair(kTtmpSelectorFirst));
