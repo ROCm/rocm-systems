@@ -44,7 +44,7 @@ This guidance is **hybrid**: a small set of **normative** rules for PR review, p
 
 ### Advisory guidance (SHOULD / MAY)
 
-- Apply `BOUND_RATIO` on min/max columns for Percent share/utilization metrics (§2.3).
+- Apply `BOUND_RATIO` on min/max columns for Percent share/utilization metrics (§2.3) **after** single-pass validation confirms clamping is appropriate.
 - Add grouping-policy entries for high-priority ratio partners on specific arches.
 - Adopt numeric thresholds in §5.4 **later** if the team agrees — **intentionally qualitative for now**; designers apply judgment with §5.2 cross-checks.
 - Add diagnostics when `BOUND_RATIO` or `SUM(MIN)` adjust values (open question §6).
@@ -157,6 +157,10 @@ return (num / safe_den * scale).clip(upper=cap)
 **Masking risk (HW bugs):** **High when silent; moderate if diagnostics added.** A systematic `a > b` bug (e.g. subset counter always over-counts) produces capped 100% min/max with **no trace** in current implementation. Large one-off spikes (739% Workgroup Manager Utilization max) are clearly noise; **repeated** capping on the same counter pair under single-pass is a red flag — escalate to hardware/driver review, not more clamping.
 
 **When to use:** Min/max columns for Percent metrics where `numerator / denominator` should represent a utilization or traffic **share**.
+
+**Validate before cap:** Run §5 single-pass cross-checks first. Apply `BOUND_RATIO` only when violations shrink to sporadic noise (short dispatches, multi-pass residual). If violations remain systematic under single-pass, **do not cap** — investigate counter semantics or potential hardware issues instead.
+
+**Non-partition pairs** (e.g. Workgroup Manager Utilization: `GRBM_SPI_BUSY / GRBM_GUI_ACTIVE`): single-pass validation is **required** before deciding whether to cap. These metrics are not subset fractions; capping is a display choice, not a physical invariant.
 
 ---
 
@@ -302,18 +306,20 @@ When `TCC_EA0_RDREQ_DRAM_sum > TCC_EA0_RDREQ_sum` on a dispatch (multi-pass vari
 
 ---
 
-#### `BOUND_RATIO` *(proposed)*
+#### `BOUND_RATIO` *(proposed — apply only after single-pass validation)*
 
 **Real metric:** *Workgroup Manager Utilization* min/max (gfx942 `0600_workgroup_manager_spi.yaml`)
+
+**Validation-first workflow:** Profile with minimal blocks so `GRBM_SPI_BUSY` and `GRBM_GUI_ACTIVE` are co-collected (§5.3). Inspect per-dispatch ratios in raw PMC. Apply cap in YAML only if violations are sporadic (e.g. one short-dispatch max spike), not systematic across dispatches.
 
 ```yaml
 min: 100 * MIN(BOUND_RATIO($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD))
 max: 100 * MAX(BOUND_RATIO($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD))
 ```
 
-Reproduction example (mat_exp workload, multi-pass analyze): raw max **739.60%** → capped **100%**.
+Reproduction example (mat_exp workload, multi-pass analyze): raw max **739.60%** → capped **100%** if cap is applied. **Decision to cap pending single-pass validation.**
 
-**Also proposed for:** CPC Stall Rate, CPC Packet Decoding, Data-Return Busy, HBM Read/Write min/max.
+**Also proposed for (after validation):** CPC Stall Rate, CPC Packet Decoding, Data-Return Busy, HBM Read/Write min/max.
 
 ---
 
@@ -355,8 +361,10 @@ flowchart TD
     J --> J2{"Violations persistent<br/>under single-pass?"}
     J2 -->|No — sporadic / small| K["Clamp helpers = safety net"]
     J2 -->|Yes — systematic| P["Potential HW counter bug<br/>— escalate, do not clamp-only"]
-    I -->|No — e.g. Workgroup Manager Utilization| L[">100% still possible<br/>(denominator collapse, semantics)"]
-    L --> M["BOUND_RATIO on min/max = display guard"]
+    I -->|No — e.g. Workgroup Manager Utilization| L["Single-pass validate first"]
+    L --> L2{"Violations sporadic<br/>after single-pass?"}
+    L2 -->|Yes| M["Consider BOUND_RATIO on min/max"]
+    L2 -->|No — systematic| P
     A --> N{"VALU dual-issue?"}
     N -->|Yes| O["Documented exception<br/>— do not clamp"]
 ```
@@ -365,7 +373,7 @@ flowchart TD
 
 1. **MUST — Prefer** single-pass grouping for counters in the same formula.
 2. **MUST — Subtract** counters in Percent splits → `NOISE_CLAMP`.
-3. **SHOULD — Min/max** Percent ratio → `BOUND_RATIO` (display guard; not a substitute for §5 validation).
+3. **SHOULD — Min/max** Percent ratio → consider `BOUND_RATIO` **only after** single-pass validation (§5) shows violations are sporadic noise, not systematic. **Non-partition pairs** (e.g. Workgroup Manager Utilization) require this validation before any cap — do not clamp by default.
 4. **MUST — Avg Percent, partition type** → `SUM(MIN(a,b))/SUM(b)`; **MUST NOT** on non-partition pairs.
 5. **MUST — Document** intentional > 100% behavior (VALU) instead of clamping.
 6. **MUST — Validate** under single-pass before relying on clamped output alone (§5).
@@ -422,7 +430,8 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 | Observation under single-pass + stable workload | Likely cause | Action |
 |---|---|---|
-| Rare rows with 100% < ratio ≤ ~105% | Multi-pass residual or async sampling | Clamp acceptable; optional diagnostic |
+| Rare rows with 100% < ratio ≤ ~105% on **partition** metrics | Multi-pass residual or async sampling | Clamp acceptable after single-pass confirms sporadic pattern |
+| **Non-partition** metric (e.g. Workgroup Manager Utilization) > 100% | May be semantics or denominator collapse | **Single-pass validate first**; cap min/max only if sporadic; otherwise document or investigate |
 | Single dispatch max spike (e.g. >> 200%) with tiny denominator | Denominator collapse / short dispatch | `BOUND_RATIO` on max; note in docs |
 | Most dispatches > 100% by similar margin | Potential HW counter bug or wrong event pairing | **Do not** rely on clamp alone; file driver/hardware investigation |
 | Persistent negative subtraction | Bug or mis-defined subset | Fix formula or counter definition; `NOISE_CLAMP` is display-only |
@@ -438,7 +447,7 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 3. **Scope of `BOUND_RATIO` rollout:** Which Percent metrics across gfx940/942/950 (and other arches) should be updated, and in what priority order?
 
-4. **Avg column consistency:** Should avg columns using `SUM(n)/SUM(d)` for non-partition pairs (e.g. Workgroup Manager Utilization: `SUM(GRBM_SPI_BUSY)/SUM(GRBM_GUI_ACTIVE)`) also be capped, or is that semantically incorrect?
+4. **Avg column consistency:** Should avg columns using `SUM(n)/SUM(d)` for non-partition pairs (e.g. Workgroup Manager Utilization) ever be capped, or only min/max after single-pass validation shows sporadic noise?
 
 5. **Complementary metric consistency:** After independent clamping on HBM (`MIN`/`BOUND_RATIO`) and Remote (`NOISE_CLAMP`), should we enforce or document that splits may not sum to exactly 100%?
 
@@ -476,4 +485,4 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 - `src/utils/utils_analysis.py` — Multi-pass data imputation
 - `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml` — Coalescing priorities
 - `src/utils/metrics/noise_clamper.py` — `NOISE_CLAMP` implementation
-- `src/utils/metrics/aggregation.py` — `BOUND_RATIO`, `to_min` (element-wise)
+- `src/utils/metrics/aggregation.py` — `BOUND_RATIO`, `to_min` (element-wise; **proposed** in follow-up PR)
