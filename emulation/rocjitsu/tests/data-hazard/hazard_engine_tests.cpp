@@ -1962,8 +1962,9 @@ TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNo
     event.is_write = true;
     engine.on_resource_access(event);
 
-    if (workgroup == 1)
+    if (workgroup == 1) {
       EXPECT_TRUE(engine.warning_snapshot().empty()) << "byte 0x3001 overlaps nothing";
+    }
   }
 
   const auto warnings = engine.warning_snapshot();
