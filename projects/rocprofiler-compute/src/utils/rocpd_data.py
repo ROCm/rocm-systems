@@ -166,7 +166,7 @@ def _pmc_catalog_tables(
 
 
 def compact_rocpd_db(db_path: Path) -> int:
-    """Clear redundant PMC catalog payload from a database whose counters live in CSV."""
+    """Clear redundant PMC catalog payload when counters live in native CSV."""
     before = db_path.stat().st_size
     with closing(sqlite3.connect(db_path)) as conn:
         catalog, events = _pmc_catalog_tables(conn)
