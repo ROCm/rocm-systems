@@ -1,4 +1,4 @@
-// Perfetto trace_processor POC — task 024
+// Perfetto trace_processor POC
 // Demonstrates the CreateInstance -> ReadTrace -> ExecuteQuery -> Iterator
 // call sequence against a Chrome JSON trace file.
 // Build only when PROFILER_HUB_ENABLE_TPX is set.

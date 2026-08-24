@@ -1,13 +1,11 @@
 -- =============================================================================
--- rocpd Schema Version 4.0  (canonical v4, Jonathan's design)
+-- rocpd Schema Version 4.0  (canonical v4)
 -- =============================================================================
--- Source: PR-347 (rocm-systems), TOP-LEVEL build output:
---   /scratch/users/avansick/github_pulls/rocm-systems-pr-347-sdk/
---       projects/rocprofiler-sdk/build/share/rocprofiler-sdk-rocpd/rocpd_tables.sql
+-- Source: PR-347 (rocm-systems) generated rocpd_tables.sql build output.
 --
--- NOTE: The same PR-347 folder also contains a versions/4.1.0/ subfolder which
--- is a DIFFERENT (later) schema — see rocpd_v4.1.sql. This file is the
--- top-level schema with the rocpd_timestamp spine.
+-- NOTE: PR-347 also produced a separate, later 4.1.0 schema variant not used
+-- by this test suite. This file is the top-level v4.0 schema with the
+-- rocpd_timestamp spine.
 --
 -- KEY CHANGES vs v3:
 --

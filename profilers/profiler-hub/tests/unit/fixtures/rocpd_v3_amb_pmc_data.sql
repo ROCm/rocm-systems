@@ -57,6 +57,6 @@ INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2);
 --   event 1: TWO rows for pmc_id=1 (the ambiguous collision)
 --   event 2: ONE row for pmc_id=2 (clean)
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
-VALUES (1, 1, 1, 142942.0),    -- pmc 1, quantity A
-       (2, 1, 1, 220332032.0), -- pmc 1, quantity B (same event_id!)
-       (3, 2, 2, 999.0);       -- pmc 2, clean
+VALUES (1, 1, 1, 142942.0),
+       (2, 1, 1, 220332032.0),
+       (3, 2, 2, 999.0);

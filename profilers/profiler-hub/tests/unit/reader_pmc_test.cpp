@@ -19,9 +19,9 @@ using namespace profiler_hub;
 using namespace profiler_hub::test;
 
 // Mint the handle for a SQL-seeded fixture row by its EXPLICIT id. Unlike the
-// writer's 0-based autoincrementer (see make_event_id above), synthetic SQL
-// fixtures assign explicit 1-based ids (e.g. rocpd_sample.id = 1), so no
-// ordinal->raw shift applies — the db_id passed here IS the raw id (DL-015/069).
+// writer's 0-based autoincrementer (make_event_id, in reader_flows_test.cpp),
+// synthetic SQL fixtures assign explicit 1-based ids (e.g. rocpd_sample.id = 1),
+// so no ordinal->raw shift applies — the db_id passed here IS the raw id.
 reader_types::event_id_t
 make_sql_event_id(reader_types::event_type_t type, size_t db_id)
 {

@@ -214,7 +214,6 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
         ASSERT_TRUE(stream_names.count("copyStreamY") == 1);
     }
 
-    // The two tracks resolve to the two distinct destination agents (id 1 and 2).
     ASSERT_EQ(track_agent_ids.size(), 2U);
     ASSERT_TRUE(track_agent_ids.count(1) == 1);
     ASSERT_TRUE(track_agent_ids.count(2) == 1);

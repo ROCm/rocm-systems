@@ -614,8 +614,7 @@ TEST_F(writer_test, insert_kernel_dispatch_data_is_readable_after_flush)
 // would still pass a no-throw-only check). node_id/process_id absent are not
 // covered here: insert_validator::require_node/require_process throw before
 // maybe_insert_sample() is ever reached on every public writer_t call path, so
-// those two branches are unreachable without a production-code seam. See
-// tasks/017-result.md for the full reachability analysis.
+// those two branches are unreachable without a production-code seam.
 TEST_F(writer_test, maybe_insert_sample_with_missing_thread_id_is_skipped)
 {
     auto writer = make_writer();

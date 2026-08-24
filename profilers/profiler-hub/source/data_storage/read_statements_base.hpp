@@ -185,9 +185,7 @@ struct timeline_event_result
     size_t start_timestamp{};
     size_t end_timestamp{};
 
-    std::optional<size_t> display_name_id;
-    // Category decoded to its display string by the backend (v3: rocpd_string,
-    // v4: rocpd_info_category), so the reader stays version-agnostic.
+    std::optional<size_t>      display_name_id;
     std::optional<std::string> category_name;
 
     size_t                nid{};
@@ -298,11 +296,9 @@ struct arg_detail_result
     std::string extdata;
 };
 
-/// Raw row shape read straight out of the event tables. call_stack / line_info are
-/// the schema-native encodings (v3: JSON blob strings on rocpd_event). The backend
-/// decodes these into event_id_result before the reader sees them, so the reader
-/// stays version-agnostic. v4 has no direct raw analogue (call stack / line info are
-/// relational) and assembles event_id_result without this struct.
+/// Raw row shape read straight out of the event tables (v3 only); call_stack/line_info
+/// are JSON blob strings on rocpd_event, decoded into event_id_result before the reader
+/// sees them. v4 has no analogous raw struct — call stack/line info are relational there.
 struct event_id_raw_result
 {
     std::optional<size_t>      event_id;
@@ -315,15 +311,9 @@ struct event_id_raw_result
     std::string                event_extdata;
 };
 
-/// Lightweight result for resolving event metadata from event-specific tables.
-/// call_stack / line_info are decoded into version-neutral reader structures by the
-/// backend (v3: deserialized from JSON; v4: assembled from rocpd_call_stack /
-/// rocpd_line_info + the pc/source-code/address-range info tables).
 struct event_id_result
 {
-    std::optional<size_t> event_id;
-    // Category decoded to its display string by the backend (v3: rocpd_string,
-    // v4: rocpd_info_category), so the reader stays version-agnostic.
+    std::optional<size_t>               event_id;
     std::optional<std::string>          category_name;
     std::optional<size_t>               stack_id;
     std::optional<size_t>               parent_stack_id;
@@ -344,11 +334,9 @@ struct time_range_result
     std::optional<size_t> max_end;
 };
 
-/// One GROUP-BY-name aggregate row for get_kernel_summary / get_region_summary.
 /// name_ref is the raw name id (kernel_symbol id for kernels, rocpd_string id for
-/// regions) which the reader resolves to a display name; nullopt when the grouped
-/// name id is NULL. Durations are (end - start) aggregates over the group; avg is
-/// computed by the reader from total/count.
+/// regions); nullopt when the grouped name id is NULL. avg is computed by the reader
+/// from total/count, not stored here.
 struct summary_result
 {
     std::optional<size_t> name_ref;
@@ -360,11 +348,9 @@ struct summary_result
 
 // ----- Track-scoped query result structs (interval / scalar / flow) -----
 
-/// One interval row on a track. name_ref is a string id for region/memory_copy
-/// tracks and a kernel_symbol id for kernel_dispatch tracks; the reader resolves
-/// it to a display_name based on the track type. category is the event's already-
-/// resolved category display string (v3 via rocpd_string, v4 via rocpd_info_category);
-/// nullopt when the interval query does not join a category source.
+/// name_ref is a string id for region/memory_copy tracks and a kernel_symbol id for
+/// kernel_dispatch tracks; resolved to a display_name based on track type. category
+/// is nullopt when the interval query does not join a category source.
 struct interval_row_result
 {
     size_t                     id{};
@@ -379,7 +365,6 @@ struct interval_row_result
     std::optional<size_t> op_kind;
 };
 
-/// One scalar (counter) sample on a counter track.
 struct scalar_row_result
 {
     size_t id{};
@@ -397,9 +382,8 @@ struct track_stats_result
     size_t                count{};
 };
 
-/// A single candidate flow leg from the stack-clique join. Carries both endpoints' row
-/// ids plus the fields get_flows needs to orient and group the directed edge: each
-/// endpoint's start, the shared clique stack_id, and each endpoint's parent_stack_id.
+/// Fields get_flows needs to orient and group the directed edge: each endpoint's
+/// start, the shared clique stack_id, each endpoint's parent_stack_id.
 struct flow_row_result
 {
     size_t                source_id{};
@@ -411,7 +395,6 @@ struct flow_row_result
     std::optional<size_t> dest_parent{};    ///< SQL dest endpoint parent_stack_id.
 };
 
-/// Distinct gpu_queue topology context synthesized from rocpd_kernel_dispatch.
 struct distinct_gpu_queue_result
 {
     size_t nid{};
@@ -420,10 +403,10 @@ struct distinct_gpu_queue_result
     size_t queue_id{};
 };
 
-/// Distinct dma topology context synthesized from rocpd_memory_copy. Keyed on the
-/// destination agent (dst_agent_id) to match Optiq's GetRocprofMemoryCopyTrackQuery
-/// swimlane grouping; stream identity lives on the separate `stream` track type.
-/// queue_id / dst_agent_id are kept as distinct group values, NULL included.
+/// Keyed on the destination agent (dst_agent_id) to match Optiq's
+/// GetRocprofMemoryCopyTrackQuery swimlane grouping; stream identity lives on the
+/// separate `stream` track type. queue_id / dst_agent_id are kept as distinct group
+/// values, NULL included.
 struct distinct_dma_result
 {
     size_t                nid{};
@@ -432,9 +415,9 @@ struct distinct_dma_result
     std::optional<size_t> dst_agent_id;
 };
 
-/// Distinct memory-track topology synthesized from rocpd_memory_allocate. Keyed on
-/// (nid, agent_id, queue_id, pid) to match Optiq's GetRocprofMemoryAllocTrackQuery
-/// GROUP BY exactly. agent_id / queue_id are nullable; NULL is a distinct group value.
+/// Keyed on (nid, agent_id, queue_id, pid) to match Optiq's
+/// GetRocprofMemoryAllocTrackQuery GROUP BY exactly. agent_id / queue_id are nullable;
+/// NULL is a distinct group value.
 struct distinct_memory_result
 {
     size_t                nid{};
@@ -456,9 +439,9 @@ struct distinct_kd_pmc_result
     size_t pmc_id{};
 };
 
-/// Distinct memory-activity track topology. One series per (nid, pid, agent_id) from
-/// rocpd_memory_allocate, matching Optiq's per-agent grouping. agent_id is nullable;
-/// NULL is a distinct group value (preserved, not dropped).
+/// One series per (nid, pid, agent_id) from rocpd_memory_allocate, matching Optiq's
+/// per-agent grouping. agent_id is nullable; NULL is a distinct group value
+/// (preserved, not dropped).
 struct distinct_mem_activity_result
 {
     size_t                nid{};
@@ -521,8 +504,6 @@ struct ambiguous_pmc_id_result
     size_t pmc_id{};
 };
 
-/// Maps a counter track_id to its PMC id and name (rocpd_info_pmc). One row per
-/// counter track.
 struct counter_track_name_result
 {
     size_t      track_id{};
@@ -530,7 +511,6 @@ struct counter_track_name_result
     std::string name;
 };
 
-/// Combined scalar detail (sample + counter value) resolved by rocpd_sample.id.
 struct scalar_detail_result
 {
     size_t                id{};
@@ -547,17 +527,6 @@ struct scalar_detail_result
 // shared_ptr<read_statements_base>, selected once at construction based on the
 // detected schema version. Both schema_v3::read_statements and
 // schema_v4::read_statements derive from this and provide their own SQL.
-//
-// Accessors split into two groups:
-//   * PURE VIRTUAL  — the shared subset both backends implement (info tables,
-//     track info, counter/scalar/flow track-scoped queries).
-//   * VIRTUAL with a default-empty body — backend-specific statements. The v3
-//     backend overrides the legacy timeline/detail/synthesis/multi-column
-//     interval accessors; the v4.0 backend overrides the track_id-anchored
-//     interval accessors. Each backend inherits empty stubs for the accessors
-//     it does not implement. The reader guards those paths (never invokes an
-//     unimplemented accessor), so the empty std::function objects returned here
-//     are never called.
 // ---------------------------------------------------------------------------
 struct read_statements_base
 {
@@ -614,10 +583,9 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<event_detail_result>(size_t)>;
     using arg_detail_func_t =
         std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
-    // Materialized (not a lazy result_set): the backend runs the query and decodes
-    // call_stack / line_info into event_id_result before returning. v4 assembles the
-    // call stack / line info from multiple relational rows, which a single lazy
-    // result_set cannot express, so both backends return a fully-built vector.
+    // Materialized (not a lazy result_set): a single lazy result_set cannot express
+    // the one-to-many call-stack/line-info fan-out, so both backends return a
+    // fully-built vector.
     using event_id_func_t = std::function<std::vector<event_id_result>(size_t)>;
     using count_func_t    = std::function<sqlite_backend::result_set<count_result>()>;
     using count_time_filtered_func_t =
@@ -669,8 +637,6 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<distinct_kd_pmc_result>()>;
     using distinct_mem_activity_func_t =
         std::function<sqlite_backend::result_set<distinct_mem_activity_result>()>;
-    // All rocpd_memory_allocate rows for (nid, pid), ordered by start. C++ computes
-    // per-agent running sums and recovers FREE agent_id via address self-join.
     using mem_activity_raw_func_t =
         std::function<sqlite_backend::result_set<mem_activity_raw_result>(size_t,
                                                                           size_t)>;
@@ -751,8 +717,7 @@ struct read_statements_base
     [[nodiscard]] virtual const flow_statement_set& region_to_memory_copy_flows()
         const = 0;
     [[nodiscard]] virtual const flow_statement_set& region_to_memory_allocate_flows()
-        const = 0;
-    // Full stack-clique legs beyond region->GPU: region->region and same-type siblings.
+        const                                                                      = 0;
     [[nodiscard]] virtual const flow_statement_set& region_to_region_flows() const = 0;
     [[nodiscard]] virtual const flow_statement_set& kernel_dispatch_sibling_flows()
         const                                                                         = 0;
@@ -920,8 +885,7 @@ struct read_statements_base
         return e;
     }
 
-    // GROUP-BY-name aggregates for get_kernel_summary / get_region_summary. Both
-    // backends override; the default static-empty function is never called.
+    // Both backends override this; the default static-empty function is never called.
     [[nodiscard]] virtual const summary_func_t& kernel_summary() const
     {
         static const summary_func_t e{};
@@ -988,8 +952,6 @@ struct read_statements_base
         static const memory_alloc_track_ids_func_t e{};
         return e;
     }
-    // v3 + v4.0: distinct kernel-dispatch PMC tracks, one per (nid, agent_id, pmc_id,
-    // pid).
     [[nodiscard]] virtual const distinct_kd_pmc_func_t& distinct_kd_pmc_tracks() const
     {
         static const distinct_kd_pmc_func_t e{};
@@ -1003,7 +965,6 @@ struct read_statements_base
         return e;
     }
 
-    // v3 + v4.0: distinct memory-activity tracks, one per (nid, pid, agent_id).
     [[nodiscard]] virtual const distinct_mem_activity_func_t&
     distinct_mem_activity_tracks() const
     {
@@ -1011,8 +972,7 @@ struct read_statements_base
         return e;
     }
     // All rocpd_memory_allocate rows for (nid, pid), ordered by start. Used by both
-    // get_scalar_track and get_track_stats for memory_activity (C++ computes per-agent
-    // running sums and recovers FREE agent_id via address self-join).
+    // get_scalar_track and get_track_stats for memory_activity.
     [[nodiscard]] virtual const mem_activity_raw_func_t& mem_activity_raw_track() const
     {
         static const mem_activity_raw_func_t e{};
@@ -1107,7 +1067,6 @@ struct read_statements_base
         static const interval_track_1_func_t e{};
         return e;
     }
-    // v4.0: memory allocations keyed by track_id (rocpd_memory_allocate.track_id).
     [[nodiscard]] virtual const interval_track_1_func_t& memory_alloc_interval_track_v4()
         const
     {
@@ -1134,10 +1093,8 @@ struct read_statements_base
 
     // ----- Track-stats aggregates (MIN/MAX/COUNT) -----
     // Shape-matched to the interval/scalar track statements above so the aggregate
-    // scopes to exactly the events that track would return. v3 overrides the
-    // multi-column variants; v4.0 overrides the track_id-anchored *_v4 variants; both
-    // override scalar_stats. Unimplemented variants inherit these empty stubs (the
-    // reader routes only to the ones its backend implements).
+    // scopes to exactly the events that track would return. Unimplemented variants
+    // inherit these empty stubs.
     [[nodiscard]] virtual const stats_track_3_func_t& region_stats_track_main() const
     {
         static const stats_track_3_func_t e{};
@@ -1216,8 +1173,6 @@ struct read_statements_base
         static const stats_track_1_func_t e{};
         return e;
     }
-    // kernel_dispatch_pmc stats (both backends): keyed by (nid, pid, agent_id, pmc_id).
-    // v3 uses inline start/end; v4.0 overrides with the timestamp-spine variant.
     [[nodiscard]] virtual const stats_track_4_func_t& kd_pmc_stats_track() const
     {
         static const stats_track_4_func_t e{};

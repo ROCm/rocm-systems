@@ -907,7 +907,7 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_BRACKET_NAME_PATH="${ROCPD_DB_V3_BRACKET_NAME_PATH}"
 )
 
-# Real v4.0 capture fixture (DL-017): rebuilt at build time from a committed,
+# Real v4.0 capture fixture: rebuilt at build time from a committed,
 # un-templated SQL dump of the original captured binary
 # (bd54a356ac:tests/unit/rocpd_v4.db). Unlike the synthetic fixtures above,
 # this dump carries no {{uuid}}/{{guid}} placeholders -- the literal values

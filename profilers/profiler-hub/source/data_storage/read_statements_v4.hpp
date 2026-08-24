@@ -21,10 +21,8 @@
 namespace profiler_hub::data_storage::schema_v4
 {
 
-// v4.0 read backend. Implements the track-scoped reader subset
-// (get_interval_track / get_scalar_track / get_flows + scalar detail overloads,
-// plus the info tables and counter-name/scalar-track statements the reader
-// needs) against the v4.0 rocpd schema.
+// v4.0 read backend, implementing the track-scoped reader subset against the v4.0
+// rocpd schema.
 //
 // v4.0 differs from v3 in two structural ways that drive the SQL here:
 //   * rocpd_track is the universal identity anchor — every event table carries a
@@ -145,8 +143,6 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_stream_tracks;
     }
-    // v4.0 memory tracks: distinct (nid, agent_id, queue_id, pid) from
-    // rocpd_memory_allocate JOIN rocpd_track (same join pattern as stream interval SQL).
     [[nodiscard]] const distinct_memory_func_t& distinct_memory_tracks() const override
     {
         return m_distinct_memory_tracks;
@@ -680,7 +676,6 @@ private:
                 &distinct_stream_result::pid,
                 &distinct_stream_result::stream_id);
 
-        // Map each counter track_id to its PMC name.
         m_counter_track_names =
             m_backend->create_read_statement_executor<counter_track_name_result>(
                 fmt::format("SELECT s.track_id, pe.pmc_id, ip.name "
@@ -695,7 +690,7 @@ private:
 
         // memory tracks: one per distinct (nid, agent_id, queue_id, pid) in
         // rocpd_memory_allocate JOIN rocpd_track (agent_id / queue_id from rocpd_track).
-        // NULL agent_id / queue_id are distinct group values per the Q2 rule.
+        // NULL agent_id / queue_id are distinct group values.
         m_distinct_memory_tracks =
             m_backend->create_read_statement_executor<distinct_memory_result>(
                 fmt::format("SELECT DISTINCT T.nid, T.agent_id, T.queue_id, T.pid "
@@ -764,8 +759,6 @@ private:
                 &mem_activity_raw_result::agent_id,
                 &mem_activity_raw_result::type);
 
-        // Collect the rocpd_track.id values referenced by kd_pmc tracks so the generic
-        // classification loop can exclude them from gpu_queue classification.
         m_kd_pmc_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
                 fmt::format("SELECT DISTINCT K.track_id "
@@ -781,9 +774,8 @@ private:
         const auto& u = m_uuid;
 
         // region intervals: start/end resolved through the timestamp spine. Category is
-        // resolved in-SQL to its display string via rocpd_info_category (v4's category
-        // source; v3 uses rocpd_string), keeping the reader version-agnostic. rocpd_event
-        // / rocpd_info_category are LEFT JOINed so the row set is unchanged — additive.
+        // resolved in-SQL to its display string via rocpd_info_category. rocpd_event /
+        // rocpd_info_category are LEFT JOINed so the row set is unchanged — additive.
         m_region_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
@@ -802,9 +794,7 @@ private:
                     &interval_row_result::name_ref,
                     &interval_row_result::category);
 
-        // kernel dispatch intervals: name_ref is the kernel_symbol id. Category is
-        // resolved in-SQL via rocpd_event/rocpd_info_category (LEFT JOIN, additive —
-        // mirrors the region and stream interval queries); the row set is unchanged.
+        // kernel dispatch intervals: name_ref is the kernel_symbol id.
         m_kernel_dispatch_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
@@ -823,9 +813,6 @@ private:
                     &interval_row_result::name_ref,
                     &interval_row_result::category);
 
-        // memory copy intervals. Category is resolved in-SQL via
-        // rocpd_event/rocpd_info_category (LEFT JOIN, additive — mirrors the
-        // kernel_dispatch and stream interval queries); the row set is unchanged.
         m_memory_copy_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
@@ -844,8 +831,8 @@ private:
                     &interval_row_result::name_ref,
                     &interval_row_result::category);
 
-        // memory allocate intervals. Mirrors memory_copy pattern; v4 has a native
-        // name_id on rocpd_memory_allocate, so name_ref is populated (unlike v3).
+        // memory allocate intervals: v4 has a native name_id on rocpd_memory_allocate,
+        // so name_ref is populated here (unlike v3).
         m_memory_alloc_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
@@ -865,9 +852,8 @@ private:
                     &interval_row_result::category);
 
         // kernel_dispatch_pmc intervals. Each event = one kernel_dispatch with PMC data.
-        // name_ref is kernel_id (for kernel symbol resolution). Category via
-        // rocpd_event/rocpd_info_category (LEFT JOIN, additive).
-        // Keyed by (K.nid, K.pid, K.agent_id, PMC_E.pmc_id) via rocpd_track JOIN.
+        // name_ref is kernel_id (for kernel symbol resolution). Keyed by (K.nid, K.pid,
+        // K.agent_id, PMC_E.pmc_id) via rocpd_track JOIN.
         m_kd_pmc_interval_track = m_backend->create_read_statement_executor<
             interval_row_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -893,11 +879,10 @@ private:
         // stream: aggregates kernel_dispatch + memory_copy + memory_allocate sharing a
         // stream. v4 stream_id is on rocpd_track, so each leg joins its event table to
         // rocpd_track and filters T.stream_id = ? (bound three times). start/end resolve
-        // through the timestamp spine; category via rocpd_event/rocpd_info_category (LEFT
-        // JOIN, additive — the per-op v4 interval queries above don't carry it). op_kind
-        // literal per leg (kernel_dispatch=1, memory_copy=2, memory_allocate=3) drives
-        // the reader's per-event name lookup and get_*_details() dispatch. Unlike v3,
-        // memory_allocate carries a name_id in v4, so its name_ref is populated.
+        // through the timestamp spine. op_kind literal per leg (kernel_dispatch=1,
+        // memory_copy=2, memory_allocate=3) drives the reader's per-event name lookup
+        // and get_*_details() dispatch. Unlike v3, memory_allocate carries a name_id in
+        // v4, so its name_ref is populated.
         m_stream_interval_track =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -943,8 +928,7 @@ private:
         const auto& u = m_uuid;
 
         // MIN(start)/MAX(end)/COUNT over exactly the rows the matching interval-track
-        // query returns, so per-track bounds/count agree with a full slice load. Bounds
-        // are resolved through the timestamp spine, mirroring the interval queries.
+        // query returns, so per-track bounds/count agree with a full slice load.
 
         m_region_stats_track_v4 =
             m_backend
@@ -998,8 +982,6 @@ private:
                     &track_stats_result::max_ts,
                     &track_stats_result::count);
 
-        // kernel_dispatch_pmc stats (v4): keyed by (T.nid, T.pid, T.agent_id,
-        // PMC_E.pmc_id).
         m_kd_pmc_stats_track = m_backend->create_read_statement_executor<
             track_stats_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -1048,7 +1030,6 @@ private:
                 &track_stats_result::max_ts,
                 &track_stats_result::count);
 
-        // counter: samples on track_id joined to their pmc value (matches scalar_track).
         m_scalar_stats =
             m_backend
                 ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
@@ -1136,18 +1117,14 @@ private:
         // A flow leg links a SOURCE event to a DEST event sharing the same non-zero
         // stack_id (the stack-clique join, E{s}.id != E{d}.id). source/dest may be the
         // same table (region->region, same-type siblings) or different (region->GPU).
-        // Structurally identical to v3 (rocpd_event still carries stack_id); the only
-        // v4 difference is the time filter, which resolves the SOURCE start time through
-        // the rocpd_timestamp spine (start_id) rather than an inline start column.
         auto make_flow_set = [&](const std::string& source_table,
                                  const std::string& source_alias,
                                  const std::string& dest_table,
                                  const std::string& dest_alias) -> flow_statement_set {
             // Surface each endpoint's start + parent_stack_id and the shared clique
             // stack_id so get_flows can orient the directed edge (parent lineage else
-            // start-ts) and derive its flow_id. v4 resolves start through the
-            // rocpd_timestamp spine (start_id), so both starts are correlated subqueries.
-            // Column order matches the member-pointer binding order below.
+            // start-ts) and derive its flow_id. Column order matches the member-pointer
+            // binding order below.
             const auto base_sql = fmt::format(
                 "SELECT {s}.id, {d}.id, "
                 "(SELECT value FROM rocpd_timestamp_{u} WHERE id = {s}.start_id), "
@@ -1176,8 +1153,6 @@ private:
                 &flow_row_result::source_parent,
                 &flow_row_result::dest_parent);
 
-            // Optional time window applied to the SOURCE event's start timestamp,
-            // resolved via the rocpd_timestamp spine.
             const auto time_sql =
                 base_sql +
                 fmt::format(" AND {s}.start_id IN (SELECT id FROM rocpd_timestamp_{u} "
@@ -1220,16 +1195,13 @@ private:
         const auto& u = m_uuid;
 
         // Build all four timeline variants for one interval table. v4.0 differs
-        // from v3 structurally:
-        //   * start/end resolved through the rocpd_timestamp spine (start_id/end_id).
-        //   * nid/pid/tid come from the rocpd_track identity anchor, not the event
-        //     table (v4 event tables carry only track_id).
-        //   * category resolved to its display string via rocpd_info_category
-        //     (v3 used rocpd_string), keeping the reader version-agnostic.
-        // The track-scoped variants filter on track_id alone (the universal v4
-        // anchor); the three leading nid/pid/tid binds are accepted for signature
-        // parity with v3 and consumed as always-true `? IS NOT NULL` no-ops so the
-        // anonymous-`?` count matches bind_types.
+        // from v3 structurally: start/end resolved through the rocpd_timestamp spine
+        // (start_id/end_id); nid/pid/tid come from the rocpd_track identity anchor,
+        // not the event table (v4 event tables carry only track_id). The track-scoped
+        // variants filter on track_id alone (the universal v4 anchor); the three
+        // leading nid/pid/tid binds are accepted for signature parity with v3 and
+        // consumed as always-true `? IS NOT NULL` no-ops so the anonymous-`?` count
+        // matches bind_types.
         auto make_timeline_set =
             [&](const std::string& table,
                 const std::string& alias,
@@ -1333,8 +1305,6 @@ private:
                 fmt::format("SELECT COUNT(*) FROM {}_{}", table, u),
                 &count_result::count);
         };
-        // v4.0 has no inline start/end column; the time window filters against the
-        // rocpd_timestamp spine reached through start_id/end_id.
         auto make_count_time_filtered_stmt = [&](const std::string& table) {
             return m_backend->create_read_statement_executor<count_result,
                                                              bind_types<size_t, size_t>>(
@@ -1365,8 +1335,6 @@ private:
     {
         const auto& u = m_uuid;
 
-        // v4.0 has no inline start/end column; MIN/MAX are computed over the
-        // rocpd_timestamp spine reached through start_id/end_id.
         auto make_time_range_stmt = [&](const std::string& table) {
             return m_backend->create_read_statement_executor<time_range_result>(
                 fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value) FROM {tbl}_{u} T "
@@ -1384,10 +1352,9 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
-    // GROUP-BY-name aggregates (v4.0). Duration is (ts_e.value - ts_s.value) via the
-    // rocpd_timestamp spine reached through start_id/end_id; grouped by name_col
-    // (kernel_id for kernels, name_id for regions). The time-filtered variant keeps
-    // events overlapping [start,end] (bind order end,start).
+    // GROUP-BY-name aggregates (v4.0), grouped by name_col (kernel_id for kernels,
+    // name_id for regions). The time-filtered variant keeps events overlapping
+    // [start,end] (bind order end,start).
     void initialize_summary_statements()
     {
         const auto& u = m_uuid;
@@ -1727,10 +1694,6 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Per-event detail keyed on the event-table primary key. v4.0 resolves
-        // start/end through the rocpd_timestamp spine and nid/pid/tid through the
-        // rocpd_track identity anchor; all other columns come straight off the
-        // event table, matching the *_detail_result shapes the reader consumes.
         m_region_detail = m_backend->create_read_statement_executor<region_detail_result,
                                                                     bind_types<size_t>>(
             fmt::format("SELECT r.id, ts_s.value, ts_e.value, r.name_id, r.event_id, "
