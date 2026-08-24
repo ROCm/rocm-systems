@@ -125,8 +125,6 @@ public:
     if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
       l2_caches_.push_back(l2);
   }
-  void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
-  uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
   bool packed_tid() const { return packed_tid_; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
@@ -400,7 +398,6 @@ private:
   // at the VM level (rj_vm.cpp).
   std::atomic<bool> is_primary_ = false;
   uint32_t workgroup_id_offset_ = 0;
-  uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
   // GFX11+ SDMA GCR keeps the same opcode but changes packet size/layout, so
   // the decoder cannot infer this dialect from the packet header alone.

@@ -15,10 +15,12 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
-#include <string>
-
 #include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -91,6 +93,58 @@ struct ScalarMemState : DynamicInstState {
   uint32_t store_data[16] = {};
 };
 
+/// @brief Per-element vector-memory lane masks with inline storage for the
+/// common one-to-four-element access widths.
+class ElementLaneMasks {
+public:
+  static constexpr size_t kInlineCapacity = 4;
+
+  [[nodiscard]] bool empty() const { return size_ == 0; }
+  [[nodiscard]] size_t size() const { return size_; }
+
+  void clear() {
+    size_ = 0;
+    overflow_.clear();
+  }
+
+  void assign(size_t count, uint64_t value) {
+    if (count <= kInlineCapacity) {
+      overflow_.clear();
+      for (size_t i = 0; i < count; ++i)
+        inline_[i] = value;
+      size_ = count;
+      return;
+    }
+    overflow_.assign(count, value);
+    size_ = count;
+  }
+
+  uint64_t &operator[](size_t index) {
+    assert(index < size_);
+    return data()[index];
+  }
+
+  const uint64_t &operator[](size_t index) const {
+    assert(index < size_);
+    return data()[index];
+  }
+
+  [[nodiscard]] std::span<const uint64_t> view() const { return {data(), size_}; }
+
+private:
+  [[nodiscard]] uint64_t *data() {
+    return size_ <= kInlineCapacity ? inline_.data() : overflow_.data();
+  }
+
+  [[nodiscard]] const uint64_t *data() const {
+    return size_ <= kInlineCapacity ? inline_.data() : overflow_.data();
+  }
+
+  std::array<uint64_t, kInlineCapacity> inline_{};
+  std::vector<uint64_t> overflow_;
+  size_t size_ = 0;
+};
+
 /// @brief Dynamic pipeline state for vector memory instructions
 /// (FLAT, MUBUF, MTBUF, DS).
 struct VectorMemState : DynamicInstState {
@@ -100,12 +154,15 @@ struct VectorMemState : DynamicInstState {
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  /// Optional per-element lane validity. Empty means every element uses
-  /// lane_mask; otherwise the vector contains exactly num_elems masks and
-  /// lane_mask is their union.
-  std::vector<uint64_t> element_lane_masks;
-  uint64_t exec_mask = 0; ///< EXEC mask at issue time. Set by addr calc functions.
-                          ///< Writeback zeroes OOB lanes (exec_mask & ~lane_mask).
+  /// Optional per-element lane validity for untyped DWORD-component bounds.
+  /// Empty means every element uses lane_mask; otherwise the container has
+  /// exactly num_elems masks and lane_mask is their union.
+  ElementLaneMasks element_lane_masks;
+  uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
+                          ///< snapshots EXEC, but ISA exceptions may replace it (for example,
+                          ///< CDNA5 DS transpose loads use an all-lanes mask), while
+                          ///< architecturally ignored accesses clear it. Writeback zeroes OOB
+                          ///< lanes (exec_mask & ~lane_mask).
   uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).
   uint32_t dst_reg_base = 0;
   uint32_t elem_size = 0;
@@ -134,8 +191,8 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
-  bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
-  bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
+  bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
+  bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
   bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
