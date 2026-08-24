@@ -43,7 +43,9 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
+#include "library/components/ucx_gotcha.hpp"
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -84,6 +86,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <pthread.h>
 #include <sstream>
@@ -113,8 +116,12 @@ std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
-std::shared_ptr<control::session> g_control_session =
-    std::make_shared<control::session>();
+std::shared_ptr<control::session>&
+get_control_session()
+{
+    static auto instance = std::make_shared<control::session>();
+    return instance;
+}
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -673,7 +680,7 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        rocprofiler_sdk::bind_session(g_control_session);
+        rocprofiler_sdk::bind_session(get_control_session());
 
         {
             using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
@@ -695,11 +702,13 @@ rocprofsys_init_tooling_hidden(void)
             });
             // clang-format on
             for(auto& sub : subscribers)
-                g_control_session->subscribe(std::move(sub));
+            {
+                get_control_session()->subscribe(std::move(sub));
+            }
 
             rocprofiler_sdk::create_roctx_client();
 
-            g_control_session->force_initial_pause();
+            get_control_session()->force_initial_pause();
         }
 
         state::process::set(
@@ -935,7 +944,7 @@ rocprofsys_finalize_hidden(void)
         rocprofiler_sdk::shutdown();
 
         LOG_DEBUG("Shutting down control session...");
-        g_control_session->shutdown();
+        get_control_session()->shutdown();
 
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
@@ -1051,7 +1060,7 @@ rocprofsys_finalize_hidden(void)
     rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Shutting down control session...");
-    g_control_session->shutdown();
+    get_control_session()->shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();

@@ -7,14 +7,15 @@
 #include "core/control/session.hpp"
 
 #include "logger/debug.hpp"
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <spdlog/fmt/ranges.h>  // NOLINT
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocprofsys::control::triggers
 {
@@ -31,7 +32,7 @@ roctx::roctx(std::shared_ptr<session> sess, std::string_view trace_regions)
     if(filter_active())
     {
         LOG_INFO("roctx trigger: filter active for regions: [{}]",
-                 fmt::join(m_trace_regions, ", "));
+                 fmt::join(m_trace_regions, ", "));  // NOLINT
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
@@ -43,36 +44,65 @@ roctx::~roctx() { m_session->unregister_trigger(trigger_name); }
 void
 roctx::on_range_start(std::uint64_t range_id, const char* message)
 {
-    if(message == nullptr || m_trace_regions.count(message) == 0) return;
+    if(message == nullptr || !m_trace_regions.contains(message))
+    {
+        return;
+    }
 
     bool was_empty = false;
     {
-        const std::scoped_lock lk{ m_mutex };
+        const std::scoped_lock notify_lk{ m_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
-        if(was_empty) m_in_region.store(true, std::memory_order_relaxed);
+        if(was_empty)
+        {
+            m_in_region.store(true, std::memory_order_relaxed);
+        }
     }
 
-    if(was_empty) refresh_state();
+    if(was_empty)
+    {
+        refresh_state();
+    }
 }
 
 void
 roctx::on_range_stop(std::uint64_t range_id)
 {
-    if(!filter_active()) return;
-
-    bool now_empty = false;
+    if(!filter_active())
     {
-        const std::scoped_lock lk{ m_mutex };
-        if(m_active_range_ids.erase(range_id) > 0)
-        {
-            now_empty = m_active_range_ids.empty();
-            if(now_empty) m_in_region.store(false, std::memory_order_relaxed);
-        }
+        return;
     }
 
-    if(!now_empty) return;
+    if(!remove_active_range(range_id))
+    {
+        return;
+    }
 
+    warn_if_paused_region_ended();
+    refresh_state();
+}
+
+bool
+roctx::remove_active_range(std::uint64_t range_id)
+{
+    const std::scoped_lock notify_lk{ m_mutex };
+    if(m_active_range_ids.erase(range_id) == 0)
+    {
+        return false;
+    }
+
+    const bool now_empty = m_active_range_ids.empty();
+    if(now_empty)
+    {
+        m_in_region.store(false, std::memory_order_relaxed);
+    }
+    return now_empty;
+}
+
+void
+roctx::warn_if_paused_region_ended()
+{
     // Region ended while paused: silently clear user_paused so a later region
     // push behaves as a fresh start. Subsequent on_resume becomes a no-op.
     if(m_user_paused.exchange(false, std::memory_order_relaxed))
@@ -80,8 +110,6 @@ roctx::on_range_stop(std::uint64_t range_id)
         LOG_WARNING(
             "Target region ended while paused. Subsequent resume will be ignored.");
     }
-
-    refresh_state();
 }
 
 void
@@ -89,7 +117,7 @@ roctx::on_pause()
 {
     if(filter_active())
     {
-        const std::scoped_lock lk{ m_mutex };
+        const std::scoped_lock notify_lk{ m_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Pause requested outside of target region - ignoring");
@@ -119,7 +147,7 @@ roctx::on_resume()
 
     if(filter_active())
     {
-        const std::scoped_lock lk{ m_mutex };
+        const std::scoped_lock notify_lk{ m_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Resume requested outside of target region - ignoring");

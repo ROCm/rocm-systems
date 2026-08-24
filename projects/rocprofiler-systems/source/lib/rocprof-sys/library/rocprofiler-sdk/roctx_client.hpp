@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -46,8 +47,11 @@ public:
 
     void configure_services(rocprofiler_context_id_t ctx);
 
-    const std::shared_ptr<control::session>& get_session() const { return m_session; }
-    control::triggers::roctx&                get_trigger() const { return *m_trigger; }
+    [[nodiscard]] const std::shared_ptr<control::session>& get_session() const
+    {
+        return m_session;
+    }
+    [[nodiscard]] control::triggers::roctx& get_trigger() const { return *m_trigger; }
 
 private:
     struct marker_range_entry

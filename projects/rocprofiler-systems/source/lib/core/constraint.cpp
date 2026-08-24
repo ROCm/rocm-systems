@@ -9,8 +9,6 @@
 #include "state.hpp"
 #include "utility.hpp"
 
-#include "common/delimit.hpp"
-
 #include "logger/debug.hpp"
 
 #include <spdlog/fmt/ranges.h>
@@ -18,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <ratio>
+#include <set>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -46,14 +45,21 @@ clock_name(std::string _v)
     return _v;
 }
 
-const auto accepted_clock_ids =
-    std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
-                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
+const std::set<clock_identifier>&
+accepted_clock_ids()
+{
+    // NOLINTBEGIN
+    static const auto instance =
+        std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
+                                    ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
+    // NOLINTEND
+    return instance;
+}
 
 template <typename Tp>
 clock_identifier
@@ -63,7 +69,7 @@ find_clock_identifier(const Tp& _v)
     if constexpr(std::is_integral<Tp>::value)
     {
         _descript = "value";
-        for(const auto& itr : accepted_clock_ids)
+        for(const auto& itr : accepted_clock_ids())
         {
             if(itr.value == _v)
             {
@@ -75,7 +81,7 @@ find_clock_identifier(const Tp& _v)
     {
         _descript        = "name";
         auto _clock_name = clock_name(_v);
-        for(const auto& itr : accepted_clock_ids)
+        for(const auto& itr : accepted_clock_ids())
         {
             if(itr.name == _clock_name || itr.raw_name == _v ||
                std::to_string(itr.value) == _v)
@@ -86,9 +92,11 @@ find_clock_identifier(const Tp& _v)
     }
 
     auto _choices = std::vector<std::string>{};
-    _choices.reserve(accepted_clock_ids.size());
-    for(const auto& itr : accepted_clock_ids)
+    _choices.reserve(accepted_clock_ids().size());
+    for(const auto& itr : accepted_clock_ids())
+    {
         _choices.emplace_back(itr.as_string());
+    }
 
     throw std::runtime_error(fmt::format("Unknown clock id {}: {}. Valid choices: {}",
                                          _descript, _v, fmt::join(_choices, "")));
@@ -285,7 +293,7 @@ spec::operator()(const stages& _stages) const
 const std::set<clock_identifier>&
 get_valid_clock_ids()
 {
-    return accepted_clock_ids;
+    return accepted_clock_ids();
 }
 
 std::vector<spec>
