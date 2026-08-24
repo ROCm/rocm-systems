@@ -870,14 +870,9 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   }
 
   // Total message must fit within the pre-allocated staging buffer (ceArMaxBytes set at init).
+  // RCCL_FORCE_CE_ALLREDUCE does not override this cap: ceArMaxBytes is a hard allocation
+  // limit, not a tuning threshold. force only bypasses the CTA_POLICY_ZERO check below.
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (force) {
-    if (msgBytes > comm->ceColl.ceArMaxBytes) {
-      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > ceArMaxBytes (%zu)",
-           msgBytes, comm->ceColl.ceArMaxBytes);
-      return false;
-    }
-  }
   if (msgBytes > comm->ceColl.ceArMaxBytes) {
     WARN("Skipping CE AllReduce: msgBytes (%zu) > ceArMaxBytes (%zu)", msgBytes, comm->ceColl.ceArMaxBytes);
     return false;
