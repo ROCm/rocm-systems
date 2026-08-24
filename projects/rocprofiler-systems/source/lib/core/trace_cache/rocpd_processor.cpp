@@ -17,6 +17,7 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 

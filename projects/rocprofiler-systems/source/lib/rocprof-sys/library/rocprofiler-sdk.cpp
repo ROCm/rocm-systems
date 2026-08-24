@@ -2500,7 +2500,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
 
-    if(!rocprofiler_sdk::spm::configure_runtime(_data)) return -1;
+    if(!rocprofiler_sdk::spm::configure_runtime(_data))
+    {
+        return -1;
+    }
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 

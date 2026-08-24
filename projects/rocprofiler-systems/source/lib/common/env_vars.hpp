@@ -353,23 +353,20 @@ inline constexpr const char* USE_TIMEMORY = "ROCPROFSYS_USE_TIMEMORY";
 inline constexpr const char* USE_SHMEM =
     "ROCPROFSYS_USE_SHMEM";  // deprecated: use USE_OPENSHMEM
 
-[[nodiscard]] inline bool
-equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
-{
-    if(lhs.size() != rhs.size()) return false;
-    for(std::size_t idx = 0; idx < lhs.size(); ++idx)
-        if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
-           std::tolower(static_cast<unsigned char>(rhs[idx])))
-            return false;
-    return true;
-}
-
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    if(equals_ignore_case(level, "trace")) return 2;
-    if(equals_ignore_case(level, "debug")) return 1;
-    if(equals_ignore_case(level, "info")) return 0;
+    auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
+        if(lhs.size() != rhs.size()) return false;
+        for(std::size_t idx = 0; idx < lhs.size(); ++idx)
+            if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
+               std::tolower(static_cast<unsigned char>(rhs[idx])))
+                return false;
+        return true;
+    };
+    if(iequal(level, "trace")) return 2;
+    if(iequal(level, "debug")) return 1;
+    if(iequal(level, "info")) return 0;
     return -1;
 }
 

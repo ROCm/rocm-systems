@@ -607,13 +607,20 @@ safe_stoi(const std::string& s)
 }
 
 std::optional<std::uint64_t>
-safe_stou64(const std::string& s)
+safe_stou64(const std::string& value)
 {
-    if(s.empty()) return std::nullopt;
-    std::uint64_t value  = 0;
-    const auto    result = std::from_chars(s.data(), s.data() + s.size(), value);
-    if(result.ec != std::errc{} || result.ptr != s.data() + s.size()) return std::nullopt;
-    return value;
+    if(value.empty())
+    {
+        return std::nullopt;
+    }
+    std::uint64_t parsed_value = 0;
+    const auto    result =
+        std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if(result.ec != std::errc{} || result.ptr != value.data() + value.size())
+    {
+        return std::nullopt;
+    }
+    return parsed_value;
 }
 
 std::optional<double>
@@ -653,10 +660,14 @@ set_json_int(nlohmann::json& target, const std::string& value)
 void
 set_json_uint64(nlohmann::json& target, const std::string& value)
 {
-    if(auto n = safe_stou64(value))
-        target = *n;
+    if(auto number = safe_stou64(value))
+    {
+        target = *number;
+    }
     else
+    {
         target = value;
+    }
 }
 
 void
@@ -886,15 +897,15 @@ export_hardware_counters(nlohmann::json&                           config,
         hw["enabled"]                    = true;
         hw["gpu_perf_counters"]["value"] = *v;
     }
-    if(auto v = lookup(env_map, env_vars::ROCM_SPM_EVENTS))
+    if(auto events = lookup(env_map, env_vars::ROCM_SPM_EVENTS))
     {
         hw["enabled"]                = true;
-        hw["spm"]["events"]["value"] = *v;
+        hw["spm"]["events"]["value"] = *events;
     }
-    if(auto v = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL))
+    if(auto interval = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL))
     {
         hw["enabled"] = true;
-        set_json_uint64(hw["spm"]["sample_interval"]["value"], *v);
+        set_json_uint64(hw["spm"]["sample_interval"]["value"], *interval);
     }
     export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
                    "hardware_counters", "papi_multiplexing");

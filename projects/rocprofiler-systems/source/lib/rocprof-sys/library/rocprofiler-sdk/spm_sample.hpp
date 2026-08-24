@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
@@ -44,7 +45,7 @@ static_assert(std::is_trivially_copyable<counter_value>::value,
 struct timestamp_sample
 {
     std::uint64_t              timestamp = 0;
-    std::vector<counter_value> values    = {};
+    std::vector<counter_value> values;
 };
 
 /**
@@ -71,8 +72,8 @@ struct sample : trace_cache::cacheable_t
     // callback-to-stream mapping is available.
     std::uint64_t                 stream_handle = 0;
     bool                          data_loss     = false;
-    std::vector<counter_info>     counters      = {};
-    std::vector<timestamp_sample> samples       = {};
+    std::vector<counter_info>     counters;
+    std::vector<timestamp_sample> samples;
 };
 
 }  // namespace rocprofsys::rocprofiler_sdk::spm

@@ -12,16 +12,12 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
-{
-namespace spm
+namespace rocprofsys::rocprofiler_sdk::spm
 {
 /// Normalized SPM counter collection settings derived from user configuration.
 struct configuration
 {
-    std::vector<std::string> counter_events  = {};
+    std::vector<std::string> counter_events;
     std::uint64_t            sample_interval = 0;
 
     /// Returns true when this configuration requests SPM counter collection.
@@ -61,7 +57,7 @@ namespace detail
 // without compiling the SDK SPM runtime path.
 struct requested_counter
 {
-    std::string                  name      = {};
+    std::string                  name;
     std::optional<std::uint64_t> device_id = std::nullopt;
 };
 
@@ -83,6 +79,4 @@ requested_counters_for_device(const requested_counter_vec_t& all_requested,
 [[nodiscard]] std::unordered_set<std::string>
 requested_counter_names(const requested_counter_vec_t& requested);
 }  // namespace detail
-}  // namespace spm
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk::spm

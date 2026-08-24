@@ -236,7 +236,8 @@ struct metadata_registry
     void set_spm_counter_names(std::uint32_t                                  device_id,
                                std::vector<info::gpu_perf_counter_name_entry> entries);
 
-    std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+    [[nodiscard]] std::optional<
+        std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
     find_spm_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
@@ -278,8 +279,8 @@ private:
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
 
-    counter_name_map_t m_gpu_perf_counter_names{};
-    counter_name_map_t m_spm_counter_names{};
+    counter_name_map_t m_gpu_perf_counter_names;
+    counter_name_map_t m_spm_counter_names;
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

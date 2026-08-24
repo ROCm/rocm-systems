@@ -3,9 +3,7 @@
 
 #pragma once
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 struct client_data;
 
@@ -23,5 +21,4 @@ configure_runtime(client_data* data);
 void
 finalize_runtime(client_data* data) noexcept;
 }  // namespace spm
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

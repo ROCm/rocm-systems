@@ -5,8 +5,10 @@
 #include "library/rocprofiler-sdk/spm_sample.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <numeric>
 #include <vector>
 
 using namespace rocprofsys::trace_cache;
@@ -18,6 +20,62 @@ protected:
 
     std::array<std::uint8_t, 4096> buffer;
 };
+
+namespace
+{
+constexpr auto spm_counter_id_0          = std::uint64_t{ 11 };
+constexpr auto spm_counter_id_1          = std::uint64_t{ 12 };
+constexpr auto spm_counter_instance_id_0 = std::uint64_t{ 111 };
+constexpr auto spm_counter_instance_id_1 = std::uint64_t{ 222 };
+constexpr auto spm_timestamp_0           = std::uint64_t{ 1000 };
+constexpr auto spm_timestamp_1           = std::uint64_t{ 1200 };
+constexpr auto spm_value_0               = 123.5;
+constexpr auto spm_value_1               = 456.75;
+constexpr auto spm_value_2               = 789.25;
+constexpr auto spm_agent_id              = std::uint64_t{ 7 };
+constexpr auto spm_dispatch_id           = std::uint64_t{ 42 };
+constexpr auto spm_kernel_id             = std::uint64_t{ 99 };
+constexpr auto spm_queue_id              = std::uint64_t{ 1234 };
+constexpr auto spm_correlation_id        = std::uint64_t{ 5678 };
+constexpr auto spm_ancestor_id           = std::uint64_t{ 9876 };
+constexpr auto spm_stream_handle         = std::uint64_t{ 55 };
+
+spm_sample
+make_spm_sample()
+{
+    return spm_sample{
+        .agent_id_handle         = spm_agent_id,
+        .dispatch_id             = spm_dispatch_id,
+        .kernel_id               = spm_kernel_id,
+        .queue_id_handle         = spm_queue_id,
+        .correlation_id_internal = spm_correlation_id,
+        .correlation_id_ancestor = spm_ancestor_id,
+        .stream_handle           = spm_stream_handle,
+        .data_loss               = true,
+        .counters =
+            {
+                { .counter_id          = spm_counter_id_0,
+                  .counter_instance_id = spm_counter_instance_id_0 },
+                { .counter_id          = spm_counter_id_1,
+                  .counter_instance_id = spm_counter_instance_id_1 },
+            },
+        .samples =
+            {
+                { .timestamp = spm_timestamp_0,
+                  .values =
+                      {
+                          { .counter_info_index = 0, .value = spm_value_0 },
+                          { .counter_info_index = 1, .value = spm_value_1 },
+                      } },
+                { .timestamp = spm_timestamp_1,
+                  .values =
+                      {
+                          { .counter_info_index = 0, .value = spm_value_2 },
+                      } },
+            },
+    };
+}
+}  // namespace
 
 TEST_F(sample_type_test, kernel_dispatch_sample_serialize_deserialize)
 {
@@ -536,41 +594,11 @@ TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
     EXPECT_EQ(sample.type_identifier, type_identifier_t::backtrace_region_sample);
 }
 
+// GoogleTest assertion macros inflate this test's measured control-flow complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 TEST_F(sample_type_test, spm_sample_serialize_deserialize)
 {
-    auto counters = std::vector<spm_counter_info>{
-        spm_counter_info{ .counter_id = 11, .counter_instance_id = 111 },
-        spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
-    };
-    auto samples = std::vector<spm_timestamp_sample>{
-        spm_timestamp_sample{
-            .timestamp = 1000,
-            .values =
-                {
-                    spm_counter_value{ .counter_info_index = 0, .value = 123.5 },
-                    spm_counter_value{ .counter_info_index = 1, .value = 456.75 },
-                },
-        },
-        spm_timestamp_sample{
-            .timestamp = 1200,
-            .values =
-                {
-                    spm_counter_value{ .counter_info_index = 0, .value = 789.25 },
-                },
-        },
-    };
-    spm_sample original{
-        .agent_id_handle         = 7,
-        .dispatch_id             = 42,
-        .kernel_id               = 99,
-        .queue_id_handle         = 1234,
-        .correlation_id_internal = 5678,
-        .correlation_id_ancestor = 9876,
-        .stream_handle           = 55,
-        .data_loss               = true,
-        .counters                = counters,
-        .samples                 = samples,
-    };
+    const auto original = make_spm_sample();
 
     serialize(buffer.data(), original);
 
@@ -613,61 +641,28 @@ TEST_F(sample_type_test, spm_sample_serialize_deserialize)
 
 TEST_F(sample_type_test, spm_sample_get_size)
 {
-    auto counters = std::vector<spm_counter_info>{
-        spm_counter_info{ .counter_id = 11, .counter_instance_id = 111 },
-        spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
-    };
-    auto samples = std::vector<spm_timestamp_sample>{
-        spm_timestamp_sample{
-            .timestamp = 1000,
-            .values =
-                {
-                    spm_counter_value{ .counter_info_index = 0, .value = 123.5 },
-                    spm_counter_value{ .counter_info_index = 1, .value = 456.75 },
-                },
-        },
-        spm_timestamp_sample{
-            .timestamp = 1200,
-            .values =
-                {
-                    spm_counter_value{ .counter_info_index = 0, .value = 789.25 },
-                },
-        },
-    };
-    const spm_sample sample{
-        .agent_id_handle         = 7,
-        .dispatch_id             = 42,
-        .kernel_id               = 99,
-        .queue_id_handle         = 1234,
-        .correlation_id_internal = 5678,
-        .correlation_id_ancestor = 9876,
-        .stream_handle           = 55,
-        .data_loss               = true,
-        .counters                = counters,
-        .samples                 = samples,
-    };
+    const auto sample = make_spm_sample();
+    const auto value_count =
+        std::accumulate(sample.samples.begin(), sample.samples.end(), std::size_t{ 0 },
+                        [](std::size_t total, const auto& timestamp) {
+                            return total + timestamp.values.size();
+                        });
 
     const auto expected_size =
         sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) * 2 +
-        counters.size() * (sizeof(std::uint64_t) * 2) +
-        samples.size() * (sizeof(std::uint64_t) + sizeof(std::uint32_t)) +
-        3 * (sizeof(std::uint32_t) + sizeof(double));
+        sample.counters.size() * (sizeof(std::uint64_t) * 2) +
+        sample.samples.size() * (sizeof(std::uint64_t) + sizeof(std::uint32_t)) +
+        value_count * (sizeof(std::uint32_t) + sizeof(double));
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
 
 TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
 {
-    const spm_sample original{
-        .agent_id_handle         = 7,
-        .dispatch_id             = 42,
-        .kernel_id               = 99,
-        .queue_id_handle         = 1234,
-        .correlation_id_internal = 5678,
-        .correlation_id_ancestor = 9876,
-        .stream_handle           = 55,
-        .data_loss               = false,
-    };
+    auto original      = make_spm_sample();
+    original.data_loss = false;
+    original.counters.clear();
+    original.samples.clear();
 
     serialize(buffer.data(), original);
 

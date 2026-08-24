@@ -773,7 +773,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
     auto get_delimiter = [](std::string_view key) -> char {
         if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
            key == env_vars::ROCM_EVENTS || key == env_vars::ROCM_SPM_EVENTS)
+        {
             return ',';
+        }
         return ':';
     };
 

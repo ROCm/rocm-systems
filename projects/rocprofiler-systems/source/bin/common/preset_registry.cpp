@@ -4,6 +4,7 @@
 #include "common/preset_registry.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "embedded_presets.hpp"
 

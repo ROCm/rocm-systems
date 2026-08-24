@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "argparse.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
@@ -1222,9 +1223,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Set beta SPM GPU hardware counter events to record")
             .min_count(1)
             .dtype("[EVENT ...]")
-            .action([&](parser_t& p) {
+            .action([&](parser_t& parser) {
                 auto _events =
-                    fmt::format("{}", fmt::join(p.get<strvec_t>("spm-events"), ","));
+                    fmt::format("{}", fmt::join(parser.get<strvec_t>("spm-events"), ","));
                 update_env(_data, env_vars::ROCM_SPM_EVENTS, _events);
             });
 
@@ -1239,9 +1240,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Set beta SPM counter sampling interval")
             .count(1)
             .dtype("integral")
-            .action([&](parser_t& p) {
+            .action([&](parser_t& parser) {
                 update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
-                           p.get<std::uint64_t>("spm-sample-interval"));
+                           parser.get<std::uint64_t>("spm-sample-interval"));
             });
 
         _data.reg.processed_environs.emplace("spm_sample_interval");

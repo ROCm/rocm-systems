@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include <cstdint>
 

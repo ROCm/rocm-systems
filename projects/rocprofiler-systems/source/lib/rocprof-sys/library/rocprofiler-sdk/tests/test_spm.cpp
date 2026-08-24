@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "core/sdk-tracing-config-deps.hpp"
 #include "core/sdk-tracing-config.hpp"
+#include "core/timemory.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm_internal.hpp"
 
 #include <gtest/gtest.h>
@@ -18,6 +19,8 @@
 
 namespace
 {
+constexpr auto valid_sample_interval = std::uint64_t{ 8192 };
+
 using rocprofsys::rocprofiler_sdk::default_sdk_externals;
 using rocprofsys::rocprofiler_sdk::sdk_tracing_config;
 using rocprofsys::rocprofiler_sdk::wrapper;
@@ -74,7 +77,8 @@ protected:
 configuration
 make_valid_requested_spm_config()
 {
-    return configuration{ .counter_events = { "SQ_WAVES" }, .sample_interval = 8192 };
+    return configuration{ .counter_events  = { "SQ_WAVES" },
+                          .sample_interval = valid_sample_interval };
 }
 
 void
@@ -94,14 +98,15 @@ TEST_F(spm_settings_test, accessors_reflect_configured_spm_settings)
         std::string{ "SQ_WAVES,TD_TD_BUSY" }));
     ASSERT_TRUE(rocprofsys::config::set_setting_value(
         std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
-        std::uint64_t{ 8192 }));
+        valid_sample_interval));
 
     const auto events = rocprofsys::rocprofiler_sdk::spm::get_events();
 
     ASSERT_EQ(events.size(), 2);
     EXPECT_EQ(events.at(0), "SQ_WAVES");
     EXPECT_EQ(events.at(1), "TD_TD_BUSY");
-    EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(), 8192);
+    EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(),
+              valid_sample_interval);
 }
 
 TEST(spm_configuration, requested_reflects_events)
@@ -135,7 +140,7 @@ TEST(spm_configuration_parsing, parse_requested_counters_skips_empty_and_invalid
     const auto parsed = spm_detail::parse_requested_counters(
         configuration{ .counter_events  = { " SQ_WAVES:device=0 ", "", "TD_TD_BUSY",
                                             "BAD:device=abc", ":device=1" },
-                       .sample_interval = 8192 });
+                       .sample_interval = valid_sample_interval });
 
     ASSERT_EQ(parsed.size(), 2);
     expect_requested_counter(parsed.at(0), "SQ_WAVES", std::uint64_t{ 0 });
@@ -147,7 +152,7 @@ TEST(spm_configuration_parsing,
 {
     const auto parsed = spm_detail::parse_requested_counters(configuration{
         .counter_events  = { "SQ_WAVES:device=0", "TD_TD_BUSY:device=1", "TCC_HIT" },
-        .sample_interval = 8192 });
+        .sample_interval = valid_sample_interval });
 
     const auto device_zero = spm_detail::requested_counters_for_device(parsed, 0);
     ASSERT_EQ(device_zero.size(), 2);
@@ -164,7 +169,7 @@ TEST(spm_configuration_parsing, requested_counter_names_deduplicates_parsed_name
 {
     const auto parsed = spm_detail::parse_requested_counters(configuration{
         .counter_events  = { "SQ_WAVES:device=0", "SQ_WAVES:device=1", "TD_TD_BUSY" },
-        .sample_interval = 8192 });
+        .sample_interval = valid_sample_interval });
 
     const auto names = spm_detail::requested_counter_names(parsed);
     EXPECT_EQ(names, (std::unordered_set<std::string>{ "SQ_WAVES", "TD_TD_BUSY" }));
@@ -194,7 +199,8 @@ TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 TEST(spm_config_validation, accepts_sample_interval_without_events)
 {
     EXPECT_TRUE(is_config_valid(
-        configuration{ .counter_events = {}, .sample_interval = 8192 }, {}, {}));
+        configuration{ .counter_events = {}, .sample_interval = valid_sample_interval },
+        {}, {}));
 }
 
 TEST(spm_config_validation, rejects_rocm_dispatch_counter_conflict)
@@ -234,7 +240,9 @@ TEST(spm_runtime_configuration, accepts_when_spm_is_not_requested)
 TEST(spm_runtime_configuration, accepts_sample_interval_without_events)
 {
     EXPECT_TRUE(configure_runtime(
-        nullptr, configuration{ .counter_events = {}, .sample_interval = 8192 }, {}, {}));
+        nullptr,
+        configuration{ .counter_events = {}, .sample_interval = valid_sample_interval },
+        {}, {}));
 }
 
 // Invalid user configuration is the only case that fails tool initialization, so it

@@ -182,7 +182,7 @@ TEST_F(json_config_test, rasolves_hw_counters_section)
 
 TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto json = nlohmann::json::parse(R"({
         "hardware_counters": {
             "enabled": true,
             "spm": {
@@ -192,7 +192,7 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
         }
     })");
 
-    auto result = resolve_config(j);
+    auto result = resolve_config(json);
 
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES");
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4200");
@@ -200,7 +200,7 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 
 TEST_F(json_config_test, does_not_resolve_spm_when_hardware_counters_are_disabled)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto json = nlohmann::json::parse(R"({
         "hardware_counters": {
             "enabled": false,
             "spm": {
@@ -210,7 +210,7 @@ TEST_F(json_config_test, does_not_resolve_spm_when_hardware_counters_are_disable
         }
     })");
 
-    auto result = resolve_config(j);
+    auto result = resolve_config(json);
 
     EXPECT_EQ(result.count(env_vars::ROCM_SPM_EVENTS), 0u);
     EXPECT_EQ(result.count(env_vars::ROCM_SPM_SAMPLE_INTERVAL), 0u);
@@ -443,9 +443,10 @@ TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
         { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4294967296" },
     };
 
-    auto j = env_vars_to_json_schema(env_vars);
+    auto json = env_vars_to_json_schema(env_vars);
 
-    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 4294967296ULL);
+    EXPECT_EQ(json["hardware_counters"]["spm"]["sample_interval"]["value"],
+              4294967296ULL);
 }
 
 TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
@@ -455,13 +456,13 @@ TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
         { rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL, "8192" },
     };
 
-    auto j = env_vars_to_json_schema(env_vars);
+    auto json = env_vars_to_json_schema(env_vars);
 
-    EXPECT_EQ(j["hardware_counters"]["enabled"], true);
-    EXPECT_EQ(j["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES:device=0");
-    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 8192);
+    EXPECT_EQ(json["hardware_counters"]["enabled"], true);
+    EXPECT_EQ(json["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES:device=0");
+    EXPECT_EQ(json["hardware_counters"]["spm"]["sample_interval"]["value"], 8192);
 
-    auto result = resolve_config(j);
+    auto result = resolve_config(json);
 
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES:device=0");
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "8192");
@@ -469,7 +470,7 @@ TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
 
 TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto json = nlohmann::json::parse(R"({
         "hardware_counters": {
             "enabled": true,
             "spm": {
@@ -478,7 +479,7 @@ TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
         }
     })");
 
-    auto result = resolve_config(j);
+    auto result = resolve_config(json);
 
     EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4294967296");
 }

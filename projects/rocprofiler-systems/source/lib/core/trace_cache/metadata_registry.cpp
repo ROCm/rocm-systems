@@ -11,10 +11,12 @@
 #include <cstdint>
 
 #include <fstream>
+#include <functional>
 
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -623,7 +625,9 @@ metadata_registry::set_counter_names(
     device_entries.clear();
     device_entries.reserve(entries.size());
     for(auto& entry : entries)
+    {
         device_entries.emplace(entry.counter_id, std::move(entry));
+    }
 }
 
 std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
@@ -631,10 +635,16 @@ metadata_registry::find_counter_by_id(const counter_name_map_t& map,
                                       std::uint32_t device_id, std::uint64_t counter_id)
 {
     const auto device_itr = map.find(device_id);
-    if(device_itr == map.end()) return std::nullopt;
+    if(device_itr == map.end())
+    {
+        return std::nullopt;
+    }
 
     const auto counter_itr = device_itr->second.find(counter_id);
-    if(counter_itr == device_itr->second.end()) return std::nullopt;
+    if(counter_itr == device_itr->second.end())
+    {
+        return std::nullopt;
+    }
 
     return std::cref(counter_itr->second);
 }
