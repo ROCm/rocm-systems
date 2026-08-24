@@ -1310,7 +1310,9 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
           dev_ptr, release_status);
       // The retained handle could not be balanced after a successful export. Don't hand back
       // a fd whose backing allocation's reference count is now in an unknown state.
+#if !IS_WINDOWS
       close(dmabuffd);
+#endif
       return false;
     }
   } else {
