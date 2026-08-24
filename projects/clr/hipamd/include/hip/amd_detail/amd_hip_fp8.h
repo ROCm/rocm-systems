@@ -327,8 +327,18 @@ So for fp32/fp16, exponent -8 is the cut point to convert to fp8 nanoo */
     mantissa += (1ull << mfmt);  // Add the implicit 1 into mantissa
   }
 
-  bool midpoint = (mantissa & ((1ull << (mfmt - wm + exponent_diff)) - 1)) ==
-                  (1ull << (mfmt - wm + exponent_diff - 1));
+  /* exponent_diff is unbounded below: an input far under the f8 denormal range gives a diff of up
+to 120 for float and 1016 for double. Shifting the 64-bit mantissa by that much is undefined
+behavior, and in practice the shift count is taken mod 64, which turns a full underflow into a
+non-zero code. Both shifts are guarded, not just the mantissa shift: the tie detection shifts by
+mfmt - wm + exponent_diff, so it leaves the valid range much earlier (from exponent_diff == 15 for
+a double converted to e4m3). Once a shift reaches the operand width the whole mantissa is gone,
+which is the underflow-to-zero case the f8_exponent == 0 && mantissa == 0 check at the end already
+turns into a signed zero. */
+  const int mantissa_bits = 8 * static_cast<int>(sizeof(mantissa));
+  const int midpoint_shift = mfmt - wm + exponent_diff;
+  bool midpoint = midpoint_shift < mantissa_bits &&
+                  (mantissa & ((1ull << midpoint_shift) - 1)) == (1ull << (midpoint_shift - 1));
   /* This part is a bit tricky. The judgment of whether it is a tie needs to be done before we shift
 right as shift right could rip off some residual part and make something not midpoint look like
 midpoint. For example, the fp16 number 0x1002 (0 00100 0000000010), it is larger than midpoint, but
@@ -336,7 +346,7 @@ after shift right by 4 bits, it would look like midpoint.
 */
 
   if (exponent_diff > 0)
-    mantissa >>= exponent_diff;
+    mantissa = (exponent_diff >= mantissa_bits) ? 0ull : (mantissa >> exponent_diff);
   else if (exponent_diff == -1)
     mantissa <<= -exponent_diff;
   bool implicit_one = mantissa & (1ull << mfmt);

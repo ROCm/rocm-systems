@@ -317,6 +317,9 @@ deviceLib:
   Unit_fp8_ocp_vector_basic_conversions:
     <<: *level_2
     tags: [types]
+  Unit_fp8_ocp_underflow_host:
+    <<: *level_2
+    tags: [types]
   Unit_fp8_fnuz_bool_host:
     <<: *level_2
     tags: [types]
@@ -327,6 +330,12 @@ deviceLib:
     <<: *level_2
     tags: [types]
   Unit_fp8_fnuz_vector_basic_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_underflow_host:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp8_underflow_known_bad_inputs_host:
     <<: *level_2
     tags: [types]
   Unit__hip_cvt_bfloat16raw_to_e8m0:

@@ -10,6 +10,8 @@
 #include <type_traits>
 #include <vector>
 #include <bitset>
+#include <cmath>
+#include <cstring>
 
 /*
  * Tests for fp8 conversions on host
@@ -1193,5 +1195,110 @@ HIP_TEST_CASE(Unit_fp8_fnuz_vector_basic_conversions) {
 
     REQUIRE(f2 == bf2_1);
     REQUIRE(f2 == h2_1);
+  }
+}
+
+/*
+ * Underflow: a magnitude below half the smallest f8 subnormal has to convert to a signed zero.
+ *
+ * cast_to_f8() shifted the mantissa right by exponent_diff without bounding the shift count, and
+ * exponent_diff is unbounded below - it reaches 120 for float inputs and 1016 for double inputs.
+ * A shift of 64 or more on the 64-bit mantissa is undefined behavior and in practice wraps mod
+ * 64, so a value that underflows completely came back as a non-zero code instead of zero.
+ */
+namespace {
+// Smallest positive subnormal of each format is 2^(1 - bias - wm).
+constexpr int kMinSubnormalExpE4M3Ocp = 1 - 7 - 3;    // 2^-9
+constexpr int kMinSubnormalExpE5M2Ocp = 1 - 15 - 2;   // 2^-16
+constexpr int kMinSubnormalExpE4M3Fnuz = 1 - 8 - 3;   // 2^-10
+constexpr int kMinSubnormalExpE5M2Fnuz = 1 - 16 - 2;  // 2^-17
+
+template <typename fp8_t, typename T>
+void CheckUnderflowsToZero(int min_subnormal_exp, bool is_fnuz) {
+  // Lowest exponent that is still a subnormal of the input type.
+  constexpr int lowest_exp = std::is_same<T, float>::value ? -149 : -1074;
+  const T mantissas[] = {T(1.0), T(1.25), T(1.5), T(1.75), T(1.99)};
+
+  // m * 2^e with m in [1, 2) and e <= min_subnormal_exp - 2 is strictly below half the smallest
+  // subnormal, so it rounds to zero whichever way a tie would go.
+  for (int e = min_subnormal_exp - 2; e >= lowest_exp; --e) {
+    for (const T m : mantissas) {
+      const T magnitude = std::ldexp(m, e);
+      for (int negative = 0; negative < 2; ++negative) {
+        const T value = negative ? -magnitude : magnitude;
+        const unsigned char expected = (is_fnuz || !negative) ? 0x00 : 0x80;
+        const fp8_t converted(value);
+        INFO("input " << static_cast<double>(value) << " = " << static_cast<double>(m) << " * 2^"
+                      << e << ", got 0x" << std::hex << static_cast<int>(converted.__x)
+                      << ", expected 0x" << static_cast<int>(expected));
+        REQUIRE(converted.__x == expected);
+      }
+    }
+  }
+}
+}  // namespace
+
+HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_underflow_host, float, double) {
+  SECTION("e4m3_ocp") {
+    CheckUnderflowsToZero<__hip_fp8_e4m3, TestType>(kMinSubnormalExpE4M3Ocp, false);
+  }
+  SECTION("e5m2_ocp") {
+    CheckUnderflowsToZero<__hip_fp8_e5m2, TestType>(kMinSubnormalExpE5M2Ocp, false);
+  }
+}
+
+HIP_TEMPLATE_TEST_CASE(Unit_fp8_fnuz_underflow_host, float, double) {
+  SECTION("e4m3_fnuz") {
+    CheckUnderflowsToZero<__hip_fp8_e4m3_fnuz, TestType>(kMinSubnormalExpE4M3Fnuz, true);
+  }
+  SECTION("e5m2_fnuz") {
+    CheckUnderflowsToZero<__hip_fp8_e5m2_fnuz, TestType>(kMinSubnormalExpE5M2Fnuz, true);
+  }
+}
+
+// Spot checks on the exact inputs the unbounded shift used to get wrong. The comment on each line
+// is the code that was returned before the shifts were guarded.
+HIP_TEST_CASE(Unit_all_fp8_underflow_known_bad_inputs_host) {
+  auto as_float = [](unsigned int bits) {
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+  };
+  auto as_double = [](unsigned long long bits) {
+    double d;
+    std::memcpy(&d, &bits, sizeof(d));
+    return d;
+  };
+
+  SECTION("e5m2_ocp") {
+    REQUIRE(__hip_fp8_e5m2(as_float(0x17800000)).__x == 0x00);           // was 0x01 (2^-16)
+    REQUIRE(__hip_fp8_e5m2(as_float(0x18000000)).__x == 0x00);           // was 0x02 (2^-15)
+    REQUIRE(__hip_fp8_e5m2(as_float(0x18800000)).__x == 0x00);           // was 0x04 (2^-14)
+    REQUIRE(__hip_fp8_e5m2(as_float(0x98800000)).__x == 0x80);           // was 0x84
+    REQUIRE(__hip_fp8_e5m2(as_double(0x0319000000000000)).__x == 0x00);  // was 0x06
+  }
+
+  SECTION("e4m3_ocp") {
+    REQUIRE(__hip_fp8_e4m3(as_float(0x1b000000)).__x == 0x00);           // was 0x01 (2^-9)
+    REQUIRE(__hip_fp8_e4m3(as_float(0x1b800000)).__x == 0x00);           // was 0x02 (2^-8)
+    REQUIRE(__hip_fp8_e4m3(as_float(0x1c000000)).__x == 0x00);           // was 0x04 (2^-7)
+    REQUIRE(__hip_fp8_e4m3(as_float(0x1c800000)).__x == 0x00);           // was 0x08 (2^-6)
+    REQUIRE(__hip_fp8_e4m3(as_float(0x9c800000)).__x == 0x80);           // was 0x88
+    REQUIRE(__hip_fp8_e4m3(as_double(0x0399000000000000)).__x == 0x00);  // was 0x0c
+  }
+
+  SECTION("e5m2_fnuz") {
+    REQUIRE(__hip_fp8_e5m2_fnuz(as_float(0x17000000)).__x == 0x00);           // was 0x01
+    REQUIRE(__hip_fp8_e5m2_fnuz(as_float(0x17800000)).__x == 0x00);           // was 0x02
+    REQUIRE(__hip_fp8_e5m2_fnuz(as_float(0x18000000)).__x == 0x00);           // was 0x04
+    REQUIRE(__hip_fp8_e5m2_fnuz(as_double(0x0309000000000000)).__x == 0x00);  // was 0x06
+  }
+
+  SECTION("e4m3_fnuz") {
+    REQUIRE(__hip_fp8_e4m3_fnuz(as_float(0x1a800000)).__x == 0x00);           // was 0x01
+    REQUIRE(__hip_fp8_e4m3_fnuz(as_float(0x1b000000)).__x == 0x00);           // was 0x02
+    REQUIRE(__hip_fp8_e4m3_fnuz(as_float(0x1b800000)).__x == 0x00);           // was 0x04
+    REQUIRE(__hip_fp8_e4m3_fnuz(as_float(0x1c000000)).__x == 0x00);           // was 0x08
+    REQUIRE(__hip_fp8_e4m3_fnuz(as_double(0x0389000000000000)).__x == 0x00);  // was 0x0c
   }
 }
