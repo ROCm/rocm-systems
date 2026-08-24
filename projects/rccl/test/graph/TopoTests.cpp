@@ -570,6 +570,52 @@ TEST_F(TopoTest, GetSystemFromXml_MloPartOnPciFunctionOne) {
   ncclTopoFree(built);
 }
 
+TEST_F(TopoTest, GetSystemFromXml_HipLogicalFunctionUnderPhysicalPci) {
+  const uint64_t host = 0x1250;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0001:01:00.0", "gfx1250", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx1250", 1, 1, /*mloPart=*/1);
+  addGpuLink(gpu0, "0001:01:00.1", 1, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0001:01:00.0", 1, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  int64_t bus0 = 0, bus1 = 0;
+  ASSERT_EQ(busIdToInt64("0001:01:00.0", &bus0), ncclSuccess);
+  ASSERT_EQ(busIdToInt64("0001:01:00.1", &bus1), ncclSuccess);
+
+  struct ncclTopoNode* d0 = nullptr;
+  struct ncclTopoNode* d1 = nullptr;
+  struct ncclTopoNode* fakeFn = nullptr;
+  ASSERT_EQ(ncclTopoGetNode(built, &d0, DEV, NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, 0))),
+            ncclSuccess);
+  ASSERT_EQ(ncclTopoGetNode(built, &d1, DEV, NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, 1))),
+            ncclSuccess);
+  ASSERT_EQ(ncclTopoGetNode(built, &fakeFn, DEV, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
+  struct ncclTopoNode* rawFn0 = nullptr;
+  ASSERT_EQ(ncclTopoGetNode(built, &rawFn0, DEV, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
+  ASSERT_NE(d0, nullptr);
+  ASSERT_NE(d1, nullptr);
+  EXPECT_EQ(fakeFn, nullptr);
+  EXPECT_EQ(rawFn0, nullptr);
+
+  ASSERT_NE(findLink(d0, d1), nullptr);
+  ASSERT_NE(findLink(d1, d0), nullptr);
+
+  for (int i = 0; i < built->nodes[DEV].count; i++) {
+    EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(built->nodes[DEV].nodes[i].id) & 0xf, 0);
+  }
+
+  ncclTopoFree(built);
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped

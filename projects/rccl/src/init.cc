@@ -25,6 +25,7 @@
 #include "enqueue.h"
 #include "graph.h"
 #include "graph/topo.h"
+#include "os.h"
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
@@ -1078,6 +1079,34 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 #endif
   info->busId = comm->busId;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP names do not contain "MLOPart". DPX/XCP logical GPUs are still exposed
+  // as PCI function .1 (etc.) while sysfs at that BDF is not a GPU. Use the
+  // PCI function as the partition index so both ranks share the physical PCI
+  // node (see ncclTopoFillGpu) with distinct overlay DEV ids: function 0 is
+  // mlopart 0, a fake non-GPU function is mlopart N.
+  if (info->mloPart == NCCL_TOPO_UNDEF) {
+    int fn = (int)(info->busId & 0xf);
+    if (fn >= 0 && fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char deviceClass[MAX_STR_LEN];
+      deviceClass[0] = '\0';
+      if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
+        (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+        int isGpu = 0;
+        if (deviceClass[0] != '\0') {
+          if (strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0) isGpu = 1;
+          else if (strncmp(deviceClass, "0x03", 4) == 0) isGpu = 1;
+        }
+        if (fn == 0) {
+          if (isGpu) info->mloPart = 0;
+        } else if (!isGpu) {
+          info->mloPart = fn;
+        }
+      }
+    }
+  }
+#endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 
   // detect if fine grained memory is available on this GPU
