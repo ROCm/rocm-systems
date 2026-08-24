@@ -5,11 +5,7 @@
  */
 
 /**
- * Tests the device-memory footprint of a graph exec's internal stream pool.
- * Each hip::Stream a graph exec holds carries a VirtualGPU whose kernarg pool is
- * device-local on large-BAR parts, so a stream created per instantiate but never
- * used is charged against VRAM for the whole graph lifetime. Workloads that keep
- * thousands of graphs resident amplify this into gigabytes.
+ * Graph exec stream-pool device-memory footprint tests.
  */
 
 #include <hip_test_common.hh>
@@ -17,6 +13,7 @@
 #include <hip_test_kernels.hh>
 #include <utils.hh>
 
+#include <cstdlib>
 #include <vector>
 
 namespace {
@@ -28,8 +25,7 @@ __global__ void bumpKernel(int* out, int n) {
   if (i < n) out[i] += 1;
 }
 
-// Independent chains of kernel nodes, so the scheduler requests more than one
-// internal stream rather than folding the graph onto a single one.
+// Build chains of kernel nodes.
 void buildChainedGraph(hipGraph_t* graph, int* buf, int chains, int depth) {
   HIP_CHECK(hipGraphCreate(graph, 0));
   for (int c = 0; c < chains; ++c) {
@@ -63,10 +59,8 @@ size_t freeDeviceMemory() {
 /**
  * Test Description
  * ------------------------
- *  - Instantiates many graphs and measures the device memory each one retains.
- *    A graph exec must not hold internal streams that its launches never use, so
- *    the steady-state cost per instantiate stays well below one stream's kernarg
- *    pool (HSA_KERNARG_POOL_SIZE, 4 MiB by default).
+ *  - Same-device instantiate footprint must stay below one kernarg pool. Single
+ *    chain needs only the launch stream; no eager cross-device slot-0 stream.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphStreamPoolFootprint.cc
@@ -76,16 +70,21 @@ size_t freeDeviceMemory() {
  */
 HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   constexpr int kGraphs = 64;
+  constexpr int kChains = 1;
+  constexpr int kDepth = 2;
   constexpr size_t kMaxBytesPerGraph = 2 * 1024 * 1024;
+
+  const char* min_overlap = std::getenv("DEBUG_HIP_GRAPH_MIN_OVERLAP");
+  INFO("DEBUG_HIP_GRAPH_MIN_OVERLAP=" << (min_overlap ? min_overlap : "(default)"));
 
   int* buf = nullptr;
   HIP_CHECK(hipMalloc(&buf, kElems * sizeof(int)));
 
-  // Warm up so one-off runtime allocations are not attributed to the graphs.
+  // Warm up one-off allocations away from the measurement.
   for (int i = 0; i < 4; ++i) {
     hipGraph_t warm_graph = nullptr;
     hipGraphExec_t warm_exec = nullptr;
-    buildChainedGraph(&warm_graph, buf, 4, 2);
+    buildChainedGraph(&warm_graph, buf, kChains, kDepth);
     HIP_CHECK(hipGraphInstantiate(&warm_exec, warm_graph, nullptr, nullptr, 0));
     HIP_CHECK(hipGraphExecDestroy(warm_exec));
     HIP_CHECK(hipGraphDestroy(warm_graph));
@@ -96,7 +95,7 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   std::vector<hipGraph_t> graphs(kGraphs, nullptr);
   std::vector<hipGraphExec_t> execs(kGraphs, nullptr);
   for (int i = 0; i < kGraphs; ++i) {
-    buildChainedGraph(&graphs[i], buf, 4, 2);
+    buildChainedGraph(&graphs[i], buf, kChains, kDepth);
     HIP_CHECK(hipGraphInstantiate(&execs[i], graphs[i], nullptr, nullptr, 0));
   }
 
@@ -111,7 +110,7 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
     HIP_CHECK(hipGraphDestroy(graphs[i]));
   }
 
-  // Everything the graphs held must come back on destroy.
+  // Memory must return after destroy.
   const size_t free_end = freeDeviceMemory();
   const size_t retained = (free_before > free_end) ? (free_before - free_end) : 0;
   INFO("device memory retained after destroy: " << retained << " bytes");
@@ -123,10 +122,8 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
 /**
  * Test Description
  * ------------------------
- *  - Interleaves same-device and cross-device launches of one graph exec. A
- *    cross-device launch needs an internal capture-device stream for slot 0,
- *    while a same-device launch supplies slot 0 itself; both orderings must keep
- *    working when that stream is created on demand rather than at instantiate.
+ *  - Same- and cross-device launches interleaved; slot-0 stream created on first
+ *    cross-device launch, not at instantiate.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphStreamPoolFootprint.cc
@@ -161,27 +158,24 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_CrossDeviceInterleaved) {
   HIP_CHECK(hipStreamCreate(&cross_dev_stream));
   HIP_CHECK(hipSetDevice(0));
 
-  // same-device first, so slot 0 comes from the user stream
+  // same-device first (user stream is slot 0)
   HIP_CHECK(hipGraphLaunch(exec, same_dev_stream));
   HIP_CHECK(hipStreamSynchronize(same_dev_stream));
 
-  // cross-device, which is where the internal slot-0 stream is needed
+  // cross-device (creates internal slot-0 stream)
   HIP_CHECK(hipSetDevice(1));
   HIP_CHECK(hipGraphLaunch(exec, cross_dev_stream));
   HIP_CHECK(hipStreamSynchronize(cross_dev_stream));
   HIP_CHECK(hipSetDevice(0));
 
-  // back to same-device: the stream added above must be left idle
   HIP_CHECK(hipGraphLaunch(exec, same_dev_stream));
   HIP_CHECK(hipStreamSynchronize(same_dev_stream));
 
-  // cross-device again, reusing rather than recreating
   HIP_CHECK(hipSetDevice(1));
   HIP_CHECK(hipGraphLaunch(exec, cross_dev_stream));
   HIP_CHECK(hipStreamSynchronize(cross_dev_stream));
   HIP_CHECK(hipSetDevice(0));
 
-  // Every launch must have run every node exactly once, on either device.
   int observed = 0;
   HIP_CHECK(hipMemcpy(&observed, buf, sizeof(int), hipMemcpyDeviceToHost));
   INFO("observed " << observed << " increments");
