@@ -612,6 +612,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   }
 
   // After transfer is completed, decrement the signal value.
+  fprintf(stderr, "[blit] SubmitCommand: signal decrement: platform_atomic=%d"
+          " completion_val=0x%llx signal_loc=%p\n",
+          (int)platform_atomic_support_, (unsigned long long)completion_signal_value,
+          out_signal.ValueLocation());
   if (platform_atomic_support_) {
     BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
     command_addr += atomic_command_size_;
@@ -1952,25 +1956,32 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
 
 template <bool useGCR, bool scopeFields>
 char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
+  // Reserve the caller's packets plus the native-SDMA FENCE/TRAP epilogue that
+  // libhsakmt appends on the doorbell (0 on non-native paths), so this producer's
+  // write index stays in step with the submitted wptr and the free-space check
+  // below accounts for those bytes.
+  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
   // Ring is full when all but one byte is written.
-  if (cmd_size >= kQueueSize) {
+  if (reserve_size >= kQueueSize) {
     return nullptr;
   }
 
   curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
+  fprintf(stderr, "[blit] AcquireWriteAddress cmd_size=%u curr_index=0x%llx rptr=0x%llx\n",
+          cmd_size, (unsigned long long)curr_index, (unsigned long long)*queue_rptr_);
 
   while (true) {
     // Check whether a linear region of the requested size is available.
     // If == cmd_size: region is at beginning of ring.
     // If < cmd_size: region intersects end of ring, pad with no-ops and retry.
-    if (WrapIntoRing(curr_index + cmd_size) < cmd_size) {
+    if (WrapIntoRing(curr_index + reserve_size) < reserve_size) {
       PadRingToEnd(curr_index);
       curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
       continue;
     }
 
     // Check whether the engine has finished using this region.
-    const uint64_t new_index = curr_index + cmd_size;
+    const uint64_t new_index = curr_index + reserve_size;
 
     if (CanWriteUpto(new_index) == false) {
       // Wait for read index to move and try again.
@@ -1996,10 +2007,13 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index) {
+  fprintf(stderr, "[blit] UpdateWriteAndDoorbellRegister curr=0x%llx new=0x%llx\n",
+          (unsigned long long)curr_index, (unsigned long long)new_index);
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
     uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
+    fprintf(stderr, "[blit] commit_index=0x%llx\n", (unsigned long long)commit_index);
     if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
@@ -2047,12 +2061,16 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
-  if (cmd_size > kQueueSize) {
+  // Advance by the caller's packets plus the reserved native-SDMA epilogue so the
+  // doorbell wptr matches what AcquireWriteAddress reserved; libhsakmt fills the
+  // reserved [end-epilogue, end) region with FENCE+TRAP.
+  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
+  if (reserve_size > kQueueSize) {
     assert(false && "cmd_addr is outside the queue buffer range");
     return;
   }
 
-  UpdateWriteAndDoorbellRegister(curr_index, curr_index + cmd_size);
+  UpdateWriteAndDoorbellRegister(curr_index, curr_index + reserve_size);
 }
 
 template <bool useGCR, bool scopeFields>
@@ -2555,6 +2573,8 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
           pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR_RECT;
           if (scopeFields) pkt->HEADER_UNION.npd = 1;
           pkt->HEADER_UNION.element = element;
+          fprintf(stderr, "[blit] BuildCopyRect sbase=0x%llx dbase=0x%llx element=%d\n",
+                  (unsigned long long)sbase, (unsigned long long)dbase, element);
           pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = sbase;
           pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = sbase >> 32;
           pkt->SRC_PARAMETER_1_UNION.src_offset_x = soff;

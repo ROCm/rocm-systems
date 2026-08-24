@@ -135,6 +135,13 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
   HsaQueueResource queue_resource_;
   int32_t sdma_engine_id_;
   bool active_;
+
+  // GPU VA of the WDDM HwQueue progress fence (native SDMA user queue on
+  // Windows/DXG only). When non-zero, RingDoorbell appends a FENCE+TRAP sequence
+  // that writes progress_fence_id_ here so the OS scheduler tracks completion.
+  // Zero on Linux/KFD and on the legacy SWS-thread path -> no packets appended.
+  uint64_t progress_fence_va_;
+  uint64_t progress_fence_id_;
 };
 
 }  // namespace AMD
