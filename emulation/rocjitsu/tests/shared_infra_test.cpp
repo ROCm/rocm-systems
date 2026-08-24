@@ -396,16 +396,15 @@ TEST(MfmaExecTest, Gfx11WmmaIu8InputLocReplicatesKAcrossHalfwaves) {
   EXPECT_EQ(g1k15.sub_element, 3u);
 }
 
-TEST(MfmaExecTest, Gfx1250WmmaIu8InputLocMatchesEightElementKBlocks) {
+TEST(MfmaExecTest, Gfx1250WmmaIu8K64PreservesSixteenElementKBlocks) {
   struct Anchor {
     uint32_t k;
     uint32_t lane;
     uint32_t slot;
   };
   constexpr std::array anchors{
-      Anchor{0, 3, 0},   Anchor{7, 3, 7},    Anchor{8, 19, 0},   Anchor{15, 19, 7},
-      Anchor{16, 3, 8},  Anchor{24, 19, 8},  Anchor{32, 3, 16},  Anchor{40, 19, 16},
-      Anchor{48, 3, 24}, Anchor{56, 19, 24}, Anchor{63, 19, 31},
+      Anchor{0, 3, 0},   Anchor{15, 3, 15}, Anchor{16, 19, 0},  Anchor{31, 19, 15},
+      Anchor{32, 3, 16}, Anchor{47, 3, 31}, Anchor{48, 19, 16}, Anchor{63, 19, 31},
   };
   for (const auto &anchor : anchors) {
     const auto loc = amdgpu::wmma_input_loc(16, 64, /*i=*/3, anchor.k, 8);
@@ -492,23 +491,26 @@ TEST(MfmaExecTest, SwmmacK32InputLocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g4s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchSparseManual) {
+TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchHardwareReferenceKernels) {
+  // These anchors record the layout required by hardware-reference Tensile
+  // kernels. They intentionally do not claim agreement with the public CDNA5
+  // sparse-layout text, which describes different B and selector routing.
   for (uint32_t ck = 0; ck < 64; ++ck) {
-    const uint32_t expected_lane = 5u + 16u * ((ck >> 3) & 1u);
-    const uint32_t expected_slot = (ck & 7u) + 8u * (ck >> 4);
+    const uint32_t expected_a_lane = 5u + 16u * ((ck >> 4) & 1u);
+    const uint32_t expected_a_slot = (ck & 15u) + 16u * (ck >> 5);
     const auto a = amdgpu::swmmac_a_input_loc(16, 128, /*row=*/5, ck, 8);
-    EXPECT_EQ(a.lane, expected_lane) << ck;
-    EXPECT_EQ(a.vgpr_offset, expected_slot / 4) << ck;
-    EXPECT_EQ(a.sub_element, expected_slot % 4) << ck;
+    EXPECT_EQ(a.lane, expected_a_lane) << ck;
+    EXPECT_EQ(a.vgpr_offset, expected_a_slot / 4) << ck;
+    EXPECT_EQ(a.sub_element, expected_a_slot % 4) << ck;
 
     const auto index = amdgpu::swmmac_index_loc(16, 128, 8, /*row=*/5, ck, /*index_entries=*/32);
-    EXPECT_EQ(index.lane, expected_lane) << ck;
-    EXPECT_EQ(index.local_compressed_k, expected_slot) << ck;
+    EXPECT_EQ(index.lane, 5u + 16u * (ck / 32u)) << ck;
+    EXPECT_EQ(index.local_compressed_k, ck % 32u) << ck;
   }
 
   for (uint32_t k = 0; k < 128; ++k) {
-    const uint32_t expected_lane = 7u + 16u * ((k >> 4) & 1u);
-    const uint32_t expected_slot = (k & 15u) + 16u * (k >> 5);
+    const uint32_t expected_lane = 7u + 16u * ((k >> 5) & 1u);
+    const uint32_t expected_slot = (k & 31u) + 32u * (k >> 6);
     const auto b = amdgpu::swmmac_b_input_loc(16, 128, /*col=*/7, k, 8);
     EXPECT_EQ(b.lane, expected_lane) << k;
     EXPECT_EQ(b.vgpr_offset, expected_slot / 4) << k;
@@ -568,7 +570,7 @@ TEST(TransposeLoadTest, WmmaTrB8Wave64UsesFirst32AddressesAndOneVgpr) {
   }
 }
 
-TEST(TransposeLoadTest, Cdna4B64TrB8KeepsMfmaPermutation) {
+TEST(TransposeLoadTest, Cdna4B64TrB8MatchesMfmaLaneLayout) {
   amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
   state.wf_size = 64;
   state.num_elems = 2;
@@ -583,15 +585,13 @@ TEST(TransposeLoadTest, Cdna4B64TrB8KeepsMfmaPermutation) {
   amdgpu::transpose_response(state);
 
   ASSERT_EQ(state.num_elems, 2u);
-  for (uint32_t half = 0; half < 2; ++half)
-    for (uint32_t group = 0; group < 32; group += 4)
-      for (uint32_t byte = 0; byte < 8; ++byte) {
-        const uint32_t dest_reg = (group % 16) / 8;
-        const uint32_t dest_lane = half * 32 + (group / 16) * 16 + ((group / 4) % 2) * 8 + byte;
-        for (uint32_t source = 0; source < 4; ++source)
-          EXPECT_EQ(state.response_data[dest_lane * 8 + dest_reg * 4 + source],
-                    input[(half * 32 + group + source) * 8 + byte]);
-      }
+  for (uint32_t dest_lane = 0; dest_lane < 64; ++dest_lane) {
+    const uint32_t source_byte = dest_lane & 7u;
+    const uint32_t source_base = (dest_lane & ~0xfu) | ((dest_lane >> 3) & 1u);
+    for (uint32_t dest_byte = 0; dest_byte < 8; ++dest_byte)
+      EXPECT_EQ(state.response_data[dest_lane * 8 + dest_byte],
+                input[(source_base + 2 * dest_byte) * 8 + source_byte]);
+  }
 }
 
 TEST(MfmaExecTest, Gfx12Wave64WmmaLocSplitsKAcrossFourLaneGroups) {
@@ -878,9 +878,8 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
         uint32_t expected_lane;
         uint32_t expected_slot;
         if (data_bits == 8) {
-          // CDNA5 defines K=128 as two consecutive K=64 matrices.
-          expected_lane = index + 16u * ((k >> 3u) & 1u);
-          expected_slot = (k & 7u) + 8u * (k >> 4u);
+          expected_lane = index + 16u * ((k >> 4u) & 1u);
+          expected_slot = (k & 15u) + 16u * (k >> 5u);
         } else {
           expected_lane = index + 16u * ((k >> 2u) & 1u);
           const uint32_t expected_reg = ((k >> 1u) & 1u) + 2u * ((k >> 3u) & 1u) +
@@ -920,46 +919,48 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
   }
 }
 
-TEST(MfmaExecTest, Cdna4ScaledMfmaInputLocMatchesSiliconQualifiedLayouts) {
+TEST(MfmaExecTest, Cdna5BlockScaledWmmaUsesContiguousKBlocks) {
+  for (uint32_t data_bits : {4u, 6u, 8u}) {
+    const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+    for (uint32_t index = 0; index < 16; ++index) {
+      for (uint32_t k = 0; k < 128; ++k) {
+        SCOPED_TRACE(::testing::Message()
+                     << "data_bits=" << data_bits << " index=" << index << " k=" << k);
+        const uint32_t expected_lane = index + 16u * ((k / block_elems) & 1u);
+        const uint32_t expected_slot = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+        const uint32_t expected_bit = expected_slot * data_bits;
+        const auto actual = amdgpu::wmma_block_scaled_input_loc(16, 128, index, k, data_bits);
+        EXPECT_EQ(actual.lane, expected_lane);
+        EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
+        EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
+      }
+    }
+  }
+
+  for (uint32_t k = 0; k < 128; ++k) {
+    EXPECT_EQ(amdgpu::wmma_block_scale_byte(k, /*scale16=*/false), k / 32u);
+    EXPECT_EQ(amdgpu::wmma_block_scale_byte(k, /*scale16=*/true), k / 16u);
+  }
+}
+
+TEST(MfmaExecTest, Cdna4ScaledMfmaInputLocMatchesDenseF8F6F4Layout) {
   constexpr std::array<uint32_t, 3> widths = {8, 6, 4};
   for (const auto &[dim, k_size] :
        std::array<std::pair<uint32_t, uint32_t>, 2>{{{16, 128}, {32, 64}}}) {
     for (uint32_t data_bits : widths) {
-      for (uint32_t other_bits : widths) {
-        for (uint32_t index = 0; index < dim; ++index) {
-          for (uint32_t k = 0; k < k_size; ++k) {
-            SCOPED_TRACE(::testing::Message()
-                         << "dim=" << dim << " k_size=" << k_size << " data_bits=" << data_bits
-                         << " other_bits=" << other_bits << " index=" << index << " k=" << k);
-            uint32_t expected_lane;
-            uint32_t expected_slot;
-            if (data_bits == 8) {
-              const uint32_t lanes_per_block = 64u / dim;
-              const uint32_t chunk = k / 16u;
-              expected_lane = (chunk % lanes_per_block) * dim + index;
-              expected_slot = (chunk / lanes_per_block) * 16u + (k & 15u);
-            } else if (other_bits == 8 && dim == 16) {
-              expected_lane = 16u * (k / 32u) + index;
-              expected_slot = 16u * ((k / 16u) & 1u) + (k & 15u);
-            } else if (other_bits == 8) {
-              expected_lane = 32u * (k / 32u) + index;
-              expected_slot = k & 31u;
-            } else if (dim == 16) {
-              expected_lane = 16u * ((k % 64u) / 16u) + index;
-              expected_slot = 16u * (k / 64u) + (k & 15u);
-            } else {
-              expected_lane = 32u * ((k % 32u) / 16u) + index;
-              expected_slot = 16u * (k / 32u) + (k & 15u);
-            }
-
-            const auto actual =
-                amdgpu::mfma_scale_f8f6f4_input_loc(dim, k_size, index, k, data_bits, other_bits);
-            const uint32_t expected_bit = expected_slot * data_bits;
-            EXPECT_EQ(actual.lane, expected_lane);
-            EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
-            EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
-            EXPECT_EQ(actual.data_bits, data_bits);
-          }
+      for (uint32_t index = 0; index < dim; ++index) {
+        for (uint32_t k = 0; k < k_size; ++k) {
+          SCOPED_TRACE(::testing::Message()
+                       << "dim=" << dim << " k_size=" << k_size << " data_bits=" << data_bits
+                       << " index=" << index << " k=" << k);
+          const auto actual = amdgpu::mfma_scale_f8f6f4_input_loc(dim, k_size, index, k, data_bits);
+          const auto expected =
+              amdgpu::input_loc(dim, k_size, /*B=*/1, index, k, /*b=*/0, data_bits);
+          EXPECT_EQ(actual.vgpr_offset, expected.vgpr_offset);
+          EXPECT_EQ(actual.lane, expected.lane);
+          EXPECT_EQ(actual.sub_element, expected.sub_element);
+          EXPECT_EQ(actual.bit_offset, expected.bit_offset);
+          EXPECT_EQ(actual.data_bits, expected.data_bits);
         }
       }
     }

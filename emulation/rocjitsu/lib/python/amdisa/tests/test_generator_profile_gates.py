@@ -126,6 +126,49 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize(
+    'arch_name',
+    (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ),
+)
+def test_shared_scalar_pair_selector_contract_matches_in_tree_isas(
+    arch_name: str,
+) -> None:
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+
+    CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
+def test_shared_scalar_pair_selector_contract_rejects_value_drift() -> None:
+    arch_name = 'cdna4'
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    selector = next(
+        item for item in spec.opnd_selectors if item.operand_type == 'OPR_SSRC'
+    )
+    selector.op_sel_vals = [
+        (name, '105' if name == 'OPR_SSRC_VCC_LO' else value)
+        for name, value in selector.op_sel_vals
+    ]
+
+    with pytest.raises(ValueError, match=r'OPR_SSRC_VCC_LO=106'):
+        CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
 def gen_mfma(
     inst: Instruction,
     dst: list[str],
@@ -251,6 +294,83 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
     assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
     for name in names[1:]:
         assert rdna4[name].semantic_class == 'ds_atomic'
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 3),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 3),
+    ],
+)
+def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> None:
+    names = ('DS_LOAD_TR8_B64', 'DS_LOAD_B64_TR_B8', 'DS_LOAD_TR_B64')
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VDS',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 6),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 6),
+    ],
+)
+def test_global_b8_transpose_aliases_share_profile_routing(
+    profile, expected_kind
+) -> None:
+    names = (
+        'GLOBAL_LOAD_TR8_B64',
+        'GLOBAL_LOAD_B64_TR_B8',
+        'GLOBAL_LOAD_TR_B64',
+    )
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VGLOBAL',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert profile.global_b8_transpose_kind == expected_kind
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+def test_global_b8_transpose_kind_can_be_overridden_by_profile() -> None:
+    class GlobalB8Kind3Profile(Cdna5Profile):
+        @property
+        def global_b8_transpose_kind(self) -> int:
+            return 3
+
+    sem = derive_semantics('GLOBAL_LOAD_TR8_B64', 'ENC_VGLOBAL', GlobalB8Kind3Profile())
+
+    assert sem is not None
+    assert sem.transpose_kind == 3
+
+
+def test_gfx1250_ds_b8_transpose_uses_profile_routing(
+    gfx1250_generated_root: Path,
+) -> None:
+    vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
+    body = _generated_method_body(vds, 'DsLoadTr8B64Vds', 'DsLoadB96Vds')
+    assert 'd->transpose = 3;' in body
 
 
 @pytest.mark.parametrize(
@@ -2711,6 +2831,23 @@ def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
     for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
         source = (tmp_path / 'cdna1' / source_name).read_text()
         assert source.count(simd_glue_include) == 1
+
+
+def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    vop3 = next(
+        encoding for encoding in spec.inst_encodings if encoding.enc_name == 'ENC_VOP3'
+    )
+    cndmask = next(inst for inst in vop3.insts if inst.name == 'V_CNDMASK_B32')
+
+    body = generator._gen_execute_body(
+        cndmask, semantics.instructions[cndmask.name], vop3.enc_name
+    )
+
+    assert body.count('amdgpu::apply_vop3_b32_src_mod(') == 2
+    assert re.search(r'(?<!amdgpu::)apply_vop3_b32_src_mod\(', body) is None
 
 
 def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):

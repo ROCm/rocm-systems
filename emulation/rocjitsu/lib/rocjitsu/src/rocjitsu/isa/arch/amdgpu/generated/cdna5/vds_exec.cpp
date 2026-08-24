@@ -3243,7 +3243,7 @@ void DsLoadTr8B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->transpose = 6;
+  d->transpose = 3;
   ds_calculate_addresses_all_lanes(inst_, wf, *d);
   set_data(std::move(d));
 }

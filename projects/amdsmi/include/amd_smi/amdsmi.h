@@ -222,7 +222,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 0
+#define AMDSMI_LIB_VERSION_MINOR 1
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -6225,6 +6225,7 @@ amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_hand
  *  @param[in,out] status_string A pointer to a const char * which will be made
  *  to point to a description of the provided error code
  *
+ *  @retval ::AMDSMI_STATUS_INVAL if @p status_string is NULL
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string);

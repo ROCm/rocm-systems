@@ -124,6 +124,7 @@ set(SRC_FILES
   include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
   include/algorithms/all_reduce/all_reduce_dda_ll.h
+  include/algorithms/all_reduce/all_reduce_dda_ll_twoshot.h
   include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
@@ -254,6 +255,7 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
@@ -1239,7 +1241,18 @@ target_link_libraries(rccl PRIVATE   hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
-  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+  find_package(rocm-core QUIET)
+  if(TARGET rocm-core)
+    target_link_libraries(rccl PRIVATE rocm-core)
+  else()
+    find_library(ROCM_CORE_LIB NAMES rocm-core
+      HINTS "${ROCMCORE_PATH}" "${ROCM_PATH}"
+      PATH_SUFFIXES lib lib64)
+    if(NOT ROCM_CORE_LIB)
+      message(FATAL_ERROR "Could not find librocm-core")
+    endif()
+    target_link_libraries(rccl PRIVATE ${ROCM_CORE_LIB})
+  endif()
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,

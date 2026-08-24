@@ -32,13 +32,8 @@ struct PkF32Words {
 };
 
 PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  const uint32_t lo = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-  const auto reg = operand.to_register_ref();
-  if (!reg || reg->cls != RegClass::VGPR)
-    return {lo, lo};
-
-  const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-  return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+  return {pair.lo, pair.hi};
 }
 
 uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {
