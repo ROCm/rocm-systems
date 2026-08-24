@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """Unit tests for utils.parser.build_dfs, apply_filters, apply_kernel_filter,
-load_pc_sampling_data, utils_analysis filter resolution, and
+load_pc_sampling_data, correct_sys_info, utils_analysis filter resolution, and
 utils_common.expand_placeholder_ranges."""
 
 from collections import OrderedDict
@@ -15,12 +15,15 @@ import pytest
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
+from utils.metrics.evaluation_pipeline import create_sys_vars
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
     build_dfs,
+    correct_sys_info,
     load_pc_sampling_data,
 )
+from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
@@ -941,3 +944,149 @@ def test_display_dedup_across_dataframes():
     matched = get_matched_torch_operators_for_display(torch_operators, ["all"])
     op_names = [name for name, _ in matched]
     assert op_names.count(H3) == 1
+
+
+# =============================================================================
+# Tests for correct_sys_info (analyze --specs-correction)
+# =============================================================================
+
+MI350_IP_BLOCKS = "SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF|roofline"
+
+
+def _mi350_mspec() -> MachineSpecsCDNA:
+    """Fully populated MI350 (gfx950) specs, mirroring the vcopy fixture.
+
+    Values match tests/workloads/vcopy/MI350/sysinfo.csv so that
+    get_class_members() reports no missing required fields.
+    """
+    return MachineSpecsCDNA(
+        workload_path="/workloads/vcopy/MI350",
+        command="./tests/vcopy -n 1048576 -b 256 -i 3",
+        ip_blocks=MI350_IP_BLOCKS,
+        timestamp="Fri Jun 26 20:32:27 2026 (UTC)",
+        version="3",
+        hostname="test-host",
+        cpu_model="AMD EPYC 9575F 64-Core Processor",
+        sbios="American Megatrends International, LLC.1.8",
+        linux_distro="Ubuntu 22.04.5 LTS",
+        linux_kernel_version="6.17.0-35-generic",
+        amd_gpu_kernel_version="6.19.9.31400000",
+        cpu_memory="3170244916",
+        gpu_memory="264224768",
+        rocm_version="7.14.0",
+        vbios="113-M350-01-1K1-040A",
+        compute_partition="SPX",
+        memory_partition="NPS1",
+        gpu_series="MI350",
+        gpu_model="MI350",
+        gpu_arch="gfx950",
+        gpu_chip_id="30112",
+        gpu_l1="32",
+        gpu_l2="4096",
+        cu_per_gpu="256",
+        simd_per_cu="4",
+        se_per_gpu="32",
+        sa_per_se="1",
+        wave_size="64",
+        workgroup_max_size="1024",
+        max_waves_per_cu="32",
+        max_sclk="2200",
+        max_mclk="1900",
+        cur_sclk="2200",
+        cur_mclk="1900",
+        l2_banks="16",
+        total_l2_chan="128",
+        lds_banks_per_cu="32",
+        sqc_per_gpu="128",
+        pipes_per_gpu="4",
+        num_xcd="8",
+        num_memory_channels="128",
+    )
+
+
+class TestCorrectSysInfo:
+    """--specs-correction parsing, spec overrides, and error handling."""
+
+    def test_single_pair_overrides_spec(self) -> None:
+        """One name:value pair updates the spec object and the returned frame."""
+        mspec = _mi350_mspec()
+        sys_info = correct_sys_info(mspec, "num_xcd:4")
+
+        assert mspec.num_xcd == "4"
+        assert len(sys_info) == 1
+        assert sys_info["num_xcd"].item() == "4"
+
+    def test_multiple_pairs_override_every_spec(self) -> None:
+        """Comma-separated pairs are all applied."""
+        mspec = _mi350_mspec()
+        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_surrounding_whitespace_is_stripped(self) -> None:
+        """Spaces around names and values do not break the override."""
+        sys_info = correct_sys_info(_mi350_mspec(), " num_xcd : 4 , cu_per_gpu:64 ")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_untouched_specs_are_preserved(self) -> None:
+        """Specs that were not corrected survive the rebuild of sys_info.
+
+        analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
+        after the correction, so dropping columns here would break analysis.
+        """
+        sys_info = correct_sys_info(_mi350_mspec(), "num_xcd:4")
+
+        assert sys_info["ip_blocks"].item() == MI350_IP_BLOCKS
+        assert sys_info["gpu_arch"].item() == "gfx950"
+        assert sys_info["gpu_model"].item() == "MI350"
+        assert sys_info["total_l2_chan"].item() == "128"
+
+    def test_fragment_without_separator_is_ignored(self) -> None:
+        """A fragment with no ':' is skipped; valid pairs still apply."""
+        mspec = _mi350_mspec()
+        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "256"
+
+    def test_value_keeps_everything_after_the_first_colon(self) -> None:
+        """Only the first ':' separates name from value."""
+        sys_info = correct_sys_info(_mi350_mspec(), "command:./vcopy -n 1:2")
+
+        assert sys_info["command"].item() == "./vcopy -n 1:2"
+
+    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
+        """An unknown spec name reports the name and aborts."""
+        error_calls = []
+
+        def record_and_exit(*args, **_kwargs):
+            error_calls.append(args)
+            raise SystemExit(1)
+
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+
+        with pytest.raises(SystemExit):
+            correct_sys_info(_mi350_mspec(), "not_a_spec:1")
+
+        assert "not_a_spec" in str(error_calls[0])
+        assert "--specs" in str(error_calls[0])
+
+    def test_corrected_specs_reach_metric_evaluation(self) -> None:
+        """Overrides land in the ammolite__* variables metric formulas use.
+
+        create_sys_vars() consumes the corrected sys_info row, so this is what
+        makes $num_xcd and $cu_per_gpu in the panel configs pick up the
+        --specs-correction values.
+        """
+        corrected = correct_sys_info(_mi350_mspec(), "num_xcd:4,cu_per_gpu:64")
+        sys_vars = create_sys_vars(corrected.iloc[0])
+
+        assert sys_vars["ammolite__num_xcd"] == 4
+        assert sys_vars["ammolite__cu_per_gpu"] == 64
+        # An uncorrected spec keeps its fixture value.
+        assert sys_vars["ammolite__total_l2_chan"] == 128
