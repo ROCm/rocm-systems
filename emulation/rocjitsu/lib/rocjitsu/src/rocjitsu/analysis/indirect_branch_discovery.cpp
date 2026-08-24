@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -356,6 +357,7 @@ struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
   rj_code_arch_t arch;
+  bool setreg_vgpr_msb_fixup = false;
   std::vector<InstructionFacts> facts;
 
   // Whole-text superset of every SGPR pair that a deferred cross-block
@@ -1337,7 +1339,8 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
 }
 
 [[nodiscard]] AnalysisContext build_context(std::span<const Instruction *const> insts,
-                                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+                                            std::span<const uint8_t> text, rj_code_arch_t arch,
+                                            rj_code_target_id_t target_id) {
   // Phase 1a: collect cheap facts that are independent of CFG. We do not build
   // full def-use information here. Generic writes are intentionally lazy because
   // many instructions never interact with a PC-builder pair, and decoding all
@@ -1346,6 +1349,16 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
   ctx.insts = insts;
   ctx.text = text;
   ctx.arch = arch;
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *architecture = registry.find(arch);
+  const IsaTargetDescriptor *target_architecture = registry.find(target_id);
+  const IsaGpuTargetDescription *target =
+      target_architecture != nullptr && target_architecture->architecture_id == arch
+          ? registry.find_gpu_target(target_id)
+          : nullptr;
+  if (target == nullptr && architecture != nullptr)
+    target = registry.find_default_gpu_target(*architecture);
+  ctx.setreg_vgpr_msb_fixup = target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
 
   ctx.facts.resize(insts.size());
   for (size_t i = 0; i < insts.size(); ++i) {
@@ -2424,6 +2437,7 @@ struct VectorLaneFlowState {
   VectorLaneFacts slots;
   RestoredSgprFacts restored_sgprs;
   std::optional<uint8_t> vgpr_msb_imm;
+  std::optional<bool> setreg_vgpr_msb_hazard;
   std::optional<bool> gpr_idx_enabled;
 
   friend bool operator==(const VectorLaneFlowState &, const VectorLaneFlowState &) = default;
@@ -2471,10 +2485,19 @@ constexpr size_t kBlockScaffoldingBytes =
 [[nodiscard]] std::optional<uint32_t> instruction_literal(const Instruction &inst,
                                                           std::span<const uint8_t> text);
 
-void update_vgpr_mode(std::optional<uint8_t> &mode, const Instruction &inst,
-                      std::span<const uint8_t> text) {
+void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacent_hazard,
+                      const Instruction &inst, std::span<const uint8_t> text,
+                      bool setreg_vgpr_msb_fixup) {
+  const std::optional<bool> incoming_hazard = adjacent_hazard;
+  adjacent_hazard = false;
   const std::string_view mnemonic = inst.mnemonic();
   if (mnemonic == "s_set_vgpr_msb") {
+    if (setreg_vgpr_msb_fixup && incoming_hazard == std::optional<bool>{true})
+      return;
+    if (setreg_vgpr_msb_fixup && !incoming_hazard) {
+      mode = std::nullopt;
+      return;
+    }
     if (const Operand *imm = inst.src_operand(0))
       mode = static_cast<uint8_t>(imm->encoding_value() & 0xffu);
     else
@@ -2489,6 +2512,22 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, const Instruction &inst,
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  if (setreg_vgpr_msb_fixup && writes_mode) {
+    if (mnemonic == "s_setreg_b32") {
+      mode = std::nullopt;
+      return;
+    }
+    if (const auto literal = instruction_literal(inst, text)) {
+      const uint8_t mode_layout = static_cast<uint8_t>((*literal & amdgpu::VGPR_MSB_MODE_MASK) >>
+                                                       amdgpu::VGPR_MSB_MODE_SHIFT);
+      mode = amdgpu::mode_layout_to_set_vgpr_msb(mode_layout);
+    } else {
+      mode = std::nullopt;
+    }
+    adjacent_hazard = true;
+    return;
+  }
   if (mnemonic == "s_setreg_b32") {
     if (hwreg_slice_overlaps_vgpr_msb(hwreg))
       mode = std::nullopt;
@@ -2696,10 +2735,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       struct WorkItem {
         size_t block_index;
         std::optional<uint8_t> mode;
+        std::optional<bool> setreg_vgpr_msb_hazard;
         std::optional<bool> gpr_idx_enabled;
       };
       std::vector<WorkItem> worklist{
-          {block_for_instruction[start->second], initial_mode, initial_gpr_idx_enabled}};
+          {block_for_instruction[start->second], initial_mode, false, initial_gpr_idx_enabled}};
       std::unordered_set<uint64_t> visited;
       bool saw_return = false;
       std::optional<uint8_t> return_mode;
@@ -2709,9 +2749,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const WorkItem item = worklist.back();
         worklist.pop_back();
         const uint64_t mode_key = item.mode ? *item.mode : uint64_t{256};
+        const uint64_t hazard_key =
+            item.setreg_vgpr_msb_hazard ? (*item.setreg_vgpr_msb_hazard ? 1u : 0u) : 2u;
         const uint64_t gpr_idx_key = item.gpr_idx_enabled ? (*item.gpr_idx_enabled ? 1u : 0u) : 2u;
-        const uint64_t visit_key =
-            (static_cast<uint64_t>(item.block_index) << 11) | (gpr_idx_key << 9) | mode_key;
+        const uint64_t visit_key = (static_cast<uint64_t>(item.block_index) << 13) |
+                                   (gpr_idx_key << 11) | (hazard_key << 9) | mode_key;
         if (!visited.insert(visit_key).second)
           continue;
         // Bound malformed or unexpectedly broad callees. Falling back to the
@@ -2724,6 +2766,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
         const AnalysisBlock &block = blocks[item.block_index];
         std::optional<uint8_t> mode = item.mode;
+        std::optional<bool> setreg_vgpr_msb_hazard = item.setreg_vgpr_msb_hazard;
         std::optional<bool> gpr_idx_enabled = item.gpr_idx_enabled;
         const auto record_all_banks = [&](uint16_t selector) {
           for (uint16_t bank = 0; bank < 4; ++bank)
@@ -2770,7 +2813,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
               }
             }
           }
-          update_vgpr_mode(mode, inst, ctx.text);
+          update_vgpr_mode(mode, setreg_vgpr_msb_hazard, inst, ctx.text, ctx.setreg_vgpr_msb_fixup);
           update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
         }
         if (unsupported)
@@ -2803,7 +2846,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           continue;
         }
         for (size_t successor : block.successors)
-          worklist.push_back({successor, mode, gpr_idx_enabled});
+          worklist.push_back({successor, mode, setreg_vgpr_msb_hazard, gpr_idx_enabled});
       }
       // A transfer through the nominal return pair is only a proven return if
       // the callee never repurposed either half. This deliberately rejects
@@ -3150,7 +3193,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                                  StashedPcHalf{.value = copied_pair->second, .high = true});
       }
 
-      update_vgpr_mode(state.vgpr_msb_imm, inst, ctx.text);
+      update_vgpr_mode(state.vgpr_msb_imm, state.setreg_vgpr_msb_hazard, inst, ctx.text,
+                       ctx.setreg_vgpr_msb_fixup);
       update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text, ctx.arch);
     }
     publish_builders();
@@ -3245,6 +3289,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       new_entry.restored_sgprs.intersect_with(incoming.restored_sgprs);
       if (new_entry.vgpr_msb_imm != incoming.vgpr_msb_imm)
         new_entry.vgpr_msb_imm = std::nullopt;
+      if (new_entry.setreg_vgpr_msb_hazard != incoming.setreg_vgpr_msb_hazard)
+        new_entry.setreg_vgpr_msb_hazard = std::nullopt;
       if (new_entry.gpr_idx_enabled != incoming.gpr_idx_enabled)
         new_entry.gpr_idx_enabled = std::nullopt;
     };
@@ -3276,6 +3322,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       VectorLaneFlowState external_entry;
       if (external_entries[block_index] != 0) {
         external_entry.vgpr_msb_imm = uint8_t{0};
+        external_entry.setreg_vgpr_msb_hazard = false;
         external_entry.gpr_idx_enabled = false;
       }
       if (!have_predecessor_state) {
@@ -3285,6 +3332,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         new_entry.restored_sgprs.clear();
         if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
           new_entry.vgpr_msb_imm = std::nullopt;
+        if (new_entry.setreg_vgpr_msb_hazard != external_entry.setreg_vgpr_msb_hazard)
+          new_entry.setreg_vgpr_msb_hazard = std::nullopt;
         if (new_entry.gpr_idx_enabled != external_entry.gpr_idx_enabled)
           new_entry.gpr_idx_enabled = std::nullopt;
       }
@@ -3483,10 +3532,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
+    rj_code_target_id_t target) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
-  AnalysisContext ctx = build_context(insts, text, arch);
+  AnalysisContext ctx = build_context(insts, text, arch, target);
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
@@ -3571,7 +3621,8 @@ bool is_callee_saved_sgpr(uint16_t sgpr) {
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
+    rj_code_target_id_t target) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3590,14 +3641,14 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points);
+        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points, target);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
   return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders, extra_split_points);
+                                                   pc_builders, extra_split_points, target);
 }
 
 } // namespace rocjitsu

@@ -10907,10 +10907,13 @@ TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) 
   constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
   constexpr auto original_mode =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  constexpr uint32_t kModeLiteral =
+      static_cast<uint32_t>(rocjitsu::amdgpu::set_vgpr_msb_to_mode_layout(0x01))
+      << rocjitsu::amdgpu::VGPR_MSB_MODE_SHIFT;
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {original_mode[0], 1u << 2, addtid[0], addtid[1], kGfx1250SEndpgm});
+      {original_mode[0], kModeLiteral, addtid[0], addtid[1], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   rocjitsu::BinaryTranslator translator(
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
@@ -11258,9 +11261,13 @@ TEST(BinaryTranslatorE2E, Gfx1250AddtidStoreModeUsesSrc1BankNotSrc0) {
   constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
   constexpr auto original_mode =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
-  // The literal supplies the low eight bits written into MODE[19:12], whose
-  // layout is {SRC2,SRC1,SRC0,DST}.
-  constexpr uint32_t kModeLiteral = (1u << 2) | (2u << 4); // SRC0 bank 1, SRC1 bank 2.
+  // Public LLVM's gfx1250 fixup contract takes the bank layout from the
+  // unshifted source bits[19:12]. Encode SRC0 bank 1 and SRC1 bank 2 in those
+  // source bits rather than in the ordinary HWREG field payload.
+  constexpr uint8_t kInitialSetLayout = 0x09;
+  constexpr uint32_t kModeLiteral =
+      static_cast<uint32_t>(rocjitsu::amdgpu::set_vgpr_msb_to_mode_layout(kInitialSetLayout))
+      << rocjitsu::amdgpu::VGPR_MSB_MODE_SHIFT;
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(

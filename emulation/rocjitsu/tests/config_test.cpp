@@ -1523,6 +1523,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   wf->set_status_raw(kStatus);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   wf->set_wave_sched_mode_raw(kWaveSchedMode);
+  wf->arm_setreg_vgpr_msb_hazard();
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
@@ -1553,6 +1554,9 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_TRUE(restored_wf->setreg_vgpr_msb_hazard());
+  EXPECT_TRUE(restored_wf->consume_setreg_vgpr_msb_hazard());
+  EXPECT_FALSE(restored_wf->consume_setreg_vgpr_msb_hazard());
   EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 

@@ -8016,7 +8016,10 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
     wf->set_mode_raw(0xAAAAAAAAu);
     wf->set_status_raw(0x13579BDFu);
     cu->execute_instruction(inst.get(), *wf);
-    EXPECT_EQ(wf->mode_raw(), 0xAAAAAAFAu) << "Partial bitfield write to MODE incorrect";
+    const uint32_t expected_mode =
+        arch_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0xAAAFFAFAu : 0xAAAAAAFAu;
+    EXPECT_EQ(wf->mode_raw(), expected_mode)
+        << "Partial MODE write or target-specific VGPR-MSB side effect incorrect";
     EXPECT_EQ(wf->status_raw(), 0x13579BDFu);
 
     if (!wf->is_halted())

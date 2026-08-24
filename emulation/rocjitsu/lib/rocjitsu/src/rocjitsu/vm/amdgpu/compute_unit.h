@@ -368,6 +368,9 @@ public:
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
 
+  /// @brief Whether this concrete target has the MODE/VGPR-MSB setreg fixup.
+  bool setreg_vgpr_msb_fixup() const { return setreg_vgpr_msb_fixup_; }
+
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
   GpuMemory *memory() const { return memory_; }
@@ -926,6 +929,7 @@ protected:
   uint32_t shader_engine_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
+  const bool setreg_vgpr_msb_fixup_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
@@ -1070,6 +1074,9 @@ inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
 inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
 inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
+inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
+  return raw_cu().setreg_vgpr_msb_fixup();
+}
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
@@ -1342,6 +1349,9 @@ protected:
   void execute_instruction(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
+    const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
+    if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
+      return;
     inst->execute(*inst, &wf);
   }
 

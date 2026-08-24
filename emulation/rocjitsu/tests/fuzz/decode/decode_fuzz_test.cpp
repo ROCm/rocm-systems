@@ -38,8 +38,8 @@ protected:
 };
 
 TEST(DecodeFuzzTargetsTest, CreatesEachSupportedDecoder) {
-  constexpr std::string_view targets[] = {"cdna1", "cdna2", "cdna3",   "cdna4", "rdna1",
-                                          "rdna2", "rdna3", "rdna3_5", "rdna4", "gfx1250"};
+  constexpr std::string_view targets[] = {"cdna1", "cdna2",   "cdna3", "cdna4",   "rdna1",  "rdna2",
+                                          "rdna3", "rdna3_5", "rdna4", "gfx1250", "gfx1251"};
   for (const std::string_view target : targets) {
     SCOPED_TRACE(target);
     EXPECT_NE(create_decoder(target), nullptr);

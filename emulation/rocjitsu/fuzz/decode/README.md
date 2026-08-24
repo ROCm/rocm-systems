@@ -6,7 +6,7 @@ accepts an exact 16-byte little-endian instruction window. Sixteen bytes cover
 the largest supported encoding while letting the decoder report the actual 4,
 8, 12, or 16-byte instruction length. The registry contains AMDGPU targets
 only. Canonical target IDs and their registered aliases are accepted, including
-`gfx950`, `gfx1201`, and `gfx1250`.
+`gfx950`, `gfx1201`, `gfx1250`, and `gfx1251`.
 
 The fuzz executable links the model-only AMDGPU registry. It therefore carries
 the generated decoder and disassembler code for every AMDGPU target without

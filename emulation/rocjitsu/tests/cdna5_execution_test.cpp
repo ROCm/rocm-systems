@@ -228,6 +228,153 @@ TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
   EXPECT_TRUE(cdna5::Operand::full_execution_backend_complete());
 }
 
+TEST(Gfx1250ExecutionTest, SetregB32ClobbersVgprMsbWithoutArmingImmediateHazard) {
+  amdgpu::GpuMemory memory("gfx1250_setreg_b32_memory");
+  amdgpu::L2Cache l2("gfx1250_setreg_b32_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_setreg_b32_cu", config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+
+  constexpr uint8_t kSourceModeLayout = 0xA5;
+  constexpr uint32_t kSource =
+      (static_cast<uint32_t>(kSourceModeLayout) << amdgpu::VGPR_MSB_MODE_SHIFT) | 1u;
+  compute_unit->write_sgpr(wave->sgpr_alloc().base, kSource);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = amdgpu::MODE_HWREG, .sdst = 0});
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr auto set_vgpr_msb =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = kFollowingSetLayout});
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1250IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> setreg_inst(decode_valid(*decoder, setreg.data()));
+  std::unique_ptr<Instruction> set_vgpr_msb_inst(decode_valid(*decoder, set_vgpr_msb.data()));
+  ASSERT_NE(setreg_inst, nullptr);
+  ASSERT_NE(set_vgpr_msb_inst, nullptr);
+
+  compute_unit->execute_and_route(std::move(setreg_inst), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(kSourceModeLayout));
+  EXPECT_FALSE(wave->setreg_vgpr_msb_hazard())
+      << "the adjacency hazard is specific to s_setreg_imm32_b32";
+
+  compute_unit->execute_and_route(std::move(set_vgpr_msb_inst), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), kFollowingSetLayout);
+}
+
+TEST(Gfx1251ExecutionTest, SetregModeUsesOrdinarySliceAndFollowingSetVgprMsbExecutes) {
+  amdgpu::GpuMemory memory("gfx1251_setreg_memory");
+  amdgpu::L2Cache l2("gfx1251_setreg_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1251;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1251_setreg_cu", config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  wave->set_vgpr_msb_mode(0x41);
+
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr uint32_t kLiteral = 0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const std::array<uint32_t, 2> setreg_words{setreg[0], kLiteral};
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr auto set_vgpr_msb =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = kFollowingSetLayout});
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> setreg_inst(decode_valid(*decoder, setreg_words.data()));
+  std::unique_ptr<Instruction> set_vgpr_msb_inst(decode_valid(*decoder, set_vgpr_msb.data()));
+  ASSERT_NE(setreg_inst, nullptr);
+  ASSERT_NE(set_vgpr_msb_inst, nullptr);
+  ASSERT_NE(setreg_inst->execute, nullptr);
+  ASSERT_NE(set_vgpr_msb_inst->execute, nullptr);
+
+  compute_unit->execute_and_route(std::move(setreg_inst), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), 0x41);
+  compute_unit->execute_and_route(std::move(set_vgpr_msb_inst), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), kFollowingSetLayout);
+}
+
+TEST(Gfx1251ExecutionTest, SetregImm32ModeFullSliceUsesRightJustifiedSource) {
+  amdgpu::GpuMemory memory("gfx1251_setreg_imm32_full_slice_memory");
+  amdgpu::L2Cache l2("gfx1251_setreg_imm32_full_slice_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1251;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit = std::make_unique<Gfx1250MemoryTestCu>("gfx1251_setreg_imm32_full_slice_cu",
+                                                            config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+
+  constexpr uint8_t kSourceModeLayout = 0xA5;
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = amdgpu::MODE_HWREG | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  const std::array<uint32_t, 2> words{setreg[0], kSourceModeLayout};
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+
+  compute_unit->execute_and_route(std::move(instruction), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(kSourceModeLayout));
+  EXPECT_FALSE(wave->setreg_vgpr_msb_hazard());
+}
+
+TEST(Gfx1251ExecutionTest, SetregB32ModeFullSliceUsesRightJustifiedSource) {
+  amdgpu::GpuMemory memory("gfx1251_setreg_b32_full_slice_memory");
+  amdgpu::L2Cache l2("gfx1251_setreg_b32_full_slice_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1251;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit = std::make_unique<Gfx1250MemoryTestCu>("gfx1251_setreg_b32_full_slice_cu",
+                                                            config, &memory, &l2);
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+
+  constexpr uint8_t kSourceModeLayout = 0xC3;
+  compute_unit->write_sgpr(wave->sgpr_alloc().base, kSourceModeLayout);
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = amdgpu::MODE_HWREG | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg, .sdst = 0});
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, setreg.data()));
+  ASSERT_NE(instruction, nullptr);
+
+  compute_unit->execute_and_route(std::move(instruction), *wave);
+  EXPECT_EQ(wave->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(kSourceModeLayout));
+  EXPECT_FALSE(wave->setreg_vgpr_msb_hazard());
+}
+
 TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
   amdgpu::GpuMemory memory("gfx1250_d16_memory");
   amdgpu::L2Cache l2("gfx1250_d16_l2");

@@ -193,6 +193,7 @@ struct PcAddressBuilder {
     std::span<const uint64_t> extra_leaders = {},
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
-    std::span<const uint64_t> extra_split_points = {});
+    std::span<const uint64_t> extra_split_points = {},
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID);
 
 } // namespace rocjitsu

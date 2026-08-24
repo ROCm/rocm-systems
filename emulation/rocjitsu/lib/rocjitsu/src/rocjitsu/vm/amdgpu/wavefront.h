@@ -139,6 +139,25 @@ public:
     mode_raw_ = (mode_raw_ & ~VGPR_MSB_MODE_MASK) | mode_bits;
   }
 
+  /// @brief Arm the gfx1250 hazard for the instruction immediately following
+  /// an S_SETREG_IMM32_B32 write to MODE.
+  void arm_setreg_vgpr_msb_hazard() { setreg_vgpr_msb_hazard_ = true; }
+
+  /// @brief Whether the next adjacent instruction is in the gfx1250 hazard window.
+  bool setreg_vgpr_msb_hazard() const { return setreg_vgpr_msb_hazard_; }
+
+  /// @brief Consume whether the immediately preceding instruction armed the
+  /// gfx1250 S_SET_VGPR_MSB drop hazard.
+  bool consume_setreg_vgpr_msb_hazard() {
+    const bool armed = setreg_vgpr_msb_hazard_;
+    setreg_vgpr_msb_hazard_ = false;
+    return armed;
+  }
+
+  /// @brief Clear the adjacency hazard when an instruction bypasses the normal
+  /// execution callback path.
+  void clear_setreg_vgpr_msb_hazard() { setreg_vgpr_msb_hazard_ = false; }
+
   /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   uint32_t wave_sched_mode_raw() const { return wave_sched_mode_raw_; }
 
@@ -873,6 +892,7 @@ public:
     vcc_ = 0;
     m0_ = 0;
     set_mode_raw(0);
+    setreg_vgpr_msb_hazard_ = false;
     set_wave_sched_mode_raw(0);
     gfx12_excp_flag_user_extra_raw_ = 0;
     gfx12_trap_ctrl_raw_ = 0;
@@ -963,14 +983,15 @@ private:
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
-  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
-  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
-  uint32_t mode_raw_ = 0;            ///< MODE register state.
-  bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
-  uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
-  uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
+  uint64_t exec_ = ~0ULL;               ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vgpr_write_mask_ = ~0ULL;    ///< Execution-local architectural and plugin write mask.
+  uint64_t vcc_ = 0;                    ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                     ///< M0 special register (misc addressing).
+  uint32_t mode_raw_ = 0;               ///< MODE register state.
+  bool mode_has_gpr_idx_en_ = false;    ///< True when MODE[27] is GPR_IDX_EN.
+  uint8_t vgpr_msb_mode_ = 0;           ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
+  bool setreg_vgpr_msb_hazard_ = false; ///< Drop an immediately following S_SET_VGPR_MSB.
+  uint32_t wave_sched_mode_raw_ = 0;    ///< WAVE_SCHED_MODE register state.
   uint32_t gfx12_excp_flag_user_extra_raw_ = 0;
   uint32_t gfx12_trap_ctrl_raw_ = 0;
   uint32_t gfx1250_xnack_state_priv_raw_ = 0;

@@ -39,7 +39,8 @@ public:
   Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
                          std::span<const ScopedCfgEdge> extra_edges = {},
                          std::span<const uint8_t> text = {},
-                         std::span<BasicBlock *const> additional_entries = {});
+                         std::span<BasicBlock *const> additional_entries = {},
+                         bool setreg_vgpr_msb_fixup = true);
   ~Gfx1250VgprMsbAnalysis();
 
   Gfx1250VgprMsbAnalysis(const Gfx1250VgprMsbAnalysis &) = delete;

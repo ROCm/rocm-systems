@@ -70,6 +70,12 @@ struct LivenessAnalysisOptions {
   /// encoded vector operands to physical VGPRs.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
+  /// @brief Concrete decoding target whose shared-instruction behavior applies.
+  ///
+  /// @details INVALID selects the architecture default, preserving gfx1250 as
+  /// the fail-closed CDNA5 behavior.
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
+
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
