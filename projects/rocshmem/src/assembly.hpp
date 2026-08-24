@@ -761,7 +761,7 @@ make_buffer_resource(const void* base, uint32_t num_bytes) {
   rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
   rsrc[1] = static_cast<int32_t>(addr >> 32);
 #if defined(__gfx1250__)
-  // MI400/gfx1250 V# descriptor:
+  // gfx1250 V# descriptor:
   //   bits  56:0   base address
   //   bits 101:57  num_records; all ones disables OOB checking
   //   bits 127:102 zero, including Type[127:126] == 0 for buffer
@@ -775,35 +775,6 @@ make_buffer_resource(const void* base, uint32_t num_bytes) {
   rsrc[3] = 0x31014000;
 #else
   // GFX9
-  rsrc[2] = static_cast<int32_t>(num_bytes);
-  rsrc[3] = 0x00020000;
-#endif
-  return rsrc;
-}
-
-// Same encoding as make_buffer_resource, but forces rsrc[0]/rsrc[1] (the
-// address) through v_readfirstlane_b32 so the result is provably wave-uniform
-// to the compiler. Only valid when base/num_bytes are genuinely the same
-// across every active lane (e.g. a workgroup-wide bulk copy) -- callers are
-// responsible for that invariant, since the hardware has no way to check it.
-// Without this, raw.buffer.* operand legalization inserts a full
-// readfirstlane/compare/exec-mask waterfall at *every* use of the resulting
-// i32x4_t, even if it's a single loop-invariant SSA value.
-__device__ __forceinline__ i32x4_t
-make_buffer_resource_uniform(const void* base, uint32_t num_bytes) {
-  uint64_t addr = reinterpret_cast<uint64_t>(base);
-  i32x4_t rsrc;
-  rsrc[0] = __builtin_amdgcn_readfirstlane(static_cast<int32_t>(addr & 0xFFFFFFFFu));
-  rsrc[1] = __builtin_amdgcn_readfirstlane(static_cast<int32_t>(addr >> 32));
-#if defined(__gfx1250__)
-  rsrc[1] = __builtin_amdgcn_readfirstlane(static_cast<int32_t>(
-      ((addr >> 32) & 0x01FFFFFFull) | (0x7Full << 25)));
-  rsrc[2] = static_cast<int32_t>(0xFFFFFFFFu);
-  rsrc[3] = 0x0000003F;
-#elif defined(__gfx1201__) || defined(__gfx1100__)
-  rsrc[2] = static_cast<int32_t>(num_bytes);
-  rsrc[3] = 0x31014000;
-#else
   rsrc[2] = static_cast<int32_t>(num_bytes);
   rsrc[3] = 0x00020000;
 #endif

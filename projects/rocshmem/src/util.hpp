@@ -400,43 +400,17 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-// UniformBase: true iff every active lane calling this copy_bulk instance is
-// guaranteed to pass the *same* dst/src (a group-cooperative copy, where only
-// tid/stride vary the per-lane offset -- e.g. memcpy_wave/memcpy_wg). This is
-// a correctness precondition, not a hint: when true, the buffer descriptor's
-// address is forced through v_readfirstlane_b32 (see
-// make_buffer_resource_uniform), which broadcasts whatever address is in lane
-// 0 to every active lane. If some lanes actually hold different dst/src (as
-// in memcpy_lane, where each lane copies its own independent element), that
-// broadcast silently corrupts every lane but lane 0's transfer. Callers must
-// only set UniformBase=true when they can prove the shared-base invariant
-// themselves; the hardware/compiler cannot check it.
-//
-// The perf motivation: dst/src are plain VGPR args across this __noinline__
-// boundary, so LLVM's divergence analysis can't prove uniformity on its own
-// even when it happens to be loop-invariant. Operand legalization for
-// raw.buffer.* checks uniformity per *use*, not per SSA value, so a
-// non-provably-uniform descriptor re-triggers a full
-// readfirstlane/compare/exec-mask waterfall at every one of the Unroll
-// load_buffer/store_buffer calls below. Forcing it through readfirstlane once
-// up front (only where it's actually safe) turns that into a single upfront
-// broadcast.
-template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy,
-          int Unroll, bool UniformBase = false>
-__device__ __noinline__ void copy_bulk(void* dst, void* src,
-                                          int n_chunks, int tid, int stride) {
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+__device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks, 
+                                          int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
   const uint32_t buf_bytes = static_cast<uint32_t>(n_chunks * ChunkSize);
   i32x4_t src_rsrc, dst_rsrc;
-  if constexpr (UniformBase) {
-    src_rsrc = make_buffer_resource_uniform(src, buf_bytes);
-    dst_rsrc = make_buffer_resource_uniform(dst, buf_bytes);
-  } else {
-    src_rsrc = make_buffer_resource(src, buf_bytes);
-    dst_rsrc = make_buffer_resource(dst, buf_bytes);
-  }
+  src_rsrc = make_buffer_resource(src, buf_bytes);
+  dst_rsrc = make_buffer_resource(dst, buf_bytes);
+
   int chunk_batch = stride * Unroll;
   int offset = 0;
   T regs[Unroll] = {};
@@ -531,8 +505,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int s
   }
 }
 
-template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll,
-          bool UniformBase = false>
+template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll>
 __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
                                                   size_t size, int tid,
                                                   int stride) {
@@ -554,7 +527,7 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
   int n_chunks = static_cast<int>(size / ChunkSize);
   int remainder = static_cast<int>(size % ChunkSize);
 
-  copy_bulk<ChunkSize, LP, SP, Unroll, UniformBase>(dst, src, n_chunks, tid, stride);
+  copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, tid, stride);
 
   if (tid == 0 && remainder > 0) {
     copy_suffix<LP, SP>(
@@ -564,20 +537,12 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
   }
 }
 
-
 // ==============================================================================
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
-
-// memcpy_lane is per-lane: many lanes may call it concurrently, each with its
-// own independent dst/src (see e.g. tile_put's element-by-element fallback).
-// It must NOT set UniformBase=true on copy_aligned_best_effort/copy_bulk --
-// doing so would broadcast one lane's address to every lane via
-// readfirstlane and silently corrupt the others' transfers. Contrast with
-// memcpy_wave/memcpy_wg below, which are group-cooperative: every
-// participating lane is guaranteed to pass the same dst/src.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ 
+  void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -601,12 +566,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     }
   }
   // Normal cache-bypass path for small transfers or single-lane execution
-  else {
+  else [[likely]] {
     if (size >= 16) {
       copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
                                             static_cast<uint8_t*>(src),
                                             size, 0, 1);
-    } else {
+    } else [[likely]] {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
                              static_cast<uint8_t*>(src),
                              size);
@@ -618,7 +583,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 // dst/src and only differs by wave_tid/wave_size (folded into the per-access
 // offset inside copy_bulk), so UniformBase=true
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ 
+  void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -630,10 +596,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   int wave_size{wave_SZ()};
 
   if (size >= 16) {
-    copy_aligned_body<16, LP, SP, Unroll, true>(static_cast<uint8_t*>(dst),
-                                                static_cast<uint8_t*>(src),
-                                                size, wave_tid, wave_size);
-  } else {
+    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
+                                          static_cast<uint8_t*>(src),
+                                          size, wave_tid, wave_size);
+  } else [[likely]] {
     // Small sizes skip bulk setup entirely
     if (wave_tid == 0) {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
@@ -643,11 +609,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-// memcpy_wg is group-cooperative: every lane in the workgroup passes the same
-// dst/src and only differs by tid/stride (folded into the per-access offset
-// inside copy_bulk), so UniformBase=true 
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ __forceinline__ 
+  void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr int Unroll = 8;
@@ -659,10 +623,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   int stride = get_flat_block_size();
 
   if (size >= 16) {
-    copy_aligned_body<16, LP, SP, Unroll, true>(static_cast<uint8_t*>(dst),
-                                                static_cast<uint8_t*>(src),
-                                                size, tid, stride);
-  } else {
+    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
+                                          static_cast<uint8_t*>(src),
+                                          size, tid, stride);
+  } else [[likely]] {
     // Small sizes skip bulk setup entirely
     if (tid == 0) {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
