@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 36
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 37
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1191,6 +1191,10 @@ typedef hipError_t (*t_hipDeviceFlushGPUDirectRDMAWrites)(
     enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope);
 typedef hipError_t (*t_hipKernelSetAttributeForDevice)(hipKernel_t kernel, hipFuncAttribute attr,
                                                         int value, int device);
+typedef hipError_t (*t_hipDeviceGetP2PAtomicCapabilities)(unsigned int* capabilities,
+                                                          const hipAtomicOperation* operations,
+                                                          unsigned int count, int srcDevice,
+                                                          int dstDevice);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1853,8 +1857,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
   t_hipKernelSetAttributeForDevice hipKernelSetAttributeForDevice_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
+  t_hipDeviceGetP2PAtomicCapabilities hipDeviceGetP2PAtomicCapabilities_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
 
   // ******************************************************************************************* //
   //
