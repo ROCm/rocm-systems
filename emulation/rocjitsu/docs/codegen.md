@@ -180,8 +180,11 @@ find lib/rocjitsu/src/rocjitsu/code/dbt/generated \
 
 When modifying ISA semantics or adding instruction support:
 
-1. Edit `lib/python/amdisa/codegen/_generator.py` (never the generated
-   C++ files)
+1. Edit the authoritative Python input: the generator orchestration in
+   `lib/python/amdisa/codegen/_generator.py`, execution emitters under
+   `lib/python/amdisa/codegen/execute/`, instruction classification in
+   `lib/python/amdisa/semantics.py`, or compatibility inventory logic in
+   `lib/python/amdisa/parser.py` as appropriate. Never edit generated C++.
 2. Regenerate with `scripts/generate-amdisa.sh` or `--multi` as shown above
 3. If you regenerated manually, format the generated files with `clang-format`
    (the helper formats changed generated files for you)

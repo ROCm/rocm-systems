@@ -124,13 +124,14 @@ public:
   /// @param num_vgprs Number of vector registers to allocate.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
+                         uint32_t wave_size = 0);
 
   /// @brief Activate a specific idle wavefront slot.
   /// @details Used by checkpoint restoration when hardware slot identity is
   /// execution state. Returns nullptr when the requested slot is invalid or busy.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                            uint32_t num_vgprs);
+                            uint32_t num_vgprs, uint32_t wave_size = 0);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -548,6 +549,18 @@ public:
   /// Raw VM/storage writes deliberately bypass this hook.
   void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
+    if (wf)
+      lane_mask &= wf->vgpr_write_mask();
+    if (wf && lane_mask != 0 && byte_mask != 0)
+      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+  }
+
+  /// @brief Report a scalar-lane VGPR write without applying vector write masks.
+  /// @details V_WRITELANE ignores EXEC and DPP destination masks, including
+  /// when a Wave64 wave selects lanes 32--63.
+  void notify_scalar_lane_vgpr_write(
+      const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+      uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (wf && lane_mask != 0 && byte_mask != 0)
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
@@ -567,6 +580,9 @@ public:
   virtual void
   notify_vgpr_write_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                            uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
+
+  /// @brief Return the wavefront currently owning a physical VGPR.
+  virtual const Wavefront *vgpr_owner(uint32_t reg_idx) const = 0;
 
   /// @brief Read a vector register lane from the physical VGPR file.
   /// @details VM/storage-level scalar lane accessor. The concrete
@@ -659,6 +675,9 @@ public:
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
+
+  /// @brief Number of physically stored lanes in each VGPR.
+  virtual uint32_t vgpr_storage_lane_count() const = 0;
 
   /// @brief Raw typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
@@ -979,8 +998,8 @@ private:
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.
 ///
-/// @details The Isa trait provides WF_SIZE which sets the VectorReg element
-/// count, so each VGPR holds one uint32_t lane per wavefront thread.
+/// @details The physical VGPR element uses the architecture's maximum lane
+/// count, avoiding unreachable upper-half storage on Wave32-only targets.
 /// Pre-allocates all wavefront slots as IsaWavefront<Isa> instances.
 ///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
@@ -988,7 +1007,8 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
-  using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+  static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
+  using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
   static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
       Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : ACC_VGPR_OFFSET + Isa::MAX_ACC_VGPRS_PER_WF;
   static constexpr uint32_t MAX_VGPRS_PER_BLOCK =
@@ -1041,6 +1061,10 @@ public:
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
+    return reg_idx < vgpr_to_wave_.size() ? vgpr_to_wave_[reg_idx] : nullptr;
+  }
+
   void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
     std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
   }
@@ -1083,22 +1107,26 @@ protected:
   int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count); }
 
   /// @brief Return allocated VGPRs to the free pool.
-  void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
+  void free_vgprs(uint32_t base) override {
+    vgpr_file_.free(base);
+    fill_vgpr_to_wave(base, vgprs_per_block_, nullptr);
+  }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
   void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
                               ComputeUnitCore::RawVgprVisitor visitor) const override {
-    static_assert(sizeof(Vgpr) == Isa::WF_SIZE * sizeof(uint32_t),
+    static_assert(sizeof(Vgpr) == Isa::WF_SIZE_MAX * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
     vgpr_file_.for_each(base, count, [&](const Vgpr &reg) {
       visitor(context,
-              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE)});
+              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE_MAX)});
     });
   }
 
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+  uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
 
 protected:
   /// @brief Execute one instruction on the given wavefront.
