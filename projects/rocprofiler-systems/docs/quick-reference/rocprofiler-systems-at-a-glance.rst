@@ -8,18 +8,20 @@
 ROCm Systems Profiler at a glance
 ******************************************************
 
-ROCm Systems Profiler (``rocprofiler-systems``) captures the entire application stack in a single, unified timeline: CPU function calls, GPU kernel dispatches, MPI collectives, OpenMP regions, memory allocations, OS scheduling events, and GPU telemetry such as temperature, power, utilization, and interconnect bandwidth.
+ROCm Systems Profiler (``rocprofiler-systems``) is a system-level profiler for GPU-accelerated applications. HIP/HSA API calls, kernel dispatches, memory copies, and GPU telemetry (temperature, power, utilization, and interconnect bandwidth) are the headline, captured in a single, unified timeline. Host call stacks, MPI/RCCL collectives, OpenMP regions, and Python frames exist to correlate with that GPU timeline - explaining why the device is busy, stalled, or waiting - rather than as a standalone CPU-profiling story.
 
-This system-wide view is especially useful when end-to-end performance depends on interactions across CPU, GPU, communication, and runtime - not on any single layer in isolation. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cross-domain interactions requires a tool that sees the full picture, not just the GPU in isolation.
+This correlation matters because end-to-end GPU performance often depends on what's happening off the device. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cases means correlating host-side activity with the GPU timeline, not profiling the GPU in isolation.
 
 This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`../conceptual/rocprof-sys-feature-set`; for a narrative introduction to output formats, see :doc:`../what-is-rocprof-sys`
 
-.. _glance-key-features:
+.. _glance-capabilities:
 
-Key features
+Capabilities
 ==============
 
 The feature set is spread across several how-to and conceptual pages; this table is a quick index into them.
+
+.. rubric:: Tracing
 
 .. list-table::
    :header-rows: 1
@@ -28,12 +30,6 @@ The feature set is spread across several how-to and conceptual pages; this table
    * - Feature
      - Description
      - See also
-   * - Dynamic binary instrumentation
-     - Rewrites the application binary to insert timing probes at every function entry and exit. No source changes needed; provides complete, deterministic call data.
-     - :ref:`glance-modes-compared`
-   * - Call-stack sampling
-     - Interrupts the application at a configurable frequency to capture the call stack, producing low-overhead statistical data.
-     - :ref:`glance-modes-compared`
    * - ROCm domain tracing
      - Traces ROCm API and runtime domains via ROCprofiler-SDK, including HIP, HSA, ROCTx, RCCL, kernel dispatches, memory events, rocDecode, and rocJPEG.
      - :ref:`rocprof-sys-feature-gpu-metrics`
@@ -43,15 +39,38 @@ The feature set is spread across several how-to and conceptual pages; this table
    * - OpenMP tracing
      - Captures thread team creation, parallel regions, task execution, and synchronization via the OMPT callback interface.
      - :doc:`../how-to/openmp-profiling`
-   * - CPU hardware counters
-     - Reads IPC, cache misses, branch mispredictions, and other CPU PMU events via the Linux ``perf`` subsystem.
-     - :ref:`rocprof-sys-feature-cpu-metrics`
+
+.. rubric:: Metrics
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
    * - GPU metrics
      - Samples GPU temperature, power, utilization, clocks, memory, and XGMI/PCIe bandwidth via ``amd-smi``; also collects GPU hardware counters via ``--gpu-events``.
      - :ref:`rocprof-sys-feature-gpu-metrics`, :doc:`../how-to/xgmi-pcie-sdma-sampling`, :doc:`../how-to/vcn-jpeg-sampling`
-   * - Causal profiling
-     - Estimates the end-to-end speedup from optimizing a given function or line by selectively slowing other code regions.
-     - :doc:`../how-to/performing-causal-profiling`
+   * - CPU hardware counters
+     - Reads IPC, cache misses, branch mispredictions, and other CPU PMU events via the Linux ``perf`` subsystem.
+     - :ref:`rocprof-sys-feature-cpu-metrics`
+
+.. rubric:: Collection mechanism (host-side correlation)
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - Dynamic binary instrumentation
+     - Rewrites the application binary to insert timing probes at every function entry and exit. No source changes needed; provides complete, deterministic host call-stack data to correlate with the GPU timeline.
+     - :ref:`glance-modes-compared`
+   * - Call-stack sampling
+     - Interrupts the application at a configurable frequency to capture the host call stack, producing low-overhead statistical data to correlate with the GPU timeline.
+     - :ref:`glance-modes-compared`
    * - Python hooks
      - Instruments Python interpreter call frames for mixed Python/C++/HIP workload analysis.
      - :doc:`../how-to/profiling-python-scripts`
@@ -59,12 +78,25 @@ The feature set is spread across several how-to and conceptual pages; this table
      - Attaches to an already-running process without restarting it, similar to the ``rocprofv3`` attach feature.
      - :doc:`../how-to/attaching-to-running-process`
 
+.. rubric:: Analysis
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - Causal profiling
+     - Estimates the end-to-end speedup from optimizing a given function or line by selectively slowing other code regions.
+     - :doc:`../how-to/performing-causal-profiling`
+
 .. _glance-architecture:
 
 How it works
 =============
 
-ROCm Systems Profiler collects data through several mechanisms - binary instrumentation, statistical sampling, callback APIs, and symbol interception - and merges CPU, GPU, communication, and system metrics into shared trace/profile output.
+ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
 
 .. image:: ../data/how_systems_profiler_works.png
    :width: 60%
@@ -74,8 +106,8 @@ For the full explanation of each collection mode, including overhead trade-offs 
 
 .. _glance-modes-compared:
 
-Instrumentation modes compared
-================================
+Binary instrumentation vs. call-stack sampling
+================================================
 
 Binary instrumentation and call-stack sampling can be used independently or together, trading overhead against completeness:
 
@@ -134,12 +166,10 @@ ROCm Systems Profiler ships as a set of standalone executables, each oriented to
      - Attaches to an already-running process
      - ``rocprof-sys-attach -p $(pidof my_app)``
      - :doc:`../how-to/attaching-to-running-process`
-
-MPI workloads are typically run with ``rocprof-sys-sample`` under ``mpirun``:
-
-.. code-block:: shell
-
-   mpirun -n 4 rocprof-sys-sample --preset=trace-hpc -- ./mpi_app
+   * - ``rocprof-sys-causal``
+     - Performs causal profiling to estimate optimization impact
+     - ``rocprof-sys-causal -l foo -- ./app``
+     - :doc:`../how-to/performing-causal-profiling`
 
 .. _glance-presets:
 
@@ -173,9 +203,6 @@ Discover, inspect, and apply a preset as follows:
    .. code-block:: shell
 
       rocprof-sys-run --preset=balanced --gpu=temp,power -- ./my_app
-
-Available presets
---------------------
 
 Each built-in preset enables a different combination of tracing, profiling, sampling, and domains, tuned for a specific workload scenario:
 
