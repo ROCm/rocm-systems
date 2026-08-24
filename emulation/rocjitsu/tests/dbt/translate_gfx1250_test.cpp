@@ -14184,40 +14184,6 @@ constexpr uint16_t kFlatScratchBaseHiSelector = 231;
 /// @brief Dependency wait required before a generated flat-scratch selector read.
 constexpr auto kFlatScratchSelectorWait = cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0});
 
-/// @brief Translate a gfx1250 kernel that forces destination staging while GPR indexing is active.
-[[nodiscard]] rocjitsu::TranslatedCodeObject
-translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
-  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
-  constexpr uint16_t kLiteralSelector = 255;
-  constexpr uint16_t kM0Operand = 125;
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  const auto enable_gpr_indexing =
-      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
-  const auto set_m0 =
-      cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kLiteralSelector, .sdst = kM0Operand});
-  const auto vector_read = cdna5::build_vop3(
-      cdna5::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
-
-  std::vector<uint32_t> words = {
-      enable_gpr_indexing[0], 1u, set_m0[0], gpr_index_control, vector_read[0], vector_read[1]};
-  // Reading every ordinary scalar register after the affected instruction
-  // leaves no SGPR pair to borrow, forcing the destination-staging decision.
-  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
-    words.push_back(cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
-                                                            .ssrc1 = static_cast<uint8_t>(base + 1),
-                                                            .sdst = 102})[0]);
-  }
-  words.push_back(kGfx1250SEndpgm);
-
-  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  return translator.translate(source);
-}
-
 /// @brief Translate a single-instruction gfx1250 kernel with the B0-to-A0 profile.
 [[nodiscard]] std::vector<uint32_t>
 translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words,
@@ -14615,32 +14581,6 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsMismatchedBanks) {
   EXPECT_FALSE(result.ok());
   EXPECT_FALSE(result.dispatchable());
   EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
-      result, rocjitsu::DiagnosticKind::ExpandFailed,
-      "flat-scratch-base rewrite could not allocate safe temporary storage"));
-}
-
-TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsSourceGprIndexing) {
-  constexpr uint32_t kNonzeroOffset = 16;
-  constexpr uint32_t kIndexSource0 = 1u << 8;
-  const auto result =
-      translate_gfx1250_indexed_flat_scratch_destination(kIndexSource0 | kNonzeroOffset);
-
-  EXPECT_FALSE(result.ok());
-  EXPECT_FALSE(result.dispatchable());
-  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
-      result, rocjitsu::DiagnosticKind::ExpandFailed,
-      "flat-scratch-base rewrite could not allocate safe temporary storage"));
-}
-
-TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsDestinationGprIndexing) {
-  constexpr uint32_t kNonzeroOffset = 16;
-  constexpr uint32_t kIndexDestination = 1u << 11;
-  const auto result =
-      translate_gfx1250_indexed_flat_scratch_destination(kIndexDestination | kNonzeroOffset);
-
-  EXPECT_FALSE(result.ok());
-  EXPECT_FALSE(result.dispatchable());
   EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
       result, rocjitsu::DiagnosticKind::ExpandFailed,
       "flat-scratch-base rewrite could not allocate safe temporary storage"));

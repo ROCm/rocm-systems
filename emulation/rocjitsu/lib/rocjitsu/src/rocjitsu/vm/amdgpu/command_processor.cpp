@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
@@ -38,12 +39,6 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
-  if (const auto granularity =
-          descriptor_vgpr_count_granule_for_wavefront(arch, isa_properties(arch).wave_size))
-    vgpr_granularity_ = *granularity;
-  // Unsupported non-AMDGPU architectures retain the constructor default; this
-  // command processor is not used to execute those ISAs.
-
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
   packed_tid_ = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
@@ -446,8 +441,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // v0[29:20]=Z. TIDIG_COMP_CNT controls which components the SPI supplies;
   // unused packed components are zero.
   uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
-    const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, cu->wf_size());
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, wf->wf_size());
     if (packed_tid_) {
       cu->write_vgpr(vbase, lane, pack_workitem_id(id, pkt.enable_vgpr_workitem_id));
     } else {
@@ -473,12 +468,12 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
     // which is exactly what rocm-dbgapi computes to locate a wave's private
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
-    uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
     uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
-    uint32_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
+    uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
 
@@ -1303,7 +1298,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf);
+                                      entry.vgprs_per_wf, entry.kernel_wave_size);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
         free_reserved();
@@ -1323,7 +1318,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_process_id(entry.process_id);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
-      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
+      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
       const uint32_t relative_wg_id = global_wg_id - entry.workgroup_id_offset;
       const WorkgroupCoord coord = entry.local_wg_coord(relative_wg_id);
       wf->set_wg_coord(coord.x, coord.y, coord.z);
@@ -1354,9 +1349,6 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
-    uint32_t local_wg_id = entry.dispatched_wgs;
-    uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
-
     if (entry.has_workgroup_clusters()) {
       assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
       // The SPI interface chooses one WG at a time and cannot reserve all peers
@@ -1367,8 +1359,10 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
              "clustered dispatch advances by whole clusters");
       assert(entry.total_wgs - entry.dispatched_wgs >= cluster_size &&
              "validate_cluster_shape guarantees a complete trailing cluster");
-      uint32_t cluster_ordinal = entry.dispatched_wgs / cluster_size;
-      local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
+      // dispatched_wgs counts workgroups; the chunk here is a whole cluster, so
+      // convert to a cluster index before asking the shard for its ordinal.
+      uint32_t cluster_ordinal = entry.chunk_ordinal_for(entry.dispatched_wgs / cluster_size);
+      uint32_t local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
       std::vector<PlannedWorkgroup> plan;
       size_t planned_next_cu = next_cu_;
       if (!plan_cluster_workgroups(entry, local_wg_id, next_cu_, cus_, plan, planned_next_cu)) {
@@ -1409,6 +1403,12 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
       continue;
     }
+
+    // Unclustered: the chunk is a single workgroup, so dispatched_wgs indexes
+    // the shard's chunks directly and the shard maps that to a grid-wide id.
+    // An unsharded entry maps the ordinal to itself.
+    uint32_t local_wg_id = entry.chunk_ordinal_for(entry.dispatched_wgs);
+    uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
 
     // SPI selects the CU or sibling-CU WGP based on descriptor mode and
     // resource availability.
@@ -1484,7 +1484,7 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  // Retire any non-kernel entries (barriers with total_wgs==0) that are now at
+  // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
     if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
@@ -1602,8 +1602,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  uint32_t vgprs = (vgpr_gran + 1) * vgpr_granularity_;
   rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  const uint32_t wave_size = kernel_wavefront_size(arch, kd);
+  const auto vgpr_granularity = descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
+  if (!vgpr_granularity)
+    throw std::runtime_error("unsupported kernel wave size for VGPR descriptor decoding");
+  uint32_t vgprs = (vgpr_gran + 1) * *vgpr_granularity;
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
@@ -1611,7 +1615,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   uint32_t wg_size =
       static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
-  uint32_t wave_size = cus_.empty() ? 64 : cus_[0]->wf_size();
   uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
 
   uint32_t num_dims = pkt.setup & 0x3;
@@ -1632,6 +1635,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
+  dp.kind = DispatchPacketKind::Kernel;
   dp.dispatched_wgs = 0;
   dp.completed_wgs = 0;
   dp.wfs_per_workgroup = wfs_per_wg;
@@ -1651,6 +1655,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
         AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT);
     dp.num_named_barriers = std::min(named_barrier_blocks * 4u, ComputeUnitCore::kMaxNamedBarriers);
   }
+  dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
@@ -2032,6 +2037,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           .queue_id = queue.queue_id,
           .process_id = queue.process_id,
           .completion_signal = sig,
+          .kind = DispatchPacketKind::NonKernel,
           .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
       };
 
@@ -2087,6 +2093,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
+            .kind = DispatchPacketKind::NonKernel,
             .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
 
@@ -2147,6 +2154,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = sig,
+            .kind = DispatchPacketKind::NonKernel,
             .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
 
@@ -2308,7 +2316,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   // immediately so host signal waits see completed barriers before returning.
   for (size_t i = 0; i < hw_queues_.size(); ++i)
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
-  // Process any new non-kernel entries (barriers with total_wgs==0).
+  // Process any new non-kernel entries (barrier-kind packets).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
     if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
       continue;

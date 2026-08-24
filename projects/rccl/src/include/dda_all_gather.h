@@ -10,6 +10,8 @@
 
 #include "nccl.h"
 
+#include <cstdint>
+
 struct ncclComm;
 
 /**
@@ -23,6 +25,13 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
  */
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream);
+
+// Total CTAs (grid blocks) each DDA allgather launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
+uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
 
 /**
  * Check if DDA allgather is eligible for the fabric/VMM path (runtime nRanks
