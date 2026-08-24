@@ -9,7 +9,7 @@
 
 ---
 
-## 0. How to use this document (internal designers)
+## 0. How to use this document (designers)
 
 This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR review, plus **SHOULD** / **MAY** patterns where rollout scope is still evolving. **§0 is the authoritative rule set**; later sections explain and illustrate — they do not override §0.
 
