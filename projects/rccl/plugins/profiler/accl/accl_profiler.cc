@@ -25,7 +25,6 @@ static ncclDebugLogger_t gLogFn;
 
 // Env vars
 static size_t gMinMsgSize = 0;  // ACCL_PROFILER_MIN_SIZE_BYTES
-static int    gWarmupIters = 5; // ACCL_PROFILER_WARMUP_ITERS
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
@@ -360,8 +359,6 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   const char* env;
   if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL)
     gMinMsgSize = (size_t)atol(env);
-  if ((env = getenv("ACCL_PROFILER_WARMUP_ITERS")) != NULL)
-    gWarmupIters = atoi(env);
 
   struct acclCommContext* ctx = (struct acclCommContext*)calloc(1, sizeof(*ctx));
   if (!ctx) return ncclSuccess;
@@ -399,8 +396,8 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
                    | ncclProfileProxyOp | ncclProfileProxyStep;
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
-            "output=%s minSize=%zu warmup=%d",
-            rank, nRanks, nNodes, ctx->outputPath, gMinMsgSize, gWarmupIters);
+            "output=%s minSize=%zu",
+            rank, nRanks, nNodes, ctx->outputPath, gMinMsgSize);
   return ncclSuccess;
 }
 
