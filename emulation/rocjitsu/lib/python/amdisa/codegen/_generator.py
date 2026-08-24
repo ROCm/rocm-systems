@@ -5974,6 +5974,9 @@ class CodeGenerator:
                 '    l2->flush_all(wf.process_id());'
             )
 
+        if cls == 'icache_inv':
+            return '  wf.cu().instruction_cache().invalidate_all();'
+
         if cls == 'gl2_wb':
             return (
                 '  if (auto *l2 = wf.cu().l2())\n' '    l2->flush_all(wf.process_id());'

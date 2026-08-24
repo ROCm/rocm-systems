@@ -269,7 +269,6 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_sethalt",
       "s_sendmsg",
       "s_sendmsghalt",
-      "s_icache_inv",
       "s_nop",
       "s_getpc",
       "s_getreg",

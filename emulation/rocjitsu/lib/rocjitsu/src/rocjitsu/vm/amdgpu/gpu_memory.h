@@ -229,25 +229,6 @@ public:
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
 
-  /// @brief Instruction fetch - read a contiguous block (I$ line fill).
-  ///
-  /// @details Resolves the whole block in one pass instead of one lookup per
-  /// word, so a line fill costs a single page-stripe lock. Unlike read_block()
-  /// the caller must keep @p size within one page; an I$ line is aligned and
-  /// smaller than a page, so it always is.
-  /// @param addr Block start; must not cross a page boundary.
-  /// @param[out] dst Destination buffer of at least @p size bytes.
-  /// @param size Number of bytes to read.
-  /// @param vmid Owning process address space.
-  void fetch_block(uint64_t addr, uint8_t *dst, size_t size, uint32_t vmid = 0) const {
-    assert((addr & PAGE_MASK) + size <= PAGE_SIZE && "I$ line must not cross a page");
-    if (read_mapped(addr, dst, size, vmid))
-      return;
-    if (vmid > 0 && read_client_memory(addr, dst, size, vmid))
-      return;
-    simdojo::SparseMemory::read_block(addr, std::span<uint8_t>(dst, size));
-  }
-
   bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
     if (is_mapped(addr, vmid) || simdojo::SparseMemory::has_page(addr))
       return true;
@@ -264,9 +245,12 @@ public:
 
   /// @brief Read a contiguous range from simulated GPU memory.
   /// @details Handles each page through mapped host memory, client memory, or
-  /// sparse backing memory. A mapped access clipped by a host extent remains
-  /// zero-filled and emits a VM diagnostic so a future strict-fault mode can
-  /// reuse the same boundary detection.
+  /// sparse backing memory. Every path resolves a whole page chunk at a time,
+  /// so a read costs one page-table walk and one page-stripe lock per page it
+  /// touches rather than one per byte -- which is what makes this cheap enough
+  /// for the I$ to fill a line through. A mapped access clipped by a host
+  /// extent remains zero-filled and emits a VM diagnostic so a future
+  /// strict-fault mode can reuse the same boundary detection.
   void read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
     for_each_page_chunk(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto out = dst.subspan(offset, chunk);
@@ -274,8 +258,8 @@ public:
         return;
       if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
         return;
-      for (size_t i = 0; i < chunk; ++i)
-        out[i] = simdojo::SparseMemory::read8(ea + i);
+      // The chunk is within one page, so this is a single sparse-page lock.
+      simdojo::SparseMemory::read_block(ea, out);
     });
   }
 

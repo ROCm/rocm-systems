@@ -5,6 +5,7 @@
 // and matmul_mfma across 1..8 threads (one per XCD). Outputs CSV to stdout.
 
 #include "aql_queue.h"
+#include "scaling_thread_counts.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
@@ -27,10 +28,10 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -134,6 +135,15 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
 }
 
 int main(int argc, char **argv) {
+  // Thread counts come from argv when given, otherwise sweep 1..TOTAL_XCDS.
+  const auto thread_counts = test::parse_thread_counts(
+      std::span<const char *const>(argv + 1, static_cast<size_t>(argc - 1)), TOTAL_XCDS);
+  if (!thread_counts) {
+    std::cerr << "usage: " << argv[0] << " [thread-count ...]   (each 1.." << TOTAL_XCDS
+              << "; none means sweep them all)\n";
+    return 2;
+  }
+
   struct Kernel {
     const char *name;
     uint32_t N;
@@ -151,18 +161,7 @@ int main(int argc, char **argv) {
 
   constexpr int RUNS = 3;
 
-  // Thread counts come from argv when given, otherwise sweep 1..TOTAL_XCDS.
-  std::vector<uint32_t> thread_counts;
-  for (int i = 1; i < argc; ++i) {
-    auto v = static_cast<uint32_t>(std::strtoul(argv[i], nullptr, 10));
-    if (v > 0)
-      thread_counts.push_back(v);
-  }
-  if (thread_counts.empty())
-    for (uint32_t t = 1; t <= TOTAL_XCDS; ++t)
-      thread_counts.push_back(t);
-
-  for (uint32_t t : thread_counts) {
+  for (uint32_t t : *thread_counts) {
     std::cout << t;
     for (auto &k : kernels) {
       // Take the median of RUNS.

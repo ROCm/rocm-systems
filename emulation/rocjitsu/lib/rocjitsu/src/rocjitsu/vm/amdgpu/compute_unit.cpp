@@ -194,9 +194,6 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   // arguments from L2/memory rather than stale lines from a prior kernel.
   // On real hardware, the driver issues s_dcache_inv at kernel launch.
   l1_scalar_.invalidate_all();
-  // Same reason, and the same launch packet: s_icache_inv, so a wave never
-  // starts on code bytes cached from a previously loaded kernel.
-  inst_cache_.invalidate_all();
 
   auto *wf = wfs_[wf_id].get();
   wf->wg_id_ = wg_id;
@@ -272,6 +269,15 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
 
 void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                                       uint32_t num_named_barriers) {
+  // The driver's s_icache_inv rides the launch packet, so it lands once per
+  // dispatch, not once per wave: a kernel VA reused by a later dispatch still
+  // sees fresh code, while the sibling waves of one dispatch keep filling a
+  // shared I$ instead of cold-starting each other.
+  if (inst_cache_dispatch_id_ != dispatch_id) {
+    inst_cache_.invalidate_all();
+    inst_cache_dispatch_id_ = dispatch_id;
+  }
+
   const uint64_t key = wg_key(dispatch_id, wg_id);
   active_wgs_[key] = wf_count;
   if (wf_count <= 1) {
@@ -677,18 +683,13 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (debug_active()) {
     // A debugger writes breakpoints straight into code memory with none of the
     // maintenance that invalidates the I$, so bypass it while one is attached.
-    inst_cache_bypassed_ = true;
     for (int i = 0; i < 4; ++i)
       words[i] = memory_->fetch32(active->pc + i * 4, vmid);
   } else {
-    // Detach leaves lines cached from before the session, which the debugger
-    // may have written over since. Drop them here rather than in
-    // set_debug_active(): that runs on the ioctl thread, and the I$ is only
-    // unlocked because this thread is its sole accessor.
-    if (inst_cache_bypassed_) {
-      inst_cache_.invalidate_all();
-      inst_cache_bypassed_ = false;
-    }
+    // A session that has come and gone may have written over lines cached
+    // before it attached, whether or not this wave issued while it was
+    // running. Take the invalidation set_debug_active() published.
+    sync_inst_cache_debug_epoch();
     inst_cache_.fetch(*memory_, active->pc, vmid, reinterpret_cast<uint8_t *>(words));
   }
 
