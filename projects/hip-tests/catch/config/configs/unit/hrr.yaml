@@ -375,3 +375,18 @@ hrr:
   Unit_HRR_ZeroInitRead_Direct:
     <<: *level_2
     tags: [direct, repro]
+  Unit_HRR_Regions_StreamFraming:
+    <<: *level_2
+    tags: [format, regions, cpu]
+  Unit_HRR_Regions_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_SegmentMaterialization:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_EmbeddedPointerMaterialization:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, regions]
+  Unit_HRR_Regions_Direct:
+    <<: *level_2
+    tags: [direct, regions]
