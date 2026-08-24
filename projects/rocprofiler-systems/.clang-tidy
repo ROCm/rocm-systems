@@ -306,3 +306,7 @@ CheckOptions:
     value: "3"
   - key: readability-identifier-length.MinimumLoopCounterNameLength
     value: "3"
+
+  # include igrone
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: "<compare>,<string_view>"
