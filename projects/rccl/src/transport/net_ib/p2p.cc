@@ -850,7 +850,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].tag = tags[i];
     localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
 
-    // Multi-segment layout goes on the side table (review ID 18), never in CTS.
+    // Multi-segment layout goes on the side table, never in CTS.
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
     if (mhandleWrapper->nSegments > 1 && (comm->peerCaps & NCCL_IB_CAP_MULTISEG)) {
       sideElem[i].nSegments = mhandleWrapper->nSegments;
