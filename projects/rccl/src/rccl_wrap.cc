@@ -1476,19 +1476,26 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // enqueues normally (mirroring rcclSelectAllGather).
   const bool ceCapturing = query ? graphCapturingHint : false;  // live: enqueue.cc gates this
   if (!ceCapturing) {
-    // For the query path we need winRegType; approximate from buffer pointer equality
-    // as a conservative check (registered if buffers differ, same heuristic as allgather query).
-    // Live path: enqueue.cc recomputes ncclCeAvailable() with the real winRegType.
-    ncclSymRegType_t queryRegType = (sendbuff != recvbuff) ? ncclSymSendNonregRecvReg : ncclSymSendRegRecvReg;
-    ncclSymRegType_t regType = query ? queryRegType : ncclSymSendNonregRecvReg;
+    // Probe real window registration on the live path (mirrors rcclSelectAllGather).
+    // Query path uses a pointer-equality heuristic: different pointers => recv likely registered.
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclSymRegType_t winRegType;
+    if (query) {
+      winRegType = (sendbuff != recvbuff) ? ncclSymSendNonregRecvReg : ncclSymSendRegRecvReg;
+    } else {
+      ncclDevrFindWindow(comm, sendbuff, &sendWin);
+      ncclDevrFindWindow(comm, recvbuff, &recvWin);
+      NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+    }
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, regType)) {
+        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, regType)) {
+    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
       if (query) {
         int a, p, ch;
