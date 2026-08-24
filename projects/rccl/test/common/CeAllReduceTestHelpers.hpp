@@ -28,9 +28,16 @@ inline bool isCeRuntimeDriverSupported()
            (driverVer >= 70051831 && driverVer < 70060000);
 }
 
-// The chunk-size helpers live in ce_coll.h (ncclCeAllReduceMaxChunkBytes,
-// ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) so these tests
-// exercise the same code ncclCeAllReduce() uses instead of a copy that can drift.
+// Staging cap used when no RCCL_CE_AR_MAX_MSG_BYTES override is set. Matches
+// rcclArchThresholds::ceArMax in graph/tuning.cc (256 MiB). Per-rank chunk
+// capacity is that cap / nRanks, same as ncclCeInit.
+constexpr size_t kCeArMaxMsgBytesDefault = 256ull * 1024 * 1024;
+
+inline size_t ceAllReduceMaxChunkBytes(int nRanks,
+                                       size_t ceArMaxBytes = kCeArMaxMsgBytesDefault)
+{
+    return ceArMaxBytes / static_cast<size_t>(nRanks);
+}
 
 // Minimal ncclComm stand-in for CE AllReduce eligibility unit tests.
 struct CeAllReduceMockComm
@@ -42,11 +49,12 @@ struct CeAllReduceMockComm
     void reset()
     {
         std::memset(&comm, 0, sizeof(comm));
-        comm.nNodes           = 1;
-        comm.nRanks           = 4;
-        comm.rank             = 0;
-        comm.symmetricSupport = true;
-        comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm.nNodes               = 1;
+        comm.nRanks               = 4;
+        comm.rank                 = 0;
+        comm.symmetricSupport     = true;
+        comm.config.CTAPolicy     = NCCL_CTA_POLICY_ZERO;
+        comm.ceColl.ceArMaxBytes  = kCeArMaxMsgBytesDefault;
     }
 
     ncclComm* get() { return &comm; }
