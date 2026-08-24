@@ -125,7 +125,7 @@ rocprofiler-systems supports several instrumentation modes:
 | Variable | Description | Default |
 | ---------- | ------------- | --------- |
 | `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `false` |
-| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `true` |
+| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `false` |
 | `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `true` |
 | `ROCPROFSYS_USE_SAMPLING` | Enable statistical sampling | `false` |
 | `ROCPROFSYS_SAMPLING_FREQ` | Sampling frequency (interrupts/sec) | `50` |

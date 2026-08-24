@@ -582,7 +582,6 @@ configure_settings(bool _init)
         get_env<size_t>(env_vars::NUM_THREADS, 1), "threading", "performance", "sampling",
         "parallelism", "advanced");
 
-    // rocpd is the default output format; perfetto must be explicitly enabled
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
                               "Enable perfetto backend for tracing", false, "backend",
                               "perfetto");
@@ -1576,6 +1575,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -1632,6 +1632,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
