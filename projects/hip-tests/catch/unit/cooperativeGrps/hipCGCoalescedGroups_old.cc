@@ -260,10 +260,11 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       temp = (((tileSz * j) - 1) * (tileSz * j)) / 2;
       expectedSum[j - 1] = temp - sum;
     }
-    // Last tile may be partial; expected sum = (size-1)*size/2 for that tile
+    // Last tile may be partial; expected sum = sum of coalesced-group ranks in that tile
     if (participatingThreads % tileSz != 0 && numTiles > 0) {
-      int lastTileSize = participatingThreads - (numTiles - 1) * tileSz;
-      expectedSum[numTiles - 1] = (lastTileSize - 1) * lastTileSize / 2;
+      int startRank = (numTiles - 1) * tileSz;
+      int endRank = participatingThreads - 1;
+      expectedSum[numTiles - 1] = (endRank - startRank + 1) * (startRank + endRank) / 2;
     }
 
     int* dResult = nullptr;
