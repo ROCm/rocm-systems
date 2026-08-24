@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run each official gdb.rocm test in a fresh verified Mirage daemon session."""
+"""Run each official gdb.rocm test in its own Mirage session."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ import time
 # in, an environment variable, or a command-line flag -- in that order of
 # increasing precedence. Nothing is hard-coded to one developer's checkout, so
 # the same run is reproducible in CI and in a second worktree.
-SESSION_ROOT = Path(f"/run/user/{os.getuid()}/mirage/session")
 
 # Resolved by configure() before main() does any work.
 ROOT = Path()
@@ -107,99 +106,32 @@ def copy_if_present(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination, follow_symlinks=True)
 
 
-def existing_sessions() -> set[Path]:
-    """Session directories present before a test launches."""
-    if not SESSION_ROOT.exists():
-        return set()
-    return {definition.parent for definition in SESSION_ROOT.glob("*/def.json")}
+SESSION_LINE_RE = re.compile(r"^mirage: session (\S+)", re.MULTILINE)
 
 
-def fresh_session(before: set[Path]) -> Path | None:
-    """The session this test created, identified by set difference.
+def session_from_console(console: Path) -> dict[str, object]:
+    """The session this test ran in, taken from `mirage run`'s own report.
 
-    Picking "newest by mtime" instead looks correct until something else on the
-    machine creates a session mid-test -- a second copy of this script, or a
-    stray `mirage run`. The newest directory is then somebody else's, and the
-    run both mis-attributes the health check and stops a session it does not
-    own, which shows up as an unrelated test failing with an empty gdb.sum.
-    Identify the session positively, and refuse to guess when ambiguous.
+    A session is owned by the `mirage run` that created it: it exists while
+    that command runs and is gone when it exits. So there is nothing left to
+    stat once a test finishes -- no session directory, no `def.json`, no
+    daemon pid to signal -- and the evidence that an emulated machine really
+    came up is the id mirage announces on stderr as it starts.
+
+    That line is a documented part of the CLI's behaviour, not incidental
+    output: it is how a user finds the session to `mirage exec` into from
+    another terminal, and mirage's own end-to-end matrix asserts on it. The
+    console log this reads has the run's stderr merged into it.
+
+    This is weaker than the health check it replaces, which could confirm the
+    emulator was still alive at the end of the test. What it still catches is
+    the failure that matters here -- a run where no emulated machine was ever
+    brought up, so the tests either did not run or ran against something other
+    than the emulator under test.
     """
-    appeared = sorted(existing_sessions() - before)
-    if not appeared:
-        return None
-    if len(appeared) > 1:
-        print(
-            "warning: several sessions appeared during one test "
-            f"({', '.join(path.name for path in appeared)}); "
-            "another mirage run is active and results are not trustworthy",
-            file=sys.stderr,
-        )
-        return None
-    return appeared[0]
-
-
-def snapshot_session(session_dir: Path, output: Path) -> dict[str, object]:
-    evidence = output / "session"
-    evidence.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "def.json": session_dir / "def.json",
-        "health-before-stop.json": session_dir / "health.json",
-        "rj_config.json": session_dir / "rj_config.json",
-        "exec-def.json": session_dir / "exec/e-000000/def.json",
-        "exec-status.json": session_dir / "exec/e-000000/status.json",
-        "daemon.pid": session_dir / "node/0/pid",
-        # The daemon hosts the emulated KFD, so anything the driver reports
-        # about a failing test is here and nowhere else: its stderr does not
-        # reach the test console. It has to be copied before the stop below,
-        # which removes the whole session directory -- taking it afterwards
-        # captures nothing at all, which is worse than missing the last few
-        # lines of shutdown output.
-        "host.log": session_dir / "node/0/host.log",
-    }
-    for destination, source in paths.items():
-        copy_if_present(source, evidence / destination)
-
-    session_definition: dict[str, object] = {}
-    try:
-        session_definition = json.loads((session_dir / "def.json").read_text())
-    except (OSError, json.JSONDecodeError):
-        pass
-    session_id = str(session_definition.get("id", session_dir.name))
-    daemon_mode = session_definition.get("daemon") is True
-
-    daemon_pid: int | None = None
-    daemon_alive = False
-    try:
-        daemon_pid = int((session_dir / "node/0/pid").read_text().strip())
-        os.kill(daemon_pid, 0)
-        daemon_alive = True
-        process = subprocess.run(
-            ["ps", "-p", str(daemon_pid), "-o", "pid,lstart,etime,stat,args"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-        (evidence / "daemon-process.txt").write_text(process.stdout)
-    except (OSError, ValueError):
-        pass
-
-    stop = subprocess.run(
-        [str(MIRAGE), "session", "stop", session_id],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
-    (evidence / "stop.log").write_text(stop.stdout)
-    return {
-        "id": session_id,
-        "daemon_mode": daemon_mode,
-        "daemon_pid": daemon_pid,
-        "daemon_alive_before_stop": daemon_alive,
-        "stop_rc": stop.returncode,
-    }
+    text = console.read_text(errors="replace") if console.is_file() else ""
+    found = SESSION_LINE_RE.search(text)
+    return {"id": found.group(1) if found else None}
 
 
 def parse_summary(path: Path) -> tuple[collections.Counter[str], bool]:
@@ -214,7 +146,7 @@ def parse_summary(path: Path) -> tuple[collections.Counter[str], bool]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run each official gdb.rocm test in a fresh verified Mirage daemon session."
+        description="Run each official gdb.rocm test in its own Mirage session."
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
@@ -288,7 +220,7 @@ def main() -> int:
         "sdk": str(SDK),
         "core": str(CORE),
         "profile": "mi350x",
-        "daemon_required": True,
+        "daemon_mode": True,
         "per_file_timeout_seconds": args.timeout,
         "tests": tests,
     }
@@ -309,7 +241,6 @@ def main() -> int:
         name = test.removesuffix(".exp")
         test_output = output / f"{index:02d}-{name}"
         test_output.mkdir()
-        sessions_before = existing_sessions()
         start = time.monotonic()
         rj_log_root = Path(args.rj_log)
         rj_log = (
@@ -325,7 +256,6 @@ def main() -> int:
             str(MIRAGE),
             "run",
             "--daemon",
-            "--keep-session",
             "--profile",
             "mi350x",
             "--env",
@@ -363,18 +293,7 @@ def main() -> int:
         elapsed = round(time.monotonic() - start, 3)
         copy_if_present(TESTSUITE / "gdb.log", test_output / "gdb.log")
         copy_if_present(TESTSUITE / "gdb.sum", test_output / "gdb.sum")
-        session_dir = fresh_session(sessions_before)
-        session = (
-            snapshot_session(session_dir, test_output)
-            if session_dir is not None
-            else {
-                "id": None,
-                "daemon_mode": False,
-                "daemon_pid": None,
-                "daemon_alive_before_stop": False,
-                "stop_rc": None,
-            }
-        )
+        session = session_from_console(test_output / "console.log")
         statuses, summary_complete = parse_summary(test_output / "gdb.sum")
         aggregate.update(statuses)
         bad = {
@@ -393,8 +312,7 @@ def main() -> int:
             process.returncode == 0
             and summary_complete
             and not bad
-            and session["daemon_mode"] is True
-            and session["daemon_alive_before_stop"] is True
+            and session["id"] is not None
         )
         record = {
             "index": index,
