@@ -448,6 +448,7 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
     const auto names = assemble_operation_env_names_for_kind(kind);
     if(names.is_empty())
     {
+        // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
         constexpr std::string_view kind_label =
             std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>
                 ? std::string_view{ "callback" }
@@ -455,6 +456,7 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
         finalize_and_throw(fmt::format("tracing_config::get_backtrace_operations: no "
                                        "options registered for {} tracing kind {}",
                                        kind_label, static_cast<int>(kind)));
+        // NOLINTEND(misc-include-cleaner)
     }
 
     const auto patterns =

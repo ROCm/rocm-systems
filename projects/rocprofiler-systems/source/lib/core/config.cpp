@@ -472,49 +472,90 @@ json_has_project_name_root(const std::string& json_path)
 }
 
 void
+register_operation_include_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_include_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_include_env_name,
+                              "Inclusive filter for domain operations (for API "
+                              "domains, this selects the functions to trace) "
+                              "[regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_exclude_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_exclude_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_exclude_env_name,
+                              "Exclusive filter for domain operations applied "
+                              "after the inclusive filter (for API domains, "
+                              "removes function from trace) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_backtrace_setting(const std::shared_ptr<settings>& _config,
+                                     std::unordered_set<std::string>& registered,
+                                     const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_annotate_backtrace_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string,
+                              spec.env_names.operations_annotate_backtrace_env_name,
+                              "Specification of domain operations which will "
+                              "record a backtrace (for API domains, this is a "
+                              "list of function names) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
 register_rocm_operation_settings(const std::shared_ptr<settings>& _config,
                                  const auto&                      operation_settings)
 {
     auto registered_operation_settings = std::unordered_set<std::string>{};
     for(const auto& spec : operation_settings)
     {
-        if(registered_operation_settings
-               .emplace(spec.env_names.operations_include_env_name)
-               .second)
-        {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, spec.env_names.operations_include_env_name,
-                "Inclusive filter for domain operations (for API "
-                "domains, this selects the functions to trace) "
-                "[regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
-                ->set_choices(spec.operation_choices);
-        }
-        if(registered_operation_settings
-               .emplace(spec.env_names.operations_exclude_env_name)
-               .second)
-        {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, spec.env_names.operations_exclude_env_name,
-                "Exclusive filter for domain operations applied "
-                "after the inclusive filter (for API domains, "
-                "removes function from trace) [regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
-                ->set_choices(spec.operation_choices);
-        }
-        if(registered_operation_settings
-               .emplace(spec.env_names.operations_annotate_backtrace_env_name)
-               .second)
-        {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, spec.env_names.operations_annotate_backtrace_env_name,
-                "Specification of domain operations which will "
-                "record a backtrace (for API domains, this is a "
-                "list of function names) [regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
-                ->set_choices(spec.operation_choices);
-        }
+        register_operation_include_setting(_config, registered_operation_settings, spec);
+        register_operation_exclude_setting(_config, registered_operation_settings, spec);
+        register_operation_backtrace_setting(_config, registered_operation_settings,
+                                             spec);
     }
+}
+
+void
+register_rocm_group_by_queue_setting(const std::shared_ptr<settings>& _config,
+                                     const std::vector<std::string>&  rocm_domain_choices)
+{
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
+    // present in supported ROCProfiler-SDK domains.
+    if(std::ranges::find(rocm_domain_choices, std::string{ "hip_stream" }) ==
+       rocm_domain_choices.end())
+    {
+        return;
+    }
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
+                              "By default, Perfetto trace will show the HIP streams "
+                              "to which kernel and memory copy operations submitted. "
+                              "With the `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the "
+                              "trace will display HSA queues to which these kernel "
+                              "and memory operations were submitted.",
+                              false, "rocm", "perfetto");
 }
 
 void
@@ -543,19 +584,7 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
 
     register_rocm_operation_settings(_config, tracing_config_t::get_operation_settings());
 
-    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
-    // present in supported ROCProfiler-SDK domains.
-    if(std::ranges::find(rocm_domain_choices, std::string{ "hip_stream" }) !=
-       rocm_domain_choices.end())
-    {
-        ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
-                                  "By default, Perfetto trace will show the HIP streams "
-                                  "to which kernel and memory copy operations submitted. "
-                                  "With the `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the "
-                                  "trace will display HSA queues to which these kernel "
-                                  "and memory operations were submitted.",
-                                  false, "rocm", "perfetto");
-    }
+    register_rocm_group_by_queue_setting(_config, rocm_domain_choices);
 }
 }  // namespace
 
