@@ -5,6 +5,7 @@
 
 import gzip
 import os
+from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -54,9 +55,6 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
     monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
-    )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
@@ -86,9 +84,6 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
-    )
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
@@ -112,13 +107,12 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
     assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
 
 
-def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
-    """run_prof skips per-pid rocpd update when its native counter CSV is missing."""
+def test_run_prof_retains_pass_dir_without_native_csv(tmp_path, monkeypatch):
+    """run_prof keeps the pass dir even when a pid has no native counter CSV."""
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = tmp_path / "workload"
 
-    # Child pids with no GPU work have a .db but no native counter CSV.
     pmc1 = workload_dir / "out" / "pmc_1"
     (pmc1 / "12345").mkdir(parents=True)
     (pmc1 / "12345" / "12345.db").touch()
@@ -126,12 +120,9 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     options = {
         "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": str(workload_dir),
-        "ROCPROF_COUNTER_COLLECTION": "0",  # native tool collects, not SDK
+        "ROCPROF_COUNTER_COLLECTION": "0",
         "ROCP_TOOL_LIBRARIES": "",
     }
-
-    update_calls: list = []
-    debug_msgs: list[str] = []
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
@@ -139,43 +130,35 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.update_rocpd_pmc_events",
-        lambda *a, **k: update_calls.append(a),
+        "utils.utils_profile.rocpd_data.has_kernel_dispatches", lambda _db: True
     )
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv",
-        lambda *a, **k: None,
-    )
-    monkeypatch.setattr(
-        "utils.utils_profile.console_debug",
-        lambda msg, *a, **k: debug_msgs.append(msg),
-    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), options, str(workload_dir))
 
-    assert update_calls == []
-    assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
+    pass_path = workload_dir / "out" / "pmc_perf_test"
+    assert pass_path.is_dir()
+    assert (pass_path / "12345" / "12345.db").is_file()
 
 
-def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
-    """Run run_prof against a canned counter CSV instead of a real profiler."""
+def test_run_prof_zero_kernels_removes_pass_dir(tmp_path, monkeypatch):
+    """A workload that dispatches no GPU kernels must warn and leave no pass dir."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = tmp_path / "workload"
+    (workload_dir / "out" / "pmc_1").mkdir(parents=True)
+
+    warnings: list[str] = []
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
-
-    def fake_convert(db_paths, counter_csv, marker_csv):
-        assert counter_csv.endswith(".csv.gz"), counter_csv
-        if counter_csv_body is not None:
-            with gzip.open(counter_csv, "wt", encoding="utf-8") as f:
-                f.write(counter_csv_body)
-
     monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", fake_convert
+        "utils.utils_profile.rocpd_data.has_kernel_dispatches", lambda _db: False
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -183,28 +166,6 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
         "utils.utils_profile.console_warning",
         lambda msg, *a, **k: warnings.append(str(msg)),
     )
-
-
-@pytest.mark.parametrize(
-    "counter_csv_body",
-    [
-        pytest.param(None, id="csv_never_written"),
-        pytest.param(COUNTER_CSV_HEADER, id="header_only"),
-    ],
-)
-def test_run_prof_zero_kernels_writes_no_results_csv(
-    tmp_path, monkeypatch, counter_csv_body
-):
-    """A workload that dispatches no GPU kernels must warn and leave no
-    results_*.csv behind: a header-only file would look like real profiling data
-    to analyze."""
-    fname = tmp_path / "pmc_perf_test.yaml"
-    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
-    workload_dir = tmp_path / "workload"
-    (workload_dir / "out" / "pmc_1").mkdir(parents=True)
-
-    warnings: list[str] = []
-    stub_run_prof_deps(monkeypatch, counter_csv_body, warnings)
 
     utils_profile.run_prof(
         str(fname),
@@ -214,40 +175,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
 
     assert any("No GPU kernel data collected" in m for m in warnings)
     assert sorted(workload_dir.glob("results_*.csv.gz")) == []
-    assert not (workload_dir / "out").exists()
-
-
-def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
-    """run_prof renumbers Dispatch_ID per unique dispatch and Kernel_ID per
-    unique kernel launch shape, and drops PID from the results CSV."""
-    fname = tmp_path / "pmc_perf_test.yaml"
-    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
-    workload_dir = tmp_path / "workload"
-    (workload_dir / "out" / "pmc_1").mkdir(parents=True)
-
-    # Two dispatches of the same kernel shape, plus a differently shaped kernel.
-    body = COUNTER_CSV_HEADER + (
-        "100,77,kernel_a,256,64,0,10,20,9,SQ_WAVES,1\n"
-        "100,77,kernel_a,256,64,0,10,20,9,SQ_BUSY_CYCLES,2\n"
-        "100,88,kernel_a,256,64,0,30,40,9,SQ_WAVES,3\n"
-        "100,99,kernel_b,512,64,0,50,60,5,SQ_WAVES,4\n"
-    )
-    warnings: list[str] = []
-    stub_run_prof_deps(monkeypatch, body, warnings)
-
-    utils_profile.run_prof(
-        str(fname),
-        {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
-        str(workload_dir),
-    )
-
-    results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
-    results = pd.read_csv(results_csv)
-    assert "PID" not in results.columns
-    assert results["Dispatch_ID"].tolist() == [0, 0, 1, 2]
-    # Kernel_ID keys off launch shape, so both kernel_a dispatches share one.
-    assert results["Kernel_ID"].tolist() == [0, 0, 0, 1]
-    assert results["Counter_Value"].tolist() == [1, 2, 3, 4]
+    assert not list((workload_dir / "out").glob("*"))
 
 
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
@@ -266,16 +194,20 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
         captured_config["sdk_config"] = sdk_config
         return str(tmp_path / "metrics_path")
 
+    def fake_capture(*_a, **_k):
+        pmc1 = Path(workload_dir) / "out" / "pmc_1"
+        pid_dir = pmc1 / "1"
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        (pid_dir / "1.db").touch()
+        return (True, "success")
+
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
-        lambda *a, **k: (True, "success"),
-    )
+    monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
     monkeypatch.setattr(
         "utils.utils_profile.create_temp_rocprofiler_metrics_path", fake_metrics_path
     )
     monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+        "utils.utils_profile.rocpd_data.has_kernel_dispatches", lambda _db: True
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -333,6 +265,10 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     def fake_capture(cmd, new_env=None, **kwargs):
         captured["cmd"] = cmd
         captured["env"] = new_env
+        pmc1 = Path(workload_dir) / "out" / "pmc_1"
+        pid_dir = pmc1 / "1"
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        (pid_dir / "1.db").touch()
         return (True, "success")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -342,7 +278,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
         lambda sdk_config: str(tmp_path / "metrics_path"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+        "utils.utils_profile.rocpd_data.has_kernel_dispatches", lambda _db: True
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)

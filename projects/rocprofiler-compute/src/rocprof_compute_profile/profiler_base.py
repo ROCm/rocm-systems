@@ -388,7 +388,6 @@ class RocProfCompute_Base:
                 profiler_options=options,
                 workload_dir=args.output_directory,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
-                retain_rocpd_output=args.retain_rocpd_output,
             )
 
             end_time = time.time()
@@ -442,14 +441,6 @@ class RocProfCompute_Base:
         msg = "Collecting Performance Counters"
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
-
-        if total_runs:
-            # Warn once per profile run, not once per counter collection pass.
-            console_warning(
-                "Intermediate results_*.csv generation from rocpd databases is "
-                "deprecated and will be replaced with automatic .db file "
-                "retention in a future release."
-            )
 
         native_tool_path = self.__get_native_tool_path(args)
         pc_sampling = PCSamplingProfile(
