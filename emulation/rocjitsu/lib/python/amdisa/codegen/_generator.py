@@ -322,6 +322,12 @@ class CodeGenerator:
     _SRC_OPERANDS_CAPACITY = 6
     _DST_OPERANDS_CAPACITY = 3
 
+    # Shared scalar execution uses these encoding values without including one
+    # ISA's generated operand enums. Validate the corresponding OPR_SSRC
+    # contract for every generated ISA so ISA description changes cannot
+    # silently make the shared resolver stale.
+    _SHARED_SCALAR_PAIR_VALUES = frozenset((*range(0, 107), *range(108, 123), 126))
+
     # These selectors name a canonical unified register namespace, while their
     # instruction fields use a format-dependent bank namespace completed by
     # separate ACC/ACC_CD bits or format selectors. Some malformed fields are
@@ -4322,13 +4328,8 @@ class CodeGenerator:
             };
 
             PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-              const uint32_t lo = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-              const auto reg = operand.to_register_ref();
-              if (!reg || reg->cls != RegClass::VGPR)
-                return {lo, lo};
-
-              const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-              return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+              return {pair.lo, pair.hi};
             }
             ''')
         model = (
@@ -5186,8 +5187,8 @@ class CodeGenerator:
                             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
                             '    if (!(exec & (1ULL << lane)))\n'
                             '      continue;\n'
-                            f'    const uint32_t src0_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
-                            f'    const uint32_t src1_value = apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
+                            f'    const uint32_t src0_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
+                            f'    const uint32_t src1_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
@@ -8358,6 +8359,91 @@ class CodeGenerator:
                 merged.append((lo, hi))
         self._selector_interval_cache[operand_type] = merged
         return merged
+
+    def _validate_shared_scalar_pair_selector_contract(self) -> None:
+        """Validate selector values consumed by the shared scalar-pair resolver."""
+        selector = next(
+            (
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == 'OPR_SSRC'
+            ),
+            None,
+        )
+        if selector is None:
+            return
+
+        enum_values: dict[str, int] = {}
+        for name, value in selector.op_sel_vals:
+            try:
+                enum_values[name] = int(value, 0)
+            except (TypeError, ValueError):
+                continue
+
+        arch = self.isa_spec.arch_name
+
+        def require(name: str, expected: int) -> None:
+            actual = enum_values.get(name)
+            if actual != expected:
+                raise ValueError(
+                    f'{arch}: shared scalar-pair selector contract requires '
+                    f'{name}={expected}, got {actual!r}'
+                )
+
+        require('OPR_SSRC_SGPR_MIN', 0)
+        require('OPR_SSRC_VCC_LO', 106)
+        require('OPR_SSRC_VCC_HI', 107)
+        require('OPR_SSRC_EXEC_LO', 126)
+        require('OPR_SSRC_EXEC_HI', 127)
+
+        sgpr_max = enum_values.get('OPR_SSRC_SGPR_MAX')
+        if sgpr_max not in (101, 105):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires '
+                f'OPR_SSRC_SGPR_MAX to be 101 or 105, got {sgpr_max!r}'
+            )
+        if sgpr_max == 101:
+            require('OPR_SSRC_FLAT_SCRATCH_LO', 102)
+            require('OPR_SSRC_FLAT_SCRATCH_HI', 103)
+            require('OPR_SSRC_XNACK_MASK_LO', 104)
+            require('OPR_SSRC_XNACK_MASK_HI', 105)
+
+        pair_block_starts = (
+            'OPR_SSRC_TTMP_MIN',
+            'OPR_SSRC_TTMP0',
+            'OPR_SSRC_TBA_LO',
+        )
+        if not any(enum_values.get(name) == 108 for name in pair_block_starts):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires a '
+                'TTMP or TBA/TMA register block starting at 108'
+            )
+        pair_block_ends = ('OPR_SSRC_TTMP_MAX', 'OPR_SSRC_TTMP15')
+        if not any(enum_values.get(name) == 123 for name in pair_block_ends):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires the '
+                'TTMP register block to end at 123'
+            )
+
+        flat_base_names = (
+            'OPR_SSRC_SRC_FLAT_SCRATCH_BASE_LO',
+            'OPR_SSRC_SRC_FLAT_SCRATCH_BASE_HI',
+        )
+        if any(name in enum_values for name in flat_base_names):
+            require(flat_base_names[0], 230)
+            require(flat_base_names[1], 231)
+
+        intervals = self._operand_selector_intervals('OPR_SSRC')
+        missing = sorted(
+            value
+            for value in self._SHARED_SCALAR_PAIR_VALUES
+            if not any(lo <= value <= hi for lo, hi in intervals)
+        )
+        if missing:
+            raise ValueError(
+                f'{arch}: OPR_SSRC is missing shared scalar-pair selector '
+                f'values {missing}'
+            )
 
     def _operand_selector_contains(self, operand_type: str, value: int) -> bool | None:
         """Whether a selector declares ``value``, or None for a non-selector type."""
@@ -11705,7 +11791,7 @@ class CodeGenerator:
                 )
                 register_access_arg_pattern = (
                     rf'((?:(?:amdgpu::)?RegisterAccess\(wf\)|regs)\.'
-                    rf'(?:read|write)_(?:scalar64|scalar|lane64|lane|chunk)\()'
+                    rf'(?:read|write)_(?:scalar64|scalar|lane_pair32|lane64|lane|chunk)\()'
                     rf'{_re.escape(opnd.name)}(?=\s*[,)])'
                 )
                 prefixed_body = _re.sub(
@@ -12315,6 +12401,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     def gen_operand_types(self) -> None:
         """Generate operand type and OpSel enums."""
+        self._validate_shared_scalar_pair_selector_contract()
         code_lines = []
         opnd_type_enum = 'enum class OperandType {'
         for opnd_type in self.isa_spec.operand_types:
