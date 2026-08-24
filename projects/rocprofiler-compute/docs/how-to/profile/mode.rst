@@ -956,10 +956,11 @@ Torch trace collector
 ---------------------
 
 Torch trace is collected by ``torch_trace_collector``, a C++ extension built for a
-specific PyTorch version. Profiling loads the installed
-``torch_trace_collector-<torch-version>.so`` that matches the workload PyTorch
-version. If none matches, profiling stops with an error that lists the supported
-PyTorch versions and the workload version.
+specific PyTorch version. Profiling loads
+``torch_trace_collector-<torch-version>.so`` for the workload PyTorch version from
+``<prefix>/lib*/rocprofiler-compute/``, or from ``src/lib/_build/lib/`` when that
+file is not installed. If no matching collector is found, profiling stops with an
+error that lists the supported PyTorch versions and the workload version.
 
 Output
 ------

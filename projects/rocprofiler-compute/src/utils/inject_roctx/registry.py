@@ -29,10 +29,14 @@ def register(backend: Backend) -> None:
 
 
 def install_many(names: Iterable[str]) -> None:
-    """Install each backend in names.
+    """Install each named backend.
 
-    Unknown or failing entries are warned and skipped.
+    Unknown or failing backends are skipped after a warning.
+    ``UnsupportedTorchVersionError`` is re-raised.
     """
+    from utils.inject_roctx._backends.torch_cpp_loader import (
+        UnsupportedTorchVersionError,
+    )
     from utils.logger import console_warning
 
     seen: set[str] = set()
@@ -49,6 +53,8 @@ def install_many(names: Iterable[str]) -> None:
                     f"but did not register {name!r}"
                 )
             _REGISTRY[name].install()
+        except UnsupportedTorchVersionError:
+            raise
         except Exception as exc:
             console_warning(
                 "inject_roctx",

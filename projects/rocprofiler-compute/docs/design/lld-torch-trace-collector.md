@@ -407,10 +407,11 @@ must tolerate the missing field: `_parse_function_backend` in
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
   are resolved under `${TORCH_INSTALL_PREFIX}/lib`.
 - The artifact is named `torch_trace_collector-<torch-version>.so`, using
-  `Torch_VERSION` from `find_package(Torch)`. At runtime the loader selects the
-  installed artifact that matches the workload `torch.__version__` (local
-  `+...` suffix removed). A mismatch raises an error listing the supported
-  versions and the workload version.
+  `Torch_VERSION` from `find_package(Torch)`. At runtime the loader loads the
+  artifact that matches the workload `torch.__version__` (local `+...` suffix
+  removed) from `<prefix>/lib*/rocprofiler-compute/`, or from
+  `src/lib/_build/lib/` when that file is not installed. A mismatch raises an
+  error listing the supported versions and the workload version.
 - A static core library carries the shared source and its usage requirements, the
   torch and roctx includes and libraries, `synchronized`, `gsl_assert`, and the
   debug-info flag, and both the pybind11 `MODULE` and the gtest binary link it and
@@ -423,10 +424,9 @@ must tolerate the missing field: `_parse_function_backend` in
 - The collector directory is registered from `src/lib/CMakeLists.txt`. The
   module omits the `lib` prefix, is named by PyTorch version, and is installed
   to `<libdir>/rocprofiler-compute/` as `TORCH_TRACE_COLLECTOR_TARGET`. The
-  loader searches that directory. The gtest is added when `ENABLE_TESTS` is on
-  and `gtest_main` exists; the directory publishes
-  `ROCPROF_TEST_LD_LIBRARY_PATH` and the root `CMakeLists.txt` registers the
-  test.
+  gtest is added when `ENABLE_TESTS` is on and `gtest_main` exists; the
+  directory publishes `ROCPROF_TEST_LD_LIBRARY_PATH` and the root
+  `CMakeLists.txt` registers the test.
 
 ## Validation
 
