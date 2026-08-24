@@ -8,14 +8,63 @@
 #define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <unordered_map>
 #include <utility> // for std::pair
 
 namespace rocjitsu {
+
+/// @brief Monotonic byte-range allocator for one kernel's private segment.
+///
+/// @details This deliberately knows nothing about register identity or spill
+/// lifetime. DBI layers stable register-to-slot mapping on top; semantic DBT
+/// creates short-lived frames on top. Keeping the common range arithmetic next
+/// to SpillManager avoids a separate one-struct allocator header while both
+/// users retain their independent allocation policies.
+class PrivateSegmentCursor final {
+public:
+  /// @brief Begin allocation at the first byte not owned by an earlier policy.
+  explicit PrivateSegmentCursor(uint32_t first_byte) : cursor_(first_byte) {}
+
+  /// @brief Compute the next aligned allocation without advancing the cursor.
+  /// @param byte_count Number of contiguous bytes requested.
+  /// @param alignment Required byte alignment for the returned base.
+  /// @param limit Exclusive upper bound for the allocation.
+  /// @returns The aligned base, or std::nullopt for an invalid or overflowing range.
+  [[nodiscard]] std::optional<uint32_t>
+  preview(uint32_t byte_count, uint32_t alignment,
+          uint32_t limit = std::numeric_limits<uint32_t>::max()) const {
+    if (byte_count == 0 || alignment == 0)
+      return std::nullopt;
+    const uint64_t base =
+        util::align_up(static_cast<uint64_t>(cursor_), static_cast<uint64_t>(alignment));
+    if (base + byte_count > limit)
+      return std::nullopt;
+    return static_cast<uint32_t>(base);
+  }
+
+  /// @brief Allocate the next aligned range and advance the high-water mark.
+  [[nodiscard]] std::optional<uint32_t>
+  allocate(uint32_t byte_count, uint32_t alignment,
+           uint32_t limit = std::numeric_limits<uint32_t>::max()) {
+    auto base = preview(byte_count, alignment, limit);
+    if (!base)
+      return std::nullopt;
+    cursor_ = *base + byte_count;
+    return base;
+  }
+
+  /// @brief One-past-end byte of all successfully allocated ranges.
+  [[nodiscard]] uint32_t high_water_mark() const { return cursor_; }
+
+private:
+  uint32_t cursor_ = 0;
+};
 
 /// @brief Per-kernel scratch reservation for DBI spill/fill slots.
 ///
@@ -75,7 +124,7 @@ public:
   [[nodiscard]] bool reserve(const RegisterSet &set);
 
   /// @returns The bumped total per-lane scratch bytes.
-  [[nodiscard]] uint32_t total_private_bytes() const { return total_bytes_; }
+  [[nodiscard]] uint32_t total_private_bytes() const { return slots_.high_water_mark(); }
 
   /// @returns Slot offset previously allocated for @p reg, or nullopt.
   [[nodiscard]] std::optional<uint32_t> offset_for(RegisterRef reg) const;
@@ -89,10 +138,8 @@ private:
     }
   };
 
-  uint32_t base_offset_; ///< First DBI slot. align_up(orig, 16).
-  uint32_t total_bytes_; ///< Bumped private_segment_fixed_size.
-  uint32_t limit_;       ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
-  uint32_t next_offset_; ///< Next free byte within DBI zone.
+  uint32_t limit_; ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
+  PrivateSegmentCursor slots_; ///< Shared range arithmetic; DBI owns stable slot identity.
   std::unordered_map<std::pair<RegClass, uint16_t>, uint32_t, RegKeyHash> reg_to_offset_;
 };
 

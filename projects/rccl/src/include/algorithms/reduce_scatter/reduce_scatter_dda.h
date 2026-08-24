@@ -18,17 +18,10 @@ template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaReduceScatterIpc(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ recvbuff,
-    size_t count,
-    const T* __restrict__ sendbuff,
-    int selfRank,
-    IpcGpuBarrier barrier) {
+  __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
 
-  barrier.syncOnSameBlockIdx<
-      false /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -37,13 +30,9 @@ __global__ void ddaReduceScatterIpc(
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  reduceScatter<T, NRANKS, hasAcc>(
-      ipcbuffs, recvbuff, nullptr, selfRank, idxStart, idxEnd, idxStride, 0);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
-
 
 } // namespace meta::comms

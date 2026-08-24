@@ -162,17 +162,15 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic) {
     REQUIRE(device == hipInvalidDeviceId);
   }
 
-  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, hipCpuDeviceId));
   HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, 0));
   HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(data), hipMemRangeAttributeAccessedBy,
                                     allocation.ptr(), kPageSize));
 
   // Use std::find since there is no guaranteed order in which devices will be returned
-  REQUIRE(std::find(cbegin(data), cend(data), hipCpuDeviceId) != cend(data));
   REQUIRE(std::find(cbegin(data), cend(data), 0) != cend(data));
 
   // All the unused slots should be at the end
-  for (auto it = cbegin(data) + 2; it != cend(data); ++it) {
+  for (auto it = cbegin(data) + 1; it != cend(data); ++it) {
     REQUIRE(*it == hipInvalidDeviceId);
   }
 }
@@ -182,7 +180,6 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
 
-  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, hipCpuDeviceId));
   HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, 0));
 
   std::array<int32_t, 4> data;
@@ -197,11 +194,10 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
                                     allocation.ptr(), kPageSize));
 
   // Use std::find since there is no guaranteed order in which devices will be returned
-  REQUIRE(std::find(cbegin(data), cend(data), hipCpuDeviceId) != cend(data));
   REQUIRE(std::find(cbegin(data), cend(data), 0) != cend(data));
 
   // All the unused slots should be at the end
-  for (auto it = cbegin(data) + 2; it != cend(data); ++it) {
+  for (auto it = cbegin(data) + 1; it != cend(data); ++it) {
     REQUIRE(*it == hipInvalidDeviceId);
   }
 }

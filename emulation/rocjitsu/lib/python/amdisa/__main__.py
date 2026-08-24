@@ -6,15 +6,17 @@
 import argparse
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as elem_tree
 
 from amdisa import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
-    Gfx1250Profile,
+    Cdna5Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -30,6 +32,7 @@ from amdisa.encoding_translator_codegen import (
 )
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
@@ -43,14 +46,68 @@ _PROFILES = {
     'cdna1': Cdna1Profile,
     'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
+    'cdna4': Cdna4Profile,
     'rdna1': Rdna1Profile,
     'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
-    'gfx1250': Gfx1250Profile,
+    'cdna5': Cdna5Profile,
 }
+
+
+def _collect_shared_execute_body_variants(specs, plan):
+    """Collect candidate shared execute bodies from each ISA.
+
+    The cross-ISA analyzer proves structural compatibility, but the final
+    generated body can still depend on architecture-specific lowering choices.
+    This preflight keeps those generated bodies visible before the real output
+    pass decides which keys can remain shared.
+    """
+    variants: dict[tuple[str, str], dict[str, tuple]] = {}
+    with TemporaryDirectory(prefix='amdisa-shared-preflight-') as out_dir:
+        config = CodegenConfig()
+        for name, spec, sem in specs:
+            code_gen = CodeGenerator(
+                spec, out_dir, sem, config=config, shared_plan=plan
+            )
+            code_gen.gen_all()
+            for key, data in code_gen._shared_execute_bodies.items():
+                variants.setdefault(key, {})[name] = data
+    return variants
+
+
+def _unshared_execute_keys_from_variants(
+    variants: dict[tuple[str, str], dict[str, tuple]],
+) -> frozenset[tuple[str, str]]:
+    """Return keys whose generated shared bodies differ between ISAs."""
+    divergent = set()
+    for key, by_isa in variants.items():
+        bodies = {data[2] for data in by_isa.values()}
+        if len(bodies) > 1:
+            divergent.add(key)
+    return frozenset(divergent)
+
+
+def _merge_shared_execute_body(
+    merged: dict[tuple[str, str], tuple],
+    key: tuple[str, str],
+    data: tuple,
+    isa_name: str,
+) -> None:
+    """Merge a final shared body and reject unexpected divergence."""
+    existing = merged.get(key)
+    if existing is None:
+        merged[key] = data
+        return
+    if existing[2] != data[2]:
+        raise AssertionError(
+            'shared execute body collision after divergence preflight: '
+            f'isa={isa_name!r} mnemonic={key[0]!r} enc={key[1]!r} produced '
+            'a different body for a key that was still marked shareable.'
+            f'\n--- first writer body ---\n{existing[2]}'
+            f'\n--- this writer body ---\n{data[2]}'
+        )
 
 
 def _detect_profile(isa_xml: str) -> str:
@@ -62,7 +119,7 @@ def _detect_profile(isa_xml: str) -> str:
     # TODO: Remove this filename override once the gfx1250 XML carries a
     # finalized architecture name that can be detected through the normal path.
     if 'gfx1250' in Path(isa_xml).stem:
-        return 'gfx1250'
+        return 'cdna5'
 
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
@@ -118,10 +175,19 @@ def _run_multi(args) -> None:
         file=sys.stderr,
     )
 
-    config = CodegenConfig()
-
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
+        emit_isa_properties(args.isa_output, specs)
+        body_variants = _collect_shared_execute_body_variants(specs, plan)
+        unshared_keys = _unshared_execute_keys_from_variants(body_variants)
+        config = CodegenConfig(unshared_execute_keys=unshared_keys)
+        if unshared_keys:
+            print(
+                f'Keeping {len(unshared_keys)} arch-dependent shared execute '
+                f'keys ISA-local after body preflight',
+                file=sys.stderr,
+            )
+
         all_shared_bodies: dict[tuple[str, str], tuple] = {}
         for name, spec, sem in specs:
             code_gen = CodeGenerator(
@@ -129,8 +195,7 @@ def _run_multi(args) -> None:
             )
             code_gen.gen_all()
             for key, data in code_gen._shared_execute_bodies.items():
-                if key not in all_shared_bodies:
-                    all_shared_bodies[key] = data
+                _merge_shared_execute_body(all_shared_bodies, key, data, name)
 
         if all_shared_bodies:
             first_spec = specs[0][1]

@@ -1,15 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
+#include "code_object_writer.h"
 #include "counters_writer.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
+#include "source_snapshotter.h"
 
 #include <gmock/gmock.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 class MockInputParameters : public rocprofiler_compute_tool::InputParameters
 {
@@ -20,7 +27,6 @@ public:
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;
-    std::string_view get_pc_sampling_beta_enabled() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
@@ -28,7 +34,6 @@ public:
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
     void set_pc_sampling_method(const std::string& method);
-    void set_pc_sampling_beta_enabled(const std::string& value);
 
     void unset_output_path();
     void unset_requested_counters();
@@ -44,7 +49,6 @@ private:
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
     std::string m_pc_sampling_method;
-    std::string m_pc_sampling_beta_enabled;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
@@ -150,11 +154,59 @@ private:
     std::vector<write_counters_info> m_write_counters_args;
 };
 
+class MockCodeObjectWriter : public rocprofiler_compute_tool::code_object_writer_t
+{
+public:
+    void        start_code_obj(size_t obj_id) override;
+    void        end_code_obj() override;
+    void        start_symbol(const rocprofiler_compute_tool::symbol_t& symbol) override;
+    void        end_symbol() override;
+    void        write_instruction(const rocprofiler_compute_tool::instruction_t& inst) override;
+    std::string get_result() override;
+    void        flush(const std::filesystem::path& output_file_path) override;
+    bool        empty() const override;
+
+    const std::vector<size_t>&                get_start_code_obj_ids() const;
+    const std::vector<std::filesystem::path>& get_flush_calls() const;
+
+private:
+    bool                               m_empty = true;
+    std::vector<size_t>                m_start_code_obj_ids;
+    std::vector<std::filesystem::path> m_flush_calls;
+};
+
 class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_collector_t
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void write(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+    void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+    const std::set<std::filesystem::path>& get_source_paths() const override;
 
-    int load_count = 0;
+    void set_has_code_objects(bool has_code_objects);
+    void set_source_paths(const std::set<std::filesystem::path>& source_paths);
+
+    int load_count     = 0;
+    int finalize_count = 0;
+
+private:
+    bool                            m_has_code_objects = false;
+    std::set<std::filesystem::path> m_source_paths;
+};
+
+class MockSourceSnapshotter : public rocprofiler_compute_tool::source_snapshotter_t
+{
+public:
+    struct snapshot_call_t
+    {
+        std::set<std::filesystem::path> source_paths;
+        std::filesystem::path           destination_root;
+    };
+
+    void snapshot(const std::set<std::filesystem::path>& source_paths,
+                  const std::filesystem::path&           destination_root) override;
+
+    const std::vector<snapshot_call_t>& get_snapshot_calls() const;
+
+private:
+    std::vector<snapshot_call_t> m_snapshot_calls;
 };

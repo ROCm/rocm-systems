@@ -84,6 +84,7 @@ subtrees:
               - file: reference/hip_runtime_api/modules/memory_management/texture_management_deprecated
               - file: reference/hip_runtime_api/modules/memory_management/surface_object
           - file: reference/hip_runtime_api/modules/peer_to_peer_device_memory_access
+          - file: reference/hip_runtime_api/modules/execution_context_management          
           - file: reference/hip_runtime_api/modules/context_management
           - file: reference/hip_runtime_api/modules/module_management
           - file: reference/hip_runtime_api/modules/occupancy

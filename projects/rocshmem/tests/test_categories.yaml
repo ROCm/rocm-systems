@@ -145,12 +145,18 @@ test_categories:
       - "fcollect_.*"
       - "teambroadcast_.*"
       - "teamreduction_.*"
+      - "teamreducescatter_.*"
       - "teambarrier_.*"
       - "teamwavebarrier_.*"
       - "teamwgbarrier_.*"
       - "teamwavesync_.*"
       - "teamwgsync_.*"
       - "teamsplit2d_.*"
+      - "alltoall_wave_.*"
+      - "broadcast_wave_.*"
+      - "fcollect_wave_.*"
+      - "reduce_wave_.*"
+      - "teamreducescatterwave_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
@@ -210,6 +216,7 @@ test_categories:
       # Tile collective tests (IPC-only)
       - "tile_broadcast_.*"
       - "tile_allgather_.*"
+      - "tile_reduce_.*"
 
     labels:
       - "nightly"

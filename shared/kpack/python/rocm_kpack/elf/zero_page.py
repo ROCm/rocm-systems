@@ -45,12 +45,15 @@ class ZeroPageResult:
     error: str | None = None
 
 
-def calculate_aligned_range(vaddr: int, size: int) -> tuple[int, int]:
+def calculate_aligned_range(
+    vaddr: int, size: int, page_size: int = PAGE_SIZE
+) -> tuple[int, int]:
     """Calculate the page-aligned range within a section.
 
     Args:
         vaddr: Section virtual address
         size: Section size
+        page_size: OS page size
 
     Returns:
         Tuple of (aligned_vaddr, aligned_size) - the range of full pages
@@ -59,10 +62,10 @@ def calculate_aligned_range(vaddr: int, size: int) -> tuple[int, int]:
     end = vaddr + size
 
     # Round up start to next page boundary
-    aligned_start = round_up_to_page(vaddr)
+    aligned_start = round_up_to_page(vaddr, page_size)
 
     # Round down end to previous page boundary
-    aligned_end = round_down_to_page(end)
+    aligned_end = round_down_to_page(end, page_size)
 
     if aligned_start >= aligned_end:
         # No full pages to zero
@@ -225,12 +228,15 @@ def conservative_zero_page(
             error=f"Section '{section_name}' is already NOBITS (already zero-paged)",
         )
 
+    page_size = surgery.page_size
     section_vaddr = section.header.sh_addr
     section_size = section.header.sh_size
     section_offset = section.header.sh_offset
 
     # Calculate aligned range
-    aligned_vaddr, aligned_size = calculate_aligned_range(section_vaddr, section_size)
+    aligned_vaddr, aligned_size = calculate_aligned_range(
+        section_vaddr, section_size, page_size
+    )
 
     if aligned_size == 0:
         # Section is too small or misaligned - no optimization possible
@@ -249,9 +255,9 @@ def conservative_zero_page(
     # higher. Cost: one fewer page of savings (4KB), but the ELF structure
     # is completely standard with no synthetic offsets.
     section_end = section_vaddr + section_size
-    suffix = section_end - round_down_to_page(section_end)
+    suffix = section_end - round_down_to_page(section_end, page_size)
     if suffix == 0:
-        aligned_size -= PAGE_SIZE
+        aligned_size -= page_size
         if aligned_size == 0:
             return ZeroPageResult(
                 success=True,
@@ -262,7 +268,7 @@ def conservative_zero_page(
             )
 
     aligned_offset = section_offset + (aligned_vaddr - section_vaddr)
-    pages_to_zero = aligned_size // PAGE_SIZE
+    pages_to_zero = aligned_size // page_size
 
     # Find the PT_LOAD containing the section
     target_result = surgery.find_phdr_containing_vaddr(section_vaddr)

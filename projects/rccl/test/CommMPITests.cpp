@@ -11,35 +11,32 @@
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
 
+#include "nccl_device.h"
+#include "comm.h"
+
+#include <array>
 #include <cstdlib>
+#include <regex>
 #include <string>
+#include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 
 /**
- * @class TrafficClassMPITest
- * @brief Test fixture for Traffic Class (QoS) configuration
- *
- * This test requires ncclCommInitRankConfig() to pass trafficClass,
- * so we override createTestCommunicator() to inject the config while
- * reusing base class members (test_comm_, test_stream_, nccl_id_).
- *
- * Pattern follows MPITestRunner.md "Example 8: Custom Test Class"
+ * @class ConfigCommMPITestBase
+ * @brief Shared fixture that builds the test communicator via
+ *        ncclCommInitRankConfig() with RAII cleanup. Subclasses fill in the
+ *        ncclConfig_t fields they want to exercise by overriding applyConfig().
  */
-class TrafficClassMPITest : public MPITestBase
+class ConfigCommMPITestBase : public MPITestBase
 {
 protected:
-    int configured_traffic_class_ = NCCL_CONFIG_UNDEF_INT;
+    virtual void applyConfig(ncclConfig_t& config) = 0;
 
-    /**
-     * @brief Override to use ncclCommInitRankConfig with trafficClass
-     *
-     * Follows same pattern as base createTestCommunicator() but uses
-     * ncclCommInitRankConfig() to pass the trafficClass configuration.
-     * Stores results in base class members for getActiveCommunicator()/getActiveStream().
-     * Uses RAII guards for proper cleanup on failure.
-     */
+    // Human-readable description of the config under test, for diagnostic logs.
+    virtual std::string configLabel() const = 0;
+
     ncclResult_t createTestCommunicator() override
     {
         int world_rank = MPIEnvironment::world_rank;
@@ -47,8 +44,7 @@ protected:
 
         if(world_rank == 0)
         {
-            TEST_INFO("Creating test-specific communicator with trafficClass=%d",
-                      configured_traffic_class_);
+            TEST_INFO("Creating test-specific communicator with %s", configLabel().c_str());
         }
 
         // Rank 0 generates unique ID
@@ -60,9 +56,9 @@ protected:
         // Broadcast ID to all ranks
         MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
 
-        // Configure with traffic class
+        // Let the subclass populate the ncclConfig_t fields under test.
         ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-        config.trafficClass = configured_traffic_class_;
+        applyConfig(config);
 
         // Initialize NCCL communicator with automatic cleanup on error
         RCCL_TEST_CHECK(ncclGroupStart());
@@ -115,6 +111,87 @@ protected:
     }
 };
 
+class PatLazyInitMPITest : public MPITestBase
+{};
+
+TEST_F(PatLazyInitMPITest, DefersConnectionUntilFirstCollective)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(/*min_processes=*/4));
+
+    MPI_Comm local_comm;
+    ASSERT_MPI_EQ(MPI_SUCCESS,
+                  MPI_Comm_split_type(
+                      MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local_comm));
+    int local_size = 0;
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_size(local_comm, &local_size));
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_free(&local_comm));
+    if(local_size != 1)
+    {
+        GTEST_SKIP() << "PAT requires exactly one MPI rank per node";
+    }
+
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT");
+    MPIHelpers::MpiEnvGuard pat_enable("NCCL_PAT_ENABLE", "1");
+    MPIHelpers::MpiEnvGuard pat_lazy("NCCL_PAT_LAZY_INIT", "1");
+    MPIHelpers::MpiEnvGuard algorithm("NCCL_ALGO", "PAT");
+    MPIHelpers::MpiEnvGuard protocol("NCCL_PROTO", "SIMPLE");
+    MPIHelpers::MpiEnvGuard cumem("NCCL_CUMEM_ENABLE", "0");
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_FALSE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    const std::string init_log = log_ctx.readNcclDebugLog();
+    ASSERT_MPI_TRUE(init_log.find("PAT lazy init enabled") != std::string::npos);
+    ASSERT_MPI_TRUE(init_log.find("Connected binomial trees") == std::string::npos);
+
+    void* send_buffer = nullptr;
+    void* recv_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send_buffer, sizeof(uint8_t)));
+    auto send_guard = makeDeviceBufferAutoGuard(send_buffer);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMalloc(&recv_buffer, sizeof(uint8_t) * MPIEnvironment::world_size));
+    auto recv_guard = makeDeviceBufferAutoGuard(recv_buffer);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllGather(send_buffer,
+                                recv_buffer,
+                                1,
+                                ncclUint8,
+                                comm,
+                                getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_MPI_TRUE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+    const std::string collective_log = log_ctx.readNcclDebugLog();
+    ASSERT_MPI_TRUE(collective_log.find("Connected binomial trees") != std::string::npos);
+}
+
+/**
+ * @class TrafficClassMPITest
+ * @brief Test fixture for Traffic Class (QoS) configuration via ncclConfig_t.
+ */
+class TrafficClassMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_traffic_class_ = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.trafficClass = configured_traffic_class_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "trafficClass=" + std::to_string(configured_traffic_class_);
+    }
+};
+
 /**
  * @test TrafficClassMPITest.ConfiguredTrafficClass
  * @brief Verify traffic class in communicator and in NCCL debug output
@@ -156,6 +233,708 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     }
 
     ASSERT_MPI_TRUE(found_line);
+}
+
+// Every layer of the traffic-class precedence chain gets a distinct value, so a
+// regression reports which layer won instead of aliasing with the value it was
+// supposed to override.
+constexpr int kHostCommTrafficClass   = 3;   // ncclConfig_t::trafficClass
+constexpr int kDeviceCommTrafficClass = 7;   // ncclDevCommRequirements::ginTrafficClass
+constexpr int kEnvServiceLevel        = 5;   // NCCL_IB_SL
+constexpr int kEnvTrafficClass        = 96;  // NCCL_IB_TC
+
+// ibv_link_layer::IBV_LINK_LAYER_ETHERNET. On native InfiniBand the generic
+// traffic-class value programs SL while the GRH traffic-class field stays zero;
+// on RoCE both fields are observable.
+constexpr int kIbvLinkLayerEthernet      = 2;
+constexpr int kInfiniBandGrhTrafficClass = 0;
+
+// getEnvParam() fallback: no valid service level or traffic class is negative.
+constexpr int kEnvParamUnset = -1;
+
+// One rank on each of exactly two nodes. The QP oracle reads the leading GIN
+// queue pairs of a single cross-node connection, so extra ranks would add
+// connections whose attributes it does not expect.
+constexpr int kTrafficClassRanks = 2;
+constexpr int kTrafficClassNodes = 2;
+
+struct GinQpTrafficClass
+{
+    int link_layer;
+    int service_level;
+    int traffic_class;
+};
+
+struct GinTrafficClassCapture
+{
+    ncclResult_t create_result{ncclSuccess};
+    ncclResult_t destroy_result{ncclSuccess};
+    bool          proxy_handles{true};
+    int           connection_count{0};
+    bool          saw_create_marker{false};
+    std::vector<GinQpTrafficClass> qps;
+};
+
+class GinTrafficClassMPITest : public TrafficClassMPITest
+{
+protected:
+    static bool envParamIsUnset(const char* name)
+    {
+        const char* value = std::getenv(name);
+        return value == nullptr || value[0] == '\0';
+    }
+
+    static bool proxyPrerequisitesMet()
+    {
+        const char* gin_type = std::getenv("NCCL_GIN_TYPE");
+        const char* cumem    = std::getenv("NCCL_CUMEM_ENABLE");
+        return gin_type != nullptr && std::string(gin_type) == "2"
+            && cumem != nullptr && std::string(cumem) == "1";
+    }
+
+    static std::array<int, 2> collectiveBoolSummary(bool value)
+    {
+        int minimum = value ? 1 : 0;
+        int maximum = minimum;
+        MPI_Allreduce(MPI_IN_PLACE, &minimum, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, &maximum, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return {minimum, maximum};
+    }
+
+    GinTrafficClassCapture captureGinQpTrafficClass(
+        int requested_traffic_class,
+        const MPIHelpers::TestLogAssertionContext& log_ctx)
+    {
+        GinTrafficClassCapture capture;
+        const std::string before = log_ctx.readNcclDebugLog();
+
+        ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+        reqs.ginConnectionType       = NCCL_GIN_CONNECTION_FULL;
+        reqs.ginContextCount         = 1;
+        reqs.ginSignalCount          = 1;
+        reqs.ginTrafficClass         = requested_traffic_class;
+
+        ncclDevComm dev_comm{};
+        capture.create_result = ncclDevCommCreate(getActiveCommunicator(), &reqs, &dev_comm);
+        if(capture.create_result != ncclSuccess) return capture;
+
+        capture.connection_count = dev_comm.ginConnectionCount;
+        if(capture.connection_count <= 0) capture.proxy_handles = false;
+        for(int connection = 0; connection < dev_comm.ginConnectionCount; ++connection)
+        {
+            capture.proxy_handles =
+                capture.proxy_handles
+                && dev_comm.ginNetDeviceTypes[connection] == NCCL_NET_DEVICE_GIN_PROXY;
+        }
+
+        // The log is sampled immediately before and after ncclDevCommCreate, so
+        // the appended text covers only this device communicator. The existing
+        // devCommCreate marker narrows it further to the last GIN setup.
+        const std::string after = log_ctx.readNcclDebugLog();
+        const std::string appended =
+            after.size() >= before.size() ? after.substr(before.size()) : after;
+        const std::string marker = "devCommCreate: creating";
+        const size_t marker_pos = appended.rfind(marker);
+        capture.saw_create_marker = marker_pos != std::string::npos;
+        const std::string qp_log =
+            capture.saw_create_marker ? appended.substr(marker_pos) : appended;
+
+        const std::regex qp_pattern(
+            R"(ncclIbQpRtr:.*ll=([0-9]+).*sl: ([0-9]+) tc: ([0-9]+))");
+        for(std::sregex_iterator it(qp_log.begin(), qp_log.end(), qp_pattern), end;
+            it != end;
+            ++it)
+        {
+            capture.qps.push_back(
+                {std::stoi((*it)[1].str()),
+                 std::stoi((*it)[2].str()),
+                 std::stoi((*it)[3].str())});
+        }
+
+        capture.destroy_result =
+            ncclDevCommDestroy(getActiveCommunicator(), &dev_comm);
+        return capture;
+    }
+
+    static bool qpsMatch(
+        const std::vector<GinQpTrafficClass>& qps,
+        int expected_service_level,
+        int expected_roce_traffic_class)
+    {
+        for(const auto& qp : qps)
+        {
+            if(qp.service_level != expected_service_level)
+            {
+                fprintf(stderr,
+                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "expected sl=%d\n",
+                        qp.link_layer,
+                        qp.service_level,
+                        qp.traffic_class,
+                        expected_service_level);
+                return false;
+            }
+            const int expected_tc = qp.link_layer == kIbvLinkLayerEthernet
+                                        ? expected_roce_traffic_class
+                                        : kInfiniBandGrhTrafficClass;
+            if(qp.traffic_class != expected_tc)
+            {
+                fprintf(stderr,
+                        "Unexpected GIN QP traffic class: ll=%d sl=%d tc=%d; "
+                        "expected tc=%d\n",
+                        qp.link_layer,
+                        qp.service_level,
+                        qp.traffic_class,
+                        expected_tc);
+                return false;
+            }
+        }
+        return !qps.empty();
+    }
+
+    static bool containsEthernetQp(const std::vector<GinQpTrafficClass>& qps)
+    {
+        for(const auto& qp : qps)
+            if(qp.link_layer == kIbvLinkLayerEthernet) return true;
+        return false;
+    }
+
+    // The GIN contexts are created first inside ncclDevCommCreate, so their queue
+    // pairs lead the captured window. The ordinary transport connections that
+    // follow in the same call always carry the host communicator value, so
+    // compare only the leading run sharing one SL/TC pair.
+    static std::vector<GinQpTrafficClass> leadingGinQps(
+        const std::vector<GinQpTrafficClass>& qps)
+    {
+        std::vector<GinQpTrafficClass> leading;
+        for(const auto& qp : qps)
+        {
+            if(!leading.empty()
+               && (qp.service_level != leading.front().service_level
+                   || qp.traffic_class != leading.front().traffic_class))
+                break;
+            leading.push_back(qp);
+        }
+        return leading;
+    }
+};
+
+// Run this case in a fresh process with NCCL_IB_SL/NCCL_IB_TC unset. It
+// observes the QP RTR attributes submitted to ibv_modify_qp, proving that a
+// device-communicator traffic class overrides the host communicator value and
+// that an unset device value falls back to it.
+TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_ib_env_unset =
+        envParamIsUnset("NCCL_IB_SL") && envParamIsUnset("NCCL_IB_TC");
+    const auto ib_env_unset = collectiveBoolSummary(local_ib_env_unset);
+    if(ib_env_unset[0] == 0 && ib_env_unset[1] == 0)
+        GTEST_SKIP() << "Run with NCCL_IB_SL and NCCL_IB_TC unset";
+    ASSERT_MPI_TRUE(ib_env_unset[0] == 1 && ib_env_unset[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    GinTrafficClassCapture device =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, device.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, device.destroy_result);
+    ASSERT_MPI_GT(device.connection_count, 0);
+    ASSERT_MPI_TRUE(device.proxy_handles);
+    const bool local_trace_unavailable =
+        device.saw_create_marker && device.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+    const bool local_trace_ready = device.saw_create_marker && !device.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    ASSERT_MPI_TRUE(qpsMatch(leadingGinQps(device.qps),
+                             /*expected_service_level=*/kDeviceCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kDeviceCommTrafficClass));
+
+    // The IB context is mutable and reused, so observing the host value here
+    // also proves the previous device value did not persist.
+    GinTrafficClassCapture host =
+        captureGinQpTrafficClass(NCCL_CONFIG_UNDEF_INT, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, host.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, host.destroy_result);
+    ASSERT_MPI_GT(host.connection_count, 0);
+    ASSERT_MPI_TRUE(host.proxy_handles);
+    ASSERT_MPI_TRUE(host.saw_create_marker);
+    ASSERT_MPI_TRUE(qpsMatch(leadingGinQps(host.qps),
+                             /*expected_service_level=*/kHostCommTrafficClass,
+                             /*expected_roce_traffic_class=*/kHostCommTrafficClass));
+}
+
+// Run in a separate process with NCCL_IB_SL=5 and NCCL_IB_TC=96. Distinct
+// values prove the two explicit IB settings independently override both the
+// device-communicator value and the host communicator value.
+TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
+{
+    const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
+    if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+    ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
+
+    const bool local_env_matches =
+        MPIHelpers::getEnvParam<int>("NCCL_IB_SL", kEnvParamUnset) == kEnvServiceLevel
+        && MPIHelpers::getEnvParam<int>("NCCL_IB_TC", kEnvParamUnset) == kEnvTrafficClass;
+    const auto env_matches = collectiveBoolSummary(local_env_matches);
+    if(env_matches[0] == 0 && env_matches[1] == 0)
+        GTEST_SKIP() << "Run in a fresh process with NCCL_IB_SL=" << kEnvServiceLevel
+                     << " and NCCL_IB_TC=" << kEnvTrafficClass;
+    ASSERT_MPI_TRUE(env_matches[0] == 1 && env_matches[1] == 1);
+
+    if(!validateTestPrerequisites(/*min_processes=*/kTrafficClassRanks,
+                                  /*max_processes=*/kTrafficClassRanks,
+                                  /*require_power_of_two=*/false,
+                                  /*min_nodes=*/kTrafficClassNodes,
+                                  /*max_nodes=*/kTrafficClassNodes))
+        GTEST_SKIP() << "Requires exactly " << kTrafficClassRanks << " ranks on "
+                     << kTrafficClassNodes << " nodes";
+
+    auto reset_debug =
+        makeScopeGuard([]() { MPIHelpers::resetNcclDebugState(); });
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "TRACE");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "INIT,NET");
+    MPIHelpers::resetNcclDebugState();
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+    configured_traffic_class_ = kHostCommTrafficClass;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    GinTrafficClassCapture capture =
+        captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
+    ASSERT_MPI_EQ(ncclSuccess, capture.create_result);
+    ASSERT_MPI_EQ(ncclSuccess, capture.destroy_result);
+    ASSERT_MPI_GT(capture.connection_count, 0);
+    ASSERT_MPI_TRUE(capture.proxy_handles);
+    const bool local_trace_unavailable =
+        capture.saw_create_marker && capture.qps.empty();
+    const auto trace_unavailable = collectiveBoolSummary(local_trace_unavailable);
+    if(trace_unavailable[0] == 1 && trace_unavailable[1] == 1)
+        GTEST_SKIP() << "RCCL was built without TRACE=ON; QP RTR attributes are unavailable";
+    const bool local_trace_ready = capture.saw_create_marker && !capture.qps.empty();
+    const auto trace_ready = collectiveBoolSummary(local_trace_ready);
+    ASSERT_MPI_TRUE(trace_ready[0] == 1 && trace_ready[1] == 1);
+    const std::vector<GinQpTrafficClass> gin_qps = leadingGinQps(capture.qps);
+    ASSERT_MPI_TRUE(containsEthernetQp(gin_qps));
+    ASSERT_MPI_TRUE(qpsMatch(gin_qps,
+                             /*expected_service_level=*/kEnvServiceLevel,
+                             /*expected_roce_traffic_class=*/kEnvTrafficClass));
+}
+
+/**
+ * @class CtaConfigMPITest
+ * @brief Fixture for the CTA override paths on AMD GPUs. Injects minCTAs/maxCTAs
+ *        through ncclCommInitRankConfig() and inspects the resulting comm->config
+ *        and comm->nChannels.
+ */
+class CtaConfigMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_min_ctas_ = NCCL_CONFIG_UNDEF_INT;
+    int configured_max_ctas_ = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.minCTAs = configured_min_ctas_;
+        config.maxCTAs = configured_max_ctas_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "minCTAs=" + std::to_string(configured_min_ctas_)
+             + " maxCTAs=" + std::to_string(configured_max_ctas_);
+    }
+};
+
+/**
+ * @test CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs
+ * @brief ncclConfig_t minCTAs/maxCTAs land in comm->config and clamp
+ *        comm->nChannels into [minCTAs, maxCTAs].
+ */
+TEST_F(CtaConfigMPITest, ConfigOverrideAppliesMinMaxCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    constexpr int kMinCTAs = 2;
+    constexpr int kMaxCTAs = 4;
+    configured_min_ctas_   = kMinCTAs;
+    configured_max_ctas_   = kMaxCTAs;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Config-override path: ncclConfig_t values are accepted into comm->config.
+    ASSERT_MPI_EQ(comm->config.minCTAs, kMinCTAs);
+    ASSERT_MPI_EQ(comm->config.maxCTAs, kMaxCTAs);
+
+    ASSERT_MPI_TRUE(comm->nChannels >= kMinCTAs);
+    ASSERT_MPI_TRUE(comm->nChannels <= kMaxCTAs);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("minCTAs=%d maxCTAs=%d -> nChannels=%d",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs
+ * @brief NCCL_MIN_CTAS / NCCL_MAX_CTAS env knobs override comm->config; skips when unset.
+ */
+TEST_F(CtaConfigMPITest, EnvKnobsApplyMinMaxCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const char* min_env = std::getenv("NCCL_MIN_CTAS");
+    const char* max_env = std::getenv("NCCL_MAX_CTAS");
+    if(min_env == nullptr && max_env == nullptr)
+    {
+        GTEST_SKIP() << "NCCL_MIN_CTAS / NCCL_MAX_CTAS not set; run under the CTA env CI tier.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Env-knob path: NCCL_MIN_CTAS / NCCL_MAX_CTAS override comm->config.
+    if(min_env != nullptr)
+    {
+        const int expected_min = std::atoi(min_env);
+        ASSERT_MPI_EQ(comm->config.minCTAs, expected_min);
+        ASSERT_MPI_TRUE(comm->nChannels >= expected_min);
+    }
+    if(max_env != nullptr)
+    {
+        const int expected_max = std::atoi(max_env);
+        ASSERT_MPI_EQ(comm->config.maxCTAs, expected_max);
+        ASSERT_MPI_TRUE(comm->nChannels <= expected_max);
+    }
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("env NCCL_MIN_CTAS=%s NCCL_MAX_CTAS=%s -> config min=%d max=%d nChannels=%d",
+                  min_env ? min_env : "(unset)",
+                  max_env ? max_env : "(unset)",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs
+ * @brief Negative test: env values <= 0 are rejected and config resolves to its positive default; skips when no knob is non-positive.
+ */
+TEST_F(CtaConfigMPITest, EnvKnobsIgnoreNonPositiveCTAs)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const char* min_env     = std::getenv("NCCL_MIN_CTAS");
+    const char* max_env     = std::getenv("NCCL_MAX_CTAS");
+    const bool  min_nonpos  = (min_env != nullptr && std::atoi(min_env) <= 0);
+    const bool  max_nonpos  = (max_env != nullptr && std::atoi(max_env) <= 0);
+    if(!min_nonpos && !max_nonpos)
+    {
+        GTEST_SKIP() << "Negative CTA env test: set NCCL_MIN_CTAS and/or NCCL_MAX_CTAS <= 0.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    if(min_nonpos)
+    {
+        ASSERT_MPI_TRUE(comm->config.minCTAs > 0);
+    }
+    if(max_nonpos)
+    {
+        ASSERT_MPI_TRUE(comm->config.maxCTAs > 0);
+    }
+
+    // Comm still initialized with a usable channel count (not clamped to 0).
+    ASSERT_MPI_TRUE(comm->nChannels >= 1);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("rejected non-positive CTAs -> config min=%d max=%d nChannels=%d",
+                  comm->config.minCTAs,
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+/**
+ * @test CtaConfigMPITest.DefaultConfigDoesNotClampChannels
+ * @brief Guard: with no min/maxCTAs (config or env), the maxCTAs clamp is a no-op and does not reduce nChannels; skips when the env knobs are set.
+ */
+TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    if(std::getenv("NCCL_MIN_CTAS") != nullptr || std::getenv("NCCL_MAX_CTAS") != nullptr)
+    {
+        GTEST_SKIP() << "NCCL_MIN_CTAS / NCCL_MAX_CTAS set; this test validates the default (unset) path.";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    // Default maxCTAs (MAXCHANNELS) must be >= nChannels, i.e. the cap did not reduce the channel count.
+    ASSERT_MPI_TRUE(comm->nChannels >= 1);
+    ASSERT_MPI_TRUE(comm->config.maxCTAs >= comm->nChannels);
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("default config -> maxCTAs=%d nChannels=%d (cap is a no-op)",
+                  comm->config.maxCTAs,
+                  comm->nChannels);
+    }
+}
+
+namespace
+{
+/**
+ * @brief True if any single line of `log` contains both `needle_a` and `needle_b`.
+ *
+ * Used to disambiguate log substrings that appear verbatim in more than one
+ * INFO call site (e.g. "- Destroy COMPLETE" is emitted by both commFree() and
+ * COLLTRACE): a plain std::string::find() on the combined log would be
+ * satisfied by either line, so same-line co-occurrence is required instead.
+ */
+bool logHasLineContainingBoth(const std::string& log, const char* needle_a, const char* needle_b)
+{
+    std::size_t line_start = 0;
+    while(line_start <= log.size())
+    {
+        const std::size_t line_end = log.find('\n', line_start);
+        const std::size_t line_len = (line_end == std::string::npos) ? std::string::npos : (line_end - line_start);
+        const std::string line     = log.substr(line_start, line_len);
+        if(line.find(needle_a) != std::string::npos && line.find(needle_b) != std::string::npos)
+        {
+            return true;
+        }
+        if(line_end == std::string::npos)
+        {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    return false;
+}
+} // namespace
+
+/**
+ * @class DestroySubsysMPITest
+ * @brief Regression coverage for the NCCL 2.30.3 log-volume-reduction cherry-pick
+ *        (upstream sync PR #6837 brought in NCCL_DESTROY and retagged the shared
+ *        comm-destroy/plugin-unload call sites; this covers the RCCL-only call
+ *        sites the sync did not touch: COLLTRACE's destroy-time INFO lines).
+ *
+ * NCCL_DESTROY is not part of the default NCCL_DEBUG_SUBSYS mask
+ * (NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV), so destroy/teardown INFO lines
+ * disappear from plain `NCCL_DEBUG=INFO` output while remaining reachable via
+ * `NCCL_DEBUG_SUBSYS=DESTROY` (or ALL). These tests use the
+ * "comm ... - Destroy COMPLETE" line emitted unconditionally from commFree()
+ * (src/init.cc) as the marker, since it fires on every plain ncclCommDestroy().
+ */
+class DestroySubsysMPITest : public MPITestBase {};
+
+/**
+ * @test DestroySubsysMPITest.DefaultSubsys_ExcludesDestroyNoise
+ * @brief Under the default subsystem mask, destroy-time INFO noise must be absent.
+ */
+TEST_F(DestroySubsysMPITest, DefaultSubsys_ExcludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    // Force NCCL_DEBUG_SUBSYS unset so RCCL falls back to its default mask,
+    // regardless of any ambient value left by CI or a previous test.
+    MPIHelpers::MpiEnvUnsetGuard subsysGuard("NCCL_DEBUG_SUBSYS");
+    // Enable the RCCL-only COLLTRACE latency profiler so ncclCommInitRank*()
+    // actually constructs a CollTrace instance and its destroy-time INFO
+    // lines get emitted. Without this, collTraceInit() (gated on this env
+    // var) never runs and this test would only exercise the shared
+    // commFree() marker, not the COLLTRACE-specific retag this PR fixes.
+    MPIHelpers::MpiEnvGuard latencyProfilerGuard("RCCL_LATENCY_PROFILER", "1");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    // Destroy while log_ctx is still alive so destroy-time output is captured
+    // before TearDown() restores NCCL_DEBUG_FILE (and possibly unlinks the log).
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
+    const std::string            from_nccl               = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
+    const std::string            combined                 = from_nccl + from_rank_log;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("commFree() destroy marker under default subsys mask: %s",
+                   hit_comm_free ? "unexpectedly present" : "correctly absent");
+        TEST_INFO("COLLTRACE destroy marker under default subsys mask: %s",
+                   hit_colltrace ? "unexpectedly present" : "correctly absent");
+    }
+
+    ASSERT_MPI_FALSE(hit_comm_free);
+    ASSERT_MPI_FALSE(hit_colltrace);
+}
+
+/**
+ * @test DestroySubsysMPITest.DestroySubsys_IncludesDestroyNoise
+ * @brief With NCCL_DEBUG_SUBSYS=DESTROY, the same destroy-time INFO line must be visible.
+ */
+TEST_F(DestroySubsysMPITest, DestroySubsys_IncludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "DESTROY");
+    // See DefaultSubsys_ExcludesDestroyNoise: without this, CollTrace is never
+    // constructed and this test would not exercise the COLLTRACE-specific retag.
+    MPIHelpers::MpiEnvGuard latencyProfilerGuard("RCCL_LATENCY_PROFILER", "1");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
+    const std::string            from_nccl               = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
+    const std::string            combined                 = from_nccl + from_rank_log;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("commFree() destroy marker under NCCL_DEBUG_SUBSYS=DESTROY: %s",
+                   hit_comm_free ? "present" : "unexpectedly absent");
+        TEST_INFO("COLLTRACE destroy marker under NCCL_DEBUG_SUBSYS=DESTROY: %s",
+                   hit_colltrace ? "present" : "unexpectedly absent");
+    }
+
+    ASSERT_MPI_TRUE(hit_comm_free);
+    ASSERT_MPI_TRUE(hit_colltrace);
+}
+
+/**
+ * @class GinRmaContextMPITest
+ * @brief Inspects the GIN and RMA plugin contexts bound at communicator init
+ *        time. No data path is stood up, only the plugin state is read.
+ */
+class GinRmaContextMPITest : public ConfigCommMPITestBase
+{
+protected:
+    // ncclCommInitChildComm() derives shareResources from the parent config, not
+    // from the config handed to ncclCommSplit(), so splitShare has to be set here.
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.splitShare = 1;
+    }
+
+    std::string configLabel() const override
+    {
+        return "splitShare=1";
+    }
+
+    struct ncclComm* ActiveComm()
+    {
+        return getActiveCommunicator();
+    }
+};
+
+/**
+ * @test GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm
+ * @brief With both plugins initialized, RMA and GIN must hold separate
+ *        contexts that a split child inherits and finalize can release.
+ */
+TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    struct ncclComm* parent = ActiveComm();
+    ASSERT_MPI_TRUE(parent != nullptr);
+    ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
+
+    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclRma == nullptr)
+    {
+        GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
+    }
+
+    // One internal backend serves both roles, so the contexts are distinct
+    // only when RMA owns a separate field.
+    ASSERT_MPI_TRUE(parent->ginContext != nullptr);
+    ASSERT_MPI_TRUE(parent->rmaContext != nullptr);
+    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaContext);
+
+    // The parent shares its resources, so the child inherits both contexts
+    // instead of initializing the plugins again.
+    ncclComm_t splitComm = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommSplit(getActiveCommunicator(), 0, getTestMpiRank(), &splitComm, nullptr));
+
+    struct ncclComm* child = splitComm;
+    ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
+    ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
+    ASSERT_MPI_TRUE(child->rmaContext == parent->rmaContext);
+
+    // Destroy the parent first so the child holds the last reference and
+    // finalizes both plugins against the contexts it inherited.
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(splitComm));
 }
 
 #endif // MPI_TESTS_ENABLED

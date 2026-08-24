@@ -125,6 +125,17 @@ class MemoryAllocator {
    */
   AllocatorType get_type() const { return type_; }
 
+  /**
+   * @brief Get the memory allocation granularity
+   *
+   * For VMM allocators this is the minimum allocation granularity reported by
+   * HIP (often a 2 MiB page); for other allocators it defaults to 1 (no
+   * granularity constraint).
+   *
+   * @return Allocation granularity in bytes
+   */
+  size_t get_granularity() const { return mem_granularity_; }
+
  public:
  protected:
   /**
@@ -136,6 +147,14 @@ class MemoryAllocator {
    * @brief Type of allocator for runtime identification
    */
   AllocatorType type_{AllocatorTypeCoarsegrained};
+
+  /**
+   * @brief Memory allocation granularity in bytes
+   *
+   * Defaults to 1 (no granularity constraint). VMM allocators set this to the
+   * HIP minimum allocation granularity at construction time.
+   */
+  size_t mem_granularity_{1};
 
  private:
   /**

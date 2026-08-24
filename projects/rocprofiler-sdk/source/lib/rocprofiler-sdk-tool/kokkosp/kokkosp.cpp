@@ -60,6 +60,19 @@ struct Section
 
 bool tool_globfences  = false;
 auto kokkosp_sections = std::vector<Section>{};
+
+// Emit an instantaneous Kokkos milestone into the marker timeline without perturbing kernel
+// renaming. rocprofv3's --kernel-rename (implied by --kokkos-trace) treats roctxMark as a
+// sticky rename that relabels every subsequent kernel dispatched on the thread. Using a
+// balanced roctxRangePush/roctxRangePop instead keeps the timeline marker but leaves the
+// kernel-rename stack net-unchanged (nothing is dispatched between the push and pop), so
+// non-Kokkos kernels retain their real names under --kokkos-trace.
+void
+kokkosp_emit_milestone(const char* name)
+{
+    roctxRangePush(name);
+    roctxRangePop();
+}
 }  // namespace
 
 extern "C" {
@@ -159,7 +172,7 @@ kokkosp_init_library(const int      loadSeq,
               << ", version: " << interfaceVer << ")\n"
               << "-----------------------------------------------------------\n";
 
-    roctxMark("Kokkos::Initialization Complete");
+    kokkosp_emit_milestone("Kokkos::Initialization Complete");
 }
 
 void
@@ -171,7 +184,7 @@ KokkosP: Finalization of rocprofv3 Connector. Complete.
 -----------------------------------------------------------
 )";
 
-    roctxMark("Kokkos::Finalization Complete");
+    kokkosp_emit_milestone("Kokkos::Finalization Complete");
 }
 
 void
@@ -253,7 +266,7 @@ kokkosp_destroy_profile_section(const uint32_t)
 void
 kokkosp_profile_event(const char* name)
 {
-    roctxMark(name);
+    kokkosp_emit_milestone(name);
 }
 
 void

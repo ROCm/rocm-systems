@@ -128,7 +128,13 @@ __host__ int IPCHostContext::reduce(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest, 
+__host__ int IPCHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  return host_interface->reduce_scatter<T, Op>(team, dest, source, nreduce);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
                                               const T *source, 
                                               int nreduce, 
                                               hipStream_t stream) {
@@ -167,12 +173,19 @@ __host__ void IPCHostContext::wait_until_all(T *ivars, size_t nelems,
                                              const int* status,
                                              int cmp, T val) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return;
+    if (!nelems) {
+      return;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return;
+    if (pos == nelems) {
+      return;
+    }
     for (size_t i{pos}; i < nelems; i++) {
-      if (nullptr != status && status[i]) continue;
-      while (!test<T>(ivars + i, cmp, val)) {}
+      if (nullptr != status && status[i]) {
+        continue;
+      }
+      while (!test<T>(ivars + i, cmp, val)) {
+      }
     }
     return;
   }
@@ -184,13 +197,21 @@ __host__ size_t IPCHostContext::wait_until_any(T *ivars, size_t nelems,
                                                const int* status,
                                                int cmp, T val) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return SIZE_MAX;
+    if (!nelems) {
+      return SIZE_MAX;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return SIZE_MAX;
+    if (pos == nelems) {
+      return SIZE_MAX;
+    }
     while (true) {
       for (size_t i{pos}; i < nelems; i++) {
-        if (nullptr != status && status[i]) continue;
-        if (test<T>(ivars + i, cmp, val)) return i;
+        if (nullptr != status && status[i]) {
+          continue;
+        }
+        if (test<T>(ivars + i, cmp, val)) {
+          return i;
+        }
       }
     }
   }
@@ -203,14 +224,20 @@ __host__ size_t IPCHostContext::wait_until_some(T *ivars, size_t nelems,
                                                 const int* status,
                                                 int cmp, T val) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return 0;
+    if (!nelems) {
+      return 0;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return 0;
+    if (pos == nelems) {
+      return 0;
+    }
     bool done{false};
     size_t ncompleted{0};
     while (!done) {
       for (size_t i{pos}; i < nelems; i++) {
-        if (nullptr != status && status[i]) continue;
+        if (nullptr != status && status[i]) {
+          continue;
+        }
         if (test<T>(ivars + i, cmp, val)) {
           done = true;
           indices[ncompleted] = i;
@@ -228,12 +255,19 @@ __host__ void IPCHostContext::wait_until_all_vector(T *ivars, size_t nelems,
                                                     const int* status,
                                                     int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return;
+    if (!nelems) {
+      return;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return;
+    if (pos == nelems) {
+      return;
+    }
     for (size_t i{pos}; i < nelems; i++) {
-      if (nullptr != status && status[i]) continue;
-      while (!test<T>(ivars + i, cmp, vals[i])) {}
+      if (nullptr != status && status[i]) {
+        continue;
+      }
+      while (!test<T>(ivars + i, cmp, vals[i])) {
+      }
     }
     return;
   }
@@ -245,13 +279,21 @@ __host__ size_t IPCHostContext::wait_until_any_vector(T *ivars, size_t nelems,
                                                       const int* status,
                                                       int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return SIZE_MAX;
+    if (!nelems) {
+      return SIZE_MAX;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return SIZE_MAX;
+    if (pos == nelems) {
+      return SIZE_MAX;
+    }
     while (true) {
       for (size_t i{pos}; i < nelems; i++) {
-        if (nullptr != status && status[i]) continue;
-        if (test<T>(ivars + i, cmp, vals[i])) return i;
+        if (nullptr != status && status[i]) {
+          continue;
+        }
+        if (test<T>(ivars + i, cmp, vals[i])) {
+          return i;
+        }
       }
     }
   }
@@ -264,14 +306,20 @@ __host__ size_t IPCHostContext::wait_until_some_vector(T *ivars, size_t nelems,
                                                        const int* status,
                                                        int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
-    if (!nelems) return 0;
+    if (!nelems) {
+      return 0;
+    }
     size_t pos{status_entry(nelems, status)};
-    if (pos == nelems) return 0;
+    if (pos == nelems) {
+      return 0;
+    }
     bool done{false};
     size_t ncompleted{0};
     while (!done) {
       for (size_t i{pos}; i < nelems; i++) {
-        if (nullptr != status && status[i]) continue;
+        if (nullptr != status && status[i]) {
+          continue;
+        }
         if (test<T>(ivars + i, cmp, vals[i])) {
           done = true;
           indices[ncompleted] = i;

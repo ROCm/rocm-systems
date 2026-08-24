@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
+#ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_OCP_FP_HPP_
+#define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_OCP_FP_HPP_
 
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_common.h"
@@ -17,10 +18,10 @@
 #include <climits>
 #include <cstdio>
 
-static_assert(sizeof(uint8_t) * CHAR_BIT == 8);
-static_assert(sizeof(uint16_t) * CHAR_BIT == 16);
-static_assert(sizeof(uint32_t) * CHAR_BIT == 32);
-static_assert(sizeof(uint64_t) * CHAR_BIT == 64);
+static_assert(sizeof(__hip_uint8_t) * CHAR_BIT == 8);
+static_assert(sizeof(__hip_uint16_t) * CHAR_BIT == 16);
+static_assert(sizeof(__hip_uint32_t) * CHAR_BIT == 32);
+static_assert(sizeof(__hip_uint64_t) * CHAR_BIT == 64);
 #endif  // !defined(__HIPCC_RTC__)
 
 // HW Detection
@@ -117,8 +118,8 @@ __amd_create_fp8x2(const __amd_fp8_storage_t x, const __amd_fp8_storage_t y) {
  * @param y
  * @return __amd_fp4x2_storage_t
  */
-__OCP_FP_HOST_DEVICE_STATIC__ __amd_fp4x2_storage_t __amd_create_fp4x2(const uint8_t x,
-                                                                       const uint8_t y) {
+__OCP_FP_HOST_DEVICE_STATIC__ __amd_fp4x2_storage_t __amd_create_fp4x2(const __hip_uint8_t x,
+                                                                       const __hip_uint8_t y) {
   __amd_fp4x2_storage_t ret = 0;
   ret = x | (y << 4);
   return ret;
@@ -202,9 +203,9 @@ __amd_extract_fp8x2(const __amd_fp8x8_storage_t x, const size_t index) {
  *
  * @param x __amd_fp4x2_storage_t type
  * @param index 0 or 1
- * @return uint8_t populated with 4 bits of fp4 number
+ * @return __hip_uint8_t populated with 4 bits of fp4 number
  */
-__OCP_FP_HOST_DEVICE_STATIC__ uint8_t __amd_extract_fp4(const __amd_fp4x2_storage_t x,
+__OCP_FP_HOST_DEVICE_STATIC__ __hip_uint8_t __amd_extract_fp4(const __amd_fp4x2_storage_t x,
                                                         const size_t index) {
   if (index == 0) return (x & 0xFu);
   return (x >> 4);
@@ -229,18 +230,18 @@ __amd_extract_fp4x2(const __amd_fp4x8_storage_t x, const size_t index) {
  * @return float embed with E8M0 in its exponent
  */
 __OCP_FP_HOST_DEVICE_STATIC__ float __amd_scale_to_float(const __amd_scale_t scale_exp) {
-  constexpr int8_t OCP_SCALE_EXP_NAN = -128;
-  const uint32_t SCALE_EXP_BIAS = 127;  // OCP MX E8M0 "scale" bias
+  constexpr __hip_int8_t OCP_SCALE_EXP_NAN = -128;
+  const __hip_uint32_t SCALE_EXP_BIAS = 127;  // OCP MX E8M0 "scale" bias
 
   // On gfx950 the "scale" operand is encoded in the exponent bits of
   // an IEEE-754 float - always in the form: 1.0 * 2**scale.
   const size_t SCALE_EXP_SHIFT = 23;  // IEEE-754 "float" mantissa bits
 
-  uint32_t s;
+  __hip_uint32_t s;
   if (scale_exp == OCP_SCALE_EXP_NAN)
     s = 0xff;
   else
-    s = ((uint32_t)scale_exp + SCALE_EXP_BIAS) & 0xffu;
+    s = ((__hip_uint32_t)scale_exp + SCALE_EXP_BIAS) & 0xffu;
 
   return fcbx::F32(s << SCALE_EXP_SHIFT);
 }
@@ -281,9 +282,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ float __amd_cvt_fp8_to_float(
 #else  // Host
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    return to_float<float, Encoding::E4M3, true>(static_cast<uint32_t>(val), 0);
+    return to_float<float, Encoding::E4M3, true>(static_cast<__hip_uint32_t>(val), 0);
   } else {
-    return to_float<float, Encoding::E5M2, true>(static_cast<uint32_t>(val), 0);
+    return to_float<float, Encoding::E5M2, true>(static_cast<__hip_uint32_t>(val), 0);
   }
 #endif
 }
@@ -299,15 +300,14 @@ __OCP_FP_HOST_DEVICE_STATIC__ float __amd_cvt_fp8_to_float(
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_float_to_fp8_sr(
     const float val, const __amd_fp8_interpretation_t interpret, const unsigned int seed) {
   static_assert(sizeof(float) == sizeof(__amd_fp8_storage_t[4]));
-  static_assert(sizeof(unsigned int) == sizeof(uint32_t));
+  static_assert(sizeof(unsigned int) == sizeof(__hip_uint32_t));
   union {
     unsigned int ui32;
-    uint32_t ui32t;
+    __hip_uint32_t ui32t;
     float f32;
     __amd_fp8_storage_t fp8[4];
   } u{0};
-#if __has_builtin(__builtin_amdgcn_cvt_sr_fp8_f32) &&                                             \
-    __has_builtin(__builtin_amdgcn_cvt_sr_bf8_f32)
+#if HIP_ENABLE_GFX950_OCP_BUILTINS
   if (interpret == __AMD_OCP_E4M3) {
     u.ui32 = __builtin_amdgcn_cvt_sr_fp8_f32(val, seed, u.ui32, 0);
   } else {
@@ -355,8 +355,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ float __amd_cvt_fp8_to_float_scale(
 #else
   using namespace fcbx;
   return interpret == __AMD_OCP_E4M3
-             ? to_float<float, Encoding::E4M3Mx, true>(static_cast<uint32_t>(val), scale)
-             : to_float<float, Encoding::E5M2Mx, true>(static_cast<uint32_t>(val), scale);
+             ? to_float<float, Encoding::E4M3Mx, true>(static_cast<__hip_uint32_t>(val), scale)
+             : to_float<float, Encoding::E5M2Mx, true>(static_cast<__hip_uint32_t>(val), scale);
 #endif
 }
 
@@ -402,9 +402,9 @@ __amd_cvt_float_to_fp8_sr_scale(const float val, const __amd_fp8_interpretation_
   }
   return u.fp8[0];
 #else
-  static_assert(sizeof(uint32_t) == sizeof(unsigned int));
+  static_assert(sizeof(__hip_uint32_t) == sizeof(unsigned int));
   union u {
-    uint32_t ui32t;
+    __hip_uint32_t ui32t;
     __amd_fp8_storage_t fp8[4];
   } u{0};
   using namespace fcbx;
@@ -435,14 +435,14 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx2_storage_t __amd_cvt_fp8x2_to_floatx2
   __amd_floatx2_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
     ret[0] =
-        to_float<float, Encoding::E4M3, true>(static_cast<uint32_t>(__amd_extract_fp8(val, 0)), 0);
+        to_float<float, Encoding::E4M3, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 0)), 0);
     ret[1] =
-        to_float<float, Encoding::E4M3, true>(static_cast<uint32_t>(__amd_extract_fp8(val, 1)), 0);
+        to_float<float, Encoding::E4M3, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 1)), 0);
   } else {
     ret[0] =
-        to_float<float, Encoding::E5M2, true>(static_cast<uint32_t>(__amd_extract_fp8(val, 0)), 0);
+        to_float<float, Encoding::E5M2, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 0)), 0);
     ret[1] =
-        to_float<float, Encoding::E5M2, true>(static_cast<uint32_t>(__amd_extract_fp8(val, 1)), 0);
+        to_float<float, Encoding::E5M2, true>(static_cast<__hip_uint32_t>(__amd_extract_fp8(val, 1)), 0);
   }
   return ret;
 #endif
@@ -512,9 +512,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp4x2_storage_t __amd_cvt_floatx2_to_fp4x2_s
                                                        __amd_scale_to_float(scale), 1);
   return u.fp4x2[1];
 #else
-  static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(uint32_t));
+  static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(__hip_uint32_t));
   union u {
-    uint32_t ui32t;
+    __hip_uint32_t ui32t;
     __amd_fp4x2_storage_t fp4x2[4];
   } u{0};
   using namespace fcbx;
@@ -672,7 +672,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_floatx2_to_fp8x2_s
   return u.fp8x2[0];
 #else
   using namespace fcbx;
-  uint8_t l, r;
+  __hip_uint8_t l, r;
   if (interpret == __AMD_OCP_E4M3) {
     l = from_float<float, Encoding::E4M3Mx, true>(val[0], scale);
     r = from_float<float, Encoding::E4M3Mx, true>(val[1], scale);
@@ -723,7 +723,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_bf16x32_to_fp6x32
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -829,7 +829,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_fp16x32_to_fp6x32
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -1422,7 +1422,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x8_storage_t __amd_cvt_fp4x8_to_fp16x8_s
  *
  * @param in
  * @param scale
- * @return __OCP_FP_DEVICE_STATIC__
+ * @return __amd_bf16x2_storage_t
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t __amd_cvt_fp4x2_to_bf16x2_scale(
     const __amd_fp4x2_storage_t in, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
@@ -1646,7 +1646,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_fp16x2_to_fp8x2_sc
   return u.fp8x2[0];
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_shortx2_storage_t) == sizeof(__amd_fp8x2_storage_t[2]));
-  static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
+  static_assert(sizeof(__hip_uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
   union {
     __amd_shortx2_storage_t shortx2;
     __amd_fp8x2_storage_t fp8x2[2];
@@ -1656,10 +1656,10 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_fp16x2_to_fp8x2_sc
       : __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(u.shortx2, in, __amd_scale_to_float(scale), false);
   return u.fp8x2[0];
 #else
-  static_assert(sizeof(__amd_fp8x2_storage_t[2]) == sizeof(uint32_t));
+  static_assert(sizeof(__amd_fp8x2_storage_t[2]) == sizeof(__hip_uint32_t));
   using namespace fcbx;
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __amd_fp8x2_storage_t fp8x2[2];
   } u{0};
   if (interpret == __AMD_OCP_E4M3) {
@@ -1715,7 +1715,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_bf16x2_to_fp8x2_sc
 #else
   using namespace fcbx;
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __amd_fp8x2_storage_t fp8x2[2];
   } u{0};
   if (interpret == __AMD_OCP_E4M3) {
@@ -1931,7 +1931,7 @@ __amd_cvt_fp8_to_fp16_scale(const __amd_fp8_storage_t val,
   }
   return ret[0];
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_fp16x2_storage_t ret;
+  __amd_fp16x2_storage_t ret{};
   ret = interpret == __AMD_OCP_E4M3
       ? __builtin_amdgcn_cvt_scalef32_f16_fp8(ret, val, __amd_scale_to_float(scale), 0, false)
       : __builtin_amdgcn_cvt_scalef32_f16_bf8(ret, val, __amd_scale_to_float(scale), 0, false);
@@ -2025,7 +2025,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx16_floatx16
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -2086,7 +2086,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -2185,9 +2185,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x16_storage_t __amd_cvt_floatx16_to_fp6x1
   using namespace fcbx;
   return interpret == __AMD_OCP_E2M3
       ? fp6_cvt_packedx16<__amd_floatx16_storage_t, __amd_fp6x16_storage_t, float,
-                          Encoding::IEEE754, Encoding::E2M3, true>(val, scale)
+                          Encoding::IEEE754, Encoding::E2M3, true>(val, scale, round)
       : fp6_cvt_packedx16<__amd_floatx16_storage_t, __amd_fp6x16_storage_t, float,
-                          Encoding::IEEE754, Encoding::E3M2, true>(val, scale);
+                          Encoding::IEEE754, Encoding::E3M2, true>(val, scale, round);
 #endif
 }
 
@@ -2271,7 +2271,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -2297,13 +2297,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
  * @param round
  * @return __amd_fp16_storage_t
  */
-__OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16_storage_t
+__OCP_FP_DEVICE_STATIC__ __amd_fp16_storage_t
 __amd_cvt_float_to_fp16_sr(const float in, const unsigned int round) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
   __amd_fp16x2_storage_t ret = __builtin_amdgcn_cvt_sr_pk_f16_f32(in, 0.0f, round);
   return ret[0];
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_fp16x2_storage_t ret;
+  __amd_fp16x2_storage_t ret{};
   ret = __builtin_amdgcn_cvt_sr_f16_f32(ret, in, round, 0);
   return ret[0];
 #else
@@ -2320,12 +2320,12 @@ __amd_cvt_float_to_fp16_sr(const float in, const unsigned int round) {
  * @param round
  * @return __amd_fp16x2_storage_t
  */
-__OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t
+__OCP_FP_DEVICE_STATIC__ __amd_fp16x2_storage_t
 __amd_cvt_float_float_to_fp16x2_sr(const float in1, const float in2, const unsigned int round) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
   return __builtin_amdgcn_cvt_sr_pk_f16_f32(in1, in2, round);
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_fp16x2_storage_t ret1, ret2;
+  __amd_fp16x2_storage_t ret1{}, ret2{};
   ret1 = __builtin_amdgcn_cvt_sr_f16_f32(ret1, in1, round, 0);
   ret2 = __builtin_amdgcn_cvt_sr_f16_f32(ret2, in2, round, 0);
   return __amd_fp16x2_storage_t{ret1[0], ret2[0]};
@@ -2341,14 +2341,14 @@ __amd_cvt_float_float_to_fp16x2_sr(const float in1, const float in2, const unsig
  * @param round
  * @return __amd_bf16_storage_t
  */
-__OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16_storage_t
+__OCP_FP_DEVICE_STATIC__ __amd_bf16_storage_t
 __amd_cvt_float_to_bf16_sr(const float in, const unsigned int round) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
-  __amd_bf16x2_storage_t ret;
+  __amd_bf16x2_storage_t ret{};
   ret = __builtin_amdgcn_cvt_sr_pk_bf16_f32(in, in, round);
   return ret[0];
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_bf16x2_storage_t ret;
+  __amd_bf16x2_storage_t ret{};
   ret = __builtin_amdgcn_cvt_sr_bf16_f32(ret, in, round, 0);
   return ret[0];
 #else
@@ -2397,7 +2397,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_fp16x32_to_fp6x32
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -2448,7 +2448,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_bf16x32_to_fp6x32
   union {
     __amd_fp6x32_storage_t fp6x32;
     unsigned int ui32[8];
-  } t_out;
+  } t_out{};
   t_out.ui32[0] = r1.ui32[0];
   t_out.ui32[1] = r1.ui32[1];
   t_out.ui32[2] = r1.ui32[2];
@@ -2735,28 +2735,28 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp4x8_storage_t __amd_cvt_floatx8_to_fp4x8_s
 #else
   __amd_fp4x8_storage_t ret = 0;
   using namespace fcbx;
-  auto tmp = from_float<float, Encoding::E2M1, true>(val[7], scale);
+  auto tmp = from_float_sr<float, Encoding::E2M1, true>(val[7], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[6], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[6], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[5], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[5], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[4], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[4], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[3], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[3], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[2], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[2], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[1], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[1], seed, scale);
   ret <<= 4;
   ret |= tmp;
-  tmp = from_float<float, Encoding::E2M1, true>(val[0], scale);
+  tmp = from_float_sr<float, Encoding::E2M1, true>(val[0], seed, scale);
   ret <<= 4;
   ret |= tmp;
   return ret;
@@ -3714,9 +3714,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_fp16_to_fp8_sr(
     int i32;
   } u{0};
   if (interpret == __AMD_OCP_E4M3) {
-    u.i32 = __builtin_amdgcn_cvt_sr_fp8_f16(val, sr, u.i32 /* old? */, 0 /* index? */);
+    u.i32 = __builtin_amdgcn_cvt_sr_fp8_f16(val, sr, u.i32, 0);
   } else {
-    u.i32 = __builtin_amdgcn_cvt_sr_bf8_f16(val, sr, u.i32 /* old? */, 0 /* index? */);
+    u.i32 = __builtin_amdgcn_cvt_sr_bf8_f16(val, sr, u.i32, 0);
   }
   return u.fp8[0];
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -3859,3 +3859,5 @@ __amd_cvt_hipbf162_to_bf16x2(const __hip_bfloat162 val) {
   } u{val};
   return u.bf16;
 }
+
+#endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_OCP_FP_HPP_

@@ -155,7 +155,7 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
     using IpcImplT = typename Config::impl_type;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
-    using NotifierProxyT = NotifierProxy<HIPAllocator, detail::atomic::memory_scope_agent>;
+    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_agent>;
     using FN_T1 = void (*)(IpcImplT*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
     using FN_T2 = void (*)(bool*, int*, int*, size_t, NotifierT*);
 

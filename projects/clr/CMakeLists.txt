@@ -40,6 +40,8 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(USE_NEW_HOSTCALL_IMPL
+  "Use the new phase/occupancy-based hostcall implementation" OFF)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)

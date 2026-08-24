@@ -95,9 +95,15 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
             *not_null(errcode_ret) = CL_INVALID_VALUE;
             return (cl_command_queue)0;
           }
-          else if (properties & ~queueProperty) {
-            *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
-            return (cl_command_queue)0;
+          else {
+            cl_command_queue_properties validMask =
+                (properties & CL_QUEUE_ON_DEVICE)
+                ? (queueonDeviceProperty | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT)
+                : queueProperty;
+            if (properties & ~validMask) {
+              *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
+              return (cl_command_queue)0;
+            }
           }
           break;
         case CL_QUEUE_SIZE:

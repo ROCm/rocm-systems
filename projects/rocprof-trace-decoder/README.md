@@ -33,6 +33,7 @@ The library installs to `/opt/rocm` by default. Override with `-DCMAKE_INSTALL_P
 | `BUILD_TESTS` | `OFF` | Enable building tests (unit + integration) |
 | `BUILD_UNIT_TESTS` | `ON` | Build unit tests (only effective when `BUILD_TESTS=ON`) |
 | `BUILD_INTEGRATION_TESTS` | `ON` | Build integration tests (only effective when `BUILD_TESTS=ON`) |
+| `BUILD_MARKERS` | `OFF` | Build and install the SQTT marker instrumentation pass plugin |
 | `USE_LLVM_DISASM` | `ON` | Use LLVM-C for AMDGPU disassembly. No `amd_comgr` / ROCm dependency. Falls back to `amd_comgr` if LLVM isn't found. |
 | `LLVM_DIR` | (auto) | Path to a specific `LLVMConfig.cmake` (e.g. `/opt/rocm/llvm/lib/cmake/llvm` for the ROCm-bundled LLVM, useful for newest ASICs). Recorded in the package config so consumers automatically use the same LLVM. |
 | `DISABLE_COMGR` | `OFF` | Skip the `amd_comgr` dependency. Combined with `USE_LLVM_DISASM=OFF` this builds with no disassembly backend (va2fo + symbol enumeration still work via inline ELF). Also disables the att-tool binary. |
@@ -62,6 +63,7 @@ The chosen `LLVM_DIR` is baked into the generated `rocprof-trace-decoder-config.
 |---|---|
 | `rocprof-trace-decoder` | Shared library (`.so`) |
 | `rocprof-trace-decoder-static` | Static library (`.a`) — built but not installed; consumed via the build-tree CMake export |
+| `SQTTInstrumentPass` | LLVM pass plugin for SQTT marker instrumentation (`libsqttinstrumentpass.so`, `BUILD_MARKERS=ON`) |
 | `unit_tests` | Unit test executable (requires `BUILD_TESTS=ON`) |
 | `format` | Run clang-format and cmake-format on all sources |
 | `docs` | Generate Doxygen API documentation |
@@ -87,50 +89,7 @@ The namespaced target carries the disasm backend's include dirs, link libs, and 
 
 ## Testing
 
-### Building and Running Tests
-
-```bash
-cmake -B build -DBUILD_TESTS=ON -DDISABLE_COMGR=ON
-cmake --build build -j$(nproc)
-cd build && ctest --test-dir test -j$(nproc)
-```
-
-Set `-DDISABLE_COMGR=ON` if `amd_comgr` is not installed. This skips the att-tool but all other tests still run.
-
-### Running Only Unit Tests
-
-```bash
-ctest --test-dir build/test -R "regular/" -j$(nproc)
-```
-
-### Running Only Integration Tests
-
-```bash
-ctest --test-dir build/test -E "regular/|sanitize|ubsan|asan" -j$(nproc)
-```
-
-### Sanitizer Builds
-
-```bash
-ctest --test-dir build/test -R "asan/" -j$(nproc)   # AddressSanitizer
-ctest --test-dir build/test -R "ubsan/" -j$(nproc)  # UBSan
-```
-
-## Code Coverage
-
-```bash
-# Requires gcov, lcov and genhtml
-
-cmake -B build_coverage -DBUILD_TESTS=ON -DDISABLE_COMGR=ON \
-    -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
-    -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
-    -DCMAKE_SHARED_LINKER_FLAGS="--coverage" \
-    -DCMAKE_BUILD_TYPE=Debug
-
-# Build and Generate coverage report
-cmake --build build_coverage -j$(nproc)
-cd build_coverage && make coverage
-```
+See [TESTING.md](TESTING.md) for test and code coverage information.
 
 ## Usage with rocprofv3
 

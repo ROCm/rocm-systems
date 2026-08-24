@@ -10,6 +10,7 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
@@ -69,10 +70,24 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction.
-  /// @retval true The last instruction is a branch or program terminator.
+  /// @brief Whether the block ends with an explicit or implicit terminator.
+  /// @retval true The last instruction is a branch/program terminator, or the block carries an
+  /// inferred boundary (see has_implicit_terminator()).
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
+
+  /// @brief Whether an inferred boundary terminates this block's fallthrough edge.
+  ///
+  /// @details Clang may omit an architectural terminator after __builtin_unreachable(). Two
+  /// source conditions establish the boundary, and they are equivalent because neither leaves a
+  /// next instruction to reach: the following word is gfx1250 zero-filled text padding, or the
+  /// block ends at the end of `.text`. Relocation materializes either as an s_endpgm.
+  ///
+  /// This cuts the FALLTHROUGH edge only. A conditional or indirect branch carrying this flag
+  /// still has a live taken edge, so consumers must not read it as a whole-block program exit --
+  /// classify_function() treats it as one only when no branch edge remains, which keeps the taken
+  /// target subject to the missing-target checks.
+  bool has_implicit_terminator() const { return has_implicit_terminator_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
   [[nodiscard]] const Instruction *terminator() const;
@@ -90,6 +105,14 @@ public:
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
 
+  /// @brief Add a call edge proven by an external finite-target analysis.
+  ///
+  /// @details Relocation-backed device function tables are discovered after
+  /// ordinary block construction. Their dynamic dispatch remains indirect in
+  /// the instruction stream, but each populated table slot is a concrete
+  /// callee for reachability and kernel-scoped liveness.
+  void add_call_edge(CallEdge edge);
+
   /// @brief Static indirect branch fixup metadata rooted in this block.
   ///
   /// @details BasicBlock::build() computes these while all decoded instructions
@@ -104,6 +127,16 @@ public:
     return static_indirect_call_fixups_;
   }
 
+  /// @brief Every PC-relative address producer whose `s_getpc_b64` lives in this block.
+  ///
+  /// @details Unlike static_indirect_call_fixups(), this covers producers that
+  /// no recovered consumer references, including ones the pass could not follow.
+  /// DBT needs the complete set to decide whether a kernel scope can be made
+  /// free of stale PC-derived values.
+  [[nodiscard]] const std::vector<PcAddressBuilder> &static_pc_address_builders() const {
+    return static_pc_address_builders_;
+  }
+
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
   InstructionList &instructions() { return instructions_; }
@@ -116,32 +149,50 @@ public:
   ///
   /// @details Recovered indirect branch targets are added as block leaders before
   /// the block objects are finalized, so users never see a recovered edge whose
-  /// destination points into the middle of a larger block.
+  /// destination points into the middle of a larger block. Syntactic call
+  /// fallthroughs remain provisional until call-return classification finishes.
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
-  /// @param[in] extra_leaders Byte offsets that must start a basic block.
-  /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>>
+  /// @param[in] emit_error Destination for a decode diagnostic, including the
+  /// source `.text` byte offset.
+  /// @param[in] extra_leaders Byte offsets that must start a basic block AND are entered from
+  /// outside the decoded graph. Under ExplicitOnly these become the external-entry set, so an
+  /// offset listed here has no incoming caller facts.
+  /// @param[in] entry_policy Whether predecessorless blocks are inferred to be
+  /// external function entries. Use ExplicitOnly only when extra_leaders
+  /// enumerates every externally reachable entry.
+  /// @param[in] extra_split_points Byte offsets that must start a basic block but are NOT external
+  /// entries. Function-entry symbols and stored-pointer targets belong here: they are genuine
+  /// boundaries, yet most are ordinary helpers whose callers reach them by a decoded edge, and
+  /// calling them external would throw those caller facts away.
+  /// @returns Ordered basic blocks with their decoded instructions, or failure.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-        std::span<const uint64_t> extra_leaders = {});
+        DecodeErrorEmitter emit_error = {}, std::span<const uint64_t> extra_leaders = {},
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+        std::span<const uint64_t> extra_split_points = {});
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
   void add_successor(BasicBlock &successor);
-  void add_call_edge(CallEdge edge);
+  /// Remove one proven-dead edge while preserving the inverse predecessor list.
+  [[nodiscard]] bool remove_successor(BasicBlock &successor);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
+  void add_static_pc_address_builder(PcAddressBuilder builder);
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
+  bool has_implicit_terminator_ = false;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;
   std::vector<BasicBlock *> predecessors_;
   std::vector<CallEdge> call_edges_;
   std::vector<IndirectCallFixup> static_indirect_call_fixups_;
+  std::vector<PcAddressBuilder> static_pc_address_builders_;
 };
 
 } // namespace rocjitsu

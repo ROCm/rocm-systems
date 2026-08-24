@@ -9,6 +9,8 @@ add_executable(
     test_pc_sampling_collector.cpp
     test_code_object_writer.h
     test_code_object_writer.cpp
+    test_source_snapshotter.h
+    test_source_snapshotter.cpp
     mocks.h
     mocks.cpp
 )
@@ -23,7 +25,7 @@ if(INSTALL_TESTS)
     install(
         TARGETS ${target}
         RUNTIME
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CMAKE_PROJECT_NAME}/tests
             COMPONENT tests
     )
 endif()

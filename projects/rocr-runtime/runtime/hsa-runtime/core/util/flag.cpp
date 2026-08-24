@@ -51,7 +51,18 @@
 #include <locale>
 #include <iomanip>
 
+// RUNNING_ON_VALGRIND is 0 outside Valgrind / when unavailable.
+#if defined(__has_include) && __has_include(<valgrind/valgrind.h>)
+#  include <valgrind/valgrind.h>
+#endif
+#ifndef RUNNING_ON_VALGRIND
+#  define RUNNING_ON_VALGRIND 0
+#endif
+
 namespace rocr {
+
+bool Flag::DetectRunningUnderValgrind() { return RUNNING_ON_VALGRIND != 0; }
+
 FILE* log_file = stderr;
 uint8_t log_flags[8];
 

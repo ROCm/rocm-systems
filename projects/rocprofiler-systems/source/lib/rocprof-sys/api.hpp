@@ -32,7 +32,7 @@ extern "C"
     void rocprofsys_set_env(const char*, const char*) ROCPROFSYS_PUBLIC_API;
 
     /// sets whether MPI should be used
-    void rocprofsys_set_mpi(bool, bool) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_set_mpi(bool) ROCPROFSYS_PUBLIC_API;
 
     /// starts an instrumentation region
     void rocprofsys_push_trace(const char*) ROCPROFSYS_PUBLIC_API;
@@ -88,7 +88,7 @@ extern "C"
     void rocprofsys_reset_for_reattach_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_preload_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_env_hidden(const char*, const char*) ROCPROFSYS_HIDDEN_API;
-    void rocprofsys_set_mpi_hidden(bool, bool) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_set_mpi_hidden(bool) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_with_args_hidden(const char*,
                                                 const char*) ROCPROFSYS_HIDDEN_API;

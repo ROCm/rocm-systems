@@ -412,6 +412,45 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_device_cuid
+
+Description: Returns the CUID of the device
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: CUID string unique to the device
+
+Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer provided is not of large enough size
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device CUID: ", amdsmi.amdsmi_get_gpu_device_cuid(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_device_uuid
 
 Description: Returns the UUID of the device
@@ -1123,6 +1162,56 @@ try:
             print(engine_usage['gfx_activity'])
             print(engine_usage['umc_activity'])
             print(engine_usage['mm_activity'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_vcn_busy_percent
+
+Description: Returns the VCN (Video Core Next) engine busy percentage for the given GPU.
+Only supported on bare-metal Linux.
+
+```{note}
+**MI-series vs. Navi/RDNA devices:** On MI-series GPUs (CDNA 3 and later, such as MI300X),
+per-partition VCN utilization is also available via the `xcp_stats.vcn_busy` field returned
+by `amdsmi_get_gpu_metrics()`. Navi/RDNA GPUs do not support partitioning, so
+`amdsmi_get_vcn_busy_percent` provides a single device-wide value and
+`xcp_stats.vcn_busy` is not applicable. See the
+[GPU partitioning](/conceptual/partition.md) guide for background on the partition model.
+```
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Integer representing VCN busy percentage (0 - 100)
+
+Exceptions that can be thrown by `amdsmi_get_vcn_busy_percent` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from sysfs is not in the expected format or is empty
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vcn_busy = amdsmi.amdsmi_get_vcn_busy_percent(device)
+            print(vcn_busy)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -2261,51 +2350,6 @@ try:
         for device in devices:
             profile = amdsmi.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
             amdsmi.amdsmi_set_gpu_power_profile(device, 0, profile)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_set_gpu_clk_range
-
-Description: This function sets the clock range information.
-It is not supported on virtual machine guest
-
-Input parameters:
-
-* `processor_handle` handle for the given device
-* `min_clk_value` minimum clock value for desired clock range
-* `max_clk_value` maximum clock value for desired clock range
-* `clk_type` SYS | MEM range type
-
-Output: None
-
-Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_clk_range(device, 0, 1000, amdsmi.AmdSmiClkType.SYS)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -4525,7 +4569,7 @@ Field | Description
 ---|---
 `num_supported` | The number of supported policies
 `current_id` | The current policy index
-`policies` | List of policies. (`plpds` marked for deprecation in next major release)
+`policies` | List of policies.
 
 Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
@@ -5101,48 +5145,6 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_vram_vendor
-
-Description: **Deprecated** (slated for removal in a future ROCm release; use `amdsmi_get_gpu_vram_info()` instead). Get the vram vendor string of a gpu device.
-
-Input parameters:
-
-* `processor_handle` device which to query
-
-Output: vram vendor
-
-Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            vram_vendor = amdsmi.amdsmi_get_gpu_vram_vendor(device)
-            print(vram_vendor)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
 ### amdsmi_get_gpu_subsystem_id
 
 Description: Get the subsystem device id associated with the device with provided device handle.
@@ -5640,7 +5642,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_compute_partition_mem_alloc_mode
+### amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Get the compute partition memory allocation mode from the given GPU. Controls how HBM capacity is distributed across XCPs within each memory partition.
 
@@ -5650,7 +5652,7 @@ Input parameters:
 
 Output: String of the memory allocation mode (`"CAPPING"` or `"ALL"`)
 
-Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5674,7 +5676,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            mode = amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
+            mode = amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(device)
             print(mode)
 except amdsmi.AmdSmiException as e:
     print(e)
@@ -5682,7 +5684,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_gpu_compute_partition_mem_alloc_mode
+### amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Set the compute partition memory allocation mode for the given GPU. Requires elevated privileges (sudo). Controls whether each XCP is capped to an even share of memory (`CAPPING`) or may use the full partition memory (`ALL`).
 
@@ -5693,7 +5695,7 @@ Input parameters:
 
 Output: None
 
-Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5717,7 +5719,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+            amdsmi.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
                 device, amdsmi.AmdSmiComputePartitionMemAllocModeType.CAPPING
             )
 except amdsmi.AmdSmiException as e:
@@ -5804,48 +5806,6 @@ try:
         for device in devices:
             memory_partition_type = amdsmi.amdsmi_get_gpu_memory_partition(device)
             print(memory_partition_type)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_set_gpu_memory_partition
-
-Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
-
-Input parameters:
-
-* `processor_handle` the device handle
-* `memory_partition` the type of memory_partition to set
-
-Output: `None`
-
-Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied
-- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

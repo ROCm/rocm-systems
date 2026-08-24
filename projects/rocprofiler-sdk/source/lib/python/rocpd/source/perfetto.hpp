@@ -35,6 +35,8 @@
 
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocpd
@@ -48,9 +50,14 @@ struct PerfettoSession
     PerfettoSession(const tool::output_config&, sqlite3* connection);
     ~PerfettoSession();
 
+    // NOTE: not thread-safe; assumes write_perfetto() is invoked single-threaded per session.
+    ::perfetto::StaticString get_static_event_name(const std::string& value) const;
+
     std::unique_ptr<::perfetto::TracingSession> tracing_session = {};
     const tool::output_config&                  config;
     sqlite3*                                    connection = nullptr;
+
+    mutable std::unordered_set<std::string> static_event_names = {};
 };
 
 void
@@ -64,6 +71,7 @@ write_perfetto(
     const tool::generator<types::sample>&            sample_gen,
     const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
     const tool::generator<types::memory_copies>&     memory_copy_gen,
+    const tool::generator<types::graph_launch>&      graph_launch_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen);

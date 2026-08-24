@@ -2,14 +2,32 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/vm/amdgpu/dispatch_entry.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/except.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -19,19 +37,64 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <sys/mman.h>
+#include <thread>
+#include <unistd.h>
 #include <vector>
+
+#if defined(__SANITIZE_ADDRESS__)
+#define RJ_AMDGPU_VM_TEST_WITH_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RJ_AMDGPU_VM_TEST_WITH_ASAN 1
+#endif
+#endif
+
+#if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
+#include <sanitizer/asan_interface.h>
+#endif
+
+namespace rocjitsu::amdgpu {
+
+class GpuMemoryTestAccess {
+public:
+  static std::mutex *backing_atomic_mutex_for(const void *address) {
+    return &GpuMemory::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
+  }
+
+#if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
+  static void set_page_table_unlocked_hook(GpuMemory &memory, std::function<void()> *hook) {
+    memory.asan_page_table_unlocked_hook_.store(hook, std::memory_order_release);
+  }
+
+  static constexpr size_t metadata_retry_limit() { return GpuMemory::kMaxMetadataRetries; }
+#endif
+};
+
+} // namespace rocjitsu::amdgpu
 
 namespace {
 
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+constexpr uint32_t SOPP_S_TRAP_1 = 0xBF920001;
 
 using namespace rocjitsu;
 
@@ -40,8 +103,8 @@ struct VmFixture {
   SoC *soc_ptr = nullptr;
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
-  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64) {
+  VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -53,7 +116,7 @@ struct VmFixture {
                std::to_string(i) + R"(","latency":1,"weight":10})";
     }
 
-    std::string json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":")" + arch +
+    std::string json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":")" + std::string(arch) +
                        R"("},)"
                        R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
                        R"({"name":"vram","type":"gpu_memory"},)"
@@ -67,8 +130,12 @@ struct VmFixture {
                        R"({"key":"num_wf_slots","value":")" +
                        std::to_string(num_wf_slots) +
                        R"("},)"
-                       R"({"key":"sgprs_per_wf","value":"104"},)"
-                       R"({"key":"vgprs_per_wf","value":"256"},)"
+                       R"({"key":"sgprs_per_wf","value":")" +
+                       std::to_string(sgprs_per_wf) +
+                       R"("},)"
+                       R"({"key":"vgprs_per_wf","value":")" +
+                       std::to_string(vgprs_per_wf) +
+                       R"("},)"
                        R"({"key":"lds_size_kb","value":")" +
                        std::to_string(lds_size_kb) +
                        R"("})"
@@ -80,7 +147,7 @@ struct VmFixture {
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
-    engine->build();
+    engine->create();
   }
 
   amdgpu::Xcd *xcd(uint32_t idx = 0) { return soc_ptr->xcd(idx); }
@@ -89,19 +156,51 @@ struct VmFixture {
   amdgpu::ComputeUnitCore *cu(uint32_t idx = 0) { return se()->compute_unit(idx); }
   amdgpu::CommandProcessor *cp(uint32_t idx = 0) { return xcd(idx)->command_processor(); }
 
+  /// Install a HaltSnapshotPlugin that records each wavefront's final register
+  /// state at s_endpgm (before resources are freed). Call before dispatching.
+  test::HaltSnapshotPlugin *capture_halts() {
+    plugin_group_ = test::make_halt_snapshot_group(&snapshot_plugin_);
+    soc_ptr->set_plugin_group(plugin_group_);
+    return snapshot_plugin_;
+  }
+
+  /// Place a single resident wavefront on CU 0 without running it to s_endpgm.
+  /// Used by tests that drive individual instructions and then read the register
+  /// file directly — the wave stays resident (its resources are not freed) until
+  /// the fixture is destroyed.
+  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256) {
+    return cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, num_sgprs, num_vgprs);
+  }
+
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  test::HaltSnapshotPlugin *snapshot_plugin_ = nullptr;
+
   /// Write a kernel descriptor + instructions to GPU memory per AMDHSA ABI.
   /// Returns the kernel_object address.
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
-                        uint32_t vgprs = 256, uint32_t user_sgprs = 2) {
+                        uint32_t vgprs = 256, uint32_t user_sgprs = 2,
+                        uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
+                        uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
+                        bool wave32 = true) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    static_cast<uint32_t>(wave32));
+    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
+    const uint32_t wave_size = kernel_wavefront_size(cu()->arch(), kd);
+    const uint32_t vgpr_granule =
+        descriptor_vgpr_granularity_for_wavefront(cu()->arch(), wave_size);
+    assert(vgpr_granule != 0 && vgprs % vgpr_granule == 0);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / 8) - 1));
+                    ((vgprs / vgpr_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
-
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
+    kd.group_segment_fixed_size = group_segment_fixed_size;
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                    enable_vgpr_workitem_id);
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
                       addr + sizeof(kernel_descriptor_t));
@@ -109,30 +208,133 @@ struct VmFixture {
   }
 };
 
+TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
+  EXPECT_THROW((void)VmFixture("cdna3", 1, 33), util::ConfigError);
+}
+
+TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
+  EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+}
+
+// Drive the engine until the listed CUs have no resident wavefronts. A wavefront
+// frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
+// kernel is complete once every listed CU reports idle. Waves that need their final
+// register state inspected should capture it via HaltSnapshotPlugin, which snapshots
+// at halt regardless of where this loop stops.
 void step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
                        uint32_t max_steps = 10000) {
-  for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
-    bool all_halted = true;
-    for (auto *cu : cus) {
-      if (!cu->has_active_wfs())
-        continue;
-      for (uint32_t w = 0; w < cu->num_wfs(); ++w) {
-        if (cu->wf(w) && !cu->wf(w)->is_halted()) {
-          all_halted = false;
-          break;
-        }
-      }
-      if (!all_halted)
-        break;
-    }
-    bool any_wf = false;
+  auto any_active = [&]() {
     for (auto *cu : cus)
-      if (cu->num_wfs() > 0)
-        any_wf = true;
-    if (any_wf && all_halted)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  };
+  bool saw_work = false;
+  for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
+    if (any_active())
+      saw_work = true;
+    else if (saw_work)
       break;
   }
+}
+
+TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
+  constexpr uint32_t kRdnaEndpgm = 0xBFB00000u;
+
+  for (bool wave32 : {false, true}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    VmFixture fixture("rdna4", 1, 4, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128,
+                      /*vgprs_per_wf=*/64);
+    auto *snapshots = fixture.capture_halts();
+    const uint32_t expected_wave_size = wave32 ? 32u : 64u;
+    const uint32_t expected_vgprs = wave32 ? 8u : 4u;
+    const uint64_t kernel_object = fixture.write_kernel(
+        0x1000, &kRdnaEndpgm, sizeof(kRdnaEndpgm), /*sgprs=*/104, expected_vgprs,
+        /*user_sgprs=*/2, /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+        /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0, wave32);
+    rocr::llvm::amdhsa::kernel_descriptor_t stored_descriptor{};
+    fixture.mem()->read_block(kernel_object, {reinterpret_cast<uint8_t *>(&stored_descriptor),
+                                              sizeof(stored_descriptor)});
+    ASSERT_EQ(kernel_wavefront_size(fixture.cu()->arch(), stored_descriptor), expected_wave_size);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
+
+    ASSERT_NO_THROW(fixture.engine->run());
+    ASSERT_FALSE(snapshots->snapshots().empty());
+    EXPECT_EQ(snapshots->snapshots().size(), wave32 ? 2u : 1u);
+    for (const auto &snapshot : snapshots->snapshots()) {
+      EXPECT_EQ(snapshot.wf_size, expected_wave_size);
+      EXPECT_EQ(snapshot.num_vgprs, expected_vgprs);
+    }
+    if (!wave32) {
+      EXPECT_EQ(snapshots->snapshots().front().vgpr(0, 43), 43u);
+    }
+  }
+}
+
+std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_offset,
+                                                   std::string_view symbol_name,
+                                                   bool include_symbol_terminator = true) {
+  constexpr uint64_t dyn_offset = 0x100;
+  constexpr uint64_t symtab_offset = 0x200;
+  constexpr uint64_t strtab_offset = 0x300;
+  constexpr uint64_t hash_offset = 0x380;
+
+  std::vector<uint8_t> image(4096, 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = 1;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Phdr phdr{};
+  phdr.p_type = PT_DYNAMIC;
+  phdr.p_vaddr = dyn_offset;
+  phdr.p_memsz = 5 * sizeof(Elf64_Dyn);
+  std::memcpy(image.data() + ehdr.e_phoff, &phdr, sizeof(phdr));
+
+  auto *dyn = reinterpret_cast<Elf64_Dyn *>(image.data() + dyn_offset);
+  dyn[0].d_tag = DT_SYMTAB;
+  dyn[0].d_un.d_val = symtab_offset;
+  dyn[1].d_tag = DT_STRTAB;
+  dyn[1].d_un.d_val = strtab_offset;
+  dyn[2].d_tag = DT_STRSZ;
+  dyn[2].d_un.d_val = 1 + symbol_name.size() + (include_symbol_terminator ? 1 : 0);
+  dyn[3].d_tag = DT_HASH;
+  dyn[3].d_un.d_val = hash_offset;
+  dyn[4].d_tag = DT_NULL;
+
+  image[strtab_offset] = '\0';
+  std::memcpy(image.data() + strtab_offset + 1, symbol_name.data(), symbol_name.size());
+
+  auto *sym = reinterpret_cast<Elf64_Sym *>(image.data() + symtab_offset);
+  sym[1].st_name = 1;
+  sym[1].st_value = kernel_descriptor_offset;
+
+  auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
+  hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
+
+  return image;
+}
+
+TEST(KernelSymbolTest, RejectsDynstrSymbolWithoutTerminator) {
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  constexpr std::string_view symbol_name = "unterminated_kernel.kd";
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, symbol_name,
+                                             /*include_symbol_terminator=*/false);
+
+  EXPECT_TRUE(
+      find_kernel_symbol(image.data() + kernel_descriptor_offset, image.data(), image.size())
+          .empty());
 }
 
 TEST(GpuMemoryTest, ReadWriteRoundTrip) {
@@ -166,6 +368,1310 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
+  amdgpu::GpuMemory mem("vmid_range_mem");
+  KfdProcess process(/*process_id=*/123);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x100000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), backing.size());
+
+  auto [host_base, size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE + 0x123, process.process_id());
+  EXPECT_EQ(host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(size, backing.size());
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, FindHostRangeStopsAtNonContiguousVmidHostPages) {
+  amdgpu::GpuMemory mem("vmid_noncontiguous_range_mem");
+  KfdProcess process(/*process_id=*/124);
+  alignas(4096) std::array<uint8_t, 3 * amdgpu::GpuMemory::PAGE_SIZE> backing{};
+  constexpr uint64_t kGpuVa = 0x200000;
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, backing.data(), amdgpu::GpuMemory::PAGE_SIZE);
+  process.map_pages(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE,
+                    backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE,
+                    amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [first_host_base, first_size] = mem.find_host_range(kGpuVa, process.process_id());
+  EXPECT_EQ(first_host_base, reinterpret_cast<uint64_t>(backing.data()));
+  EXPECT_EQ(first_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  auto [second_host_base, second_size] =
+      mem.find_host_range(kGpuVa + amdgpu::GpuMemory::PAGE_SIZE, process.process_id());
+  EXPECT_EQ(second_host_base,
+            reinterpret_cast<uint64_t>(backing.data() + 2 * amdgpu::GpuMemory::PAGE_SIZE));
+  EXPECT_EQ(second_size, amdgpu::GpuMemory::PAGE_SIZE);
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
+  constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
+  constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  for (const char *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, kWgpLdsBytes,
+                                 /*wgp_mode=*/true);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    EXPECT_NO_THROW(f.engine->run());
+    EXPECT_EQ(f.cu(0)->lds().size_bytes(), kPerCuLdsBytes);
+    EXPECT_EQ(f.se()->spi().max_wgp_lds_bytes(), kWgpLdsBytes);
+
+    // A WGP-mode wave sees the combined sibling-CU LDS capacity (wave32 splits the
+    // 64-thread workgroup into two waves; both see the same combined pool).
+    ASSERT_GE(snap->snapshots().size(), 1u);
+    for (const auto &wf : snap->snapshots())
+      EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
+  }
+}
+
+TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
+  using namespace rocr::llvm::amdhsa;
+
+  uint32_t rsrc1 = 0;
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64, FLOAT_ROUND_MODE_PLUS_INFINITY);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, FLOAT_DENORM_MODE_FLUSH_SRC);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, FLOAT_DENORM_MODE_FLUSH_NONE);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE, 1);
+  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, 1);
+
+  const uint32_t common_mode =
+      (FLOAT_ROUND_MODE_ZERO << 0) | (FLOAT_ROUND_MODE_PLUS_INFINITY << 2) |
+      (FLOAT_DENORM_MODE_FLUSH_SRC << 4) | (FLOAT_DENORM_MODE_FLUSH_NONE << 6) |
+      amdgpu::Wavefront::FP16_OVFL_BIT;
+
+  struct ModeInitCase {
+    const char *arch;
+    uint32_t endpgm;
+    uint32_t expected_mode;
+  };
+
+  constexpr uint32_t kGfx9Endpgm = SOPP_S_ENDPGM;
+  constexpr uint32_t kGfx11Endpgm = 0xBFB00000u;
+  const ModeInitCase cases[] = {
+      {"cdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna3", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"cdna4", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna1", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna2", kGfx9Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna3_5", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
+      {"rdna4", kGfx11Endpgm, common_mode},
+      {"cdna5", kGfx11Endpgm, common_mode},
+  };
+
+  for (const ModeInitCase &mode_case : cases) {
+    SCOPED_TRACE(mode_case.arch);
+    const uint32_t code[] = {mode_case.endpgm};
+    VmFixture f(mode_case.arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    EXPECT_NO_THROW(f.engine->run());
+    ASSERT_GE(snap->snapshots().size(), 1u);
+    for (const auto &wf : snap->snapshots())
+      EXPECT_EQ(wf.mode_raw, mode_case.expected_mode);
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("cdna5", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "gfx1250 must not enable WGP mode from the descriptor bit";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("in CU mode"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, LegacySpiQueueRejectsWgpMode) {
+  VmFixture f("rdna4", 2);
+  amdgpu::DispatchEntry entry{};
+  entry.wgp_mode = true;
+
+  EXPECT_THROW(f.se()->spi().enqueue_wg(0, 0, &entry), std::invalid_argument);
+}
+
+TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 64 * 1024 + 1,
+                               /*wgp_mode=*/false);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized CU-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 65537 bytes of LDS (65792 bytes after alignment) in CU mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 65536 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024 + 1,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized WGP-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 131073 bytes of LDS (131328 bytes after alignment) in WGP mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 131072 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
+  amdgpu::GpuMemory mem("vmid_kernel_symbol_mem");
+  KfdProcess process(/*process_id=*/125);
+  constexpr uint64_t gpu_va = 0x5400200000;
+  constexpr uint64_t kernel_descriptor_offset = 0x800;
+  auto image = make_loaded_kernel_symbol_elf(kernel_descriptor_offset, "vmid_kernel.kd");
+
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(gpu_va, image.data(), image.size());
+
+  uint64_t kernel_object = gpu_va + kernel_descriptor_offset;
+  auto [host_base, host_size] = mem.find_host_range(kernel_object, process.process_id());
+  ASSERT_NE(host_base, 0u);
+
+  // Kernel descriptors arrive as GPU VAs. Symbol lookup needs the translated
+  // host pointer so pointer subtraction against the loaded ELF image produces
+  // the descriptor offset recorded in .dynsym.
+  auto *mapped_page = mem.translate_debug(kernel_object, process.process_id());
+  ASSERT_NE(mapped_page, nullptr);
+  auto *kernel_object_host = mapped_page;
+
+  EXPECT_NE(reinterpret_cast<uint64_t>(kernel_object_host), kernel_object);
+  EXPECT_EQ(find_kernel_symbol(kernel_object_host, reinterpret_cast<const uint8_t *>(host_base),
+                               host_size),
+            "vmid_kernel");
+
+  mem.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> page{};
+  page[kOffset] = 0x5a;
+  process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), page.data() + kOffset);
+  EXPECT_EQ(memory.read8(kAddr, kPid), page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.unregister_process(kPid);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, ReregisterProcessInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess first_process(kPid);
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  first_page[kOffset] = 0x11;
+  second_page[kOffset] = 0x22;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  memory.register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                          first_process.page_table_generation());
+  ASSERT_EQ(memory.resolve_host_ptr(kAddr, kPid), first_page.data() + kOffset);
+  ASSERT_EQ(memory.read8(kAddr, kPid), first_page[kOffset]);
+  ASSERT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.register_process(kPid, &second_process.page_table_, &second_process.page_table_mutex_,
+                          second_process.page_table_generation());
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), second_page.data() + kOffset);
+  EXPECT_EQ(memory.read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> old_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+  old_page[kOffset] = 0x11;
+  new_page[kOffset] = 0x22;
+  process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  ASSERT_EQ(memory.read8(kAddr, kPid), old_page[kOffset]);
+  ASSERT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  process.remap_page_host_ptrs(kBaseVa, old_page.data(), new_page.data(), new_page.size());
+  EXPECT_EQ(memory.read8(kAddr, kPid), new_page[kOffset]);
+
+  process.set_page_mtype(kBaseVa, new_page.size(), amdgpu::Mtype::CC);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryTest, UnalignedMappingUsesGpuPageOffsetForHostTranslation) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000800;
+  constexpr size_t kMappingSize = KfdProcess::kPageSize;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, kMappingSize> allocation{};
+  allocation.front() = 0x11;
+  allocation.back() = 0x22;
+  process.map_pages(kBaseVa, allocation.data(), allocation.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x11);
+  EXPECT_EQ(memory.read8(kBaseVa + kMappingSize - 1, kPid), 0x22);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid, kMappingSize), allocation.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid), allocation.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kMappingSize - 1, kPid),
+            allocation.data() + kMappingSize - 1);
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kMappingSize - 1, kPid),
+            std::make_pair(reinterpret_cast<uint64_t>(allocation.data()),
+                           static_cast<uint64_t>(kMappingSize)));
+
+  memory.write8(kBaseVa + kMappingSize - 1, 0x33, kPid);
+  EXPECT_EQ(allocation.back(), 0x33);
+
+  process.unmap_pages(kBaseVa, kMappingSize);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kMappingSize - 1, kPid), nullptr);
+}
+
+TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kAllocationSize = 24;
+  constexpr size_t kCacheLineSize = 64;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, kAllocationSize> allocation{};
+  for (size_t i = 0; i < allocation.size(); ++i)
+    allocation[i] = static_cast<uint8_t>(i + 1);
+  process.map_pages(kBaseVa, allocation.data(), allocation.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid),
+            allocation.data() + kAllocationSize - 1);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid, 2), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize, kPid), nullptr);
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize - 1, kPid),
+            std::make_pair(reinterpret_cast<uint64_t>(allocation.data()),
+                           static_cast<uint64_t>(kAllocationSize)));
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize, kPid),
+            (std::pair<uint64_t, uint64_t>{0, 0}));
+
+  constexpr size_t kAtomicOffset = 8;
+  uint32_t atomic_value = 7;
+  std::memcpy(allocation.data() + kAtomicOffset, &atomic_value, sizeof(atomic_value));
+  memory.atomic_rmw(
+      kBaseVa + kAtomicOffset, sizeof(atomic_value),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kAtomicOffset, kPid), 8u);
+
+  uint32_t invalid_atomic_read = std::numeric_limits<uint32_t>::max();
+  memory.atomic_rmw(
+      kBaseVa + kAllocationSize, sizeof(invalid_atomic_read),
+      [&](uint8_t *storage) {
+        std::memcpy(&invalid_atomic_read, storage, sizeof(invalid_atomic_read));
+        const uint32_t replacement = 0xa5a5a5a5;
+        std::memcpy(storage, &replacement, sizeof(replacement));
+      },
+      kPid);
+  EXPECT_EQ(invalid_atomic_read, 0u);
+  EXPECT_EQ(memory.read32(kBaseVa + kAllocationSize, kPid), 0u);
+
+  constexpr size_t kStraddlingAtomicOffset = kAllocationSize - 2;
+  allocation[kStraddlingAtomicOffset] = 0x11;
+  allocation[kStraddlingAtomicOffset + 1] = 0x22;
+  std::array<uint8_t, sizeof(uint32_t)> straddling_atomic_read{};
+  memory.atomic_rmw(
+      kBaseVa + kStraddlingAtomicOffset, sizeof(uint32_t),
+      [&](uint8_t *storage) {
+        std::memcpy(straddling_atomic_read.data(), storage, straddling_atomic_read.size());
+        const std::array<uint8_t, sizeof(uint32_t)> replacement = {0x31, 0x32, 0x33, 0x34};
+        std::memcpy(storage, replacement.data(), replacement.size());
+      },
+      kPid);
+  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0x11, 0x22, 0, 0}));
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x31);
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x32);
+
+  std::array<uint8_t, kCacheLineSize> cache_line{};
+  memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
+  EXPECT_TRUE(std::equal(allocation.begin(), allocation.end(), cache_line.begin()));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
+                          [](uint8_t value) { return value == 0; }));
+
+  std::array<uint8_t, kCacheLineSize> replacement{};
+  replacement.fill(0xa5);
+  memory.write_block(kBaseVa, std::span<const uint8_t>(replacement), kPid);
+  EXPECT_TRUE(std::all_of(allocation.begin(), allocation.end(),
+                          [](uint8_t value) { return value == 0xa5; }));
+}
+
+TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kPageVa = 0x40000000;
+  constexpr uint64_t kFirstVa = kPageVa + 0x100;
+  constexpr uint64_t kSecondVa = kPageVa + 0x300;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, 32> first{};
+  std::array<uint8_t, 32> second{};
+  first.fill(0x11);
+  second.fill(0x22);
+  process.map_pages(kFirstVa, first.data(), first.size());
+  process.map_pages(kSecondVa, second.data(), second.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.read8(kFirstVa, kPid), 0x11);
+  EXPECT_EQ(memory.read8(kSecondVa, kPid), 0x22);
+  EXPECT_EQ(memory.resolve_host_ptr(kFirstVa, kPid, first.size()), first.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kSecondVa, kPid, second.size()), second.data());
+
+  process.unmap_pages(kFirstVa, first.size());
+  EXPECT_EQ(memory.resolve_host_ptr(kFirstVa, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kSecondVa, kPid, second.size()), second.data());
+  memory.write8(kSecondVa, 0x33, kPid);
+  EXPECT_EQ(second.front(), 0x33);
+}
+
+TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAtomicVa = 0x40000100;
+
+  KfdProcess process(kPid);
+  alignas(8) std::array<uint8_t, sizeof(uint64_t)> first_backing = {1, 2, 3, 4, 5, 6, 7, 8};
+  alignas(8) std::array<uint8_t, KfdProcess::kPageSize> second_pool{};
+  auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(first_backing.data());
+  uint8_t *second_backing = nullptr;
+  for (size_t offset = 0; offset + sizeof(uint32_t) <= second_pool.size(); offset += 8) {
+    auto *candidate = second_pool.data() + offset;
+    if (amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(candidate) != first_mutex) {
+      second_backing = candidate;
+      break;
+    }
+  }
+  ASSERT_NE(second_backing, nullptr);
+  std::copy_n(first_backing.begin() + sizeof(uint32_t), sizeof(uint32_t), second_backing);
+
+  process.map_pages(kAtomicVa, first_backing.data(), sizeof(uint32_t));
+  process.map_pages(kAtomicVa + sizeof(uint32_t), second_backing, sizeof(uint32_t));
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  bool second_stripe_locked = false;
+  std::array<uint8_t, sizeof(uint64_t)> observed{};
+  const std::array<uint8_t, sizeof(uint64_t)> replacement = {8, 7, 6, 5, 4, 3, 2, 1};
+  memory.atomic_rmw(
+      kAtomicVa, sizeof(uint64_t),
+      [&](uint8_t *storage) {
+        std::memcpy(observed.data(), storage, observed.size());
+        std::thread probe([&] {
+          auto *second_mutex =
+              amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(second_backing);
+          if (second_mutex->try_lock()) {
+            second_mutex->unlock();
+            return;
+          }
+          second_stripe_locked = true;
+        });
+        probe.join();
+        std::memcpy(storage, replacement.data(), replacement.size());
+      },
+      kPid);
+
+  EXPECT_TRUE(second_stripe_locked);
+  EXPECT_EQ(observed, (std::array<uint8_t, sizeof(uint64_t)>{1, 2, 3, 4, 5, 6, 7, 8}));
+  EXPECT_TRUE(std::equal(replacement.begin(), replacement.begin() + sizeof(uint32_t),
+                         first_backing.begin()));
+  EXPECT_TRUE(
+      std::equal(replacement.begin() + sizeof(uint32_t), replacement.end(), second_backing));
+}
+
+TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kAllocationSize = 32;
+
+  KfdProcess process(kPid);
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  const uint64_t gpu_va = reinterpret_cast<uint64_t>(backing.data());
+  process.map_pages(gpu_va, backing.data(), kAllocationSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(gpu_va, kPid, kAllocationSize), backing.data());
+  EXPECT_EQ(memory.resolve_host_ptr(gpu_va, kPid, kAllocationSize + 1), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(gpu_va + kAllocationSize, kPid), nullptr);
+}
+
+#if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
+TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kAllocationSize = 24;
+  constexpr size_t kCacheLineSize = 64;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
+  std::fill_n(allocation.get(), kAllocationSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid),
+            allocation.get() + kAllocationSize - 1);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize - 1, kPid, 2), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kAllocationSize, kPid), nullptr);
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize - 1, kPid),
+            std::make_pair(reinterpret_cast<uint64_t>(allocation.get()),
+                           static_cast<uint64_t>(kAllocationSize)));
+  EXPECT_EQ(memory.find_host_range(kBaseVa + kAllocationSize, kPid),
+            (std::pair<uint64_t, uint64_t>{0, 0}));
+
+  constexpr size_t kAtomicOffset = 8;
+  uint32_t atomic_value = 7;
+  std::memcpy(allocation.get() + kAtomicOffset, &atomic_value, sizeof(atomic_value));
+  memory.atomic_rmw(
+      kBaseVa + kAtomicOffset, sizeof(atomic_value),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kAtomicOffset, kPid), 8u);
+
+  uint32_t invalid_atomic_read = std::numeric_limits<uint32_t>::max();
+  memory.atomic_rmw(
+      kBaseVa + kAllocationSize, sizeof(invalid_atomic_read),
+      [&](uint8_t *storage) {
+        std::memcpy(&invalid_atomic_read, storage, sizeof(invalid_atomic_read));
+        const uint32_t replacement = 0xa5a5a5a5;
+        std::memcpy(storage, &replacement, sizeof(replacement));
+      },
+      kPid);
+  EXPECT_EQ(invalid_atomic_read, 0u);
+  EXPECT_EQ(memory.read32(kBaseVa + kAllocationSize, kPid), 0u);
+
+  constexpr size_t kStraddlingAtomicOffset = kAllocationSize - 2;
+  allocation[kStraddlingAtomicOffset] = 0x11;
+  allocation[kStraddlingAtomicOffset + 1] = 0x22;
+  std::array<uint8_t, sizeof(uint32_t)> straddling_atomic_read{};
+  memory.atomic_rmw(
+      kBaseVa + kStraddlingAtomicOffset, sizeof(uint32_t),
+      [&](uint8_t *storage) {
+        std::memcpy(straddling_atomic_read.data(), storage, straddling_atomic_read.size());
+        const std::array<uint8_t, sizeof(uint32_t)> replacement = {0x31, 0x32, 0x33, 0x34};
+        std::memcpy(storage, replacement.data(), replacement.size());
+      },
+      kPid);
+  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0x11, 0x22, 0, 0}));
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x31);
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x32);
+
+  std::fill_n(allocation.get(), kAllocationSize, 0x5a);
+  std::array<uint8_t, kCacheLineSize> cache_line{};
+  memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
+  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kAllocationSize,
+                          [](uint8_t value) { return value == 0x5a; }));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
+                          [](uint8_t value) { return value == 0; }));
+
+  cache_line.fill(0xa5);
+  memory.write_block(kBaseVa, std::span<const uint8_t>(cache_line), kPid);
+  EXPECT_TRUE(std::all_of(allocation.get(), allocation.get() + kAllocationSize,
+                          [](uint8_t value) { return value == 0xa5; }));
+
+  constexpr size_t kRemappedAllocationSize = 8;
+  auto remapped_allocation = std::make_unique<uint8_t[]>(kRemappedAllocationSize);
+  std::fill_n(remapped_allocation.get(), kRemappedAllocationSize, 0x3c);
+  process.remap_page_host_ptrs(kBaseVa, allocation.get(), remapped_allocation.get(),
+                               KfdProcess::kPageSize);
+
+  cache_line.fill(0xff);
+  memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
+  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kRemappedAllocationSize,
+                          [](uint8_t value) { return value == 0x3c; }));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kRemappedAllocationSize, cache_line.end(),
+                          [](uint8_t value) { return value == 0; }));
+}
+
+TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kInitialExtentBytes = 256;
+  constexpr size_t kReducedExtentBytes = 1024;
+  constexpr size_t kAllocationSize = KfdProcess::kPageSize;
+  constexpr size_t kInitialInsideOffset = kInitialExtentBytes / 2;
+  constexpr size_t kGrowthProbeOffset = kInitialExtentBytes * 2;
+  constexpr size_t kReducedInsideOffset = kReducedExtentBytes - sizeof(uint32_t);
+  constexpr size_t kReducedOutsideOffset = kReducedExtentBytes + 512;
+  constexpr size_t kInteriorPoisonOffset = kInitialExtentBytes * 2;
+  constexpr size_t kInteriorPoisonBytes = 256;
+  constexpr size_t kLaterLiveOffset = kInteriorPoisonOffset + kInteriorPoisonBytes + 256;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
+  std::fill_n(allocation.get(), kAllocationSize, 0);
+  process.map_pages(kBaseVa, allocation.get(), kAllocationSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  __asan_poison_memory_region(allocation.get() + kInitialExtentBytes,
+                              kAllocationSize - kInitialExtentBytes);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0x11111111, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0x11111111u);
+  memory.write32(kBaseVa + kGrowthProbeOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kGrowthProbeOffset, kPid), 0u);
+
+  __asan_unpoison_memory_region(allocation.get() + kInitialExtentBytes,
+                                kAllocationSize - kInitialExtentBytes);
+  memory.write32(kBaseVa + kGrowthProbeOffset, 0x22222222, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kGrowthProbeOffset, kPid), 0x22222222u);
+
+  __asan_poison_memory_region(allocation.get() + kReducedExtentBytes,
+                              kAllocationSize - kReducedExtentBytes);
+  memory.write32(kBaseVa + kReducedInsideOffset, 0x33333333, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kReducedInsideOffset, kPid), 0x33333333u);
+  memory.write32(kBaseVa + kReducedOutsideOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kReducedOutsideOffset, kPid), 0u);
+
+  __asan_poison_memory_region(allocation.get(), kAllocationSize);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0u);
+
+  __asan_unpoison_memory_region(allocation.get(), kAllocationSize);
+  memory.write32(kBaseVa + kInitialInsideOffset, 0x44444444, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInitialInsideOffset, kPid), 0x44444444u);
+
+  __asan_poison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
+  memory.write32(kBaseVa + kInteriorPoisonOffset, 0xeeeeeeee, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kInteriorPoisonOffset, kPid), 0u);
+  memory.write32(kBaseVa + kLaterLiveOffset, 0x55555555, kPid);
+  EXPECT_EQ(memory.read32(kBaseVa + kLaterLiveOffset, kPid), 0x55555555u);
+  __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
+}
+
+TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kOuterVa = 0x40000000;
+  constexpr uint64_t kNestedVa = 0x50000000;
+
+  KfdProcess process(kPid);
+  auto outer_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto nested_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  outer_page[0] = 0x11;
+  nested_page[0] = 0x22;
+  process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
+  process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    memory.unregister_process(kPid);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    EXPECT_EQ(memory.read8(kNestedVa, kPid), 0x22);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  EXPECT_EQ(memory.read8(kOuterVa, kPid), 0x11);
+}
+
+TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
+  for (const bool use_generation : {false, true}) {
+    SCOPED_TRACE(use_generation ? "generation" : "legacy-exact-pte");
+    amdgpu::GpuMemory memory("memory");
+    constexpr uint32_t kPid = 7;
+    constexpr uint64_t kBaseVa = 0x40000000;
+
+    KfdProcess process(kPid);
+    auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+    auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+    old_page[0] = 0x11;
+    new_page[0] = 0x22;
+    process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            use_generation ? process.page_table_generation() : nullptr);
+
+    uint8_t *current_page = old_page.get();
+    size_t hook_calls = 0;
+    std::function<void()> query_hook = [&] {
+      ++hook_calls;
+      if (hook_calls == 4) {
+        amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+        return;
+      }
+      auto *next_page = current_page == old_page.get() ? new_page.get() : old_page.get();
+      process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+      current_page = next_page;
+    };
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+    EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x22);
+    EXPECT_EQ(hook_calls, 4u);
+  }
+}
+
+TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kLiveOffset = 128;
+
+  KfdProcess process(kPid);
+  auto first_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto second_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::fill_n(first_page.get(), KfdProcess::kPageSize, 0x5a);
+  std::fill_n(second_page.get(), KfdProcess::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, first_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  uint8_t *current_page = first_page.get();
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    auto *next_page = current_page == first_page.get() ? second_page.get() : first_page.get();
+    process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+    current_page = next_page;
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(hook_calls, amdgpu::GpuMemoryTestAccess::metadata_retry_limit());
+  EXPECT_EQ(first_page[kLiveOffset], 0x5a);
+  EXPECT_EQ(second_page[kLiveOffset], 0x5a);
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(current_page[kLiveOffset], 0xa5);
+  memory.write8(kBaseVa + kLiveOffset, 0x3c, kPid);
+  EXPECT_EQ(current_page[kLiveOffset], 0x3c);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
+  process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0u);
+}
+
+TEST(GpuMemoryTest, SanitizedRegistryRetryLimitKeepsMappedAccessOutOfFallback) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint32_t kChurnPid = 8;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kLiveOffset = 128;
+
+  KfdProcess process(kPid);
+  KfdProcess churn_process(kChurnPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  bool churn_registered = false;
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    if (churn_registered)
+      memory.unregister_process(kChurnPid);
+    else
+      memory.register_process(kChurnPid, &churn_process.page_table_,
+                              &churn_process.page_table_mutex_,
+                              churn_process.page_table_generation());
+    churn_registered = !churn_registered;
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(hook_calls, amdgpu::GpuMemoryTestAccess::metadata_retry_limit());
+  EXPECT_EQ(allocation[kLiveOffset], 0x5a);
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  if (churn_registered)
+    memory.unregister_process(kChurnPid);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(allocation[kLiveOffset], 0xa5);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0xa5);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeQueriesWithoutPageTableLocks) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOtherVa = 0x50000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto other_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    process.map_pages(kOtherVa, other_page.get(), KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(allocation.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesTargetRemap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    process.remap_page_host_ptrs(kBaseVa, old_page.get(), new_page.get(), KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(new_page.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRejectsTargetUnmap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, 0u);
+  EXPECT_EQ(size, 0u);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesVmidReplacement) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess old_process(kPid);
+  KfdProcess new_process(kPid);
+  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  old_process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+  new_process.map_pages(kBaseVa, new_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &old_process.page_table_, &old_process.page_table_mutex_,
+                          old_process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    memory.unregister_process(kPid);
+    memory.register_process(kPid, &new_process.page_table_, &new_process.page_table_mutex_,
+                            new_process.page_table_generation());
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(new_page.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedUnrelatedMappingChurnDoesNotLoseStableWrites) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kChurnVa = 0x50000000;
+  constexpr size_t kOffset = 128;
+  constexpr size_t kIterations = 64;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto churn_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::atomic<size_t> requested{0};
+  std::atomic<size_t> completed{0};
+  std::atomic<bool> stop{false};
+  std::jthread writer([&] {
+    size_t handled = 0;
+    bool mapped = false;
+    while (true) {
+      requested.wait(handled, std::memory_order_acquire);
+      if (stop.load(std::memory_order_acquire))
+        return;
+      const size_t target = requested.load(std::memory_order_acquire);
+      while (handled < target) {
+        if (mapped)
+          process.unmap_pages(kChurnVa, KfdProcess::kPageSize);
+        else
+          process.map_pages(kChurnVa, churn_page.get(), KfdProcess::kPageSize);
+        mapped = !mapped;
+        completed.store(++handled, std::memory_order_release);
+        completed.notify_all();
+      }
+    }
+  });
+  auto churn_once = [&] {
+    const size_t token = requested.fetch_add(1, std::memory_order_acq_rel) + 1;
+    requested.notify_one();
+    size_t observed = completed.load(std::memory_order_acquire);
+    while (observed < token) {
+      completed.wait(observed, std::memory_order_acquire);
+      observed = completed.load(std::memory_order_acquire);
+    }
+  };
+  std::function<void()> query_hook = churn_once;
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+
+  for (size_t i = 0; i < kIterations; ++i) {
+    churn_once();
+    const auto value = static_cast<uint8_t>(i + 1);
+    memory.write8(kBaseVa + kOffset, value, kPid);
+    EXPECT_EQ(allocation[kOffset], value);
+    EXPECT_EQ(memory.read8(kBaseVa + kOffset, kPid), value);
+  }
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  stop.store(true, std::memory_order_release);
+  requested.fetch_add(1, std::memory_order_release);
+  requested.notify_one();
+}
+
+TEST(GpuMemoryTest, SanitizedCacheLinePreservesLiveBytesAfterInteriorGap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kCacheLineSize = 64;
+  constexpr size_t kGapOffset = 16;
+  constexpr size_t kGapSize = 16;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  __asan_poison_memory_region(allocation.get() + kGapOffset, kGapSize);
+  std::array<uint8_t, kCacheLineSize> cache_line{};
+  memory.read_block(kBaseVa, cache_line, kPid);
+  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kGapOffset,
+                          [](uint8_t value) { return value == 0x5a; }));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kGapOffset,
+                          cache_line.begin() + kGapOffset + kGapSize,
+                          [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::all_of(cache_line.begin() + kGapOffset + kGapSize, cache_line.end(),
+                          [](uint8_t value) { return value == 0x5a; }));
+
+  cache_line.fill(0xa5);
+  memory.write_block(kBaseVa, cache_line, kPid);
+  EXPECT_TRUE(std::all_of(allocation.get(), allocation.get() + kGapOffset,
+                          [](uint8_t value) { return value == 0xa5; }));
+  EXPECT_TRUE(std::all_of(allocation.get() + kGapOffset + kGapSize,
+                          allocation.get() + kCacheLineSize,
+                          [](uint8_t value) { return value == 0xa5; }));
+  __asan_unpoison_memory_region(allocation.get() + kGapOffset, kGapSize);
+}
+
+TEST(GpuMemoryTest, SanitizedCrossPageResolveIgnoresEarlierGap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kMappingSize = 2 * KfdProcess::kPageSize;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(kMappingSize);
+  process.map_pages(kBaseVa, allocation.get(), kMappingSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  __asan_poison_memory_region(allocation.get() + 256, 64);
+  constexpr size_t kResolveOffset = KfdProcess::kPageSize - 8;
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kResolveOffset, kPid, 16),
+            allocation.get() + kResolveOffset);
+  __asan_unpoison_memory_region(allocation.get() + 256, 64);
+}
+
+TEST(GpuMemoryTest, SanitizedPassthroughCrossPageResolveChecksEveryPage) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr size_t kMappingSize = 2 * KfdProcess::kPageSize;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  auto *mapping = static_cast<uint8_t *>(raw_mapping);
+  __asan_poison_memory_region(mapping + KfdProcess::kPageSize, 8);
+  const uint64_t gpu_va = reinterpret_cast<uint64_t>(mapping + KfdProcess::kPageSize - 8);
+  EXPECT_EQ(memory.resolve_host_ptr(gpu_va, 0, 16), nullptr);
+  __asan_unpoison_memory_region(mapping + KfdProcess::kPageSize, 8);
+  EXPECT_EQ(munmap(mapping, kMappingSize), 0);
+}
+#endif
+
+TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+  alignas(amdgpu::GpuMemory) unsigned char storage[sizeof(amdgpu::GpuMemory)];
+
+  KfdProcess first_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  first_page[kOffset] = 0x11;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+
+  auto *first_memory = new (storage) amdgpu::GpuMemory("memory");
+  first_memory->register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                                 first_process.page_table_generation());
+  EXPECT_EQ(first_memory->read8(kAddr, kPid), first_page[kOffset]);
+  EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+  first_memory->~GpuMemory();
+
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  second_page[kOffset] = 0x22;
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  auto *second_memory = new (storage) amdgpu::GpuMemory("memory");
+  second_memory->register_process(kPid, &second_process.page_table_,
+                                  &second_process.page_table_mutex_,
+                                  second_process.page_table_generation());
+  EXPECT_EQ(second_memory->read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(second_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+  second_memory->~GpuMemory();
+}
+
+TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kVmid = 17;
+
+  void *raw_mapping = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data;
+    ~Mapping() { munmap(data, KfdProcess::kPageSize); }
+  } mapping{static_cast<uint8_t *>(raw_mapping)};
+
+  KfdProcess process(kVmid);
+  memory.register_process(kVmid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kVmid, getpid());
+
+  auto *target = reinterpret_cast<uint32_t *>(mapping.data + 64);
+  *target = 0;
+
+  std::barrier first_atomic_has_read(2);
+  std::barrier allow_first_atomic_to_write(2);
+  std::thread first_atomic([&] {
+    memory.atomic_rmw(
+        reinterpret_cast<uint64_t>(target), sizeof(*target),
+        [&](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+          first_atomic_has_read.arrive_and_wait();
+          allow_first_atomic_to_write.arrive_and_wait();
+        },
+        kVmid);
+  });
+
+  first_atomic_has_read.arrive_and_wait();
+
+  const bool acquired_page_table_exclusively = process.page_table_mutex_.try_lock();
+  if (acquired_page_table_exclusively)
+    process.page_table_mutex_.unlock();
+  EXPECT_FALSE(acquired_page_table_exclusively)
+      << "fallback atomic must retain the page-table shared lock during its callback";
+
+  allow_first_atomic_to_write.arrive_and_wait();
+  first_atomic.join();
+
+  process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data, KfdProcess::kPageSize);
+  memory.atomic_rmw(
+      reinterpret_cast<uint64_t>(target), sizeof(*target),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kVmid);
+
+  EXPECT_EQ(*target, 2u);
+}
+
+TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x40000000;
+  constexpr uint32_t kValuePrefix = 0xa5a50000;
+  constexpr uint32_t kReaders = 4;
+  constexpr uint32_t kRemaps = 2000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  auto initial_page = std::make_unique<uint32_t>(kValuePrefix);
+  process.map_pages(kAddr, initial_page.get(), sizeof(*initial_page));
+  std::barrier start(kReaders + 1);
+  std::barrier initial_read(kReaders + 1);
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> mapped_reads{0};
+  std::atomic<uint64_t> invalid_reads{0};
+  std::vector<std::thread> readers;
+  readers.reserve(kReaders);
+  for (uint32_t i = 0; i < kReaders; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      const uint32_t initial_value = memory.read32(kAddr, kPid);
+      if ((initial_value & 0xffff0000) == kValuePrefix)
+        mapped_reads.fetch_add(1, std::memory_order_relaxed);
+      else
+        invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      initial_read.arrive_and_wait();
+      while (!stop.load(std::memory_order_acquire)) {
+        const uint32_t value = memory.read32(kAddr, kPid);
+        if (value == 0)
+          continue;
+        if ((value & 0xffff0000) == kValuePrefix)
+          mapped_reads.fetch_add(1, std::memory_order_relaxed);
+        else
+          invalid_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  initial_read.arrive_and_wait();
+  process.unmap_pages(kAddr, sizeof(*initial_page));
+  initial_page.reset();
+  for (uint32_t i = 0; i < kRemaps; ++i) {
+    auto page = std::make_unique<uint32_t>(kValuePrefix | (i & 0xffff));
+    process.map_pages(kAddr, page.get(), sizeof(*page));
+    std::this_thread::yield();
+    process.unmap_pages(kAddr, sizeof(*page));
+    page.reset();
+  }
+  stop.store(true, std::memory_order_release);
+
+  for (auto &reader : readers)
+    reader.join();
+
+  EXPECT_GT(mapped_reads.load(std::memory_order_relaxed), 0u);
+  EXPECT_EQ(invalid_reads.load(std::memory_order_relaxed), 0u);
+}
+
+TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
+            nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(0x4000), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, ZeroPassthroughAddressUsesFallbackStorage) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+
+  constexpr uint32_t kValue = 0xc001d00d;
+  memory.write32(0, kValue);
+
+  EXPECT_EQ(memory.read32(0), kValue);
+}
+
+TEST(GpuMemoryTest, NullBackedPteDoesNotInvokeMappedCallback) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddr = 0x4000;
+  constexpr uint32_t kValue = 0x12345678;
+
+  KfdProcess process(kPid);
+  process.page_table_[kAddr >> KfdProcess::kPageShift] = {};
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  ASSERT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  memory.write32(kAddr, kValue, kPid);
+  EXPECT_EQ(memory.read32(kAddr, kPid), kValue);
+}
+
+TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kMappingSize = KfdProcess::kPageSize * 2;
+
+  void *raw_mapping =
+      mmap(nullptr, kMappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw_mapping, MAP_FAILED);
+  struct Mapping {
+    uint8_t *data = nullptr;
+    size_t size = 0;
+    ~Mapping() {
+      if (data)
+        munmap(data, size);
+    }
+  } mapping{static_cast<uint8_t *>(raw_mapping), kMappingSize};
+
+  for (size_t i = 0; i < kMappingSize; ++i)
+    mapping.data[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+
+  constexpr size_t kAccessOffset = KfdProcess::kPageSize - 8;
+  constexpr size_t kAccessSize = 32;
+  const uint64_t addr = reinterpret_cast<uint64_t>(mapping.data + kAccessOffset);
+
+  std::array<uint8_t, kAccessSize> actual{};
+  memory.read_block(addr, std::span<uint8_t>(actual), kPid);
+  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), mapping.data + kAccessOffset));
+
+  std::array<uint8_t, kAccessSize> replacement{};
+  for (size_t i = 0; i < replacement.size(); ++i)
+    replacement[i] = static_cast<uint8_t>(0xa0 + i);
+
+  memory.write_block(addr, std::span<const uint8_t>(replacement), kPid);
+  EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), mapping.data + kAccessOffset));
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -243,15 +1749,13 @@ protected:
 TEST_P(IsaTest, RegisterAccess) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Exercise the CU register-file read/write API on a live, resident wavefront.
+  // dispatch_wf() allocates a slot without running the kernel to s_endpgm (which
+  // would free the slot), so the registers stay readable/writable here.
   auto *cu = f.cu();
+  auto *w = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(w, nullptr);
   ASSERT_GE(cu->num_wfs(), 1u);
-  auto *w = cu->wf(0);
 
   EXPECT_EQ(w->wf_size(), 64u);
   EXPECT_EQ(w->num_sgprs(), 104u);
@@ -272,34 +1776,183 @@ TEST_P(IsaTest, RegisterAccess) {
   EXPECT_EQ(cu->read_vgpr(vb + 1, 1), 0u);
 }
 
-TEST_P(IsaTest, RegisterFileIsolation) {
-  VmFixture f(arch(), 1, 2);
+TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
 
-  // Two wavefronts in one workgroup: grid=128 items, wg=64 -> 2 wfs.
-  // But that gives 2 workgroups. Use 1 workgroup with 128 items for 2 wfs.
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  for (const std::string &arch :
+       {std::string("rdna3"), std::string("rdna3_5"), std::string("rdna4")}) {
+    for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
+      SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
+      VmFixture f(arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+      auto *snap = f.capture_halts();
+      uint64_t ko =
+          f.write_kernel(0x1000, code, sizeof(code), 104, 32, 2, 0, false, component_count);
+
+      test::AqlQueue queue(f.mem(), f.cp());
+      hsa_kernel_dispatch_packet_t pkt{};
+      pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      pkt.setup = 3;
+      pkt.workgroup_size_x = 8;
+      pkt.workgroup_size_y = 4;
+      pkt.workgroup_size_z = 2;
+      pkt.grid_size_x = 8;
+      pkt.grid_size_y = 4;
+      pkt.grid_size_z = 2;
+      pkt.kernel_object = ko;
+      queue.submit(pkt);
+      step_until_halted(*f.engine, {f.cu()});
+
+      ASSERT_EQ(snap->snapshots().size(), 2u);
+      const auto *wf0 = snap->by_wf_id(0);
+      const auto *wf1 = snap->by_wf_id(1);
+      ASSERT_NE(wf0, nullptr);
+      ASSERT_NE(wf1, nullptr);
+      EXPECT_EQ(wf0->vgpr(0, 0), amdgpu::pack_workitem_id({0, 0, 0}, component_count));
+      EXPECT_EQ(wf0->vgpr(0, 9), amdgpu::pack_workitem_id({1, 1, 0}, component_count));
+      EXPECT_EQ(wf1->vgpr(0, 8), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
+      EXPECT_EQ(wf1->vgpr(0, 31), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+    }
+  }
+}
+
+TEST(CdnaDispatchTest, Wave64PackedTidHonorsRequestedComponents) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  for (std::string_view arch : {"cdna2", "cdna3", "cdna4"}) {
+    for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
+      SCOPED_TRACE(::testing::Message() << arch << " component_count=" << component_count);
+      VmFixture f(arch);
+      auto *snap = f.capture_halts();
+      ASSERT_TRUE(f.cp()->packed_tid());
+      uint64_t ko =
+          f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
+
+      test::AqlQueue queue(f.mem(), f.cp());
+      hsa_kernel_dispatch_packet_t pkt{};
+      pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      pkt.setup = 3;
+      pkt.workgroup_size_x = 8;
+      pkt.workgroup_size_y = 4;
+      pkt.workgroup_size_z = 2;
+      pkt.grid_size_x = 8;
+      pkt.grid_size_y = 4;
+      pkt.grid_size_z = 2;
+      pkt.kernel_object = ko;
+      queue.submit(pkt);
+      step_until_halted(*f.engine, {f.cu()});
+
+      ASSERT_EQ(snap->snapshots().size(), 1u);
+      const auto *wf = &snap->snapshots().front();
+      EXPECT_EQ(wf->wf_size, 64u);
+      EXPECT_EQ(wf->vgpr(0, 40), amdgpu::pack_workitem_id({0, 1, 1}, component_count));
+      EXPECT_EQ(wf->vgpr(0, 63), amdgpu::pack_workitem_id({7, 3, 1}, component_count));
+    }
+  }
+}
+
+TEST(CdnaDispatchTest, Wave64MasksMultidimensionalGridTailAcrossLane32) {
+  VmFixture f("cdna3");
+  auto *snap = f.capture_halts();
+  const uint32_t code[] = {SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  {
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 2;
+  pkt.workgroup_size_x = 8;
+  pkt.workgroup_size_y = 6;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 5;
+  pkt.grid_size_y = 5;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = ko;
+  queue.submit(pkt);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto *wf = &snap->snapshots().front();
+  EXPECT_EQ(wf->wf_size, 64u);
+  // Five active X lanes in each of five Y rows. The final active row starts
+  // at lane 32; lanes 40-47 are past grid_size_y, and lanes 48-63 map beyond
+  // workgroup_size_z.
+  EXPECT_EQ(wf->exec, 0x0000'001F'1F1F'1F1FULL);
+}
+
+TEST(CdnaDispatchTest, Cdna1UnpackedTidHonorsRequestedComponents) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
+    SCOPED_TRACE("component_count=" + std::to_string(component_count));
+    VmFixture f("cdna1");
+    auto *snap = f.capture_halts();
+    ASSERT_FALSE(f.cp()->packed_tid());
+    uint64_t ko =
+        f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, component_count);
+
     test::AqlQueue queue(f.mem(), f.cp());
     hsa_kernel_dispatch_packet_t pkt{};
     pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    pkt.setup = 1;
-    pkt.workgroup_size_x = 128; // 2 wavefronts per workgroup
-    pkt.workgroup_size_y = 1;
-    pkt.workgroup_size_z = 1;
-    pkt.grid_size_x = 128; // 1 workgroup
-    pkt.grid_size_y = 1;
-    pkt.grid_size_z = 1;
+    pkt.setup = 3;
+    pkt.workgroup_size_x = 8;
+    pkt.workgroup_size_y = 4;
+    pkt.workgroup_size_z = 2;
+    pkt.grid_size_x = 8;
+    pkt.grid_size_y = 4;
+    pkt.grid_size_z = 2;
     pkt.kernel_object = ko;
-    pkt.kernarg_address = nullptr;
     queue.submit(pkt);
-  }
-  step_until_halted(*f.engine, {f.cu()});
+    step_until_halted(*f.engine, {f.cu()});
 
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    const auto *wf = &snap->snapshots().front();
+    EXPECT_EQ(wf->wf_size, 64u);
+    EXPECT_EQ(wf->vgpr(0, 63), 7u);
+    EXPECT_EQ(wf->vgpr(1, 63), component_count >= 1 ? 3u : 0u);
+    EXPECT_EQ(wf->vgpr(2, 63), component_count >= 2 ? 1u : 0u);
+  }
+}
+
+TEST(DispatchEntryTest, InitialExecMaskSupportsWave64GridTail) {
+  amdgpu::DispatchEntry entry{};
+  entry.grid_size_x = 65;
+  entry.grid_wgs_x = 2;
+  entry.workgroup_size_x = 64;
+
+  EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 0, 0, 64), ~0ULL);
+  EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 1, 0, 64), 1ULL);
+}
+
+TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
+  amdgpu::DispatchEntry entry{};
+  entry.workgroup_id_offset = 100;
+  entry.grid_size_x = 4;
+  entry.grid_size_y = 3;
+  entry.grid_size_z = 3;
+  entry.grid_wgs_x = 1;
+  entry.grid_wgs_y = 2;
+  entry.grid_wgs_z = 2;
+  entry.workgroup_size_x = 4;
+  entry.workgroup_size_y = 2;
+  entry.workgroup_size_z = 2;
+
+  EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 103, 0, 64), 0xFULL);
+}
+
+TEST_P(IsaTest, RegisterFileIsolation) {
+  VmFixture f(arch(), 1, 2);
+
+  // Two concurrently-resident wavefronts must own disjoint register blocks.
+  // dispatch_wf() places both without running to s_endpgm (which would free them),
+  // so their register files stay live for the isolation checks below.
   auto *cu = f.cu();
+  auto *w0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  auto *w1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(w0, nullptr);
+  ASSERT_NE(w1, nullptr);
   ASSERT_EQ(cu->num_wfs(), 2u);
-  auto *w0 = cu->wf(0);
-  auto *w1 = cu->wf(1);
+  ASSERT_NE(w0->sgpr_alloc().base, w1->sgpr_alloc().base);
+  ASSERT_NE(w0->vgpr_alloc().base, w1->vgpr_alloc().base);
 
   cu->write_sgpr(w0->sgpr_alloc().base + 0, 42);
   cu->write_sgpr(w1->sgpr_alloc().base + 0, 99);
@@ -322,12 +1975,158 @@ TEST_P(IsaTest, DispatchAndCapacity) {
   queue.dispatch(ko, 128, 64); // grid=128, wg=64 → 2 workgroups
   f.engine->run();
 
-  // Both slots were used (wavefronts have now halted and been retired).
+  // Both workgroups ran to completion; their waves freed themselves at s_endpgm.
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST(CommandProcessorTest, DebugSuspendedEmptyQueueDefersNewDispatchUntilResume) {
+  VmFixture f("cdna4", 1, 2);
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t kernel_object = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  // Queue suspension is persistent HQD state. It must block packets submitted
+  // after an empty queue was suspended, not just pause waves already resident.
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, true);
+  queue.dispatch(kernel_object, 64);
+  (void)f.engine->step();
+  EXPECT_EQ(f.cp()->dispatched_count(), 0u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, false);
+  f.engine->run();
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+}
+
+TEST(CommandProcessorTest, DebugResumeWithOnlyResidentWorkDoesNotRescanQueue) {
+  VmFixture f("cdna4", 1, 2);
+  std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum * 2, SOPP_S_NOP);
+  code.push_back(SOPP_S_ENDPGM);
+  uint64_t kernel_object = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  queue.dispatch(kernel_object, 64);
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.cp()->dispatched_count(), 1u);
+  ASSERT_TRUE(f.cu()->has_active_wfs());
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+
+  // Model a command-processor event that was already queued when KFD froze the
+  // resident wave. Consuming that event while no packet is unread must not
+  // manufacture deferred work and create a resume/event chain.
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, true);
+  wave->set_debug_suspended(true);
+  f.engine->schedule_event_now(f.cp()->doorbell_event());
+  ASSERT_TRUE(f.engine->step());
+  const uint64_t passes_before_resume = f.cp()->doorbell_handle_count_for_test();
+
+  wave->set_debug_suspended(false);
+  f.cu()->schedule_work_async();
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, false);
+  ASSERT_TRUE(f.engine->step());
+
+  EXPECT_EQ(f.cp()->doorbell_handle_count_for_test(), passes_before_resume);
+  f.engine->run();
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
+  // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
+  // The CP relies on can_accept_workgroup() gating, but the API contract must hold
+  // independently so it cannot silently drift into OOB access in release builds.
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch(), 1, kSlots);
+  auto *cu = f.cu();
+  for (uint32_t i = 0; i < kSlots; ++i)
+    ASSERT_NE(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr) << "slot " << i;
+  EXPECT_EQ(cu->num_wfs(), kSlots);
+  // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
+  EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
+}
+
+TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) {
+  VmFixture f("cdna4", 2, 2);
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  const uint32_t warmup[] = {SOPP_S_ENDPGM};
+  uint64_t warmup_ko = f.write_kernel(0x1000, warmup, sizeof(warmup));
+  queue.dispatch(warmup_ko, 64);
+  for (uint32_t i = 0; i < 100 && f.cp()->dispatched_count() != 1; ++i)
+    ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.cp()->dispatched_count(), 1u);
+
+  constexpr uint64_t kTrapPc = 0x8000;
+  constexpr uint64_t kTrapHandlerPc = 0x9000;
+  f.mem()->write32(kTrapPc, SOPP_S_TRAP_1);
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(trap_handler); ++i)
+    f.mem()->write32(kTrapHandlerPc + i * 4, trap_handler[i]);
+  f.cu(0)->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerPc, 0, true};
+  });
+  f.cu(0)->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t message) { return message == 1; });
+  auto *stopped = f.cu(0)->dispatch_wf(0, kTrapPc, 104, 256);
+  ASSERT_NE(stopped, nullptr);
+  f.cu(0)->schedule_work();
+  for (uint32_t i = 0; i < 100 && !stopped->debug_halted(); ++i)
+    ASSERT_TRUE(f.engine->step());
+  ASSERT_TRUE(stopped->debug_halted());
+  ASSERT_TRUE(f.cu(0)->is_idle());
+
+  std::vector<uint32_t> long_running(amdgpu::ComputeUnitCore::kFunctionalQuantum + 1, SOPP_S_NOP);
+  long_running.push_back(SOPP_S_ENDPGM);
+  uint64_t long_ko =
+      f.write_kernel(0x10000, long_running.data(), long_running.size() * sizeof(uint32_t));
+  uint64_t followup_ko = f.write_kernel(0x20000, warmup, sizeof(warmup));
+
+  hsa_kernel_dispatch_packet_t first{};
+  first.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  first.setup = 1;
+  first.workgroup_size_x = 64;
+  first.workgroup_size_y = 1;
+  first.workgroup_size_z = 1;
+  first.grid_size_x = 64;
+  first.grid_size_y = 1;
+  first.grid_size_z = 1;
+  first.kernel_object = long_ko;
+  queue.submit(first);
+
+  hsa_kernel_dispatch_packet_t followup = first;
+  followup.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  followup.kernel_object = followup_ko;
+  queue.submit(followup);
+
+  amdgpu::Wavefront *followup_wf = nullptr;
+  for (uint32_t i = 0; i < 100 && f.engine->step(); ++i) {
+    for (uint32_t slot = 0; slot < f.cu(0)->num_wf_slots(); ++slot) {
+      auto *wf = f.cu(0)->wf(slot);
+      if (wf != stopped && wf->dispatch_id() == 3) {
+        followup_wf = wf;
+        break;
+      }
+    }
+    if (followup_wf && followup_wf->is_halted())
+      break;
+  }
+
+  ASSERT_NE(followup_wf, nullptr);
+  EXPECT_TRUE(followup_wf->is_halted());
+  EXPECT_TRUE(stopped->debug_halted());
+  EXPECT_EQ(f.cp()->dispatched_count(), 3u);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   VmFixture f(arch(), 1, 8);
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -353,8 +2152,11 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
   queue.submit(raw);
   f.engine->run();
 
+  // The clustered dispatch produced one consolidated dispatch, and its cluster
+  // wavefronts ran and halted (freeing themselves at s_endpgm). Observe the waves
+  // at halt rather than as post-run residents.
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
-  EXPECT_GE(f.cu()->num_wfs(), 1u);
+  EXPECT_GE(snap->snapshots().size(), 1u);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemory) {
@@ -392,8 +2194,220 @@ TEST_P(IsaTest, VendorSpecificExtKernelDispatchReadsDependencySignalFromGpuMemor
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
 }
 
+TEST_P(IsaTest, VendorSpecificBarrierValueConditionsWaitAndResume) {
+  struct ConditionCase {
+    uint32_t condition;
+    int64_t initial_signal_value;
+    int64_t ready_signal_value;
+    int64_t value;
+    int64_t mask;
+  };
+  constexpr std::array cases{
+      ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0x106, 0x105, 0x5, 0xff},
+      ConditionCase{HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<int64_t>::min(),
+                    std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::min()},
+      ConditionCase{HSA_SIGNAL_CONDITION_NE, 4, 5, 4, std::numeric_limits<int64_t>::max()},
+      ConditionCase{HSA_SIGNAL_CONDITION_LT, 1, 0, 1, std::numeric_limits<int64_t>::max()},
+      ConditionCase{HSA_SIGNAL_CONDITION_GTE, 4, 5, 5, std::numeric_limits<int64_t>::max()},
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.condition);
+    VmFixture f(arch(), 1, 8);
+
+    constexpr uint64_t kDepSignal = 0x7000;
+    constexpr uint64_t kCompletionSignal = 0x7100;
+    constexpr uint32_t kSignalValueOffset = 8;
+    f.mem()->write64(kDepSignal + kSignalValueOffset, test_case.initial_signal_value);
+    f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+
+    amdgpu::AmdBarrierValuePacket barrier{};
+    barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+    barrier.signal.handle = kDepSignal;
+    barrier.value = test_case.value;
+    barrier.mask = test_case.mask;
+    barrier.condition = test_case.condition;
+    barrier.completion_signal.handle = kCompletionSignal;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(barrier);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+    EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 1u);
+
+    f.mem()->write64(kDepSignal + kSignalValueOffset, test_case.ready_signal_value);
+    f.engine->run();
+
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+    EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 0u);
+  }
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueAllowsNullSignals) {
+  VmFixture f(arch(), 1, 8);
+
+  constexpr uint64_t kCompletionSignal = 0x7100;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.condition = HSA_SIGNAL_CONDITION_EQ;
+  barrier.completion_signal.handle = kCompletionSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(barrier);
+  barrier.completion_signal.handle = 0;
+  queue.submit(barrier);
+  f.engine->run();
+
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
+  EXPECT_EQ(f.mem()->read64(kCompletionSignal + kSignalValueOffset), 0u);
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueRejectsInvalidCondition) {
+  VmFixture f(arch(), 1, 8);
+
+  constexpr uint64_t kDepSignal = 0x7000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.signal.handle = kDepSignal;
+  barrier.mask = std::numeric_limits<int64_t>::max();
+  barrier.condition = 99;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(barrier);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+}
+
+TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kBarrierCompletionSignal = 0x7000;
+  constexpr uint64_t kLaterCompletionSignal = 0x7100;
+  constexpr uint32_t kSignalValueOffset = 8;
+  f.mem()->write64(kBarrierCompletionSignal + kSignalValueOffset, 1);
+  f.mem()->write64(kLaterCompletionSignal + kSignalValueOffset, 1);
+
+  hsa_kernel_dispatch_packet_t dispatch{};
+  dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  dispatch.setup = 1;
+  dispatch.workgroup_size_x = 64;
+  dispatch.workgroup_size_y = 1;
+  dispatch.workgroup_size_z = 1;
+  dispatch.grid_size_x = 64;
+  dispatch.grid_size_y = 1;
+  dispatch.grid_size_z = 1;
+  dispatch.kernel_object = ko;
+
+  amdgpu::AmdBarrierValuePacket barrier{};
+  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.completion_signal.handle = kBarrierCompletionSignal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(dispatch);
+  queue.submit(barrier);
+  dispatch.completion_signal.handle = kLaterCompletionSignal;
+  queue.submit(dispatch);
+  (void)f.engine->step();
+
+  EXPECT_EQ(f.cu()->num_wfs(), 1u);
+  EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+  EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
+
+  f.engine->run();
+
+  EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
+  EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+}
+
+TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
+  constexpr std::array packet_types{
+      HSA_PACKET_TYPE_BARRIER_AND,
+      HSA_PACKET_TYPE_BARRIER_OR,
+      HSA_PACKET_TYPE_VENDOR_SPECIFIC,
+  };
+
+  for (const auto packet_type : packet_types) {
+    SCOPED_TRACE(packet_type);
+    VmFixture f(arch(), 1, 8);
+
+    const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    constexpr uint64_t kBarrierCompletionSignal = 0x7000;
+    constexpr uint64_t kLaterCompletionSignal = 0x7100;
+    constexpr uint32_t kSignalValueOffset = 8;
+    f.mem()->write64(kBarrierCompletionSignal + kSignalValueOffset, 1);
+    f.mem()->write64(kLaterCompletionSignal + kSignalValueOffset, 1);
+
+    hsa_kernel_dispatch_packet_t dispatch{};
+    dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    dispatch.setup = 1;
+    dispatch.workgroup_size_x = 64;
+    dispatch.workgroup_size_y = 1;
+    dispatch.workgroup_size_z = 1;
+    dispatch.grid_size_x = 64;
+    dispatch.grid_size_y = 1;
+    dispatch.grid_size_z = 1;
+    dispatch.kernel_object = ko;
+
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = packet_type | (1 << HSA_PACKET_HEADER_BARRIER);
+    if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+      barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
+    barrier.completion_signal.handle = kBarrierCompletionSignal;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(dispatch);
+    queue.submit(barrier);
+    dispatch.completion_signal.handle = kLaterCompletionSignal;
+    queue.submit(dispatch);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.cu()->num_wfs(), 1u);
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
+
+    f.engine->run();
+
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
+    EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
+  }
+}
+
+TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
+  constexpr std::array<uint8_t, 2> unsupported_formats{0, amdgpu::kHsaAmdPacketTypeReserved200};
+
+  for (const auto amd_format : unsupported_formats) {
+    SCOPED_TRACE(static_cast<unsigned>(amd_format));
+    VmFixture f(arch(), 1, 8);
+
+    amdgpu::AmdExtKernelDispatchPacket packet{};
+    packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    packet.amd_format = amd_format;
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(packet);
+
+    EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  }
+}
+
 TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
-  VmFixture f("gfx1250", 1, 1);
+  VmFixture f("cdna5", 1, 1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -410,7 +2424,7 @@ TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
 }
 
 TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster) {
-  VmFixture f("gfx1250", 1, 3, /*lds_size_kb=*/1);
+  VmFixture f("cdna5", 1, 3, /*lds_size_kb=*/1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -456,6 +2470,50 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
   EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), 0u);
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
+  VmFixture f("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  auto *snap = f.capture_halts();
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 3;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 1;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 2;
+  ext.cluster_size_z = 2;
+  ext.kernel_object = ko;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(ext);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 8u);
+  std::array<bool, 8> seen{};
+  for (const auto &wf : snap->snapshots()) {
+    const uint32_t workgroup_id = wf.wg_id;
+    ASSERT_LT(workgroup_id, seen.size());
+    seen[workgroup_id] = true;
+
+    const uint32_t workgroup_x = workgroup_id % 2;
+    const uint32_t workgroup_y = (workgroup_id / 2) % 2;
+    const uint32_t workgroup_z = workgroup_id / 4;
+    EXPECT_EQ(wf.ttmp(6), 0u);
+    EXPECT_EQ(wf.ttmp(7), (workgroup_z << 16) | workgroup_y);
+    EXPECT_EQ(wf.ttmp(9), workgroup_x);
+  }
+  for (bool was_seen : seen)
+    EXPECT_TRUE(was_seen);
 }
 
 TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
@@ -514,6 +2572,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
 
 TEST_P(IsaTest, DispatchCreatesWavefronts) {
   VmFixture f(arch(), 2);
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -521,12 +2580,14 @@ TEST_P(IsaTest, DispatchCreatesWavefronts) {
   queue.dispatch(ko, 128); // 2 workgroups of 64
   step_until_halted(*f.engine, {f.se()->compute_unit(0), f.se()->compute_unit(1)});
 
-  EXPECT_EQ(f.se()->compute_unit(0)->num_wfs(), 1u);
-  EXPECT_EQ(f.se()->compute_unit(1)->num_wfs(), 1u);
+  // Round-robin placement puts one workgroup (one wave) on each CU.
+  EXPECT_EQ(snap->for_cu(f.se()->compute_unit(0)).size(), 1u);
+  EXPECT_EQ(snap->for_cu(f.se()->compute_unit(1)).size(), 1u);
 }
 
 TEST_P(IsaTest, MultipleWavesPerWorkgroup) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -547,7 +2608,8 @@ TEST_P(IsaTest, MultipleWavesPerWorkgroup) {
   }
   step_until_halted(*f.engine, {f.cu()});
 
-  EXPECT_EQ(f.cu()->num_wfs(), 3u);
+  // One workgroup of 192 work-items = 3 wavefronts, all on the single CU.
+  EXPECT_EQ(snap->for_cu(f.cu()).size(), 3u);
 }
 
 TEST_P(IsaTest, RunToCompletion) {
@@ -622,6 +2684,12 @@ constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
 }
 constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
 
+constexpr std::array<uint32_t, 2> vop3_cdna(uint32_t op, uint32_t vdst, uint32_t src0,
+                                            uint32_t src1, uint32_t src2 = 0, uint32_t opsel = 0) {
+  return {vdst | ((opsel & 0xFu) << 11) | ((op & 0x3FFu) << 16) | (0x34u << 26),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
+}
+
 // VOP2: encoding[31]=0, op[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]
 constexpr uint32_t vop2(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t vsrc1) {
   return (op << 25) | (vdst << 17) | (vsrc1 << 9) | src0;
@@ -637,6 +2705,9 @@ constexpr uint32_t v_add_u32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
 }
 constexpr uint32_t v_cndmask_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
   return vop2(0, vdst, s0, vs1);
+}
+constexpr uint32_t v_lshlrev_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
+  return vop2(18, vdst, s0, vs1);
 }
 
 // VOPC: encoding[31:25]=0x3E, op[24:17], vsrc1[16:9], src0[8:0]
@@ -667,16 +2738,120 @@ constexpr uint32_t flat_hi(uint32_t vdst, uint32_t data, uint32_t addr, uint32_t
   return (vdst << 24) | (saddr << 16) | (data << 8) | addr;
 }
 
+// MUBUF (64-bit): CDNA layout.
+// dword0: offset[11:0], offen[12], idxen[13], sc0[14], sc1[15], lds[16], nt[17],
+//         op[24:18], encoding[31:26]=0x38
+// dword1: vaddr[7:0], vdata[15:8], srsrc[20:16], acc[23], soffset[31:24]
+constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0,
+                            uint32_t idxen = 0, uint32_t lds = 0) {
+  return (0x38u << 26) | (op << 18) | (lds << 16) | (idxen << 13) | (offen << 12) |
+         (offset & 0xFFFu);
+}
+constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
+                            uint32_t soffset = INLINE_CONST(0)) {
+  return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
+}
+
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
 
+TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
+  using namespace rocr::llvm::amdhsa;
+  using namespace enc;
+
+  auto run_case = [](bool fp16_ovfl, uint32_t expected_v2) {
+    uint32_t rsrc1 = 0;
+    const uint32_t fp16_ovfl_bit = fp16_ovfl ? 1u : 0u;
+    AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, fp16_ovfl_bit);
+
+    const auto cvt_pk_fp8 = vop3_cdna(cdna4::kVCvtPkFp8F32Vop3, 2, VGPR_SRC(5), VGPR_SRC(6));
+    const uint32_t code[] = {
+        s_mov_b32(SGPR(5), 255), std::bit_cast<uint32_t>(500.0f),
+        s_mov_b32(SGPR(6), 255), std::bit_cast<uint32_t>(500.0f),
+        v_mov_b32(5, SGPR(5)),   v_mov_b32(6, SGPR(6)),
+        cvt_pk_fp8[0], // v_cvt_pk_fp8_f32 v2.l, v5, v6
+        cvt_pk_fp8[1],           S_ENDPGM,
+    };
+
+    VmFixture f("cdna4");
+    auto *snap = f.capture_halts();
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0,
+                                 /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/0,
+                                 /*extra_compute_pgm_rsrc1=*/rsrc1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+
+    ASSERT_NO_THROW(f.engine->run());
+    ASSERT_EQ(snap->snapshots().size(), 1u);
+    EXPECT_EQ((snap->snapshots().front().mode_raw & amdgpu::Wavefront::FP16_OVFL_BIT) != 0,
+              fp16_ovfl);
+    EXPECT_EQ(snap->snapshots().front().vgpr(2, 0), expected_v2);
+  };
+
+  run_case(false, 0x00007F7Fu);
+  run_case(true, 0x00007E7Eu);
+}
+
+TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
+  constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
+  constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
+  constexpr uint32_t kAddress = kPerCuLdsBytes + 4;
+  constexpr uint32_t kValue = 0xC001D00D;
+  constexpr uint32_t kDsStoreB32 = 26;
+  constexpr uint32_t kDsLoadB32 = 108;
+  constexpr uint32_t kRdna4WaitcntLgkm0 = 0xBF89FC07;
+  constexpr uint32_t kRdna4Endpgm = 0xBFB00000;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),
+      kAddress,
+      s_mov_b32(SGPR(5), 255),
+      kValue,
+      v_mov_b32(0, SGPR(4)),
+      v_mov_b32(1, SGPR(5)),
+      ds_lo(kDsStoreB32),
+      ds_hi(/*vdst=*/0, /*data0=*/1, /*addr=*/0),
+      kRdna4WaitcntLgkm0,
+      ds_lo(kDsLoadB32),
+      ds_hi(/*vdst=*/2, /*data0=*/0, /*addr=*/0),
+      kRdna4WaitcntLgkm0,
+      kRdna4Endpgm,
+  };
+
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  auto *snap = f.capture_halts();
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 128, 64, 2, kWgpLdsBytes,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 32, 32);
+
+  ASSERT_NO_THROW(f.engine->run());
+
+  // The DS store wrote an offset in the sibling CU's half of the combined WGP LDS
+  // pool, then the DS load read it back into v2. A correct v2 proves the store and
+  // load both resolved through the combined pool (kAddress > per-CU capacity, so it
+  // only succeeds if the sibling half is addressable).
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+  EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
+  EXPECT_EQ(wf.vgpr(2, 0), kValue);
+}
+
+// Runs a self-contained scalar/vector program to s_endpgm and exposes the
+// wavefront's final architectural state. Because a wave frees its registers the
+// instant it halts, the final state is captured at halt time via HaltSnapshotPlugin
+// and served from that snapshot rather than from the (now-freed) slot.
 struct ExecFixture {
   VmFixture f;
   std::string arch_;
+  test::HaltSnapshotPlugin *snap_ = nullptr;
 
-  explicit ExecFixture(const std::string &arch) : f(arch), arch_(arch) {}
+  explicit ExecFixture(const std::string &arch) : f(arch), arch_(arch) {
+    snap_ = f.capture_halts();
+  }
 
   bool is_cdna4() const { return arch_ == "cdna4"; }
   uint32_t sopp_bytes() const { return 4u; }
@@ -697,24 +2872,24 @@ struct ExecFixture {
     step_until_halted(*f.engine, {f.cu()});
   }
 
-  amdgpu::Wavefront *wf() { return f.cu()->wf(0); }
   amdgpu::ComputeUnitCore *cu() { return f.cu(); }
-  bool step() { return f.cu()->step(); }
 
-  uint32_t read_sgpr(uint32_t idx) { return cu()->read_sgpr(wf()->sgpr_alloc().base + idx); }
-  void write_sgpr(uint32_t idx, uint32_t val) {
-    cu()->write_sgpr(wf()->sgpr_alloc().base + idx, val);
+  /// Snapshot of the (single) halted wavefront's final state.
+  const test::WavefrontSnapshot &snap() const {
+    EXPECT_EQ(snap_->snapshots().size(), 1u);
+    return snap_->snapshots().front();
   }
-  uint32_t read_vgpr(uint32_t reg, uint32_t lane) {
-    return cu()->read_vgpr(wf()->vgpr_alloc().base + reg, lane);
-  }
-  void write_vgpr(uint32_t reg, uint32_t lane, uint32_t val) {
-    cu()->write_vgpr(wf()->vgpr_alloc().base + reg, lane, val);
-  }
+
+  bool halted() const { return !snap_->snapshots().empty(); }
+  uint32_t status_raw() const { return snap().status; }
+  uint64_t vcc() const { return snap().vcc; }
+  uint32_t read_sgpr(uint32_t idx) { return snap().sgpr(idx); }
+  uint32_t read_vgpr(uint32_t reg, uint32_t lane) { return snap().vgpr(reg, lane); }
 };
 
 TEST_P(IsaTest, StepExecutesAndHalts) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   auto prog = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_NOP}, {SOPP_S_ENDPGM}});
   uint64_t ko = f.write_kernel(0x0, prog.data(), prog.size() * sizeof(uint32_t));
@@ -722,9 +2897,9 @@ TEST_P(IsaTest, StepExecutesAndHalts) {
   queue.dispatch(ko, 64);
   step_until_halted(*f.engine, {f.cu()});
 
-  auto *cu = f.cu();
-  ASSERT_GE(cu->num_wfs(), 1u);
-  EXPECT_TRUE(cu->wf(0)->is_halted());
+  // The wave executed and halted (freeing itself at s_endpgm).
+  EXPECT_EQ(snap->snapshots().size(), 1u);
+  EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
 TEST_P(IsaTest, RoundRobinScheduling) {
@@ -748,6 +2923,7 @@ TEST_P(IsaTest, RoundRobinScheduling) {
 
 TEST_P(IsaTest, EngineRunsToCompletion) {
   VmFixture f(arch());
+  auto *snap = f.capture_halts();
 
   auto prog = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_ENDPGM}});
   uint64_t ko = f.write_kernel(0x0, prog.data(), prog.size() * sizeof(uint32_t));
@@ -755,8 +2931,8 @@ TEST_P(IsaTest, EngineRunsToCompletion) {
   queue.dispatch(ko, 64);
   step_until_halted(*f.engine, {f.cu()});
 
-  ASSERT_GE(f.cu()->num_wfs(), 1u);
-  EXPECT_TRUE(f.cu()->wf(0)->is_halted());
+  EXPECT_EQ(snap->snapshots().size(), 1u);
+  EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
 TEST_P(IsaTest, SMovB32_InlineConst) {
@@ -820,7 +2996,7 @@ TEST_P(IsaTest, SCmpEqI32_Equal) {
   fx.load_program({enc::s_mov_b32(0, enc::INLINE_CONST(42)),
                    enc::s_mov_b32(1, enc::INLINE_CONST(42)),
                    enc::s_cmp_eq_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 1u); // SCC=1
+  EXPECT_EQ(fx.status_raw() & 1u, 1u); // SCC=1
 }
 
 TEST_P(IsaTest, SCmpEqI32_NotEqual) {
@@ -828,7 +3004,7 @@ TEST_P(IsaTest, SCmpEqI32_NotEqual) {
   fx.load_program({enc::s_mov_b32(0, enc::INLINE_CONST(42)),
                    enc::s_mov_b32(1, enc::INLINE_CONST(43)),
                    enc::s_cmp_eq_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 0u); // SCC=0
+  EXPECT_EQ(fx.status_raw() & 1u, 0u); // SCC=0
 }
 
 TEST_P(IsaTest, SCmpGtI32) {
@@ -838,7 +3014,7 @@ TEST_P(IsaTest, SCmpGtI32) {
   fx.load_program({enc::s_mov_b32(0, NEG_5),  // s0 = -5
                    enc::s_mov_b32(1, NEG_10), // s1 = -10
                    enc::s_cmp_gt_i32(enc::SGPR(0), enc::SGPR(1)), SOPP_S_ENDPGM});
-  EXPECT_EQ(fx.wf()->status_raw() & 1u, 1u); // -5 > -10, SCC=1
+  EXPECT_EQ(fx.status_raw() & 1u, 1u); // -5 > -10, SCC=1
 }
 
 TEST_P(IsaTest, SBranch_Forward) {
@@ -851,8 +3027,7 @@ TEST_P(IsaTest, SBranch_Forward) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  ASSERT_GE(fx.cu()->num_wfs(), 1u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc0_Taken) {
@@ -872,7 +3047,7 @@ TEST_P(IsaTest, SCbranchScc0_Taken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc0_NotTaken) {
@@ -890,7 +3065,7 @@ TEST_P(IsaTest, SCbranchScc0_NotTaken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SCbranchScc1_Taken) {
@@ -908,13 +3083,13 @@ TEST_P(IsaTest, SCbranchScc1_Taken) {
   test::AqlQueue queue(fx.f.mem(), fx.f.cp());
   queue.dispatch(ko, 64);
   step_until_halted(*fx.f.engine, {fx.cu()});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, SEndpgm_Halts) {
   ExecFixture fx(arch());
   fx.load_program({SOPP_S_ENDPGM});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, VMovB32_PerLane) {
@@ -968,7 +3143,7 @@ TEST_P(IsaTest, VCmpEqF32_SetsVCC) {
   // Lane 0: v0=0, compared with 0 -> equal -> VCC[0]=1.
   // Lane 1: v0=1, compared with 0 -> not equal -> VCC[1]=0.
   fx.load_program({enc::v_cmp_eq_f32(enc::INLINE_CONST(0), 0), SOPP_S_ENDPGM});
-  uint64_t vcc = fx.wf()->vcc();
+  uint64_t vcc = fx.vcc();
   EXPECT_TRUE(vcc & (1ULL << 0));  // lane 0: 0.0 == 0.0
   EXPECT_FALSE(vcc & (1ULL << 1)); // lane 1: int 1 as float != 0.0
 }
@@ -994,7 +3169,7 @@ TEST_P(IsaTest, ExecMask_PreservesInactiveLanes) {
   // We can't set EXEC before run. Instead, verify that the engine runs to completion.
   // This test is simplified to just verify halting behavior.
   fx.load_program({enc::v_mov_b32(2, enc::VGPR_SRC(0)), SOPP_S_ENDPGM});
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
   EXPECT_EQ(fx.read_vgpr(2, 0), 0u);
   EXPECT_EQ(fx.read_vgpr(2, 1), 1u);
 }
@@ -1010,7 +3185,7 @@ TEST_P(IsaTest, MultiInstructionProgram) {
   EXPECT_EQ(fx.read_sgpr(3), 10u);
   EXPECT_EQ(fx.read_sgpr(4), 20u);
   EXPECT_EQ(fx.read_sgpr(5), 30u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 TEST_P(IsaTest, BranchLoop) {
@@ -1031,7 +3206,7 @@ TEST_P(IsaTest, BranchLoop) {
   step_until_halted(*fx.f.engine, {fx.cu()});
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
-  EXPECT_TRUE(fx.wf()->is_halted());
+  EXPECT_TRUE(fx.halted());
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
@@ -1044,14 +3219,11 @@ INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
 TEST_P(IsaTest, MfmaF16Accumulation) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave: this test drives MFMA directly and reads the VGPR file,
+  // so the wave must stay allocated (not run to s_endpgm, which would free it).
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
   // Test v_mfma_f32_16x16x32_f16: M=16, N=16, K=32, B=1, in_bits=16
@@ -1105,14 +3277,10 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
 TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
   VmFixture f(arch());
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(ko, 64);
-  step_until_halted(*f.engine, {f.cu()});
-
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = cu->wf(0);
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
   // Test with patterned data: A[i][k] = (i+1) as FP16, B[k][j] = 1.0h
@@ -1153,6 +3321,115 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
     }
   }
   EXPECT_EQ(mismatches, 0u);
+}
+
+void init_mfma_f64_neg_inputs(amdgpu::ComputeUnitCore *cu, uint32_t s0, uint32_t s1, uint32_t s2,
+                              double a = 1.0, double b = 1.0, double c = 1.0) {
+  uint64_t a_bits = std::bit_cast<uint64_t>(a);
+  uint64_t b_bits = std::bit_cast<uint64_t>(b);
+  uint64_t c_bits = std::bit_cast<uint64_t>(c);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    cu->write_vgpr(s0, lane, static_cast<uint32_t>(a_bits));
+    cu->write_vgpr(s0 + 1, lane, static_cast<uint32_t>(a_bits >> 32));
+    cu->write_vgpr(s1, lane, static_cast<uint32_t>(b_bits));
+    cu->write_vgpr(s1 + 1, lane, static_cast<uint32_t>(b_bits >> 32));
+    cu->write_vgpr(s2, lane, static_cast<uint32_t>(c_bits));
+    cu->write_vgpr(s2 + 1, lane, static_cast<uint32_t>(c_bits >> 32));
+  }
+}
+
+void expect_mfma_f64_outputs(amdgpu::ComputeUnitCore *cu, uint32_t dst, double expected) {
+  uint64_t expected_bits = std::bit_cast<uint64_t>(expected);
+  uint32_t mismatches = 0;
+  for (uint32_t b = 0; b < 4; ++b) {
+    for (uint32_t row = 0; row < 4; ++row) {
+      for (uint32_t col = 0; col < 4; ++col) {
+        auto out = amdgpu::output_loc_64(4, 4, row, col, b);
+        uint32_t lo = cu->read_vgpr(dst + out.reg, out.lane);
+        uint32_t hi = cu->read_vgpr(dst + out.reg + 1, out.lane);
+        uint64_t got_bits = static_cast<uint64_t>(hi) << 32 | lo;
+        if (got_bits != expected_bits) {
+          if (mismatches < 5)
+            ADD_FAILURE() << "F64 output mismatch b=" << b << " row=" << row << " col=" << col
+                          << " expected=" << expected << " got=" << std::bit_cast<double>(got_bits);
+          ++mismatches;
+        }
+      }
+    }
+  }
+  EXPECT_EQ(mismatches, 0u);
+}
+
+void expect_mfma_f64_neg_modifier(const std::string &arch) {
+  VmFixture f(arch);
+
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
+  auto *cu = f.cu();
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  uint32_t vb = wf->vgpr_alloc().base;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
+  uint32_t s0 = vb + 10;
+  uint32_t s1 = vb + 20;
+  uint32_t s2 = dst;
+
+  init_mfma_f64_neg_inputs(cu, s0, s1, s2);
+
+  // CDNA f64 MFMA uses the BLGP bit range as NEG[2:0]. NEG=5 negates A and C:
+  // D = -C + (-A * B) * K = -1 + (-1 * 1) * 4 = -5.
+  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 5);
+  expect_mfma_f64_outputs(cu, dst, -5.0);
+
+  init_mfma_f64_neg_inputs(cu, s0, s1, s2);
+
+  // NEG=2 isolates the B operand negate bit:
+  // D = C + (A * -B) * K = 1 + (1 * -1) * 4 = -3.
+  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 2);
+  expect_mfma_f64_outputs(cu, dst, -3.0);
+}
+
+TEST(MfmaF64Cdna3Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna3"); }
+
+TEST(MfmaF64Cdna4Test, NegModifier) { expect_mfma_f64_neg_modifier("cdna4"); }
+
+TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
+  VmFixture f("cdna4");
+
+  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
+  auto *cu = f.cu();
+  auto *wf = f.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSrc0 = 10;
+  constexpr uint32_t kSrc1 = 20;
+  constexpr uint32_t kDst = 0;
+  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET + kDst;
+
+  cdna4::Vop3pMfmaMachineInst raw{};
+  raw.vdst = kDst;
+  raw.acc_cd = 1;
+  raw.src0 = 256 + kSrc0;
+  raw.src1 = 256 + kSrc1;
+  raw.src2 = 256 + kDst;
+
+  const struct {
+    uint32_t blgp;
+    double expected;
+  } cases[] = {
+      {0, 29.0},
+      {2, -19.0},
+      {5, -29.0},
+  };
+
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.blgp);
+    init_mfma_f64_neg_inputs(cu, vb + kSrc0, vb + kSrc1, dst, 2.0, 3.0, 5.0);
+    raw.blgp = test.blgp;
+    cdna4::VMfmaF644x4x44bF64Vop3pMfma inst(reinterpret_cast<const cdna4::MachineInst *>(&raw));
+    inst.execute_impl(*wf);
+
+    expect_mfma_f64_outputs(cu, dst, test.expected);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,10 +3598,66 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
   EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
 }
 
+// buffer_load_dword lds: offset:0 -> LDS+0x200, offset:256 -> LDS+0x300; M0 supplies the base.
+TEST(MubufLdsTest, LoadDwordLdsAppliesInstOffset) {
+  constexpr uint64_t kSrcAddr = 0x2000ULL;
+  constexpr uint32_t kRowBytes = 64 * sizeof(uint32_t);
+  constexpr uint32_t kLdsBase = 0x200; // M0
+  constexpr uint32_t kSrd = 4;         // s[4:7]
+  constexpr uint32_t kBufferLoadDword = 20;
+  constexpr uint32_t kM0 = 124;
+  constexpr uint32_t kSentinel = 0xDEADBEEFu;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(kSrd), 255),
+      static_cast<uint32_t>(kSrcAddr), // SRD base
+      s_mov_b32(SGPR(kSrd + 1), INLINE_CONST(0)),
+      s_mov_b32(SGPR(kSrd + 2), 255),
+      2 * kRowBytes, // num_records
+      s_mov_b32(SGPR(kSrd + 3), 255),
+      0x00020000u, // word3: dword format
+      s_mov_b32(kM0, 255),
+      kLdsBase,
+      v_lshlrev_b32(1, INLINE_CONST(2), 0), // v1 = lane * 4
+      mubuf_lo(kBufferLoadDword, /*offset=*/0, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(/*vdata=*/0, /*vaddr=*/1, kSrd / 4),
+      mubuf_lo(kBufferLoadDword, /*offset=*/kRowBytes, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(/*vdata=*/0, /*vaddr=*/1, kSrd / 4),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch);
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      f.mem()->write32(kSrcAddr + lane * 4, 0xA0000000u | lane);
+      f.mem()->write32(kSrcAddr + kRowBytes + lane * 4, 0xB0000000u | lane);
+    }
+    for (uint32_t i = 0; i < 2 * kRowBytes; i += 4)
+      f.cu()->lds().write32(kLdsBase + i, kSentinel);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+    ASSERT_NO_THROW(f.engine->run());
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      EXPECT_EQ(f.cu()->lds().read32(kLdsBase + lane * 4), 0xA0000000u | lane)
+          << "row 0 lane " << lane;
+      EXPECT_EQ(f.cu()->lds().read32(kLdsBase + kRowBytes + lane * 4), 0xB0000000u | lane)
+          << "row 1 lane " << lane;
+    }
+  }
+}
+
 // Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),
 // not to VGPR (vb+vdst).
 TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
 
   constexpr uint32_t VDST = 4;
   constexpr uint32_t ADDR_REG = 0;
@@ -1359,19 +3692,313 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   queue.dispatch(ko, 64);
   f.engine->run();
 
-  auto *wf = cu->wf(0);
-  ASSERT_NE(wf, nullptr);
-  uint32_t vb = wf->vgpr_alloc().base;
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
 
   // VGPR v4 should still hold the sentinel (42), not overwritten by ds_read.
-  uint32_t vgpr_val = cu->read_vgpr(vb + VDST, 0);
+  uint32_t vgpr_val = wf.vgpr(VDST, 0);
   EXPECT_EQ(vgpr_val, 42u) << "VGPR v" << VDST << " should NOT have been written when acc=1";
 
   // AccVGPR a4 should have been written with LDS data (not 42, not 0).
-  uint32_t acc_val = cu->read_vgpr(vb + 256 + VDST, 0);
+  uint32_t acc_val = wf.vgpr(256 + VDST, 0);
   EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
   EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
                           << " should contain LDS data, not the VGPR sentinel";
+}
+
+constexpr uint32_t tr_b16_halfword_value(uint32_t lane, uint32_t halfword) {
+  return (0x1200u + lane * 0x11u + halfword) & 0xffffu;
+}
+
+constexpr uint32_t pack_u16_pair(uint32_t lo, uint32_t hi) {
+  return (lo & 0xffffu) | ((hi & 0xffffu) << 16);
+}
+
+constexpr uint32_t tr_b8_byte_value(uint32_t lane, uint32_t byte) {
+  return (0x40u + lane * 7u + byte) & 0xffu;
+}
+
+constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
+                                   uint32_t dest_byte_base) {
+  uint32_t word = 0;
+  for (uint32_t byte = 0; byte < 4; ++byte)
+    word |= tr_b8_byte_value(source_base + 2 * (dest_byte_base + byte), source_byte) << (byte * 8);
+  return word;
+}
+
+void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
+  VmFixture f(arch, 1, 10);
+  auto *snap = f.capture_halts();
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t TID_REG = 0;
+  constexpr uint32_t ADDR_REG = 1;
+  constexpr uint32_t BYTES_PER_LANE = 8;
+
+  std::array<uint32_t, 7> code{};
+  if (arch == "cdna5") {
+    const auto add_tid = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna5::build_sopp(cdna5::kSWaitDscntSopp);
+    const auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  } else {
+    ASSERT_EQ(arch, "cdna4");
+    const auto add_tid = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna4::build_ds(cdna4::kDsReadB64TrB8Ds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna4::build_sopp(cdna4::kSWaitcntSopp);
+    const auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  }
+  uint64_t ko = f.write_kernel(0x1000, code.data(), sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/0,
+                               /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/1);
+
+  auto *cu = f.cu();
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte) {
+      lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
+      hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+    }
+    cu->lds().write32(lane * BYTES_PER_LANE, lo);
+    cu->lds().write32(lane * BYTES_PER_LANE + 4, hi);
+  }
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, /*grid_size_x=*/wave_size, /*workgroup_size_x=*/wave_size);
+  f.engine->run();
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    const uint32_t source_byte = lane & 7u;
+    const uint32_t source_base = (lane & ~0xfu) | ((lane >> 3) & 1u);
+    EXPECT_EQ(wf.vgpr(VDST, lane), pack_tr_b8_word(source_base, source_byte, 0))
+        << "lane " << lane << " v" << VDST;
+    EXPECT_EQ(wf.vgpr(VDST + 1, lane), pack_tr_b8_word(source_base, source_byte, 4))
+        << "lane " << lane << " v" << (VDST + 1);
+  }
+}
+
+TEST(DsTransposeTest, ReadB64TrB8_LaneLayout) {
+  verify_b64_tr_b8_lane_layout("cdna4", /*wave_size=*/64);
+}
+
+TEST(DsTransposeTest, Gfx1250LoadTr8B64_LaneLayout) {
+  verify_b64_tr_b8_lane_layout("cdna5", /*wave_size=*/32);
+}
+
+// Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,
+// destination lane l halfword n comes from source lane
+// ((l & 0x30) | ((l & 0xc) >> 2)) + 4 * n, halfword (l & 3). Expected values use
+// the same reference formula as tests/dbt/cdna4_to_cdna3_lds_hip_test.cpp.
+TEST(DsTransposeTest, ReadB64TrB16_LaneLayout) {
+  VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t TID_REG = 0;
+  constexpr uint32_t ADDR_REG = 1;
+  constexpr uint32_t DS_OP = 227; // ds_read_b64_tr_b16
+  constexpr uint32_t WAVE_SIZE = 64;
+  constexpr uint32_t BYTES_PER_LANE = 8;
+
+  // Kernel:
+  //   v_add_u32 v1, v0, v0     ; v1 = 2 * tid
+  //   v_add_u32 v1, v1, v1     ; v1 = 4 * tid
+  //   v_add_u32 v1, v1, v1     ; v1 = 8 * tid (per-lane LDS byte address)
+  //   ds_read_b64_tr_b16 v[4:5], v1
+  //   s_waitcnt lgkmcnt(0)
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_add_u32(ADDR_REG, VGPR_SRC(TID_REG), TID_REG),
+      v_add_u32(ADDR_REG, VGPR_SRC(ADDR_REG), ADDR_REG),
+      v_add_u32(ADDR_REG, VGPR_SRC(ADDR_REG), ADDR_REG),
+      ds_lo(DS_OP),
+      ds_hi(VDST, /*data0=*/0, ADDR_REG),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  auto *cu = f.cu();
+  for (uint32_t lane = 0; lane < WAVE_SIZE; ++lane) {
+    const uint32_t source_lo =
+        pack_u16_pair(tr_b16_halfword_value(lane, 0), tr_b16_halfword_value(lane, 1));
+    const uint32_t source_hi =
+        pack_u16_pair(tr_b16_halfword_value(lane, 2), tr_b16_halfword_value(lane, 3));
+    cu->lds().write32(lane * BYTES_PER_LANE, source_lo);
+    cu->lds().write32(lane * BYTES_PER_LANE + 4, source_hi);
+  }
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, WAVE_SIZE);
+  f.engine->run();
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+
+  for (uint32_t lane = 0; lane < WAVE_SIZE; ++lane) {
+    const uint32_t halfword = lane & 3;
+    const uint32_t source_base = (lane & 0x30) + ((lane & 0x0c) >> 2);
+    const uint32_t expected_lo = pack_u16_pair(tr_b16_halfword_value(source_base + 0, halfword),
+                                               tr_b16_halfword_value(source_base + 4, halfword));
+    const uint32_t expected_hi = pack_u16_pair(tr_b16_halfword_value(source_base + 8, halfword),
+                                               tr_b16_halfword_value(source_base + 12, halfword));
+    EXPECT_EQ(wf.vgpr(VDST, lane), expected_lo) << "lane " << lane << " v" << VDST;
+    EXPECT_EQ(wf.vgpr(VDST + 1, lane), expected_hi) << "lane " << lane << " v" << (VDST + 1);
+  }
+}
+
+// Write-through scalar stores must use the store's VMID. Two page tables map
+// the same GPU VA to different host pages; a store under VMID 7 followed by the
+// no-op writeback_all(8) must land only in VMID 7's backing.
+TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 8;
+  constexpr uint64_t kSharedVa = 0x40000; // page-aligned, aliased across procs.
+  constexpr uint32_t kStoreWord = 0xA5A5A5A5u;
+
+  amdgpu::GpuMemory mem("test.vram");
+
+  // Two processes whose page tables map the same VA to different host buffers.
+  KfdProcess proc_a(kVmidA);
+  KfdProcess proc_b(kVmidB);
+  alignas(4096) std::array<uint8_t, 4096> backing_a{};
+  alignas(4096) std::array<uint8_t, 4096> backing_b{};
+  proc_a.map_pages(kSharedVa, backing_a.data(), backing_a.size());
+  proc_b.map_pages(kSharedVa, backing_b.data(), backing_b.size());
+  mem.register_process(kVmidA, &proc_a.page_table_, &proc_a.page_table_mutex_,
+                       proc_a.page_table_generation());
+  mem.register_process(kVmidB, &proc_b.page_table_, &proc_b.page_table_mutex_,
+                       proc_b.page_table_generation());
+
+  amdgpu::L2Cache l2("test.l2");
+  l2.set_backing_memory(&mem);
+
+  amdgpu::L1ScalarCache k_cache(&l2);
+  k_cache.set_memory(&mem);
+
+  // Store a dword under VMID A. Write-through must publish it immediately
+  // through VMID A's page table.
+  k_cache.store(kSharedVa, /*num_dwords=*/1, &kStoreWord, kVmidA);
+  EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord);
+  EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord);
+
+  // A writeback request from another process is harmless because K$ has no
+  // dirty data to publish.
+  k_cache.writeback_all(kVmidB);
+  l2.flush_all();
+
+  EXPECT_EQ(mem.read32(kSharedVa, kVmidA), kStoreWord)
+      << "write-through store must remain in VMID A";
+  EXPECT_NE(mem.read32(kSharedVa, kVmidB), kStoreWord)
+      << "store must NOT leak into VMID B's address space";
+
+  mem.unregister_process(kVmidA);
+  mem.unregister_process(kVmidB);
+}
+
+TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
+  // Regression for the idle CP doorbell poller: the monitor must stop and be joined
+  // once the last host-accessible (KFD) queue is destroyed, and a later queue
+  // registration must start a fresh monitor. Uses only the queue-registration
+  // lifecycle (no dispatch), so the monitor thread runs on its own and its state
+  // is observed through the test-only accessor.
+  VmFixture f("cdna4", /*num_cus=*/1);
+  amdgpu::CommandProcessor *cp = f.cp();
+
+  auto wait_for_monitor = [&](bool expected) {
+    // The loop retires on a 100us cadence; allow generous slack for CI load.
+    for (int i = 0; i < 2000 && cp->doorbell_monitor_running_for_test() != expected; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return cp->doorbell_monitor_running_for_test();
+  };
+
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "no monitor should run before any host-accessible queue is registered";
+
+  amdgpu::HwQueue queue{};
+  queue.process_id = 1;
+  queue.queue_id = 7;
+  queue.host_accessible = true;
+  cp->register_queue(queue);
+  EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
+
+  cp->unregister_queue(queue.queue_id, queue.process_id);
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "monitor must stop after the last host-accessible queue is destroyed";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the stopped monitor must be joined before queue teardown returns";
+
+  // A new queue landing on a CP whose monitor retired must get polling back.
+  amdgpu::HwQueue queue2{};
+  queue2.process_id = 1;
+  queue2.queue_id = 8;
+  queue2.host_accessible = true;
+  cp->register_queue(queue2);
+  EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
+
+  cp->unregister_queue(queue2.queue_id, queue2.process_id);
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "monitor must retire again after the last queue";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the restarted monitor must also be joined during teardown";
+}
+
+TEST(DoorbellMonitorLifecycle, ConcurrentLastQueueRemovalAndRegistrationKeepsMonitorRunning) {
+  VmFixture f("cdna4", /*num_cus=*/1);
+  amdgpu::CommandProcessor *cp = f.cp();
+
+  for (uint32_t iteration = 0; iteration < 50; ++iteration) {
+    amdgpu::HwQueue old_queue{};
+    old_queue.process_id = 1;
+    old_queue.queue_id = iteration * 2 + 1;
+    old_queue.host_accessible = true;
+    cp->register_queue(old_queue);
+
+    amdgpu::HwQueue new_queue{};
+    new_queue.process_id = 1;
+    new_queue.queue_id = iteration * 2 + 2;
+    new_queue.host_accessible = true;
+
+    std::barrier start(3);
+    std::thread remove_last([&] {
+      start.arrive_and_wait();
+      cp->unregister_queue(old_queue.queue_id, old_queue.process_id);
+    });
+    std::thread register_next([&] {
+      start.arrive_and_wait();
+      cp->register_queue(new_queue);
+    });
+    start.arrive_and_wait();
+    remove_last.join();
+    register_next.join();
+
+    ASSERT_TRUE(cp->doorbell_monitor_running_for_test())
+        << "registration racing last-queue removal lost the monitor at iteration " << iteration;
+    cp->unregister_queue(new_queue.queue_id, new_queue.process_id);
+    ASSERT_FALSE(cp->doorbell_monitor_running_for_test());
+    ASSERT_FALSE(cp->doorbell_monitor_joinable_for_test());
+  }
 }
 
 } // namespace
