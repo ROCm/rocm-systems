@@ -181,10 +181,25 @@ extern int g_ncclTopoGetCpuAffinityLastRank;
 extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
 extern ncclResult_t g_ncclNvlsInitResult;
 extern int g_ncclNvlsInitCalls;
-extern ncclResult_t g_ncclTopoComputeResult;
+// A std::function, not a result knob: rung 3 needs it to succeed AND write graph->nChannels, which
+// :1671-1672 read back to size the tree graph. Defaults to failing, so it stays the rung-2 terminator.
+extern std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute;
 extern int g_ncclTopoComputeCalls;
 // Every ncclTopoGraph* handed to ncclTopoCompute, in call order; [0] is the :1648 ring compute.
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
+
+// -------------------------------------------------------------------------
+// Graph-block seams (init.cc:1649-1774), rung 3 of the ladder.
+// ncclTopoComputeP2pChannelsPerPeer terminates this rung and deliberately uses a DIFFERENT sentinel
+// (ncclTimeout) from the ncclRemoteError rungs 1 and 2 share: a rung-3 test that forgot to arm
+// g_ncclTopoCompute would stop at :1648 and return ncclRemoteError, which no rung-3 assertion accepts.
+// -------------------------------------------------------------------------
+extern ncclResult_t g_ncclTopoPrintGraphResult;
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;  // pairs 1:1 with the computes
+extern ncclResult_t g_ncclTopoDumpGraphsResult;
+extern int g_ncclTopoDumpGraphsCalls;
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
+extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 
 // Enable the full commAlloc() happy path in one call: flips the HIP deep-path
 // seams (attribute/PCIBusId/event/mempool/stream) to success and resets the

@@ -352,9 +352,20 @@ int g_ncclNvlsInitCalls                     = 0;
 // Same sentinel as the rung-1 terminator, and unambiguous for the same reason it is a sentinel at all:
 // every rung-2 test calls installTopo(), which replaces g_ncclTopoGetSystem with a succeeding lambda,
 // so ncclRemoteError here can only have come from :1648.
-ncclResult_t g_ncclTopoComputeResult        = ncclRemoteError;  // rung-2 terminator
+std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute =
+    [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };  // rung-2 terminator
 int g_ncclTopoComputeCalls                  = 0;
 std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
+
+// Graph-block seams (:1649-1774), rung 3. ncclTopoComputeP2pChannelsPerPeer is the terminator and uses
+// ncclTimeout, NOT the ncclRemoteError the earlier rungs share, so a rung-3 assertion cannot be
+// satisfied by a test that forgot to arm g_ncclTopoCompute and stopped at :1648 instead.
+ncclResult_t g_ncclTopoPrintGraphResult     = ncclSuccess;
+std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;
+ncclResult_t g_ncclTopoDumpGraphsResult     = ncclSuccess;
+int g_ncclTopoDumpGraphsCalls               = 0;
+std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
+ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;  // rung-3 terminator
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
@@ -439,7 +450,13 @@ void ResetInitFakes() {
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclNvlsInitResult = ncclSuccess;
   g_ncclNvlsInitCalls = 0;
-  g_ncclTopoComputeResult = ncclRemoteError;
+  g_ncclTopoCompute = [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };
   g_ncclTopoComputeCalls = 0;
   g_ncclTopoComputeGraphs.clear();
+  g_ncclTopoPrintGraphResult = ncclSuccess;
+  g_ncclTopoPrintGraphGraphs.clear();
+  g_ncclTopoDumpGraphsResult = ncclSuccess;
+  g_ncclTopoDumpGraphsCalls = 0;
+  g_ncclTopoDumpGraphsArray.clear();
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
 }

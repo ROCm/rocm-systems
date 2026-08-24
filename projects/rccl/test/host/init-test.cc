@@ -3049,7 +3049,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoComputeFails_PropagatesAndRunsClean
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclOsCpuCountValue = 1;
-  g_ncclTopoComputeResult = ncclInvalidArgument;
+  g_ncclTopoCompute = [](ncclTopoSystem*, ncclTopoGraph*) { return ncclInvalidArgument; };
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoComputeCalls);
@@ -3117,4 +3117,255 @@ TEST_F(InitMicrotest, InitTransportsRank_RingGraphSeededBeforeTopoCompute) {
   // regardless of which pointer the compute call then receives.
   ASSERT_EQ(1u, g_ncclTopoComputeGraphs.size());
   EXPECT_EQ(&c.get()->graphs[NCCL_ALGO_RING], g_ncclTopoComputeGraphs[0]);
+}
+
+// ===========================================================================
+// initTransportsRank rung 3: the ring/tree/CollNet/NVLS graph block, the graph
+// dump and the P2P peer cap (src :1649-1774). ncclTopoCompute now succeeds and
+// stamps nChannels, and ncclTopoComputeP2pChannelsPerPeer (:1774) takes over as
+// terminator -- with ncclTimeout, a DIFFERENT sentinel from the earlier rungs, so
+// a test that forgot to arm the compute seam cannot satisfy a rung-3 oracle.
+// ===========================================================================
+namespace {
+// Walks the ladder through the whole graph block. Stamping nChannels matters: :1671-1672 read
+// ringGraph->nChannels back to size the tree graph, so a seam that only returned success would
+// leave every downstream channel count at zero and hide that dependency.
+void InstallTopoComputeSuccess(int nChannels) {
+  g_ncclTopoCompute = [nChannels](ncclTopoSystem*, ncclTopoGraph* g) {
+    g->nChannels = nChannels;
+    return ncclSuccess;
+  };
+}
+}  // namespace
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeGraphSeededFromRingChannelCount) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));  // reached :1774
+  const ncclTopoGraph& tree = c.get()->graphs[NCCL_ALGO_TREE];
+  EXPECT_EQ(1, tree.id);
+  EXPECT_EQ(NCCL_TOPO_PATTERN_BALANCED_TREE, tree.pattern);
+  EXPECT_EQ(5, tree.minChannels);  // both taken from ringGraph->nChannels, not from a constant
+  EXPECT_EQ(5, tree.maxChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetGraphsSeededWithDistinctIdsAndPatterns) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& chain = c.get()->graphs[NCCL_ALGO_COLLNET_CHAIN];
+  EXPECT_EQ(2, chain.id);
+  EXPECT_EQ(NCCL_TOPO_PATTERN_TREE, chain.pattern);
+  EXPECT_EQ(1, chain.collNet);
+  EXPECT_EQ(5, chain.minChannels);  // ring-sized, unlike direct below
+  EXPECT_EQ(5, chain.maxChannels);
+  const ncclTopoGraph& direct = c.get()->graphs[NCCL_ALGO_COLLNET_DIRECT];
+  EXPECT_EQ(4, direct.id);  // 4, not 3 -- nvls takes 3
+  EXPECT_EQ(NCCL_TOPO_PATTERN_COLLNET_DIRECT, direct.pattern);
+  EXPECT_EQ(1, direct.collNet);
+  EXPECT_EQ(1, direct.minChannels);
+  EXPECT_EQ(MAXCHANNELS, direct.maxChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsGraphSeededWithFullChannelRange) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& nvls = c.get()->graphs[NCCL_ALGO_NVLS];
+  EXPECT_EQ(3, nvls.id);
+  EXPECT_EQ(NCCL_TOPO_PATTERN_NVLS, nvls.pattern);
+  EXPECT_EQ(1, nvls.minChannels);
+  EXPECT_EQ(MAXCHANNELS, nvls.maxChannels);
+}
+
+// The compute ORDER is the oracle these share: the seam records every graph pointer it was handed,
+// so a swapped or dropped compute is visible in a way a per-graph field check is not.
+TEST_F(InitMicrotest, InitTransportsRank_CollNetAndNvlsOff_ComputesOnlyRingAndTree) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  ncclComm* comm = c.get();
+  EXPECT_EQ(std::vector<ncclTopoGraph*>({&comm->graphs[NCCL_ALGO_RING], &comm->graphs[NCCL_ALGO_TREE]}),
+            g_ncclTopoComputeGraphs);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetEnabled_ComputesChainThenDirect) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  ncclCollNet_t collNet{};
+  c.get()->ncclCollNet = &collNet;  // keeps collnetEnable alive past :1614
+  c.get()->config.collnetEnable = 1;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  ncclComm* comm = c.get();
+  EXPECT_EQ(std::vector<ncclTopoGraph*>({&comm->graphs[NCCL_ALGO_RING], &comm->graphs[NCCL_ALGO_TREE],
+                                         &comm->graphs[NCCL_ALGO_COLLNET_CHAIN],
+                                         &comm->graphs[NCCL_ALGO_COLLNET_DIRECT]}),
+            g_ncclTopoComputeGraphs);  // chain before direct, the reverse of the :1763 dump order
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsSupported_ComputesNvlsGraphLast) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  c.get()->nvlsSupport = 1;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  ncclComm* comm = c.get();
+  EXPECT_EQ(std::vector<ncclTopoGraph*>({&comm->graphs[NCCL_ALGO_RING], &comm->graphs[NCCL_ALGO_TREE],
+                                         &comm->graphs[NCCL_ALGO_NVLS]}),
+            g_ncclTopoComputeGraphs);
+}
+
+// Each compute is immediately followed by a print of the SAME graph; recording both is what makes a
+// mismatched pair -- printing the tree graph after computing the ring one -- visible.
+TEST_F(InitMicrotest, InitTransportsRank_EachComputedGraphIsPrintedInTheSameOrder) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  c.get()->nvlsSupport = 1;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(g_ncclTopoComputeGraphs, g_ncclTopoPrintGraphGraphs);
+  EXPECT_EQ(3u, g_ncclTopoPrintGraphGraphs.size());  // and not vacuously empty
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeGraphComputeFails_PropagatesAfterRingSucceeded) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  g_ncclTopoCompute = [](ncclTopoSystem*, ncclTopoGraph*) {
+    return g_ncclTopoComputeCalls == 2 ? ncclInvalidUsage : ncclSuccess;  // fail the :1673 tree compute
+  };
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoComputeCalls);
+  EXPECT_EQ(1u, g_ncclTopoPrintGraphGraphs.size());  // only the ring print ran
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PrintGraphFails_PropagatesBeforeTheTreeCompute) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  g_ncclTopoPrintGraphResult = ncclInvalidArgument;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoComputeCalls);  // :1649 stopped it before :1673
+}
+
+// gfx1151 overrides whatever ncclTopoCompute chose, clamped into the ring graph's own channel range.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_OverridesRingChannelsWithParam) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1151");
+  SetParams({{"RCCL_INIT_CHANNELS", 3}});  // RCCL_PARAM prefixes; the bare name would silently miss
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(3, c.get()->graphs[NCCL_ALGO_RING].nChannels);  // 3, not the 5 the compute stamped
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_UnsetParamFallsBackToSixChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1151");
+  InstallTopoComputeSuccess(/*nChannels=*/5);  // INIT_CHANNELS defaults to -1, so the literal 6 wins
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+// Zero is the boundary the `> 0` test exists for: it means "not set", so the literal 6 still wins.
+// A `>= 0` reading would take the 0 through the clamp at :1664 and land on minChannels, i.e. 1.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_ZeroInitChannelsIsTreatedAsUnset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1151");
+  SetParams({{"RCCL_INIT_CHANNELS", 0}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonGfx1151_KeepsTheComputedRingChannelCount) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();  // gcn stays empty, so IsArchMatch is false
+  SetParams({{"RCCL_INIT_CHANNELS", 3}});  // RCCL_PARAM prefixes; the bare name would silently miss
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(5, c.get()->graphs[NCCL_ALGO_RING].nChannels);  // param ignored off gfx1151
+}
+
+// :1763 builds its own array, ordered direct BEFORE chain -- the reverse of the compute order above.
+TEST_F(InitMicrotest, InitTransportsRank_DumpFileRankMatches_DumpsFiveGraphsDirectBeforeChain) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);  // GRAPH_DUMP_FILE_RANK defaults to 0
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoDumpGraphsCalls);
+  ncclComm* comm = c.get();
+  EXPECT_EQ(std::vector<ncclTopoGraph*>({&comm->graphs[NCCL_ALGO_RING], &comm->graphs[NCCL_ALGO_TREE],
+                                         &comm->graphs[NCCL_ALGO_COLLNET_DIRECT],
+                                         &comm->graphs[NCCL_ALGO_COLLNET_CHAIN],
+                                         &comm->graphs[NCCL_ALGO_NVLS]}),
+            g_ncclTopoDumpGraphsArray);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DumpFileRankDiffers_SkipsTheDump) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);  // rank 1 != GRAPH_DUMP_FILE_RANK 0
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoDumpGraphsCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DumpGraphsFails_Propagates) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  g_ncclTopoDumpGraphsResult = ncclSystemError;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MaxP2pPeersAboveRankCount_IsCappedToNRanks) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  c.get()->config.maxP2pPeers = 64;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, c.get()->config.maxP2pPeers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MaxP2pPeersBelowRankCount_IsLeftAlone) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  c.get()->config.maxP2pPeers = 2;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, c.get()->config.maxP2pPeers);  // positive anchor for the cap above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_P2pChannelsPerPeerFails_PropagatesAndRunsCleanup) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  g_ncclOsCpuCountValue = 1;
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclOsCpuCountCalls);  // :1608 and exit::2403 -- fail: fell through to exit:
 }
