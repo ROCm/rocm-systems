@@ -364,12 +364,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'    const_acc = amdgpu::RegisterAccess(wf).read_scalar({s2});')
             L.append(f'  }}')
     else:
-        src0_base_expr = _matrix_base(
-            supports_gpr_idx, f'amdgpu::src_base(vb, {s0}.encoding_value_)', 'Src0'
-        )
-        src1_base_expr = _matrix_base(
-            supports_gpr_idx, f'amdgpu::src_base(vb, {s1}.encoding_value_)', 'Src1'
-        )
         # ACC_CD selects VGPRs or AccVGPRs for the C and D matrices. Encodings
         # without the field always use AccVGPRs.
         if 'acc_cd' in ctx.enc_field_names:
@@ -382,6 +376,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(
                 f'  uint32_t dst = {_matrix_base(supports_gpr_idx, f"amdgpu::dst_base(vb, {d}.encoding_value_, 1)", "Dst")};'
             )
+        L.append(
+            f'  uint32_t src0_base = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
+        )
+        L.append(
+            f'  uint32_t src1_base = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
+        )
+        src0_base_expr = 'src0_base'
+        src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')

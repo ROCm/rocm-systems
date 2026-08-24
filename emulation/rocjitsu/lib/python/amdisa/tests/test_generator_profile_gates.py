@@ -1854,8 +1854,7 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'amdgpu::resolve_acc(vb, dst,' in body
     assert (
         'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2,' in body
+        'src0_base, src1_base, s2,' in body
     )
 
 
@@ -1874,8 +1873,7 @@ def test_matrix_direct_sparse_operands_reach_final_call():
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
     assert (
         'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, '
+        'src0_base, src1_base, s2, index_base, '
         '16, index_key,' in body
     )
 
@@ -1925,10 +1923,7 @@ def test_fixed_wave_swmmac_layout_selects_sparse_executor_without_arch_name(
     )
     call = _generated_matrix_call(body, callee)
 
-    assert (
-        'dst, amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base,'
-    ) in call
+    assert ('dst, src0_base, src1_base, s2, index_base,') in call
     assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
     assert 'wf.wf_size()' not in call
 
@@ -1985,9 +1980,8 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
         'src1_base, s2,' in resolved
     )
     assert (
-        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2,' in direct
+        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
+        'src1_base, s2,' in direct
     )
 
 
@@ -2121,9 +2115,14 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
             assert 'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset' in body
             assert 'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset' in body
         else:
-            expected_operands = (
-                'dst, amdgpu::src_base(vb, src0.encoding_value_), '
-                'amdgpu::src_base(vb, src1.encoding_value_), s2'
+            expected_operands = 'dst, src0_base, src1_base, s2'
+            assert (
+                'uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);'
+                in body
+            )
+            assert (
+                'uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);'
+                in body
             )
             assert 'Isa::resolved_vgpr_offset' not in body
 
@@ -2153,8 +2152,8 @@ def test_dynamic_mfma_aliases_use_profile_selected_operand_bases(
         assert 'uint32_t s0b = src0_base;' in body
         assert 'uint32_t s1b = src1_base;' in body
     else:
-        assert 'uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);' in body
-        assert 'uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);' in body
+        assert 'uint32_t s0b = src0_base;' in body
+        assert 'uint32_t s1b = src1_base;' in body
     assert (
         'a_bits, b_bits, dst, s0b, s1b, s2, ea, eb, const_acc);'
         in _generated_matrix_call(body, 'exec_f32_mixed')
@@ -2185,10 +2184,7 @@ def test_matrix_f64_direct_sources_use_direct_base_expressions():
     body = _gen_mfma(inst, 'cdna5', profile)
 
     assert 'Isa::resolved_vgpr_offset' not in body
-    assert (
-        '                 amdgpu::src_base(vb, src0.encoding_value_),\n'
-        '                 amdgpu::src_base(vb, src1.encoding_value_),'
-    ) in body
+    assert ('                 src0_base,\n' '                 src1_base,') in body
 
 
 @pytest.mark.parametrize(
@@ -5133,9 +5129,8 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
     assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
     assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, '
+        'src1_base, s2, index_base, 16, '
         'index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc, wf.wf_size());'
     ) in body
     assert 'resolve_acc' not in body
@@ -5171,9 +5166,8 @@ def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
         )
         assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
         assert (
-            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, '
-            'amdgpu::src_base(vb, src0.encoding_value_), '
-            'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, src0_base, '
+            'src1_base, s2, index_base, 16, '
             f'index_key, amdgpu::{extract_a}, amdgpu::{extract_b}, const_acc, wf.wf_size());'
         ) in body
 
