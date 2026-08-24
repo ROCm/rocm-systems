@@ -15,7 +15,10 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     kfd_correlation.hpp
     poll_reader.hpp
     kfd_profiler.hpp
-    kfd_reader.hpp)
+    kfd_reader.hpp
+    dispatch_hub.hpp
+    owner_registry.hpp
+    complete_signal_less_dispatch.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KFD_EVENT_SOURCES}
