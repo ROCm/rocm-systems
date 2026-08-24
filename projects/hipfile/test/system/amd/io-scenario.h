@@ -149,4 +149,169 @@ inline const std::array<Axis<size_t>, 3> kCombinedSizes{{
 }};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
 
+// ---------------------------------------------------------------------------
+// Element policies that determine the datatype that the GPU kernels will operate on.
+// ---------------------------------------------------------------------------
+struct IntElementPolicy {
+    using Elem = int32_t;
+
+    static constexpr uint8_t kDevFill = kSentinelByte;
+
+    static constexpr size_t elems(size_t bytes)
+    {
+        return bytes / sizeof(Elem);
+    }
+
+    static void seedFileData(int fd, hoff_t off, size_t n)
+    {
+        seedFilePattern(fd, off, n);
+    }
+
+    static void seedFileSlack(int fd, hoff_t off, size_t n)
+    {
+        seedFileConstant(fd, off, n, kSentinel);
+    }
+
+    static void seedDeviceData(void *buf, hoff_t off, size_t n)
+    {
+        seedDevicePattern(buf, off, n);
+    }
+
+    static std::vector<Elem> readFile(int fd, hoff_t off, size_t n)
+    {
+        return readFileInts(fd, off, n);
+    }
+
+    static void assertFileSlack(const Elem *arr, size_t from, size_t to)
+    {
+        assertConstant(arr, from, to, kSentinel);
+    }
+
+    static void assertModified(const Elem *arr, size_t n, size_t stride)
+    {
+        assertModifiedPattern(arr, n, stride);
+    }
+
+    static void verifyAndModify(Elem *start, size_t alloc_n, size_t data_start, size_t n, dim3 grid,
+                                dim3 workgroup, size_t stride)
+    {
+        assertVerifyAndModify(start, alloc_n, data_start, n, grid, workgroup, stride);
+    }
+};
+
+struct ByteElementPolicy {
+    using Elem = uint8_t;
+
+    static constexpr uint8_t kDevFill = kByteDevSlack;
+
+    static constexpr size_t elems(size_t bytes)
+    {
+        return bytes;
+    }
+
+    static void seedFileData(int fd, hoff_t off, size_t n)
+    {
+        seedFileBytesConstant(fd, off, n, kByteEntry);
+    }
+
+    static void seedFileSlack(int fd, hoff_t off, size_t n)
+    {
+        seedFileBytesConstant(fd, off, n, kByteFileSlack);
+    }
+
+    static void seedDeviceData(void *buf, hoff_t off, size_t n)
+    {
+        ASSERT_EQ(hipSuccess,
+                  hipMemset(static_cast<uint8_t *>(buf) + static_cast<size_t>(off), kByteEntry, n));
+    }
+
+    static std::vector<Elem> readFile(int fd, hoff_t off, size_t n)
+    {
+        return readFileBytes(fd, off, n);
+    }
+
+    static void assertFileSlack(const Elem *arr, size_t from, size_t to)
+    {
+        assertBytesConstant(arr, from, to, kByteFileSlack);
+    }
+
+    static void assertModified(const Elem *arr, size_t n, size_t stride)
+    {
+        assertBytesModified(arr, n, stride);
+    }
+
+    static void verifyAndModify(Elem *start, size_t alloc_bytes, size_t data_start, size_t n, dim3 grid,
+                                dim3 workgroup, size_t stride)
+    {
+        assertVerifyAndModifyBytes(start, alloc_bytes, data_start, n, grid, workgroup, stride);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// The base fixture for all of the data modification suites to reuse.
+//
+// Individual suites should use ftruncate to size the file's initial length before
+// calling this SetUp.
+// ---------------------------------------------------------------------------
+template <class Policy> struct DataModificationBase : public testing::TestWithParam<IoTestScenario> {
+
+    const IoTestBackend backend{GetParam().backend};   // backend fulfilling the I/O request
+    const size_t        io_bytes{GetParam().io_bytes}; // bytes transferred using the hipFile API
+    // Over-allocate a device sentinel region on each side of the data.
+    // Device layout (each sentinel region 4_KiB, data io_bytes):
+    // [head device sentinel region][data][tail device sentinel region].
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};        // total device buffer size
+    const size_t io_elems{Policy::elems(io_bytes)};         // transferred elements
+    const size_t buffer_elems{Policy::elems(buffer_bytes)}; // elements spanning the whole buffer
+
+    Tmpfile                tmpfile;
+    hipFileHandle_t        tmpfile_handle{nullptr};
+    void                  *device_buffer{nullptr}; // allocated by SetUp
+    typename Policy::Elem *buffer_start{nullptr};  // typed view of device_buffer
+
+    DataModificationBase() : tmpfile{test_env.ais_capable_dir}
+    {
+    }
+
+    void SetUp() override
+    {
+        hipFile::Context<hipFile::Configuration>::get()->fastpath(false);
+        hipFile::Context<hipFile::Configuration>::get()->fallback(false);
+
+        switch (backend) {
+            case IoTestBackend::Fastpath:
+                hipFile::Context<hipFile::Configuration>::get()->fastpath(true);
+                break;
+            case IoTestBackend::Fallback:
+                hipFile::Context<hipFile::Configuration>::get()->fallback(true);
+                break;
+            default:
+                FAIL() << "Unsupported IoTestBackend";
+        }
+
+        hipFileDescr_t descr{};
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        descr.handle.fd = tmpfile.fd;
+        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
+
+        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<typename Policy::Elem *>(device_buffer);
+        ASSERT_EQ(hipSuccess, hipMemset(device_buffer, Policy::kDevFill, buffer_bytes));
+        // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+        if (backend == IoTestBackend::Fastpath) {
+            enforceFastpathGate(tmpfile_handle, device_buffer);
+        }
+    }
+
+    void TearDown() override
+    {
+        if (device_buffer) {
+            ASSERT_EQ(hipSuccess, hipFree(device_buffer));
+        }
+        hipFileHandleDeregister(tmpfile_handle);
+    }
+};
+
 } // namespace hipFileTest
