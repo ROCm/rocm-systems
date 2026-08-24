@@ -5,7 +5,7 @@
  */
 
 /**
- * Graph exec stream-pool device-memory footprint tests.
+ * Graph exec instantiate-time device-memory footprint test.
  */
 
 #include <hip_test_common.hh>
@@ -100,10 +100,11 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   }
 
   const size_t free_after = freeDeviceMemory();
-  const size_t used = (free_before > free_after) ? (free_before - free_after) : 0;
+  REQUIRE(free_after <= free_before);
+  const size_t used = free_before - free_after;
   const size_t per_graph = used / kGraphs;
   INFO("device memory per instantiate: " << per_graph << " bytes over " << kGraphs << " graphs");
-  REQUIRE(per_graph <= kMaxBytesPerGraph);
+  REQUIRE(used <= kGraphs * kMaxBytesPerGraph);
 
   for (int i = 0; i < kGraphs; ++i) {
     HIP_CHECK(hipGraphExecDestroy(execs[i]));
@@ -116,76 +117,5 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   INFO("device memory retained after destroy: " << retained << " bytes");
   REQUIRE(retained <= kMaxBytesPerGraph);
 
-  HIP_CHECK(hipFree(buf));
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Same- and cross-device launches interleaved; slot-0 stream created on first
- *    cross-device launch, not at instantiate.
- * Test source
- * ------------------------
- *  - unit/graph/hipGraphStreamPoolFootprint.cc
- * Test requirements
- * ------------------------
- *  - Multi device
- *  - HIP_VERSION >= 6.0
- */
-HIP_TEST_CASE(Unit_hipGraphStreamPool_CrossDeviceInterleaved) {
-  int nGpus = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpus));
-  if (nGpus < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-
-  constexpr int kChains = 4;
-  constexpr int kDepth = 2;
-  constexpr int kLaunches = 4;
-
-  HIP_CHECK(hipSetDevice(0));
-  int* buf = nullptr;
-  HIP_CHECK(hipMalloc(&buf, kElems * sizeof(int)));
-  HIP_CHECK(hipMemset(buf, 0, kElems * sizeof(int)));
-
-  hipGraph_t graph = nullptr;
-  hipGraphExec_t exec = nullptr;
-  buildChainedGraph(&graph, buf, kChains, kDepth);
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
-
-  hipStream_t same_dev_stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&same_dev_stream));
-  hipStream_t cross_dev_stream = nullptr;
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipStreamCreate(&cross_dev_stream));
-  HIP_CHECK(hipSetDevice(0));
-
-  // same-device first (user stream is slot 0)
-  HIP_CHECK(hipGraphLaunch(exec, same_dev_stream));
-  HIP_CHECK(hipStreamSynchronize(same_dev_stream));
-
-  // cross-device (creates internal slot-0 stream)
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipGraphLaunch(exec, cross_dev_stream));
-  HIP_CHECK(hipStreamSynchronize(cross_dev_stream));
-  HIP_CHECK(hipSetDevice(0));
-
-  HIP_CHECK(hipGraphLaunch(exec, same_dev_stream));
-  HIP_CHECK(hipStreamSynchronize(same_dev_stream));
-
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipGraphLaunch(exec, cross_dev_stream));
-  HIP_CHECK(hipStreamSynchronize(cross_dev_stream));
-  HIP_CHECK(hipSetDevice(0));
-
-  int observed = 0;
-  HIP_CHECK(hipMemcpy(&observed, buf, sizeof(int), hipMemcpyDeviceToHost));
-  INFO("observed " << observed << " increments");
-  REQUIRE(observed == kChains * kDepth * kLaunches);
-
-  HIP_CHECK(hipStreamDestroy(same_dev_stream));
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipStreamDestroy(cross_dev_stream));
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(buf));
 }

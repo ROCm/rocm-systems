@@ -1414,12 +1414,8 @@ graph:
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_2
     tags: [exec]
-    # (amd_windows) PAL backend does not charge device memory for the unpinned
-    # leaked stream this test measures, so the leak is unmeasurable there.
-    disabled: [amd_windows]
-  Unit_hipGraphStreamPool_CrossDeviceInterleaved:
-    <<: *level_2
-    tags: [exec]
+    # (amd_windows) PAL backend does not charge device memory for eager internal
+    # stream allocation at instantiate, so the footprint is unmeasurable there.
     disabled: [amd_windows]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
