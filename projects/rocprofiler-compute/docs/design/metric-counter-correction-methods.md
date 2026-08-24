@@ -524,7 +524,7 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 ## References
 
-- **Motivating example:** AIPROFCOMP-78 (Percent metrics > 100% on MI300X CPX — one reproduction case among several arches)
+- **Motivating example:** Percent metrics > 100% on MI300X CPX (one reproduction case among several arches)
 - `CHANGELOG.md` — Known issues: negative values and multi-pass variance (v3.3.x)
 - `src/utils/utils_analysis.py` — Multi-pass data imputation
 - `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml` — Coalescing priorities
