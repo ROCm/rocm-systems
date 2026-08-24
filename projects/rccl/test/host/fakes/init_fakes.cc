@@ -325,8 +325,9 @@ int g_ncclMnnvlCheckCalls                = 0;
 std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
     [](int* level) { *level = 3; return ncclSuccess; };
 // Defaults to FAILURE -- it is the rung-1 terminator, and no test drives its call sites to success by default.
-// ncclRemoteError is a SENTINEL: no other seam and no init.cc path produces it, so EXPECT_EQ on it proves
-// execution actually reached :1576 rather than dying earlier at AllGather1 or the :1554 intra-proc guard.
+// ncclRemoteError is a SENTINEL: no init.cc path reachable from initTransportsRank produces it, so EXPECT_EQ
+// on it proves execution reached a terminator rather than dying at AllGather1 or the :1554 intra-proc guard.
+// The rung-2 terminator below shares it; see there for why the two cannot be confused.
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem =
     [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
 
@@ -351,8 +352,8 @@ int g_ncclNvlsInitCalls                     = 0;
 // Same sentinel as the rung-1 terminator, and unambiguous for the same reason it is a sentinel at all:
 // every rung-2 test calls installTopo(), which replaces g_ncclTopoGetSystem with a succeeding lambda,
 // so ncclRemoteError here can only have come from :1648.
-ncclResult_t g_ncclTopoComputeResult       = ncclRemoteError;  // rung-2 terminator
-int g_ncclTopoComputeCalls                 = 0;
+ncclResult_t g_ncclTopoComputeResult        = ncclRemoteError;  // rung-2 terminator
+int g_ncclTopoComputeCalls                  = 0;
 std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }

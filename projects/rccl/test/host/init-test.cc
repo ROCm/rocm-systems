@@ -3017,6 +3017,7 @@ TEST_F(InitMicrotest, InitTransportsRank_InterleavedHosts_DeDupScanCoversAllEarl
   specs[1].node = 1;  // layout A B A B -- an adjacent-only scan would count 4 hosts, not 2
   specs[3].node = 1;
   InstallPeerInfoAllGather(c, specs);
+  topo->hostIdx = 9;  // self leads host A, so the written value is 0 -- poison to tell it from zero-init
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, topo->nHosts);
   EXPECT_EQ(0, topo->hostIdx);

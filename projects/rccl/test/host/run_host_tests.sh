@@ -33,8 +33,10 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
-#   GTEST_SHUFFLE gtest ordering flag (run phase)  (default: --gtest_shuffle; set empty to disable
-#                                                   when bisecting a failure)
+#   HOST_TEST_SHUFFLE  gtest ordering flag (run)   (default: --gtest_shuffle; set empty to disable
+#                                                   when bisecting a failure. Deliberately NOT named
+#                                                   GTEST_SHUFFLE: gtest owns that name and reads an
+#                                                   empty value as TRUE, so clearing it would shuffle)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -48,7 +50,7 @@ GPU_TARGETS="${GPU_TARGETS:-gfx942}"
 BUILD_TYPE="${BUILD_TYPE:-Debug}"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 GTEST_FILTER="${GTEST_FILTER:-*}"
-GTEST_SHUFFLE="${GTEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
+HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
@@ -127,11 +129,11 @@ do_host_tests() {
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
     # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
     # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
-    # GTEST_SHUFFLE to run in declaration order while bisecting.
+    # HOST_TEST_SHUFFLE to run in declaration order while bisecting.
     "$BUILD_DIR/$name" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
-      ${GTEST_SHUFFLE:+"$GTEST_SHUFFLE"} \
+      ${HOST_TEST_SHUFFLE:+"$HOST_TEST_SHUFFLE"} \
       --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
   done
   return "$rc"

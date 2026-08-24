@@ -26,7 +26,7 @@ ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort
 // Controllable (was fail-loud). Defaults to FAILURE: this is the rung-2 ladder terminator at :1648, and
 // its four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are on paths
 // no test drives yet. Records the graph pointer: without it, :1648 being handed treeGraph instead of
-// ringGraph is invisible, the same "a fake that drops an argument untests it" rule as nccl_stubs.cc:83.
+// ringGraph is invisible, the same "a fake that drops an argument untests it" rule as nccl_stubs.cc:90.
 extern ncclResult_t g_ncclTopoComputeResult;
 extern int g_ncclTopoComputeCalls;
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
