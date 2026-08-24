@@ -313,7 +313,9 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   int nSend = 0, nRecv = 0;
 
   for (int i = 0; i < coll->nProxyOps; i++) {
-    struct acclProxyOpInfo* op = &coll->proxyOps[i];
+    int opIdx = coll->proxyOpIndices[i];
+    if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
+    struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
     totalGpuWait += (double)op->totalGpuWaitUs;
     totalNetwork += (double)op->totalNetworkUs;
     totalPeerWait += (double)op->totalPeerWaitUs;
@@ -344,6 +346,17 @@ static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (coll->nProxyOpsCompleted != coll->nProxyOpsStarted) return 0;
   coll->finalized = 1;
   return 1;
+}
+
+static void acclFinalizeAndFree(struct acclCommContext* ctx,
+                                struct acclCollInfo* coll) {
+  acclFinalizeCollective(coll);
+  for (int i = 0; i < coll->nProxyOps; i++) {
+    int idx = coll->proxyOpIndices[i];
+    if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
+      acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+  }
+  acclFreeColl(ctx, coll);
 }
 
 // ============================================================================
@@ -408,11 +421,15 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   ACCL_INFO("ACCL Profiler: finalize rank=%d output=%s", ctx->rank, ctx->outputPath);
 
   // Drain any coll slots still in use (orphaned by teardown).
-  // Don't emit records for these — they have incomplete data that
-  // would show as busbw=0 regressions in the report.
+  // Don't emit records — they have incomplete data.
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
+      for (int j = 0; j < coll->nProxyOps; j++) {
+        int idx = coll->proxyOpIndices[j];
+        if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE)
+          acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+      }
       coll->finalized = 1;
       pthread_mutex_destroy(&coll->mutex);
       ctx->collPoolUsed[i] = 0;
@@ -574,8 +591,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     pthread_mutex_unlock(&coll->mutex);
 
     if (shouldFinalize) {
-      acclFinalizeCollective(coll);
-      acclFreeColl(ctx, coll);
+      acclFinalizeAndFree(ctx, coll);
     }
     return ncclSuccess;
   }
@@ -596,8 +612,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     if (shouldFinalize) {
       struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
-      acclFinalizeCollective(coll);
-      acclFreeColl(ctx, coll);
+      acclFinalizeAndFree(ctx, coll);
     }
     return ncclSuccess;
   }
@@ -608,29 +623,30 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     struct acclCollInfo* coll = (struct acclCollInfo*)op->parentObj;
 
-    // Snapshot the accumulated step data under the op's lock to ensure
-    // no concurrent ProxyStep stop is mid-write
+    // Record the proxy op index in the coll's list (under lock) so
+    // finalization can read the data. The op itself stays in the pool
+    // until we free it after recording.
     if (coll) {
-      pthread_mutex_lock(&op->mutex);
+      struct acclCommContext* ctx2 = (struct acclCommContext*)coll->commCtx;
+      int opIdx = (int)(op - ctx2->proxyOpPool);
       pthread_mutex_lock(&coll->mutex);
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
-        memcpy(&coll->proxyOps[coll->nProxyOps], op, sizeof(*op));
+        coll->proxyOpIndices[coll->nProxyOps] = opIdx;
         coll->nProxyOps++;
       }
       pthread_mutex_unlock(&coll->mutex);
-      pthread_mutex_unlock(&op->mutex);
     }
 
     struct acclCommContext* ctx = (struct acclCommContext*)op->commCtx;
-    acclFreeProxyOp(ctx, op);
-    if (coll) {
+    if (!coll) {
+      acclFreeProxyOp(ctx, op);
+    } else {
       pthread_mutex_lock(&coll->mutex);
       coll->nProxyOpsCompleted++;
       int shouldFinalize = acclShouldFinalize(coll);
       pthread_mutex_unlock(&coll->mutex);
       if (shouldFinalize) {
-        acclFinalizeCollective(coll);
-        acclFreeColl(ctx, coll);
+        acclFinalizeAndFree(ctx, coll);
       }
     }
     return ncclSuccess;

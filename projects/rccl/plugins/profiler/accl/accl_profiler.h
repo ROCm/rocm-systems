@@ -96,11 +96,11 @@ struct acclCollInfo {
   uint32_t    nKernelChCompleted;
   struct acclKernelChInfo kernelCh[ACCL_MAX_CHANNELS];
 
-  // Proxy ops linked to this collective
+  // Proxy ops linked to this collective (indices into ctx->proxyOpPool)
   int         nProxyOps;
   int         nProxyOpsStarted;
   int         nProxyOpsCompleted;
-  struct acclProxyOpInfo proxyOps[ACCL_MAX_PROXY_OPS];
+  int         proxyOpIndices[ACCL_MAX_PROXY_OPS];
 
   // Comm info backpointer
   void*       commCtx;
