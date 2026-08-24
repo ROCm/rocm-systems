@@ -63,6 +63,26 @@ jobs:
       therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
+  # ext-plugins suite on ruby: builds RCCL + rccl-tests + the example plugins,
+  # then runs test/ext-plugins pytest (mixed/tuner/profiler/...). Non-gating for
+  # now so a new suite cannot block merges while it is validated on the runner.
+  ext-plugins:
+    name: ext-plugins
+    uses: ./.github/workflows/rccl-suite.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      suite: ext-plugins
+      runs_on: '["ruby-linux-slurm-scale-runner"]'
+      partition: interactive
+      timeout_minutes: 120
+      non_gating: true
+      artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
+      artifact_run_id: ${{ inputs.artifact_run_id || '' }}
+      therock_ref: ${{ inputs.therock_ref || '2e7c190b99caa226a8644eda6eca720b3db102d5' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
   # non_gating keeps test failures from blocking; build/infra failures gate via
   # gin-build-gate below. AICOMRCCL-1478: enable full gating once GIN lands in develop.
