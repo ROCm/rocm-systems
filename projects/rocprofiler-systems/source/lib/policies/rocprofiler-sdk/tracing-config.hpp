@@ -9,11 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace policies
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::policies::rocprofiler_sdk
 {
 
 /// @brief Structural requirements for the SdkBackend parameter of
@@ -114,6 +110,4 @@ concept tracing_config_externals = requires(std::string_view setting_name) {
     } -> std::same_as<std::optional<std::string>>;
 };
 
-}  // namespace rocprofiler_sdk
-}  // namespace policies
-}  // namespace rocprofsys
+}  // namespace rocprofsys::policies::rocprofiler_sdk

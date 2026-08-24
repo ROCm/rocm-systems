@@ -16,8 +16,8 @@ to_lower(std::string_view value)
 {
     std::string str_copy{ value };
 
-    std::ranges::transform(str_copy, str_copy.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
+    std::ranges::transform(str_copy, str_copy.begin(), [](unsigned char chr) {
+        return static_cast<char>(std::tolower(chr));
     });
 
     return str_copy;

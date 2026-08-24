@@ -151,7 +151,10 @@ struct name_info_impl
 {
     struct support_type
     {
-        ValueT operator()(const char* s) const { return s ? ValueT{ s } : ValueT{}; }
+        ValueT operator()(const char* str) const
+        {
+            return str ? ValueT{ str } : ValueT{};
+        }
         static ValueT default_value() { return {}; }
     };
 
@@ -161,13 +164,15 @@ struct name_info_impl
     int                 value{};
     std::vector<ValueT> operations{};
 
-    item_array_t items() const
+    [[nodiscard]] item_array_t items() const
     {
         auto ret = item_array_t{};
         ret.reserve(operations.size());
         int idx = 0;
         for(const auto& itr : operations)
+        {
             ret.emplace_back(idx++, &itr);
+        }
         return ret;
     }
 };
@@ -194,13 +199,16 @@ struct name_info
         entry.operations.at(opidx) = typename value_type::support_type{}(name);
     }
 
-    decltype(auto) size() const { return impl.size(); }
-    decltype(auto) begin() const { return impl.begin(); }
-    decltype(auto) end() const { return impl.end(); }
+    [[nodiscard]] decltype(auto) size() const { return impl.size(); }
+    [[nodiscard]] decltype(auto) begin() const { return impl.begin(); }
+    [[nodiscard]] decltype(auto) end() const { return impl.end(); }
 
     value_type& operator[](std::size_t idx)
     {
-        if(idx >= impl.size()) impl.resize(idx + 1);
+        if(idx >= impl.size())
+        {
+            impl.resize(idx + 1);
+        }
         return impl[idx];
     }
     const value_type& operator[](std::size_t idx) const

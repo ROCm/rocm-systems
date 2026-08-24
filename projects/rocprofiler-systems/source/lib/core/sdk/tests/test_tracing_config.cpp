@@ -83,8 +83,8 @@ struct cached_backend_methods : Base
 {
     // backend.hpp (production) names these with a `_t` suffix; mock_wrapper.hpp's
     // Base does not — adapt here rather than touching either established file.
-    using callback_tracing_kind_t = typename Base::callback_tracing_kind;
-    using buffer_tracing_kind_t   = typename Base::buffer_tracing_kind;
+    using callback_tracing_kind_t = Base::callback_tracing_kind;
+    using buffer_tracing_kind_t   = Base::buffer_tracing_kind;
 
     static auto get_version(std::uint32_t* major, std::uint32_t* minor,
                             std::uint32_t* patch)

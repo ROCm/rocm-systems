@@ -31,9 +31,9 @@ struct default_externals
             .value_or(std::string{});
     }
 
-    static std::optional<std::string> get_setting_value(std::string_view s)
+    static std::optional<std::string> get_setting_value(std::string_view setting_name)
     {
-        return ::rocprofsys::get_setting_value<std::string>(std::string{ s });
+        return ::rocprofsys::get_setting_value<std::string>(std::string{ setting_name });
     }
 
     using ProcessState = ::rocprofsys::state::process;

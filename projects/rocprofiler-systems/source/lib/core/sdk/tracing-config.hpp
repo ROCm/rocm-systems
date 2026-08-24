@@ -9,14 +9,13 @@
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/tracing-config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
 
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <optional>
 #include <ranges>
 #include <regex>
 #include <stdexcept>
@@ -46,12 +45,14 @@ class tracing_config
 public:
     struct operation_options_env_names
     {
-        std::string operations_include_env_name            = {};
-        std::string operations_exclude_env_name            = {};
-        std::string operations_annotate_backtrace_env_name = {};
+        std::string operations_include_env_name;
+        std::string operations_exclude_env_name;
+        std::string operations_annotate_backtrace_env_name;
 
         operation_options_env_names() = default;
 
+        // NOLINTBEGIN(misc-include-cleaner) -- fmt::format is provided by the
+        // <spdlog/fmt/fmt.h> wrapper above; include-cleaner doesn't see through it.
         explicit operation_options_env_names(const std::string_view domain_name)
         : operations_include_env_name(
               fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", domain_name))
@@ -60,6 +61,7 @@ public:
         , operations_annotate_backtrace_env_name(fmt::format(
               "ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", domain_name))
         {}
+        // NOLINTEND(misc-include-cleaner)
 
         [[nodiscard]] bool is_empty() const
         {
@@ -108,10 +110,10 @@ private:
     static operation_options_env_names assemble_operation_env_names_for_kind(
         TracingKind kind);
 
-    static const std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
+    static std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
     get_supported_callback_domains();
 
-    static const std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
+    static std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
     get_supported_buffer_domains();
 
     /// @brief Domain-name -> kind(s) lookup table for get_callback_domains(),
@@ -126,14 +128,42 @@ private:
                               std::vector<typename SdkBackend::buffer_tracing_kind_t>>
     get_buffered_domain_map();
 
+    /// @brief KFD domain-name aliases (collective + individual), gated on
+    /// SdkBackend >= 1.2.2; factored out of get_buffered_domain_map() to keep
+    /// that function within the project's function-size limits.
+    static std::unordered_map<std::string,
+                              std::vector<typename SdkBackend::buffer_tracing_kind_t>>
+    get_kfd_buffered_domain_aliases();
+
+    static const std::unordered_set<std::string_view>&
+    get_domains_to_skip_for_operation_options();
+
+    static const std::unordered_set<std::string_view>&
+    get_domains_to_skip_for_domain_choices();
+
     static constexpr common::version s_compile_time_sdk_version =
         common::version::from_formatted(SdkBackend::compile_time_version);
 
-    const static std::unordered_set<std::string_view>
-        s_domains_to_skip_for_operation_options;
-
-    const static std::unordered_set<std::string_view>
-        s_domains_to_skip_for_domain_choices;
+    /// @brief Named SDK version gates used by if constexpr feature checks below,
+    /// in place of raw common::version{...} literals at each call site.
+    static constexpr common::version s_sdk_version_1_0_0{ .major = 1,
+                                                          .minor = 0,
+                                                          .patch = 0 };
+    static constexpr common::version s_sdk_version_0_6_0{ .major = 0,
+                                                          .minor = 6,
+                                                          .patch = 0 };
+    static constexpr common::version s_sdk_version_0_7_0{ .major = 0,
+                                                          .minor = 7,
+                                                          .patch = 0 };
+    static constexpr common::version s_sdk_version_1_2_2{ .major = 1,
+                                                          .minor = 2,
+                                                          .patch = 2 };
+    static constexpr common::version s_sdk_version_1_3_4{ .major = 1,
+                                                          .minor = 3,
+                                                          .patch = 4 };
+    static constexpr common::version s_sdk_version_1_3_5{ .major = 1,
+                                                          .minor = 3,
+                                                          .patch = 5 };
 };
 
 /// @brief Return the version of the rocprofiler-sdk
@@ -160,7 +190,7 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
 
     auto add_domain_f = [&choices](std::string_view domain_to_add) {
         const auto domain_lowercase = utility::string::to_lower(domain_to_add);
-        if(s_domains_to_skip_for_domain_choices.contains(domain_lowercase))
+        if(get_domains_to_skip_for_domain_choices().contains(domain_lowercase))
         {
             return;
         }
@@ -173,8 +203,7 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     add_domain_f("marker_api");
     add_domain_f("roctx");
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 2, .patch = 2 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
     {
         add_domain_f("kfd_events");
     }
@@ -197,8 +226,7 @@ tracing_config<SdkBackend, Externals>::get_domain_defaults()
     auto defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                  "memory_copy,scratch_memory" };
 
-    if constexpr(s_compile_time_sdk_version <
-                 common::version{ .major = 1, .minor = 0, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version < s_sdk_version_1_0_0)
     {
         defaults.append(",page_migration");
     }
@@ -245,14 +273,13 @@ template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
 std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_callback_domains()
 {
-    using kind_t = typename SdkBackend::callback_tracing_kind_t;
+    using kind_t = SdkBackend::callback_tracing_kind_t;
 
     auto       callback_domains = std::unordered_set<kind_t>{};
     const auto domains_input =
         rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 0, .minor = 6, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_6_0)
     {
         if(Externals::get_use_rcclp())
         {
@@ -308,7 +335,7 @@ template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_buffered_domains()
 {
-    using kind_t = typename SdkBackend::buffer_tracing_kind_t;
+    using kind_t = SdkBackend::buffer_tracing_kind_t;
 
     auto data    = std::unordered_set<kind_t>{};
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
@@ -338,8 +365,7 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
         }
     }
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 2, .patch = 2 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
     {
         // Automatically enable KFD domains when unified memory profiling is enabled
         if(Externals::get_use_unified_memory_profiling())
@@ -363,6 +389,7 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
     const auto names = assemble_operation_env_names_for_kind(kind);
     if(names.is_empty())
     {
+        // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
         if constexpr(std::same_as<TracingKind,
                                   typename SdkBackend::callback_tracing_kind_t>)
         {
@@ -378,6 +405,7 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
                             "buffer tracing kind {}",
                             static_cast<int>(kind)));
         }
+        // NOLINTEND(misc-include-cleaner)
     }
 
     const auto include_patterns =
@@ -420,37 +448,29 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
     const auto names = assemble_operation_env_names_for_kind(kind);
     if(names.is_empty())
     {
-        if constexpr(std::same_as<TracingKind,
-                                  typename SdkBackend::callback_tracing_kind_t>)
-        {
-            finalize_and_throw(fmt::format("tracing_config::get_backtrace_"
-                                           "operations: no options registered for "
-                                           "callback tracing kind {}",
-                                           static_cast<int>(kind)));
-        }
-        else
-        {
-            finalize_and_throw(fmt::format("tracing_config::get_backtrace_"
-                                           "operations: no options registered for "
-                                           "buffer tracing kind {}",
-                                           static_cast<int>(kind)));
-        }
+        constexpr std::string_view kind_label =
+            std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>
+                ? std::string_view{ "callback" }
+                : std::string_view{ "buffer" };
+        finalize_and_throw(fmt::format("tracing_config::get_backtrace_operations: no "
+                                       "options registered for {} tracing kind {}",
+                                       kind_label, static_cast<int>(kind)));
     }
 
     const auto patterns =
         compile_operation_patterns(names.operations_annotate_backtrace_env_name);
+    if(patterns.empty())
+    {
+        return {};
+    }
 
     std::unordered_set<std::int32_t> matched_operation_ids{};
-    if(!patterns.empty())
+    for(const auto& [operation_id, operation_name] : all_operation_items_for_kind(kind))
     {
-        for(const auto& [operation_id, operation_name] :
-            all_operation_items_for_kind(kind))
+        if(matches_any_operation_pattern(names.operations_annotate_backtrace_env_name,
+                                         operation_name, patterns))
         {
-            if(matches_any_operation_pattern(names.operations_annotate_backtrace_env_name,
-                                             operation_name, patterns))
-            {
-                matched_operation_ids.insert(operation_id);
-            }
+            matched_operation_ids.insert(operation_id);
         }
     }
 
@@ -496,12 +516,14 @@ tracing_config<SdkBackend, Externals>::compile_operation_patterns(
     const std::string& operations_setting_env_name)
 {
     const auto setting_value = Externals::get_setting_value(operations_setting_env_name);
+    // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
     if(!setting_value)
     {
         finalize_and_throw(fmt::format(
             "tracing_config::compile_operation_patterns: no registered setting '{}'",
             operations_setting_env_name));
     }
+    // NOLINTEND(misc-include-cleaner)
 
     constexpr std::string_view operation_filter_delimiters{ " ,;:\n\t" };
 
@@ -551,7 +573,7 @@ tracing_config<SdkBackend, Externals>::finalize_and_throw(
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
 template <concepts::tracing_kind<SdkBackend> TracingKind>
-typename tracing_config<SdkBackend, Externals>::operation_options_env_names
+tracing_config<SdkBackend, Externals>::operation_options_env_names
 tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     TracingKind kind)
 {
@@ -573,8 +595,8 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
         has_operations    = !entry.operations.empty();
     }
 
-    if(!has_operations ||
-       s_domains_to_skip_for_operation_options.contains(utility::string::to_lower(name)))
+    if(!has_operations || get_domains_to_skip_for_operation_options().contains(
+                              utility::string::to_lower(name)))
     {
         return {};
     }
@@ -584,7 +606,7 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-const std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
+std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::callback_tracing_kind_t>{
@@ -598,26 +620,22 @@ tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
         SdkBackend::CALLBACK_TRACING_CODE_OBJECT,
     };
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 0, .minor = 6, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_6_0)
     {
         supported.insert({ SdkBackend::CALLBACK_TRACING_RCCL_API,
                            SdkBackend::CALLBACK_TRACING_OMPT,
                            SdkBackend::CALLBACK_TRACING_ROCDECODE_API });
     }
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 0, .minor = 7, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_7_0)
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_ROCJPEG_API);
     }
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 3, .patch = 4 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_3_4)
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_ROCSHMEM_API);
     }
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 3, .patch = 5 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_3_5)
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_HIPFILE_API);
     }
@@ -626,7 +644,7 @@ tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-const std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
+std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>{
@@ -635,14 +653,12 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
         SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 0, .minor = 6, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_6_0)
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_MEMORY_ALLOCATION);
     }
 
-    if constexpr(s_compile_time_sdk_version <
-                 common::version{ .major = 1, .minor = 0, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version < s_sdk_version_1_0_0)
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_PAGE_MIGRATION);
     }
@@ -650,8 +666,7 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
     // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined
     // node IDs (0xFFFFFFFF), so the KFD domains are gated on the bugfix
     // version rather than the version that first declared the enums (1.0.0).
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 2, .patch = 2 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
@@ -669,7 +684,7 @@ template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
 std::unordered_map<std::string, std::vector<typename SdkBackend::callback_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 {
-    using kind_t              = typename SdkBackend::callback_tracing_kind_t;
+    using kind_t              = SdkBackend::callback_tracing_kind_t;
     const auto& callback_info = SdkBackend::get_callback_tracing_names();
     const auto  supported     = get_supported_callback_domains();
 
@@ -722,7 +737,7 @@ template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
 std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
-    using kind_t            = typename SdkBackend::buffer_tracing_kind_t;
+    using kind_t            = SdkBackend::buffer_tracing_kind_t;
     const auto& buffer_info = SdkBackend::get_buffer_tracing_names();
     const auto  supported   = get_supported_buffer_domains();
 
@@ -763,52 +778,16 @@ tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
         },
     };
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 0, .minor = 6, .patch = 0 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_6_0)
     {
         domain_map.emplace(
             "memory_allocation",
             std::vector<kind_t>{ SdkBackend::BUFFER_TRACING_MEMORY_ALLOCATION });
     }
 
-    if constexpr(s_compile_time_sdk_version >=
-                 common::version{ .major = 1, .minor = 2, .patch = 2 })
+    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
     {
-        domain_map.insert({
-            { "kfd_events",
-              {
-                  SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT,
-                  SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                  SdkBackend::BUFFER_TRACING_KFD_QUEUE,
-                  SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                  SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                  SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-              } },
-            {
-                "kfd_page_fault",
-                { SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT },
-            },
-            {
-                "kfd_page_migrate",
-                { SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE },
-            },
-            {
-                "kfd_queue",
-                { SdkBackend::BUFFER_TRACING_KFD_QUEUE },
-            },
-            {
-                "kfd_event_queue",
-                { SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE },
-            },
-            {
-                "kfd_event_unmap_from_gpu",
-                { SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU },
-            },
-            {
-                "kfd_event_dropped_events",
-                { SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS },
-            },
-        });
+        domain_map.merge(get_kfd_buffered_domain_aliases());
     }
 
     for(std::size_t index = 0; index < buffer_info.size(); ++index)
@@ -826,18 +805,69 @@ tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-const std::unordered_set<std::string_view> tracing_config<
-    SdkBackend, Externals>::s_domains_to_skip_for_operation_options{
-
-    "none",        "correlation_id_retirement", "marker_control_api", "marker_name_api",
-    "code_object", "kernel_dispatch",           "page_migration",
-};
+std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
+tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
+{
+    return {
+        { "kfd_events",
+          {
+              SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT,
+              SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+              SdkBackend::BUFFER_TRACING_KFD_QUEUE,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+          } },
+        {
+            "kfd_page_fault",
+            { SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT },
+        },
+        {
+            "kfd_page_migrate",
+            { SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE },
+        },
+        {
+            "kfd_queue",
+            { SdkBackend::BUFFER_TRACING_KFD_QUEUE },
+        },
+        {
+            "kfd_event_queue",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE },
+        },
+        {
+            "kfd_event_unmap_from_gpu",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU },
+        },
+        {
+            "kfd_event_dropped_events",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS },
+        },
+    };
+}
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-const std::unordered_set<std::string_view>
-    tracing_config<SdkBackend, Externals>::s_domains_to_skip_for_domain_choices{
+const std::unordered_set<std::string_view>&
+tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_operation_options()
+{
+    static const auto s_domains = std::unordered_set<std::string_view>{
+        "none",
+        "correlation_id_retirement",
+        "marker_control_api",
+        "marker_name_api",
+        "code_object",
+        "kernel_dispatch",
+        "page_migration",
+    };
+    return s_domains;
+}
 
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
+const std::unordered_set<std::string_view>&
+tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_domain_choices()
+{
+    static const auto s_domains = std::unordered_set<std::string_view>{
         "none",
         "correlation_id_retirement",
         "marker_core_api",
@@ -845,4 +875,6 @@ const std::unordered_set<std::string_view>
         "marker_name_api",
         "code_object",
     };
+    return s_domains;
+}
 }  // namespace rocprofsys::rocprofiler_sdk

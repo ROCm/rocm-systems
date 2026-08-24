@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include <cstdint>
+#include <rocprofiler-sdk/version.h>
 
 #if ROCPROFILER_VERSION >= 10202
 

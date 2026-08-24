@@ -3,12 +3,10 @@
 
 #pragma once
 
-#include <compare>
+#include <compare>  // NOLINT(misc-include-cleaner)
 #include <cstdint>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 struct version
@@ -38,5 +36,4 @@ struct version
     constexpr auto operator<=>(const version&) const = default;
 };
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

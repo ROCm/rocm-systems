@@ -472,31 +472,11 @@ json_has_project_name_root(const std::string& json_path)
 }
 
 void
-configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
+register_rocm_operation_settings(const std::shared_ptr<settings>& _config,
+                                 const auto&                      operation_settings)
 {
-    using tracing_config_t = rocprofiler_sdk::tracing_config<
-        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
-        rocprofiler_sdk::default_externals>;
-
-    const auto rocm_domain_choices = tracing_config_t::get_domain_choices();
-    const auto rocm_domain_description =
-        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
-                    fmt::join(rocm_domain_choices, ", "));
-
-    ROCPROFSYS_CONFIG_SETTING(
-        std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
-        tracing_config_t::get_domain_defaults(), "rocm", "rocprofiler-sdk")
-        ->set_choices(rocm_domain_choices);
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
-                              "ROCm hardware counters. Use ':device=N' syntax to "
-                              "specify collection on device number N, e.g. ':device=0'. "
-                              "If no device specification is provided, the event is "
-                              "collected on every available device",
-                              std::string{}, "rocm", "hardware_counters");
-
     auto registered_operation_settings = std::unordered_set<std::string>{};
-    for(const auto& spec : tracing_config_t::get_operation_settings())
+    for(const auto& spec : operation_settings)
     {
         if(registered_operation_settings
                .emplace(spec.env_names.operations_include_env_name)
@@ -535,6 +515,33 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
                 ->set_choices(spec.operation_choices);
         }
     }
+}
+
+void
+configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
+{
+    using tracing_config_t = rocprofiler_sdk::tracing_config<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
+        rocprofiler_sdk::default_externals>;
+
+    const auto rocm_domain_choices = tracing_config_t::get_domain_choices();
+    const auto rocm_domain_description =
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(rocm_domain_choices, ", "));
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
+        tracing_config_t::get_domain_defaults(), "rocm", "rocprofiler-sdk")
+        ->set_choices(rocm_domain_choices);
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
+                              "ROCm hardware counters. Use ':device=N' syntax to "
+                              "specify collection on device number N, e.g. ':device=0'. "
+                              "If no device specification is provided, the event is "
+                              "collected on every available device",
+                              std::string{}, "rocm", "hardware_counters");
+
+    register_rocm_operation_settings(_config, tracing_config_t::get_operation_settings());
 
     // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
     // present in supported ROCProfiler-SDK domains.
@@ -2904,9 +2911,9 @@ get_gpu_perf_counters()
 std::vector<std::string>
 get_rocm_counter_events()
 {
-    static auto _v = get_config()->find(std::string{ env_vars::ROCM_EVENTS });
+    static auto _val = get_config()->find(std::string{ env_vars::ROCM_EVENTS });
     return rocprofsys::delimit(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), " ,;\t\n");
+        static_cast<tim::tsettings<std::string>&>(*_val->second).get(), " ,;\t\n");
 }
 
 bool
