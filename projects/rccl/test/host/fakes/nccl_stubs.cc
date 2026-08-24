@@ -113,3 +113,9 @@ ncclResult_t ncclMemFree(void* ptr) { ::abort(); }
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
 int64_t rcclParamHierarchicalReduceScatter() { ::abort(); }
 size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) { ::abort(); }
+
+// WarpSpeed eligibility (rccl_wrap.cc), referenced by init.cc's willEnableWarpSpeed().
+// Same deep ncclCommInitRankFunc arm as the floor above -- never entered by the
+// current tests, so fail loudly if a future test reaches it.
+int64_t rcclParamWarpSpeedForceEnable() { ::abort(); }
+bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) { ::abort(); }
