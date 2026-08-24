@@ -509,7 +509,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemGetDefaultMemPool = 484,
   HIP_API_ID_hipDeviceGetLuid = 485,
   HIP_API_ID_hipInitDevice = 486,
-  HIP_API_ID_LAST = 486,
+  HIP_API_ID_hipDeviceGetP2PAtomicCapabilities = 487,
+  HIP_API_ID_LAST = 487,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -596,6 +597,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
     case HIP_API_ID_hipDeviceGetMemPool: return "hipDeviceGetMemPool";
     case HIP_API_ID_hipDeviceGetName: return "hipDeviceGetName";
+    case HIP_API_ID_hipDeviceGetP2PAtomicCapabilities: return "hipDeviceGetP2PAtomicCapabilities";
     case HIP_API_ID_hipDeviceGetP2PAttribute: return "hipDeviceGetP2PAttribute";
     case HIP_API_ID_hipDeviceGetPCIBusId: return "hipDeviceGetPCIBusId";
     case HIP_API_ID_hipDeviceGetSharedMemConfig: return "hipDeviceGetSharedMemConfig";
@@ -1076,6 +1078,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
   if (strcmp("hipDeviceGetMemPool", name) == 0) return HIP_API_ID_hipDeviceGetMemPool;
   if (strcmp("hipDeviceGetName", name) == 0) return HIP_API_ID_hipDeviceGetName;
+  if (strcmp("hipDeviceGetP2PAtomicCapabilities", name) == 0) return HIP_API_ID_hipDeviceGetP2PAtomicCapabilities;
   if (strcmp("hipDeviceGetP2PAttribute", name) == 0) return HIP_API_ID_hipDeviceGetP2PAttribute;
   if (strcmp("hipDeviceGetPCIBusId", name) == 0) return HIP_API_ID_hipDeviceGetPCIBusId;
   if (strcmp("hipDeviceGetSharedMemConfig", name) == 0) return HIP_API_ID_hipDeviceGetSharedMemConfig;
@@ -1757,6 +1760,15 @@ typedef struct hip_api_data_s {
       int len;
       hipDevice_t device;
     } hipDeviceGetName;
+    struct {
+      unsigned int* capabilities;
+      unsigned int capabilities__val;
+      const hipAtomicOperation* operations;
+      hipAtomicOperation operations__val;
+      unsigned int count;
+      int srcDevice;
+      int dstDevice;
+    } hipDeviceGetP2PAtomicCapabilities;
     struct {
       int* value;
       int value__val;
@@ -4667,6 +4679,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceGetName.name = (char*)name; \
   cb_data.args.hipDeviceGetName.len = (int)len; \
   cb_data.args.hipDeviceGetName.device = (hipDevice_t)device; \
+};
+// hipDeviceGetP2PAtomicCapabilities[('unsigned int*', 'capabilities'), ('const hipAtomicOperation*', 'operations'), ('unsigned int', 'count'), ('int', 'srcDevice'), ('int', 'dstDevice')]
+#define INIT_hipDeviceGetP2PAtomicCapabilities_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetP2PAtomicCapabilities.capabilities = (unsigned int*)capabilities; \
+  cb_data.args.hipDeviceGetP2PAtomicCapabilities.operations = (const hipAtomicOperation*)operations; \
+  cb_data.args.hipDeviceGetP2PAtomicCapabilities.count = (unsigned int)count; \
+  cb_data.args.hipDeviceGetP2PAtomicCapabilities.srcDevice = (int)srcDevice; \
+  cb_data.args.hipDeviceGetP2PAtomicCapabilities.dstDevice = (int)dstDevice; \
 };
 // hipDeviceGetP2PAttribute[('int*', 'value'), ('hipDeviceP2PAttr', 'attr'), ('int', 'srcDevice'), ('int', 'dstDevice')]
 #define INIT_hipDeviceGetP2PAttribute_CB_ARGS_DATA(cb_data) { \
@@ -7587,6 +7607,11 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipDeviceGetName:
       data->args.hipDeviceGetName.name = (data->args.hipDeviceGetName.name) ? strdup(data->args.hipDeviceGetName.name) : NULL;
       break;
+// hipDeviceGetP2PAtomicCapabilities[('unsigned int*', 'capabilities'), ('const hipAtomicOperation*', 'operations'), ('unsigned int', 'count'), ('int', 'srcDevice'), ('int', 'dstDevice')]
+    case HIP_API_ID_hipDeviceGetP2PAtomicCapabilities:
+      if (data->args.hipDeviceGetP2PAtomicCapabilities.capabilities) data->args.hipDeviceGetP2PAtomicCapabilities.capabilities__val = *(data->args.hipDeviceGetP2PAtomicCapabilities.capabilities);
+      if (data->args.hipDeviceGetP2PAtomicCapabilities.operations) data->args.hipDeviceGetP2PAtomicCapabilities.operations__val = *(data->args.hipDeviceGetP2PAtomicCapabilities.operations);
+      break;
 // hipDeviceGetP2PAttribute[('int*', 'value'), ('hipDeviceP2PAttr', 'attr'), ('int', 'srcDevice'), ('int', 'dstDevice')]
     case HIP_API_ID_hipDeviceGetP2PAttribute:
       if (data->args.hipDeviceGetP2PAttribute.value) data->args.hipDeviceGetP2PAttribute.value__val = *(data->args.hipDeviceGetP2PAttribute.value);
@@ -9642,6 +9667,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetName.name__val); }
       oss << ", len="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetName.len);
       oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetName.device);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetP2PAtomicCapabilities:
+      oss << "hipDeviceGetP2PAtomicCapabilities(";
+      if (data->args.hipDeviceGetP2PAtomicCapabilities.capabilities == NULL) oss << "capabilities=NULL";
+      else { oss << "capabilities="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetP2PAtomicCapabilities.capabilities__val); }
+      if (data->args.hipDeviceGetP2PAtomicCapabilities.operations == NULL) oss << ", operations=NULL";
+      else { oss << ", operations="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetP2PAtomicCapabilities.operations__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetP2PAtomicCapabilities.count);
+      oss << ", srcDevice="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetP2PAtomicCapabilities.srcDevice);
+      oss << ", dstDevice="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetP2PAtomicCapabilities.dstDevice);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetP2PAttribute:

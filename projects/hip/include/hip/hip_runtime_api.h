@@ -757,6 +757,38 @@ typedef enum hipDeviceP2PAttr {
   hipDevP2PAttrNativeAtomicSupported,
   hipDevP2PAttrHipArrayAccessSupported
 } hipDeviceP2PAttr;
+/**
+ * Atomic operations that can be queried for native P2P support via
+ * ::hipDeviceGetP2PAtomicCapabilities.
+ */
+typedef enum hipAtomicOperation {
+  hipAtomicOperationIntegerAdd = 0,
+  hipAtomicOperationIntegerMin,
+  hipAtomicOperationIntegerMax,
+  hipAtomicOperationIntegerIncrement,
+  hipAtomicOperationIntegerDecrement,
+  hipAtomicOperationAnd,
+  hipAtomicOperationOr,
+  hipAtomicOperationXOR,
+  hipAtomicOperationExchange,
+  hipAtomicOperationCAS,
+  hipAtomicOperationFloatAdd,
+  hipAtomicOperationFloatMin,
+  hipAtomicOperationFloatMax
+} hipAtomicOperation;
+/**
+ * Bitmask flags describing how an atomic operation is natively supported over a link,
+ * as reported per-operation by ::hipDeviceGetP2PAtomicCapabilities.
+ */
+typedef enum hipAtomicOperationCapability {
+  hipAtomicCapabilitySigned     = 1 << 0,
+  hipAtomicCapabilityUnsigned   = 1 << 1,
+  hipAtomicCapabilityReduction  = 1 << 2,
+  hipAtomicCapabilityScalar32   = 1 << 3,
+  hipAtomicCapabilityScalar64   = 1 << 4,
+  hipAtomicCapabilityScalar128  = 1 << 5,
+  hipAtomicCapabilityVector32x4 = 1 << 6
+} hipAtomicOperationCapability;
 typedef enum hipDriverEntryPointQueryResult {
   hipDriverEntryPointSuccess = 0,
   hipDriverEntryPointSymbolNotFound = 1,
@@ -2331,6 +2363,26 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
  */
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice);
+/**
+ * @brief Queries the native P2P atomic capabilities of a link between two devices.
+ *
+ * For each atomic operation in @p operations, writes a bitmask of
+ * ::hipAtomicOperationCapability flags into the corresponding entry of @p capabilities,
+ * describing how that operation is natively supported over the P2P link from
+ * @p srcDevice to @p dstDevice. A zero bitmask means the operation is not natively
+ * supported over the link.
+ *
+ * @param [out] capabilities Array of @p count bitmasks, one per queried operation
+ * @param [in] operations Array of @p count operations to query
+ * @param [in] count Number of entries in @p capabilities and @p operations
+ * @param [in] srcDevice The source device of the link
+ * @param [in] dstDevice The destination device of the link
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
+ */
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation* operations,
+                                             unsigned int count, int srcDevice, int dstDevice);
 /**
  * @brief Returns a PCI Bus Id string for the device, overloaded to take int device ID.
  * @param [out] pciBusId The string of PCI Bus Id format for the device
