@@ -14,17 +14,17 @@ namespace profiler_hub::detail
 {
 
 // Computes the geometric packing `lane` for every event (always valid), and the
-// containment `parent_id`/`level` for `stack` tracks only, over an interval list. Returns
-// the track's peak concurrency (number of lanes = max_lane). Reader-internal; exposed in
-// a header only so it can be unit-tested directly with exact coordinates.
+// containment `parent_id`/`level` for `stack` tracks only, over an interval list.
+// Returns the track's peak concurrency (number of lanes = max_lane).
 //
-// `lane` is greedy interval packing so overlapping bars never collide; `parent_id` is a
-// true containment edge computed ONLY when nesting == stack, and carries the opaque
-// event_id_t, never a raw row id. The containment walk searches DOWN the ancestor stack
-// for the nearest true container instead of testing only the immediate top (A=[0,100],
-// B=[10,60], C=[50,90]: C is a child of A, not top-level). `level` is retained for
-// backward compatibility (Optiq reads it for height): containment depth on stack tracks,
-// == lane on lane tracks; height consumers should migrate to track_info_t::max_lane.
+// `lane` is greedy interval packing so overlapping bars never collide. `parent_id`
+// carries the opaque event_id_t (never a raw row id) and is set only when
+// nesting == stack; the containment walk searches down the ancestor stack for the
+// nearest true container instead of testing only the immediate top (A=[0,100],
+// B=[10,60], C=[50,90]: C is a child of A, not top-level). `level` mirrors
+// containment depth on stack tracks and the packing lane on lane tracks; Optiq
+// reads it for height, so height consumers migrating away from it should use
+// track_info_t::max_lane instead.
 inline uint32_t
 compute_interval_layout(reader_types::interval_entry_list_t& events,
                         reader_types::nesting_model_t        nesting)
@@ -34,10 +34,8 @@ compute_interval_layout(reader_types::interval_entry_list_t& events,
         return a.end > b.end;
     });
 
-    // Greedy lane packing over ALL tracks: each event takes the lowest-numbered lane
-    // whose last event ends at or before this event's start; else a new lane. Because
-    // events are processed in start order, the lane count equals the track's peak
-    // concurrency.
+    // Because events are processed in start order, the lane count equals the
+    // track's peak concurrency.
     std::vector<reader_types::timestamp_t> lane_end;  // last end time per lane
     for(auto& ev : events)
     {
@@ -60,9 +58,7 @@ compute_interval_layout(reader_types::interval_entry_list_t& events,
 
     if(nesting != reader_types::nesting_model_t::stack)
     {
-        // Concurrency track: overlap is not containment. parent is always no-parent;
-        // level mirrors the packing lane so consumers still reading `level` for height
-        // see rows.
+        // Overlap is not containment for a concurrency (non-stack) track.
         for(auto& ev : events)
         {
             ev.parent_id = std::nullopt;
@@ -71,10 +67,8 @@ compute_interval_layout(reader_types::interval_entry_list_t& events,
         return max_lane;
     }
 
-    // Stack track: assign each event its nearest enclosing ancestor. Pop tops that end at
-    // or before this event's start (disjoint), then search top->down for the nearest
-    // ancestor that truly contains this event (end >= this.end). Skipped partial-overlap
-    // siblings stay on the stack — they may still contain a later event.
+    // Partial-overlap siblings that don't contain this event stay on the stack —
+    // they may still contain a later one.
     std::vector<size_t> stack;
     for(size_t i = 0; i < events.size(); ++i)
     {

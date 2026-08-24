@@ -39,7 +39,6 @@ INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type
 VALUES (1, 1, 1, 'GPU', 0, 0, 'GPU-0'),
        (2, 1, 1, 'GPU', 1, 1, 'GPU-1');
 
--- v4 tracks: one per agent (nid/pid reference rocpd_info_node/process.id = 1).
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1),
        (2, 1, 1, 2);
@@ -65,7 +64,6 @@ VALUES (1,  5000, 1),  -- row 5 start
        (10, 4100, 1);  -- row 4 end
 
 -- Memory allocate rows (inserted out of start order; ORDER BY ts_s.value enforced).
--- name_id is required NOT NULL; use the rocpd_string id matching each type string.
 INSERT INTO "rocpd_memory_allocate{{uuid}}"
     (id, track_id, type, level, start_id, end_id, name_id, address, size)
 VALUES

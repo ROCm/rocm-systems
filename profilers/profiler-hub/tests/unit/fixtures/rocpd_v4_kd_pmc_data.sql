@@ -6,20 +6,15 @@
 --   rocpd_kernel_dispatch. This synthetic fixture covers the v4 backend for the
 --   kernel_dispatch_pmc track type.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} / {{guid}} substituted, then fed through rocpd_v4.0_tables.sql +
---   this file via the sqlite3 CLI. The presence of rocpd_timestamp makes the
---   reader select the v4 backend.
---
 -- DATA SHAPE (mirrors the v3 kd_pmc fixture for cross-schema regression):
 --   * 1 GPU agent (id=1, nid=1, pid=100)
 --   * 2 PMC types: pmc 1 = "SQ_WAVES", pmc 2 = "GRBM_COUNT"
 --   * 1 kernel symbol: vecAdd(float*, int)
 --   * 1 rocpd_track (track_id=1, nid=1, pid=100, agent_id=1) for gpu_queue use
---   * 3 kernel_dispatch rows via track_id=1 + timestamp spine:
---       kd 1: start_id=1 (ts=1000), end_id=2 (ts=1200), pmc_id=1
---       kd 2: start_id=3 (ts=2000), end_id=4 (ts=2300), pmc_id=1
---       kd 3: start_id=5 (ts=3000), end_id=6 (ts=3100), pmc_id=2
+--   * 3 kernel_dispatch rows via track_id=1 + timestamp spine (2 ids each):
+--       kd 1: ts=1000..1200, pmc_id=1
+--       kd 2: ts=2000..2300, pmc_id=1
+--       kd 3: ts=3000..3100, pmc_id=2
 --   * 2 kernel_dispatch_pmc tracks synthesized by distinct_kd_pmc_tracks():
 --       track A: (nid=1, pid=100, agent_id=1, pmc_id=1) -> kd 1, kd 2 (2 events)
 --       track B: (nid=1, pid=100, agent_id=1, pmc_id=2) -> kd 3 (1 event)
@@ -38,24 +33,20 @@ VALUES (1, 1, 100, 100);
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 100, 'GPU', 0, 0, 'Synthetic GPU v4');
 
--- Two PMC types
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
 VALUES (1, 1, 100, 1, 'SQ_WAVES',   'SQ_WAVES'),
        (2, 1, 100, 1, 'GRBM_COUNT', 'GRBM_COUNT');
 
--- Kernel symbol
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 100, 1);
 
 INSERT INTO "rocpd_info_kernel_symbol{{uuid}}" (id, nid, pid, code_object_id, kernel_name, display_name)
 VALUES (1, 1, 100, 1, 'vecAdd', 'vecAdd(float*, int)');
 
--- v4 track: nid/pid reference rocpd_info_node.id and rocpd_info_process.id (both 1).
--- agent_id=1 so distinct_kd_pmc_tracks JOIN rocpd_track carries the GPU agent.
+-- agent_id=1 so distinct_kd_pmc_tracks' JOIN rocpd_track carries the GPU agent.
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1);
 
--- Events (one per kernel_dispatch)
 INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2), (3);
 
 -- Timestamp spine: 3 dispatches x 2 timestamps each = 6 rows
@@ -80,10 +71,6 @@ VALUES (2, 1, 1, 2, 1, 2, 64, 1, 1, 1024, 1, 1, 1),
        (1, 1, 1, 1, 3, 4, 64, 1, 1,  512, 1, 1, 2),
        (3, 1, 1, 3, 5, 6, 64, 1, 1,  256, 1, 1, 3);
 
--- PMC events: link pmc_event.event_id -> kernel_dispatch.event_id
--- kd 1 (event 2): SQ_WAVES (pmc_id=1)
--- kd 2 (event 1): SQ_WAVES (pmc_id=1)
--- kd 3 (event 3): GRBM_COUNT (pmc_id=2)
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
 VALUES (1, 2, 1, 12345.0),
        (2, 1, 1, 23456.0),

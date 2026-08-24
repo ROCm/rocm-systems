@@ -138,8 +138,6 @@ struct reader_t::impl
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::event_id_t& id);
 
-    // Unified event detail (collapses the typed detail methods above into one flat,
-    // typed property bag). The typed methods are retained as private helpers reused here.
     [[nodiscard]] std::optional<reader_types::event_info_t> get_event_info(
         const reader_types::event_id_t& id);
 
@@ -150,7 +148,6 @@ struct reader_t::impl
     [[nodiscard]] reader_types::source_context_list_t get_source_context(
         const reader_types::timeline_event_t& event);
 
-    // Opaque-handle overloads: build a timeline_event_t from the handle and delegate.
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
         const reader_types::event_id_t& id);
 
@@ -205,8 +202,6 @@ private:
     void apply_pagination(reader_types::timeline_event_list_t& events,
                           const reader_types::pagination_t&    pagination);
 
-    // Build combined pmc_event_data_t (value + sample timestamp/track + event) from a
-    // resolved scalar detail row.
     [[nodiscard]] reader_types::pmc_event_data_t build_pmc_event_data(
         const data_storage::scalar_detail_result& row);
 
@@ -255,7 +250,6 @@ private:
 
     std::unordered_map<reader_types::track_info_ptr_t, size_t> m_track_ptr_to_db_id;
 
-    // Routing info for track-scoped queries, keyed by track_info_t::id.
     std::unordered_map<size_t, track_query_info_t> m_track_query_info;
 };
 

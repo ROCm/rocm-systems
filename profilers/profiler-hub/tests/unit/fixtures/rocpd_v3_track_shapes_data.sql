@@ -21,12 +21,6 @@
 --   shape, every row hand-chosen so tests assert on KNOWN min_ts/max_ts/count and
 --   the exact interval start order -- locking behavior, not just touching lines.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} -> "_" + <hex uuid>, {{guid}} -> <hex uuid> (mirrors get_schema_query()),
---   then the canonical v3 schema (source/data_storage/schema/rocpd_tables.sql) and
---   this file are piped through the sqlite3 CLI. The db has NO rocpd_timestamp
---   table, so the reader selects the v3 backend.
---
 -- TRACK MATRIX (what get_tracks() returns):
 --   dma (from rocpd_memory_copy, distinct nid,pid,queue_id,dst_agent_id):
 --     * qa      queue_id=1, dst_agent_id=1  -> starts {1000,1200} end 1300  count 2
@@ -65,20 +59,18 @@ INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type
 VALUES (1, 1, 1, 'GPU', 0, 0, 'Synthetic GPU 0'),
        (2, 1, 1, 'GPU', 1, 1, 'Synthetic GPU 1');
 
--- Two queues.
 INSERT INTO "rocpd_info_queue{{uuid}}" (id, nid, pid, name)
 VALUES (1, 1, 1, 'Queue-A'),
        (2, 1, 1, 'Queue-B');
 
--- Strings (memory_copy name_id + region name_id). memory_allocate has no name_id.
 INSERT INTO "rocpd_string{{uuid}}" (id, string)
 VALUES (1, 'copyHtoD'),
        (2, 'RegionAlpha'),
        (3, 'RegionBeta');
 
--- rocpd_track: sole purpose is to be the FK target for the region samples below.
--- It has NO pmc-backed sample, so it is NOT a counter; it has no rocpd_region row
--- of its own, so it is NOT a cpu_thread track either -> ignored by discovery.
+-- rocpd_track: only exists as the FK target for the region samples below --
+-- no pmc sample (not a counter) and no rocpd_region of its own (not a
+-- cpu_thread) -> correctly ignored by track discovery.
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
 VALUES (1, 1, 1, 1, NULL);
 
@@ -88,25 +80,21 @@ VALUES (101, NULL),
        (102, NULL);
 
 -- Regions (cpu_thread SAMPLE track for tid=1) --------------------------------
--- Both events carry exactly one rocpd_sample -> is_sample=1 for the (1,1,1)
--- region track. Row-id order != start order so ORDER BY start is proven.
+-- Row-id order != start order (region 2 inserted before region 1), proving
+-- ORDER BY start:
 --   get_interval_track -> [region 1 (7000), region 2 (7200)]
 --   count(DISTINCT r.id)=2, MIN(start)=7000, MAX(end)=7500.
 INSERT INTO "rocpd_region{{uuid}}" (id, nid, pid, tid, start, "end", name_id, event_id)
 VALUES (2, 1, 1, 1, 7200, 7300, 3, 102),
        (1, 1, 1, 1, 7000, 7500, 2, 101);
 
--- One sample per region event (so interval SELECT DISTINCT r.id and stats
--- COUNT(DISTINCT r.id) agree at 2). track_id references the ignored rocpd_track 1.
+-- One sample per region event (interval DISTINCT r.id and stats COUNT(DISTINCT
+-- r.id) must agree at 2); track_id references the intentionally-ignored track 1.
 INSERT INTO "rocpd_sample{{uuid}}" (id, track_id, timestamp, event_id)
 VALUES (1, 1, 7000, 101),
        (2, 1, 7200, 102);
 
 -- Memory copies (dma tracks) ------------------------------------------------
--- cols: (id, nid, pid, start, "end", name_id, dst_agent_id, size, queue_id, event_id)
---   dma qa      queue_id=1, dst_agent_id=1  : mc 1,2 (starts out of row order)
---   dma q_only  queue_id=2, dst_agent_id=NULL: mc 3,4
---   dma a_only  queue_id=NULL, dst_agent_id=2: mc 5
 INSERT INTO "rocpd_memory_copy{{uuid}}"
     (id, nid, pid, start, "end", name_id, dst_agent_id, size, queue_id, event_id)
 VALUES (1, 1, 1, 1200, 1300, 1, 1,    1024, 1,    NULL),   -- dma qa
@@ -116,10 +104,6 @@ VALUES (1, 1, 1, 1200, 1300, 1, 1,    1024, 1,    NULL),   -- dma qa
        (5, 1, 1, 3000, 3100, 1, 2,    1024, NULL, NULL);   -- dma a_only
 
 -- Memory allocations (memory tracks) ----------------------------------------
--- cols: (id, nid, pid, agent_id, type, level, start, "end", size, queue_id, event_id)
---   memory qa      agent_id=1, queue_id=1   : ma 1,2 (starts out of row order)
---   memory q_only  agent_id=NULL, queue_id=2: ma 3,4
---   memory neither agent_id=NULL, queue_id=NULL: ma 5
 INSERT INTO "rocpd_memory_allocate{{uuid}}"
     (id, nid, pid, agent_id, type, level, start, "end", size, queue_id, event_id)
 VALUES (1, 1, 1, 1,    'ALLOC', 'REAL', 4200, 4300, 4096, 1,    NULL),  -- memory qa

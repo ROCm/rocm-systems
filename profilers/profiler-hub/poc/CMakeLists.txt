@@ -23,7 +23,6 @@ if(NOT EXISTS "${TPX_LIB}")
     )
 endif()
 
-# Imported static target wrapping the pre-built GN archive.
 add_library(perfetto_trace_processor STATIC IMPORTED)
 set_target_properties(
     perfetto_trace_processor

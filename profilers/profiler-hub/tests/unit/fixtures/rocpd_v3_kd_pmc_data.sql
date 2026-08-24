@@ -8,12 +8,6 @@
 --   requires rocpd_pmc_event.event_id == rocpd_kernel_dispatch.event_id, which
 --   neither real capture provides. This synthetic fixture covers that gap.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} -> "_" + <hex uuid>, {{guid}} -> <hex uuid>, then fed through
---   the canonical v3 schema and the sqlite3 CLI (same mechanism as the edge
---   fixture). The resulting DB has NO rocpd_timestamp table, so the reader
---   selects the v3 backend.
---
 -- DATA SHAPE (all values chosen so tests assert on real numbers):
 --   * 1 GPU agent (id=1, nid=1, pid=100, agent_id=1)
 --   * 2 PMC types:
@@ -31,10 +25,7 @@
 --     start order even if row-id order differs (kd 2 inserted before kd 1).
 -- =============================================================================
 
--- Bare alias views ----------------------------------------------------------
--- The v3 reader joins rocpd_event / rocpd_string / rocpd_sample by bare name;
--- the canonical schema only creates uuid-suffixed tables. Reproduce the views
--- a real capture would provide. (See rocpd_v3_edge_data.sql for the pattern.)
+-- Bare alias views used by the v3 reader (see other v3 fixtures) ------------
 CREATE VIEW rocpd_event AS SELECT * FROM "rocpd_event{{uuid}}";
 CREATE VIEW rocpd_string AS SELECT * FROM "rocpd_string{{uuid}}";
 CREATE VIEW rocpd_sample AS SELECT * FROM "rocpd_sample{{uuid}}";
@@ -52,12 +43,10 @@ VALUES (1, 1, 1, 100);
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 1, 'GPU', 0, 0, 'Synthetic GPU');
 
--- Two PMC types. pid/nid here are the rocpd_info_process.id / rocpd_info_node.id FKs.
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
 VALUES (1, 1, 1, 1, 'SQ_WAVES',   'SQ_WAVES'),
        (2, 1, 1, 1, 'GRBM_COUNT', 'GRBM_COUNT');
 
--- One kernel symbol
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1);
 
@@ -80,8 +69,7 @@ VALUES (1, 1, 1, 'Stream-0');
 -- to prove ORDER BY start is enforced and not ORDER BY event_id or row_id.
 INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2), (3);
 
--- kernel_dispatch rows: nid=1, pid=1 (rocpd_info_process.id), agent_id=1,
--- queue_id=1, stream_id=1. Inserted out of start order to prove ORDER BY start:
+-- Inserted out of start order to prove ORDER BY start:
 --   get_interval_track(pmc_1 track) -> [kd_pmc 1 (start=1000), kd_pmc 2 (start=2000)]
 INSERT INTO "rocpd_kernel_dispatch{{uuid}}"
     (id, nid, pid, agent_id, kernel_id, dispatch_id, queue_id, stream_id,
@@ -91,10 +79,6 @@ VALUES (2, 1, 1, 1, 1, 2, 1, 1, 2000, 2300, 64, 1, 1, 1024, 1, 1, 1),
        (1, 1, 1, 1, 1, 1, 1, 1, 1000, 1200, 64, 1, 1,  512, 1, 1, 2),
        (3, 1, 1, 1, 1, 3, 1, 1, 3000, 3100, 64, 1, 1,  256, 1, 1, 3);
 
--- PMC events: link pmc_event.event_id -> kernel_dispatch.event_id
--- kd 1 (event 2): SQ_WAVES (pmc_id=1)
--- kd 2 (event 1): SQ_WAVES (pmc_id=1)
--- kd 3 (event 3): GRBM_COUNT (pmc_id=2)
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
 VALUES (1, 2, 1, 12345.0),
        (2, 1, 1, 23456.0),

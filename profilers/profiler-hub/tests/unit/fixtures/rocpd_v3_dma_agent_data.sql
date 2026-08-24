@@ -16,12 +16,6 @@
 --   this repo's test tree. This file reproduces that DB's essential shape as a
 --   self-contained, hand-reviewable fixture built from the canonical v3 schema.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} -> "_" + <hex uuid>, {{guid}} -> <hex uuid>  (mirrors get_schema_query),
---   then the canonical v3 schema (source/data_storage/schema/rocpd_tables.sql) and
---   this file are piped through the sqlite3 CLI. There is NO rocpd_timestamp table,
---   so the reader selects the v3 backend.
---
 -- CROSSED PARTITION (the oracle):
 --   48 memory_copy events, all on ONE queue (queue_id = 1), fully crossing two
 --   destination agents with two streams, 12 events per cell:
@@ -52,13 +46,10 @@ VALUES (1, 333333, 'synthetic-machine-dma', 'Linux', 'synth-dma-host');
 INSERT INTO "rocpd_info_process{{uuid}}" (id, nid, pid, command)
 VALUES (1, 1, 4343, 'synthetic-dma-app');
 
--- Two GPU agents (destination agents). Both carry type_index so get_all_agents
--- keeps them (reader drops NULL-type_index agents).
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 1, 'GPU', 0, 0, 'Synthetic GPU 0'),
        (2, 1, 1, 'GPU', 1, 1, 'Synthetic GPU 1');
 
--- One queue -> all copies share queue_id = 1 (exercises the qa interval variant).
 INSERT INTO "rocpd_info_queue{{uuid}}" (id, nid, pid, name)
 VALUES (1, 1, 1, 'Queue-A');
 
@@ -74,9 +65,8 @@ VALUES (1, 'copyStreamX'),
        (2, 'copyStreamY');
 
 -- Memory copies (dma tracks) ------------------------------------------------
--- Generated crossed pattern: 48 rows, queue_id=1, dst_agent in {1,2}, stream in
--- {1,2}, 12 per cell. name_id follows stream (1=copyStreamX, 2=copyStreamY).
--- Layout by id: 1-12 (a1,s1), 13-24 (a1,s2), 25-36 (a2,s1), 37-48 (a2,s2).
+-- Generated crossed pattern (see CROSSED PARTITION above): the arithmetic below
+-- assigns name_id/dst_agent_id/stream_id for ids 1-48.
 WITH RECURSIVE gen(i) AS (
     SELECT 1
     UNION ALL
@@ -85,15 +75,15 @@ WITH RECURSIVE gen(i) AS (
 INSERT INTO "rocpd_memory_copy{{uuid}}"
     (id, nid, pid, start, "end", name_id, dst_agent_id, size, queue_id, stream_id, event_id)
 SELECT
-    i,                              -- id
-    1,                             -- nid
-    1,                             -- pid
-    i * 1000,                      -- start (distinct, ascending)
-    i * 1000 + 100,                -- end
+    i,
+    1,
+    1,
+    i * 1000,
+    i * 1000 + 100,
     ((i - 1) / 12) % 2 + 1,        -- name_id: stream 1->copyStreamX, 2->copyStreamY
     (i - 1) / 24 + 1,              -- dst_agent_id: 1..24 -> agent 1, 25..48 -> agent 2
-    1024,                          -- size
+    1024,
     1,                             -- queue_id (non-null -> qa variant)
     ((i - 1) / 12) % 2 + 1,        -- stream_id: crossed, NOT part of dma identity
-    NULL                           -- event_id (no flows needed here)
+    NULL
 FROM gen;

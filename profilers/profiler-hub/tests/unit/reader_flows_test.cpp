@@ -22,37 +22,16 @@
 using namespace profiler_hub;
 using namespace profiler_hub::test;
 
-// ===========================================================================
-// Flow-family tests (ported from pre-rebase cac3369ac5, re-seeded via the
-// writer temp-DB model). The original fixtures loaded three purpose-built
-// SQL databases (rocpd_v3_clique / rocpd_v3_flow_order / a flat-clique slice
-// of rocpd_v3_edge) via ROCPD_DB_V3_*_PATH compile definitions; here each
-// fixture reproduces the identical stack_id clique geometry through
-// writer_t::insert_*_data, so the assertions (directed/typed clique, handle
-// collision, equal-start + equal-latency tie-breaks, stack-0/NULL exclusion)
-// are unchanged — only the seeding mechanism moved from raw SQL to the writer.
-// ===========================================================================
-
-// --- test-only opaque-handle peeks (public API treats these as opaque) ---
-
-// Mint the handle for the `ordinal`-th inserted event of `type` (1-based logical
-// ordinal). The writer assigns per-type-table row ids from an autoincrementer that
-// starts at 0 (see source/autoincrementer.hpp), so the N-th inserted row of a type
-// carries raw id N-1. Tests name endpoints by their 1-based insertion order (region 1,
-// kd 2, ...) to match the seed comments and the original SQL fixtures, so this helper
-// maps that ordinal onto the writer's 0-based raw id.
+// ordinal is 1-based; the writer's per-type autoincrementer is 0-based
+// (source/autoincrementer.hpp), so raw id = ordinal - 1.
 reader_types::event_id_t
 make_event_id(reader_types::event_type_t type, size_t ordinal)
 {
     return reader_types::detail::event_id_access::make(type, ordinal - 1);
 }
 
-// --- shared writer-seed helpers ---
-// Per-type-table row ids come from the writer's per-type autoincrementer (0-based,
-// source/autoincrementer.hpp), incremented once per insert, so seeding each type in
-// the intended order yields dense ids 0,1,2,... — the N-th inserted row is raw id N-1.
-// trace_environment.track_name is left unset so no rocpd_sample is minted (keeps
-// regions a single cpu_thread/main track).
+// trace_environment.track_name is left unset here and in the seed_* helpers below,
+// so no rocpd_sample is minted — regions collapse onto a single cpu_thread/main track.
 
 void
 seed_flow_identity(writer_t& writer)
@@ -199,10 +178,9 @@ seed_memory_alloc(writer_t&                 writer,
 }
 
 // ---------------------------------------------------------------------------
-// Clique fixture: reproduces rocpd_v3_clique_data.sql. stack 1000 = one of each
-// type (region1/kd1/mc1/ma1); stacks 2000/3000/4000/5000 = same-type sibling
-// pairs (region2/3, kd2/3, mc2/3, ma2/3); stack 0 = region4 (excluded).
-// 11 undirected clique pairs -> 7 directed edges.
+// Clique fixture: stack 1000 = one of each type (region1/kd1/mc1/ma1); stacks
+// 2000/3000/4000/5000 = same-type sibling pairs (region2/3, kd2/3, mc2/3, ma2/3);
+// stack 0 = region4 (excluded). 11 undirected clique pairs -> 7 directed edges.
 // ---------------------------------------------------------------------------
 class reader_v3_clique_test : public reader_test
 {
@@ -213,23 +191,19 @@ protected:
         auto writer = make_writer();
         seed_flow_identity(*writer);
 
-        // regions 1..4 (ids by insertion order)
         seed_region(*writer, 1000, 1000, 1100);  // region 1
         seed_region(*writer, 2000, 2000, 2100);  // region 2
         seed_region(*writer, 2000, 2050, 2150);  // region 3
         seed_region(*writer, 0, 9000, 9100);     // region 4 (stack 0 -> excluded)
 
-        // kernel dispatches 1..3
         seed_kernel_dispatch(*writer, 1000, 1200, 1300);  // kd 1
         seed_kernel_dispatch(*writer, 3000, 3000, 3100);  // kd 2
         seed_kernel_dispatch(*writer, 3000, 3050, 3150);  // kd 3
 
-        // memory copies 1..3
         seed_memory_copy(*writer, 1000, 1400, 1500);  // mc 1
         seed_memory_copy(*writer, 4000, 4000, 4100);  // mc 2
         seed_memory_copy(*writer, 4000, 4050, 4150);  // mc 3
 
-        // memory allocates 1..3
         seed_memory_alloc(*writer, 1000, 1600, 1700);  // ma 1
         seed_memory_alloc(*writer, 5000, 5000, 5100);  // ma 2
         seed_memory_alloc(*writer, 5000, 5050, 5150);  // ma 3
@@ -250,10 +224,9 @@ TEST_F(reader_v3_clique_test, get_flows_emits_directed_typed_clique)
                                  profiler_hub::reader_types::event_id_t>;
 
     auto flows = m_reader->get_flows();
-    // Directed model: the 11 undirected pairs collapse to 7 directed edges. The 3
-    // cross-type region->gpu legs were already single-direction; the 4 same-type sets
-    // (region<->region, kd<->kd, mc<->mc, ma<->ma) each de-dup from two ordered pairs to
-    // one. This is the "half on symmetric pairs" property the directed model guarantees.
+    // 11 undirected pairs -> 7 directed edges: the 3 cross-type region->gpu legs were
+    // already single-direction; the 4 same-type sibling sets each de-dup from two
+    // ordered pairs to one.
     ASSERT_EQ(flows.size(), 7U);
 
     struct edge_expect
@@ -293,7 +266,6 @@ TEST_F(reader_v3_clique_test, get_flows_emits_directed_typed_clique)
                 make_event_id(et::memory_allocate, 1),
                 fk::copy_submit_to_exec,
                 1000);
-    // Same-type sets: earlier-start endpoint sources the single surviving directed edge.
     expect_edge(make_event_id(et::region, 2),  // start 2000 < region 3 start 2050
                 make_event_id(et::region, 3),
                 fk::generic,
@@ -312,8 +284,8 @@ TEST_F(reader_v3_clique_test, get_flows_emits_directed_typed_clique)
                 5000);
 
     // Handle-collision guard: region 1 / kernel_dispatch 1 / memory_copy 1 /
-    // memory_allocate 1 all share raw row id 1 but come from different per-type tables.
-    // They MUST mint to four distinct handles (closing a prior identity-leak defect).
+    // memory_allocate 1 share raw row id 1 across different per-type tables; they must
+    // mint to four distinct handles.
     std::unordered_set<profiler_hub::reader_types::event_id_t> distinct{
         make_event_id(et::region, 1),
         make_event_id(et::kernel_dispatch, 1),
@@ -325,9 +297,6 @@ TEST_F(reader_v3_clique_test, get_flows_emits_directed_typed_clique)
 
 TEST_F(reader_v3_clique_test, get_flows_dedups_symmetric_pairs_to_single_direction)
 {
-    // Direction / de-dup: for every surviving edge (a -> b), the reverse (b -> a) must
-    // NOT also be present. This is the core invariant of the directed model: each
-    // unordered clique pair yields exactly one edge.
     auto flows = m_reader->get_flows();
     std::set<std::pair<profiler_hub::reader_types::event_id_t,
                        profiler_hub::reader_types::event_id_t>>
@@ -350,8 +319,6 @@ TEST_F(reader_v3_clique_test, get_flows_kind_matches_endpoint_types)
     auto type_of = [](const profiler_hub::reader_types::event_id_t& id) {
         return profiler_hub::reader_types::detail::event_id_access::type(id);
     };
-    // Kind correctness: the flow_kind_t of every edge is a pure function of its ordered
-    // endpoint types, independent of which endpoint won orientation.
     for(const auto& f : m_reader->get_flows())
     {
         const auto s = type_of(f.source);
@@ -386,12 +353,10 @@ TEST_F(reader_v3_clique_test, get_flows_for_chain_groups_by_flow_id)
     for(const auto& f : chain)
         EXPECT_EQ(flow_id_value(f.flow_id), 1000U);
 
-    // A flow_id that names no chain returns empty.
     auto none = m_reader->get_flows_for_chain(
         profiler_hub::reader_types::detail::flow_id_access::make(99));
     EXPECT_TRUE(none.empty());
 
-    // Sorting the group by source start recovers a stable linear ordering.
     std::sort(chain.begin(), chain.end(), [&](const auto& x, const auto& y) {
         // all share the same source (region 1); tie-break by dest handle for determinism
         return x.dest < y.dest;
@@ -417,7 +382,6 @@ TEST_F(reader_v3_clique_test, get_flows_for_event_returns_adjacent_edges)
     ASSERT_EQ(kd1_adj.size(), 1U);
     EXPECT_EQ(kd1_adj.front().dest, make_event_id(et::kernel_dispatch, 1));
 
-    // An event handle that participates in no edge returns empty.
     auto none = m_reader->get_flows_for_event(make_event_id(et::region, 999));
     EXPECT_TRUE(none.empty());
 }
@@ -425,8 +389,8 @@ TEST_F(reader_v3_clique_test, get_flows_for_event_returns_adjacent_edges)
 TEST_F(reader_v3_clique_test,
        get_flows_in_window_empty_window_and_tracks_equals_get_flows)
 {
-    // Criterion 7(b)/7(e): empty window + empty tracks + max_edges 0 is a pure pass-
-    // through of get_flows({}) — same edges, same source/dest/flow_id/kind, no cap.
+    // Empty window + empty tracks + max_edges 0 is a pure pass-through of get_flows({})
+    // — same edges, same source/dest/flow_id/kind, no cap.
     auto all = m_reader->get_flows();
     auto win = m_reader->get_flows_in_window({}, {}, 0);
     ASSERT_EQ(win.size(), all.size());
@@ -450,9 +414,9 @@ TEST_F(reader_v3_clique_test,
 
 TEST_F(reader_v3_clique_test, get_flows_in_window_filters_by_extent)
 {
-    // Criterion 7(a): window overlap uses the edge extent, boundary-inclusive.
-    // [2000,5150] captures the four same-type sibling edges (extents start >= 2000);
-    // region1's three legs (ehi <= 1700 < 2000) fall out.
+    // Window overlap uses the edge extent, boundary-inclusive. [2000,5150] captures
+    // the four same-type sibling edges (extents start >= 2000); region1's three legs
+    // (ehi <= 1700 < 2000) fall out.
     profiler_hub::reader_types::time_window_t inner;
     inner.start = 2000;
     inner.end   = 5150;
@@ -465,7 +429,6 @@ TEST_F(reader_v3_clique_test, get_flows_in_window_filters_by_extent)
     straddle.end   = 2000;
     EXPECT_EQ(m_reader->get_flows_in_window({}, straddle, 0).size(), 2U);
 
-    // A window past every edge excludes all of them.
     profiler_hub::reader_types::time_window_t outside;
     outside.start = 6000;
     EXPECT_TRUE(m_reader->get_flows_in_window({}, outside, 0).empty());
@@ -473,24 +436,23 @@ TEST_F(reader_v3_clique_test, get_flows_in_window_filters_by_extent)
 
 TEST_F(reader_v3_clique_test, get_flows_in_window_filters_by_track_membership)
 {
-    // Criterion 7(c): an edge is kept iff AT LEAST ONE endpoint sits on a listed track.
-    // The single cpu_thread track carries regions 1/2/3, so scoping to it keeps region1's
-    // three legs (source-only membership) plus region2->region3 (both endpoints), and
-    // drops the kd/mc/ma sibling edges (neither endpoint on a region track).
+    // An edge is kept iff AT LEAST ONE endpoint sits on a listed track. The single
+    // cpu_thread track carries regions 1/2/3, so scoping to it keeps region1's three
+    // legs (source-only membership) plus region2->region3 (both endpoints), and drops
+    // the kd/mc/ma sibling edges (neither endpoint on a region track).
     auto cpu = find_first_track(m_reader->get_tracks(),
                                 profiler_hub::reader_types::track_type_t::cpu_thread);
     ASSERT_NE(cpu, nullptr);
     EXPECT_EQ(m_reader->get_flows_in_window({ cpu->id }, {}, 0).size(), 4U);
 
-    // Empty track list applies no filter.
     EXPECT_EQ(m_reader->get_flows_in_window({}, {}, 0).size(), 7U);
 }
 
 TEST_F(reader_v3_clique_test, get_flows_in_window_decimates_by_latency_stably)
 {
-    // Criterion 7(d): cap to max_edges by descending arrow-span latency. region1's three
-    // legs have the only nonzero latencies (500 > 300 > 100), so max_edges 3 returns
-    // exactly those three; the four zero-latency sibling edges are dropped.
+    // Cap to max_edges by descending arrow-span latency. region1's three legs have the
+    // only nonzero latencies (500 > 300 > 100), so max_edges 3 returns exactly those
+    // three; the four zero-latency sibling edges are dropped.
     using et  = profiler_hub::reader_types::event_type_t;
     auto top3 = m_reader->get_flows_in_window({}, {}, 3);
     ASSERT_EQ(top3.size(), 3U);
@@ -509,7 +471,6 @@ TEST_F(reader_v3_clique_test, get_flows_in_window_decimates_by_latency_stably)
     EXPECT_EQ(top3.front().source, region1);
     EXPECT_EQ(top3.front().dest, make_event_id(et::memory_allocate, 1));
 
-    // Stable: an identical query yields an identical ordering across calls.
     auto again = m_reader->get_flows_in_window({}, {}, 3);
     ASSERT_EQ(again.size(), top3.size());
     for(size_t i = 0; i < top3.size(); ++i)
@@ -524,11 +485,10 @@ TEST_F(reader_v3_clique_test, get_flows_in_window_decimates_by_latency_stably)
 }
 
 // ---------------------------------------------------------------------------
-// Flow-ordering / tie-break fixture: reproduces rocpd_v3_flow_order_data.sql.
-// Crafts the two degenerate-but-legitimate shapes the clique fixture never hits:
-// two endpoints at an identical start (equal-start direction tie-break) and two
-// same-source legs at identical (clamped-zero) latency (windowed decimation
-// final dest tie-break). parent_stack_id NULL throughout.
+// Flow-ordering / tie-break fixture: crafts the two degenerate-but-legitimate
+// shapes the clique fixture never hits — an equal-start pair (direction tie-break)
+// and two same-source legs at identical clamped-zero latency (windowed decimation
+// dest tie-break). parent_stack_id NULL throughout.
 // ---------------------------------------------------------------------------
 class reader_v3_flow_order_test : public reader_test
 {
@@ -539,17 +499,14 @@ protected:
         auto writer = make_writer();
         seed_flow_identity(*writer);
 
-        // regions 1..3
         seed_region(*writer, 1000, 5000, 5100);  // region 1 (equal-start pair)
         seed_region(*writer, 1000, 5000, 5100);  // region 2 (equal-start pair)
         seed_region(*writer, 2000, 6000, 6500);  // region 3 (encloses its children)
 
-        // kernel dispatches 1..3
         seed_kernel_dispatch(*writer, 2000, 6100, 6200);  // kd 1 (inside region 3)
         seed_kernel_dispatch(*writer, 3000, 7000, 7100);  // kd 2 (equal-start pair)
         seed_kernel_dispatch(*writer, 3000, 7000, 7100);  // kd 3 (equal-start pair)
 
-        // memory copy 1
         seed_memory_copy(*writer, 2000, 6200, 6300);  // mc 1 (inside region 3)
 
         writer->flush_in_memory_data_to_disk();
@@ -564,12 +521,10 @@ TEST_F(reader_v3_flow_order_test, equal_start_region_pair_tie_breaks_by_handle_o
 {
     using et = profiler_hub::reader_types::event_type_t;
     using fk = profiler_hub::reader_types::flow_kind_t;
-    // Stack 1000 = { region 1, region 2 } BOTH start 5000, parent_stack_id NULL. Neither
-    // parent-lineage branch fires and the start-ts branch cannot decide (starts are
-    // identical), so direction falls to the deterministic equal-start tie-break:
-    // src = key.first (the lower event_id_t handle), dst = key.second. region 1 (row id
-    // 1) mints a lower handle than region 2, so the single surviving directed edge MUST
-    // be region 1 -> region 2 (never the reverse).
+    // Stack 1000: region 1 and region 2 both start at 5000 with parent_stack_id NULL,
+    // so neither the lineage nor start-ts branch can decide; direction falls to the
+    // tie-break src = lower event_id_t handle. region 1's handle is lower, so the edge
+    // must be region 1 -> region 2 (never the reverse).
     const auto r1 = make_event_id(et::region, 1);
     const auto r2 = make_event_id(et::region, 2);
     ASSERT_TRUE(r1 < r2) << "test premise: lower row id mints the lower handle";
@@ -616,32 +571,24 @@ TEST_F(reader_v3_flow_order_test, equal_start_kd_siblings_tie_break_by_handle_or
 TEST_F(reader_v3_flow_order_test, window_decimation_tie_breaks_equal_latency_by_dest)
 {
     using et = profiler_hub::reader_types::event_type_t;
-    // Stack 2000: region 3 [6000,6500] sources kd 1 (start 6100) and mc 1 (start 6200);
-    // both children start BEFORE region 3 ends, so both arrow-span latencies
-    // (dst.start - src.end) clamp to 0 -> EQUAL latency, and both share source region 3.
-    // A window that admits only these two edges, capped at max_edges = 1, forces the
-    // decimation sort to compare two flows with equal latency AND equal source -> the
-    // final tie-break `a.dest < b.dest` decides. kd 1's handle < mc 1's handle
-    // (event_type kernel_dispatch < memory_copy), so the survivor MUST be region 3 ->
-    // kd 1.
+    // Stack 2000: region 3 [6000,6500] sources kd1 (6100) and mc1 (6200); both start
+    // before region 3 ends, so both arrow-span latencies clamp to 0 — equal latency AND
+    // equal source, forcing the decimation tie-break `a.dest < b.dest`. kd1's handle <
+    // mc1's, so the survivor must be region 3 -> kd1.
     profiler_hub::reader_types::time_window_t win;
     win.start = 6000;
     win.end   = 6600;  // excludes the stack-1000 (5000) and stack-3000 (7000) edges
 
-    // Uncapped, the window admits exactly the two zero-latency same-source legs.
     auto both = m_reader->get_flows_in_window({}, win, 0);
     ASSERT_EQ(both.size(), 2U);
     for(const auto& f : both)
         EXPECT_EQ(f.source, make_event_id(et::region, 3));
 
-    // Capped at 1: the equal-latency, equal-source pair is tie-broken by dest handle,
-    // keeping the lower dest (kd 1) and dropping mc 1.
     auto top1 = m_reader->get_flows_in_window({}, win, 1);
     ASSERT_EQ(top1.size(), 1U);
     EXPECT_EQ(top1.front().source, make_event_id(et::region, 3));
     EXPECT_EQ(top1.front().dest, make_event_id(et::kernel_dispatch, 1));
 
-    // Deterministic across calls (stable ranking, the design contract backstops).
     auto again = m_reader->get_flows_in_window({}, win, 1);
     ASSERT_EQ(again.size(), 1U);
     EXPECT_EQ(again.front().source, top1.front().source);
@@ -693,9 +640,7 @@ TEST_F(reader_v3_flow_order_test, full_flow_set_matches_oracle)
 // ---------------------------------------------------------------------------
 // Flat-clique edge fixture: the single flow test carried over from the edge
 // fixture. Each non-zero stack is one region + one GPU event (region source,
-// one GPU-type dest, no siblings); stack 0 is a lone excluded region. The other
-// 17 edge tests (counter/track/interval/scalar/stream/etc.) are a deferred SQL
-// port chunk — they are not flow tests and are not writer-seedable here.
+// one GPU-type dest, no siblings); stack 0 is a lone excluded region.
 // ---------------------------------------------------------------------------
 class reader_v3_edge_flow_test : public reader_test
 {
@@ -706,7 +651,6 @@ protected:
         auto writer = make_writer();
         seed_flow_identity(*writer);
 
-        // Three flat cliques (region + one GPU event each) + one excluded stack-0 region.
         seed_region(*writer, 100, 1000, 1100);  // region A (stack 100)
         seed_region(*writer, 200, 2000, 2100);  // region B (stack 200)
         seed_region(*writer, 400, 3000, 3100);  // region C (stack 400)
@@ -745,33 +689,14 @@ TEST_F(reader_v3_edge_flow_test, get_flows_excludes_zero_and_null_stack_id)
         ASSERT_TRUE(m_reader->get_event_info(f.source).has_value());
         ASSERT_EQ(count_interval_resolutions(*m_reader, f.dest), 1);
         ASSERT_NE(type_of(f.dest), profiler_hub::reader_types::event_type_t::region);
-        // Directed/typed: excluded stacks (0/NULL) never appear, so every flow_id is a
-        // non-zero source stack_id; kind is a cross-type region->gpu category.
         ASSERT_GT(flow_id_value(f.flow_id), 0U);
         ASSERT_TRUE(f.kind == fk::launch_to_dispatch ||
                     f.kind == fk::copy_submit_to_exec);
     }
 }
 
-// ===========================================================================
-// Edge-matrix NON-flow tests (ported from pre-rebase cac3369ac5). Chunk 2 of
-// the mixed-policy port wave. The pre-rebase reader_v3_edge_test
-// loaded a single SQL fixture (rocpd_v3_edge.db) for all 17 non-flow tests; the
-// DL-015 3-way split re-homes them by seed mechanism:
-//   * (c) 9 writer-portable behaviors -> reader_v3_edge_test below, reproduced
-//     through writer_t::insert_*_data + insert_pmc_event_data (counters).
-//   * (a) 2 degenerate + (b) 6 writer-id-blocked -> reader_v3_edge_sql_test,
-//     which still loads the SQL fixture (bare non-pmc sample track a correct
-//     writer must never emit; rocpd_arg on kd/mc/ma; counter/track identity via
-//     register_track_info) — see that fixture's header.
-// Assertions are preserved verbatim; only the seeding mechanism moved.
-// ===========================================================================
-
-// Writer-seeded reproduction of the edge oracle's non-counter matrix + its two
-// discoverable counters. The one off-by-one vs. the 1-based SQL fixture is agent
-// id: agent primary keys are 0-based (source/autoincrementer.hpp), but the
-// memory-track test asserts agent_info->id == 1, so a throwaway agent is
-// registered first, landing the real {GPU,0} agent (used by kd + alloc) at id 1.
+// Writer-seeded reproduction of the edge oracle's non-counter matrix plus its
+// two discoverable counters.
 class reader_v3_edge_test : public reader_test
 {
 protected:
@@ -790,14 +715,10 @@ protected:
         seed_named_region(*writer, "RegionAlpha", 100, 1000, 5000);  // region id 2
         seed_named_region(*writer, "RegionDelta", 400, 6000, 6500);  // region id 3
 
-        // 3 kernel dispatches: Queue-A (1) = kd@1200 + kd@1600, Queue-B (2) = kd@1400.
-        // All on stream 1.
         seed_kd(*writer, /*queue*/ 1, /*stream*/ 1, 1200, 1300);
         seed_kd(*writer, /*queue*/ 2, /*stream*/ 1, 1400, 1500);
         seed_kd(*writer, /*queue*/ 1, /*stream*/ 1, 1600, 1700);
 
-        // 3 memory copies: all dst_agent NULL -> ONE dma track [2100,2200,2400].
-        // stream 1 gets 2100 + 2200, stream 2 gets 2400.
         seed_mc(*writer, /*stream*/ 1, 2100, 2150);
         seed_mc(*writer, /*stream*/ 1, 2200, 2250);
         seed_mc(*writer, /*stream*/ 2, 2400, 2450);
@@ -863,8 +784,8 @@ protected:
 
         // Throwaway stream registered first so its 0-based primary key is 0, leaving
         // the two real streams at primary keys 1 and 2 (the reader keys stream_info by
-        // primary key, and the ported tests expect the 6-event stream at stream_id 1).
-        // It carries no events, so it never surfaces as a synthesized stream track.
+        // primary key; stream_id 1 must carry the 6-event stream). It carries no events,
+        // so it never surfaces as a synthesized stream track.
         {
             writer_types::stream_info_t dummy_stream;
             dummy_stream.stream_id  = 99;
@@ -985,11 +906,9 @@ protected:
         writer.insert_memory_alloc_data(memory_alloc_data, trace_environment);
     }
 
-    // Register a PMC + a track, then insert one PMC-backed sample per (ts,value).
-    // insert_pmc_event_data inserts an event, a rocpd_pmc_event row (making the
-    // track discoverable as a counter), and a rocpd_sample on the shared track;
-    // the counter's display name resolves to the PMC name. pmc/track names are
-    // string_view — callers must pass string literals (static storage).
+    // Registers a PMC + track, then inserts one PMC-backed sample per (ts, value).
+    // pmc/track names are string_view — callers must pass string literals (static
+    // storage).
     void seed_counter(
         writer_t&                                                        writer,
         std::string_view                                                 pmc_name,
@@ -1142,11 +1061,10 @@ TEST_F(reader_v3_edge_test, track_scoped_queries_respect_type)
 
 TEST_F(reader_v3_edge_test, get_track_stats_matches_slices_for_every_track_type)
 {
-    // Hand-authored oracle: the 4-region cpu_thread track spans start 1000..end 6000+.
-    // For every track, stats must equal MIN/MAX/COUNT over the exact interval/scalar
-    // slice — this covers cpu_thread, gpu_queue, dma (here the "neither" variant:
-    // queue_id NULL + dst_agent_id NULL; the queue+agent "qa" variant is covered by the
-    // dma-by-agent fixture) and counter in one pass, per synthesized track flavor.
+    // Stats must equal MIN/MAX/COUNT over the exact interval/scalar slice for every
+    // track — covering cpu_thread, gpu_queue, dma (the queue_id+dst_agent_id NULL
+    // "neither" variant; the "qa" variant is covered by the dma-by-agent fixture),
+    // and counter in one pass.
     auto tracks = m_reader->get_tracks();
 
     bool checked_cpu = false;
@@ -1209,14 +1127,12 @@ TEST_F(reader_v3_edge_test, get_track_stats_matches_slices_for_every_track_type)
 
 TEST_F(reader_v3_edge_test, get_interval_track_stream_aggregates_three_op_kinds)
 {
-    // This is the only fixture exercising all THREE UNION legs of a stream track,
-    // including memory_allocate. Hand-authored oracle:
-    //   stream 1 (nid,pid,stream_id)=(1,1,1): 3 kernel_dispatch + 2 memory_copy +
-    //       1 memory_allocate = 6 events, ORDER BY start:
-    //       kd3(1200) kd2(1400) kd1(1600) mc3(2100) mc1(2200) ma1(6100)
-    //   stream 2 (1,1,2): 1 memory_copy = 1 event (mc2 start 2400)
-    // op_kind is retired: each event's opaque handle encodes its type and resolves
-    // through exactly one get_*_details() accessor, which is what we assert here.
+    // The only fixture exercising all three UNION legs of a stream track, including
+    // memory_allocate. Oracle: stream 1 (1,1,1) = 3 kernel_dispatch + 2 memory_copy +
+    // 1 memory_allocate = 6 events, ORDER BY start: kd3(1200) kd2(1400) kd1(1600)
+    // mc3(2100) mc1(2200) ma1(6100). Stream 2 (1,1,2) = 1 memory_copy (mc2, 2400).
+    // op_kind is retired: each handle resolves through exactly one get_*_details()
+    // accessor, which is what's asserted here.
     auto tracks  = m_reader->get_tracks();
     auto streams = find_tracks(tracks, profiler_hub::reader_types::track_type_t::stream);
     ASSERT_EQ(streams.size(), 2U);
@@ -1313,7 +1229,6 @@ TEST_F(reader_v3_edge_test, get_interval_track_memory_type_interval_and_identity
     ASSERT_EQ(mem_trk.size(), 1U);
 
     const auto& t = mem_trk.front();
-    // agent_info must be populated (agent_id=1); queue_info null (queue_id IS NULL).
     ASSERT_NE(t->agent_info, nullptr);
     EXPECT_EQ(t->agent_info->id, 1U);
     EXPECT_EQ(t->queue_info, nullptr);
@@ -1323,7 +1238,6 @@ TEST_F(reader_v3_edge_test, get_interval_track_memory_type_interval_and_identity
     EXPECT_EQ(intervals.front().start, 6100U);
     EXPECT_EQ(intervals.front().end, 6200U);
 
-    // the handle must resolve through get_event_info() as a memory_allocate event.
     ASSERT_EQ(type_of(intervals.front().id),
               profiler_hub::reader_types::event_type_t::memory_allocate);
     auto details = m_reader->get_event_info(intervals.front().id);
@@ -1343,8 +1257,6 @@ TEST_F(reader_v3_edge_test, get_interval_track_memory_type_interval_and_identity
 
 TEST_F(reader_v3_edge_test, get_track_stats_memory_type_matches_interval_slice)
 {
-    // get_track_stats() must return the same count/min/max as the interval slice for
-    // the memory track.
     auto tracks  = m_reader->get_tracks();
     auto mem_trk = find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory);
     ASSERT_EQ(mem_trk.size(), 1U);
@@ -1355,14 +1267,13 @@ TEST_F(reader_v3_edge_test, get_track_stats_memory_type_matches_interval_slice)
 }
 
 // ===========================================================================
-// SQL-seeded edge tests (DL-015 buckets (a) + (b)). These load the committed
-// SQL fixture (fixtures/rocpd_v3_edge_data.sql -> rocpd_v3_edge.db, built at
-// configure time). (a) is the permanent escape-hatch: a bare non-pmc rocpd_sample
-// track a correct writer must never emit. (b) is writer-id-blocked NOW and is
-// flagged for a future writer task: rocpd_arg rows on kernel_dispatch/memory_copy/
-// memory_allocate events (writer only carries args on regions) and counter/track
-// identity (NULL pid/tid, empty-pmc-name fallback) authored directly on
-// rocpd_track. Assertions are the pre-rebase originals, verbatim.
+// SQL-seeded edge tests: load the committed SQL fixture (fixtures/
+// rocpd_v3_edge_data.sql -> rocpd_v3_edge.db, built at configure time) because
+// the writer cannot yet produce these shapes: a bare non-pmc rocpd_sample track
+// (a correct writer must never emit one), rocpd_arg rows on kernel_dispatch/
+// memory_copy/memory_allocate events (the writer only carries args on regions),
+// and counter/track identity with NULL pid/tid or an empty-pmc-name fallback,
+// authored directly on rocpd_track.
 // ===========================================================================
 class reader_v3_edge_sql_test : public ::testing::Test
 {
@@ -1426,7 +1337,6 @@ TEST_F(reader_v3_edge_sql_test, counter_discovery_excludes_non_pmc_sample_track)
     auto tracks = m_reader->get_tracks();
     auto counters =
         find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
-    // Primary signal: only the 4 PMC-backed sample tracks (2, 3, 6, 8) are counters.
     ASSERT_EQ(counters.size(), 4U);
     // Corroborating signal: every counter is PMC-backed, so each resolves to a
     // non-empty scalar track. The spurious non-PMC track 7 would resolve to zero.
@@ -1456,9 +1366,7 @@ TEST_F(reader_v3_edge_sql_test, counter_identity_null_pid_and_null_tid_branches)
         else
             ++without_process;
     }
-    // Exactly one counter track carries a resolved thread (tid set -- track 3).
     ASSERT_EQ(with_thread, 1);
-    // Exactly one carries no process (pid NULL -- track 6); tracks 2/3/8 do.
     ASSERT_EQ(without_process, 1);
     ASSERT_EQ(with_process, 3);
 }
@@ -1487,11 +1395,11 @@ TEST_F(reader_v3_edge_sql_test, counter_thread_info_tracks_tid_agent_info_always
     ASSERT_NE(with_tid_counter, nullptr)
         << "counter display name should be its PMC name (Q9)";
 
-    // Branch 1: counter with tid NULL -> thread_info null.
     ASSERT_EQ(no_tid_counter->thread_info, nullptr);
     ASSERT_EQ(no_tid_counter->agent_info, nullptr);
 
-    // Branch 2: counter WITH tid -> thread_info populated (the case rocpd.db lacks).
+    // Counter WITH tid -> thread_info populated; a case real capture DBs don't
+    // exercise, hence the synthetic fixture.
     ASSERT_NE(with_tid_counter->thread_info, nullptr);
     ASSERT_EQ(with_tid_counter->agent_info, nullptr);
 }
@@ -1517,9 +1425,7 @@ TEST_F(reader_v3_edge_sql_test, counter_display_name_falls_back_to_track_name_on
     }
     ASSERT_NE(fallback_counter, nullptr) << "fallback counter track not found";
 
-    // Primary assertion: display name equals rocpd_track.name (the fallback value).
     ASSERT_EQ(fallback_counter->name, "FallbackCounter");
-    // Sanity: non-empty, not garbage.
     ASSERT_FALSE(fallback_counter->name.empty());
     // pmc_info: pmc_id=99 is in rocpd_info_pmc with empty name -> pmc_info IS attached
     // but carries an empty name, which is exactly what triggers the fallback guard.
@@ -1539,8 +1445,6 @@ TEST_F(reader_v3_edge_sql_test, counter_display_name_falls_back_to_track_name_on
     ASSERT_EQ(with_pmc_name_match, 3U);
 }
 
-// Scan a track's interval handles for the get_event_info whose property bag
-// contains `arg_key`, and return that value (or nullptr if none carries it).
 static const profiler_hub::reader_types::arg_value_t*
 find_folded_arg_on_track(const profiler_hub::reader_t&                       r,
                          const profiler_hub::reader_types::track_info_ptr_t& track,

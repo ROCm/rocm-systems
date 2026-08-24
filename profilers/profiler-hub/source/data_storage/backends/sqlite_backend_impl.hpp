@@ -252,19 +252,12 @@ database_backend<SqlitePolicy>::discover_uuids()
         std::string uuid;
     };
 
-    // Recover the node UUID(s) encoded in this database's rocpd table suffixes.
-    //
-    // Preferred path: read the authoritative rocpd_info_node.guid column and
-    // normalize '-'->'_' to match the underscore suffix the reader concatenates as
-    // `rocpd_X_<uuid>`. rocpd_metadata.uuid is deliberately NOT used: it stores a
-    // LEADING-underscore variant (`_00001eca_...`) that would double the separator
-    // when concatenated.
-    //
-    // Fallback path: schema-only databases built from rocpd_tables.sql without
-    // rocpd_views.sql (e.g. some generated unit fixtures) have no unsuffixed
-    // rocpd_info_node view to read guid from. For those, derive the UUID from the
-    // suffixed rocpd_info_node table name by taking everything after the
-    // `rocpd_info_node_` prefix. DISTINCT (both paths) preserves multi-node enumeration.
+    // Preferred: read rocpd_info_node.guid, normalizing '-'->'_' to match the
+    // `rocpd_X_<uuid>` suffix format. rocpd_metadata.uuid is NOT used: its
+    // leading-underscore variant would double the separator.
+    // Fallback (schema-only DBs with no rocpd_info_node view): parse the UUID
+    // from the suffixed table name instead. DISTINCT preserves multi-node
+    // enumeration in both paths.
     struct count_result
     {
         std::int64_t value{ 0 };

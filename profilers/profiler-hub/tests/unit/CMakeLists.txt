@@ -102,13 +102,8 @@ if(
     target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
 endif()
 
-# Synthetic v3 edge-matrix fixture, generated at build time from committed SQL.
-# The v3 schema is canonical at source/data_storage/schema/rocpd_tables.sql, so we
-# reference it directly to avoid a drifting duplicate. The {{uuid}}/{{guid}}
-# placeholders are substituted exactly as get_schema_query() does, then fed
-# through the sqlite3 CLI. The db has no rocpd_timestamp table, so the reader
-# selects the v3 backend. It seeds the two degenerate (bare non-pmc sample track)
-# and the six writer-id-blocked (rocpd_arg on kd/mc/ma; counter/track identity)
+# Synthetic v3 edge-matrix fixture: seeds the two degenerate (bare non-pmc sample
+# track) and six writer-id-blocked (rocpd_arg on kd/mc/ma; counter/track identity)
 # edge tests that cannot be expressed through the current writer API. Regenerate:
 #   uuid=00000000000000000000000000e30003
 #   sed -e "s/{{uuid}}/_$uuid/g" -e "s/{{guid}}/$uuid/g" \
@@ -168,11 +163,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_EDGE_PATH="${ROCPD_DB_V3_EDGE_PATH}"
 )
 
-# Synthetic v3 kernel_dispatch_pmc fixture, generated at build time from committed
-# SQL against the canonical v3 schema (same mechanism as the edge fixture above).
-# Encodes two PMC types across three kernel_dispatch rows so both track discovery
-# and get_interval_track() can be asserted on real values. The db has no
-# rocpd_timestamp table, so the reader selects the v3 backend.
+# Synthetic v3 kernel_dispatch_pmc fixture: encodes two PMC types across three
+# kernel_dispatch rows so both track discovery and get_interval_track() can be
+# asserted on real values.
 set(_v3p_uuid "0000000000000000000000000b030003")
 set(_v3p_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -218,11 +211,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_KD_PMC_PATH="${ROCPD_DB_V3_KD_PMC_PATH}"
 )
 
-# Synthetic v3 track-shapes fixture, generated at build time from committed SQL
-# against the canonical v3 schema (same mechanism as the kd_pmc fixture above).
-# Carries one track of each v3 dma / memory / cpu_thread shape the other v3
-# fixtures leave dark in get_track_stats / get_interval_track. The db has no
-# rocpd_timestamp table, so the reader selects the v3 backend.
+# Synthetic v3 track-shapes fixture: carries one track of each v3 dma / memory /
+# cpu_thread shape the other v3 fixtures leave dark in get_track_stats /
+# get_interval_track.
 set(_v3s_uuid "00000000000000000000000000730003")
 set(_v3s_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -271,10 +262,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_TRACK_SHAPES_PATH="${ROCPD_DB_V3_TRACK_SHAPES_PATH}"
 )
 
-# Synthetic v4.0 kernel_dispatch_pmc fixture, generated at build time from committed
-# SQL against the bundled v4.0 schema (no canonical v4.0 DDL lives in-tree, so the
-# schema copy ships in fixtures/). Mirrors the v3 fixture data shape; the presence
-# of rocpd_timestamp makes the reader select the v4 backend.
+# Synthetic v4.0 kernel_dispatch_pmc fixture. No canonical v4.0 DDL lives
+# in-tree; the schema copy ships in fixtures/. Mirrors the v3 fixture's data
+# shape.
 set(_v4p_uuid "0000000000000000000000000b040004")
 set(_v4p_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_kd_pmc_data.sql)
 set(_v4p_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_kd_pmc_gen.sql)
@@ -313,11 +303,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_KD_PMC_PATH="${ROCPD_DB_V4_KD_PMC_PATH}"
 )
 
-# Synthetic v4.0 counter/scalar fixture, generated at build time from committed SQL
-# against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
-# No real v4.0 capture available to the project contains rocpd_sample rows, so this is
-# the only way to positively exercise the v4.0 scalar/counter path; the presence of
-# rocpd_timestamp makes the reader select the v4 backend.
+# Synthetic v4.0 counter/scalar fixture. No real v4.0 capture available to the
+# project contains rocpd_sample rows, so this is the only way to positively
+# exercise the v4.0 scalar/counter path.
 set(_v4c_uuid "00000000000000000000000000c00001")
 set(_v4c_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_counter_data.sql)
 set(_v4c_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_counter_gen.sql)
@@ -357,12 +345,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_COUNTER_PATH="${ROCPD_DB_V4_COUNTER_PATH}"
 )
 
-# Synthetic v4.0 memory_activity fixture, generated at build time from committed SQL
-# against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
-# No real v4.0 capture available to the project carries the memory_activity shape, so
-# this SQL fixture is the only way to positively exercise the v4.0 memory-activity
-# scalar/interval path; the presence of rocpd_timestamp makes the reader select the
-# v4 backend.
+# Synthetic v4.0 memory_activity fixture. No real v4.0 capture available to the
+# project carries the memory_activity shape, so this is the only way to
+# positively exercise the v4.0 memory-activity scalar/interval path.
 set(_v4m_uuid "0000000000000000000000000c020002")
 set(_v4m_data_src
     ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_mem_activity_data.sql
@@ -404,11 +389,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_MEM_ACTIVITY_PATH="${ROCPD_DB_V4_MEM_ACTIVITY_PATH}"
 )
 
-# Synthetic v3 memory_activity fixture, generated at build time from committed SQL
-# against the canonical v3 schema (same mechanism as the v3 kd_pmc fixture above).
-# Exercises get_scalar_track(memory_activity) on the v3 backend: cumulative per-agent
-# running sum with FREE agent_id recovery via address self-join. The db has no
-# rocpd_timestamp table, so the reader selects the v3 backend.
+# Synthetic v3 memory_activity fixture: exercises get_scalar_track(memory_activity)
+# with a cumulative per-agent running sum and FREE agent_id recovery via address
+# self-join.
 set(_v3m_uuid "0000000000000000000000000c010001")
 set(_v3m_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -457,11 +440,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_MEM_ACTIVITY_PATH="${ROCPD_DB_V3_MEM_ACTIVITY_PATH}"
 )
 
-# Synthetic v3 memory_activity time-window fixture, generated at build time from
-# committed SQL against the canonical v3 schema (same mechanism as the v3 kd_pmc
-# fixture above). ALLOC/FREE rows straddle a chosen window so the time-window
-# `continue` filters in get_scalar_track(memory_activity) all fire. The db has no
-# rocpd_timestamp table, so the reader selects the v3 backend.
+# Synthetic v3 memory_activity time-window fixture: ALLOC/FREE rows straddle a
+# chosen window so every time-window `continue` filter in
+# get_scalar_track(memory_activity) fires.
 set(_v3mw_uuid "00000000000000000000000000730045")
 set(_v3mw_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -516,10 +497,8 @@ target_compile_definitions(
         ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH="${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}"
 )
 
-# Synthetic v4.0 summary/GROUP-BY-name fixture, generated at build time from committed
-# SQL against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
-# Shares the by-construction oracle with the v3 summary fixture so both reader backends
-# assert identical aggregates; the presence of rocpd_timestamp selects the v4 backend.
+# Synthetic v4.0 summary/GROUP-BY-name fixture: shares its by-construction oracle
+# with the v3 summary fixture so both reader backends assert identical aggregates.
 set(_v4s_uuid "00000000000000000000000000740050")
 set(_v4s_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_summary_data.sql)
 set(_v4s_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_summary_gen.sql)
@@ -559,11 +538,8 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_SUMMARY_PATH="${ROCPD_DB_V4_SUMMARY_PATH}"
 )
 
-# Synthetic v3 summary/GROUP-BY-name fixture, generated at build time from committed
-# SQL against the in-tree v3 schema (rocpd_metadata DML stripped -- the modern sqlite3
-# CLI rejects it). Shares the by-construction oracle with the v4 summary fixture so both
-# reader backends assert identical aggregates; the absence of rocpd_timestamp selects the
-# v3 backend.
+# Synthetic v3 summary/GROUP-BY-name fixture: shares its by-construction oracle
+# with the v4 summary fixture so both reader backends assert identical aggregates.
 set(_v3s_uuid "00000000000000000000000000730050")
 set(_v3s_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -610,11 +586,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_SUMMARY_PATH="${ROCPD_DB_V3_SUMMARY_PATH}"
 )
 
-# Synthetic v3 missing-metadata naming-fallback fixture, generated at build time from
-# committed SQL against the in-tree v3 schema (rocpd_metadata DML stripped -- the modern
-# sqlite3 CLI rejects it). An unnamed stream, a region on an absent thread, a region on a
-# NULL-named thread, and an agent with a NULL type_index light the synthetic-name / dropped-
-# agent fallbacks; the absence of rocpd_timestamp selects the v3 backend.
+# Synthetic v3 missing-metadata naming-fallback fixture: an unnamed stream, a
+# region on an absent thread, a region on a NULL-named thread, and an agent with
+# a NULL type_index light the synthetic-name / dropped-agent fallbacks.
 set(_v3mm_uuid "00000000000000000000000000730048")
 set(_v3mm_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -663,9 +637,6 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_MISSING_META_PATH="${ROCPD_DB_V3_MISSING_META_PATH}"
 )
 
-# Synthetic v4.0 ambiguous-pmc fixture, generated at build time from committed SQL
-# against the bundled v4.0 schema (reused unchanged from the kd_pmc fixture above).
-# The presence of rocpd_timestamp makes the reader select the v4 backend.
 set(_v4ap_uuid "0000000000000000000000000a014004")
 set(_v4ap_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_amb_pmc_data.sql)
 set(_v4ap_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_amb_pmc_gen.sql)
@@ -705,10 +676,6 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_AMB_PMC_PATH="${ROCPD_DB_V4_AMB_PMC_PATH}"
 )
 
-# Synthetic v4.0 ambiguous-classification fixture, generated at build time from
-# committed SQL against the bundled v4.0 schema (reused unchanged from the kd_pmc
-# fixture above). The presence of rocpd_timestamp makes the reader select the v4
-# backend.
 set(_v4ac_uuid "0000000000000000000000000a018001")
 set(_v4ac_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_amb_cls_data.sql)
 set(_v4ac_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_amb_cls_gen.sql)
@@ -748,11 +715,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V4_AMB_CLS_PATH="${ROCPD_DB_V4_AMB_CLS_PATH}"
 )
 
-# Synthetic v3 ambiguous-pmc fixture, generated at build time from committed SQL
-# against the canonical v3 schema (same mechanism as the kd_pmc fixture above).
-# One ambiguous pmc_id (2 rocpd_pmc_event rows per event_id) and one clean pmc_id,
-# so get_all_pmc_info() ambiguity detection can be asserted. The db has no
-# rocpd_timestamp table, so the reader selects the v3 backend.
+# Synthetic v3 ambiguous-pmc fixture: one ambiguous pmc_id (2 rocpd_pmc_event
+# rows per event_id) and one clean pmc_id, so get_all_pmc_info() ambiguity
+# detection can be asserted.
 set(_v3ap_uuid "0000000000000000000000000a014003")
 set(_v3ap_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -799,12 +764,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_AMB_PMC_PATH="${ROCPD_DB_V3_AMB_PMC_PATH}"
 )
 
-# Synthetic v3 dma-by-destination-agent fixture, generated at build time from
-# committed SQL against the canonical v3 schema (same mechanism as the kd_pmc
-# fixture above). 48 memory copies fully cross two destination agents and two
-# streams (12 per cell) on one queue, so dma tracks keyed by dst_agent_id yield
-# exactly two agent-tracks spanning both streams. The db has no rocpd_timestamp
-# table, so the reader selects the v3 backend.
+# Synthetic v3 dma-by-destination-agent fixture: 48 memory copies fully cross two
+# destination agents and two streams (12 per cell) on one queue, so dma tracks
+# keyed by dst_agent_id yield exactly two agent-tracks spanning both streams.
 set(_v3da_uuid "00000000000000000000000000d30003")
 set(_v3da_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
@@ -853,12 +815,9 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_DMA_AGENT_PATH="${ROCPD_DB_V3_DMA_AGENT_PATH}"
 )
 
-# Synthetic v3 bracket-in-name counter fixture, generated at build time from
-# committed SQL against the canonical v3 schema (same mechanism as the kd_pmc
-# fixture above). A single counter track whose metric name itself contains " ["
-# ("TCC_HIT [sum] [0]") defeats the ordinal strip, so pmc resolution falls to the
-# pmc_id tiebreaker. The db has no rocpd_timestamp table, so the reader selects
-# the v3 backend.
+# Synthetic v3 bracket-in-name counter fixture: a counter track whose metric name
+# itself contains " [" ("TCC_HIT [sum] [0]") defeats the ordinal strip, so pmc
+# resolution falls to the pmc_id tiebreaker.
 set(_v3bn_uuid "00000000000000000000000000630063")
 set(_v3bn_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql

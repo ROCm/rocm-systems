@@ -56,8 +56,6 @@ expect_kernel_summary_oracle(const profiler_hub::reader_t& reader)
     ASSERT_NE(ka, nullptr);
     ASSERT_NE(kb, nullptr);
 
-    // kA(int) spans TWO kernel_symbol ids (1 and 3) that resolve to the same
-    // display name; the single count-3 bucket proves the merge fired.
     EXPECT_EQ(ka->count, 3U);
     EXPECT_EQ(ka->total_duration, 600U);
     EXPECT_EQ(ka->min_duration, 100U);
@@ -114,7 +112,6 @@ expect_windowed_kernel_summary(const profiler_hub::reader_t& reader)
     EXPECT_EQ(ka->total_duration, 500U);  // 300 (kd2) + 200 (kd4)
     EXPECT_EQ(kb->count, 1U);             // kd3 [3000,3050] still inside the window
 
-    // Prove the window actually dropped a row rather than being ignored.
     auto        full    = reader.get_kernel_summary();
     const auto* ka_full = find_summary(full, "kA(int)");
     ASSERT_NE(ka_full, nullptr);

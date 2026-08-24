@@ -26,15 +26,11 @@ namespace profiler_hub
 
 namespace
 {
-// The per-track nesting_model assignment. Region (cpu_thread) is the ONLY track whose
-// overlapping intervals are a genuine synchronous call tree (HIP->HSA API nesting) ->
-// `stack`, so its events carry a containment parent. Every other track's overlaps are
-// concurrency, not containment (a kernel dispatch overlapping another is not its child;
-// memory copies, streams, PMC/memory-activity samples likewise) -> `lane`, parent always
-// no-parent.
-// schema_version is stored as "3" (v3) or "4.0.0"/"4.1.0" (v4); the leading integer is
-// the major version. Returns -1 when there is no leading digit so the caller can fall
-// through to the metadata-less detection path rather than guess a version.
+// cpu_thread is the only track type with real containment (HIP->HSA call nesting) ->
+// `stack`; every other track type overlaps concurrently, not as parent/child -> `lane`.
+// schema_version is "3" (v3) or "4.0.0"/"4.1.0" (v4); leading integer is the major
+// version. Returns -1 when there is no leading digit, so the caller falls through to
+// the metadata-less detection path instead of guessing.
 int
 schema_major_from_version(const std::string& version)
 {
@@ -70,26 +66,8 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
                           "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 {
-    // Version dispatch: the read backend is selected ONCE here, off the AUTHORITATIVE
-    // rocpd_metadata.schema_version VALUE, so every
-    // m_read_statements->foo() call site downstream stays schema-agnostic and there is no
-    // per-call schema sniffing. Detection is binary: major version 4 (covers BOTH v4.0 =
-    // "4.0.0" AND v4.1 = "4.1.0") selects the v4 backend, 3 selects v3. Reading the
-    // stored version rather than inferring it from the presence of the convention-named
-    // rocpd_timestamp_{uuid} table removes a hidden coupling to get_uuid(): a truncated
-    // uuid used to make that existence probe miss and misdetect a real v4 DB as v3.
-    // schema_version_major is NOT used — it is an unsubstituted "{{...}}" placeholder on
-    // templated captures, whereas schema_version itself is always concrete.
-    //
-    // Three tiers (mirroring discover_uuids' probe-then-read) keep every input shape
-    // green; each SELECT is prepared only after sqlite_master confirms its object exists,
-    // because preparing a read against a missing view/table throws:
-    //   Primary    - unsuffixed rocpd_metadata view (real captures + committed .db
-    //   fixtures) Fallback A - suffixed rocpd_metadata_<uuid> table (.sql-generated
-    //   fixtures load
-    //                rocpd_tables.sql only, so they have no unsuffixed view)
-    //   Fallback B - no rocpd_metadata anywhere (e.g. metadata-less captures): retain the
-    //                original rocpd_timestamp_<uuid> existence probe, behavior unchanged.
+    // schema_version_major is not used: it is an unsubstituted template placeholder on
+    // templated captures, not a concrete value; schema_version itself is always concrete.
     const auto uuid = m_backend->get_uuid();
 
     auto object_exists = [&](const std::string& name) {
@@ -174,9 +152,8 @@ reader_t::impl::initialize_all_info_lists()
     m_pmc_info_list           = get_all_pmc_infos();
     m_track_info_list         = get_tracks();
 
-    // Stamp each track's nesting_model from its type once the full list is built (covers
-    // both v3 synthesis and v4 build_v4_tracks). max_lane is filled lazily on first
-    // get_interval_track (see below).
+    // Stamp each track's nesting_model once the list is built. max_lane is filled lazily
+    // on first get_interval_track.
     for(auto& t : m_track_info_list)
     {
         if(t) t->nesting = nesting_for(t->type);
@@ -351,22 +328,19 @@ reader_t::impl::get_tracks()
             return m_track_info_list;
         }
 
-        // v3 rocpd_track is not a reliable cpu_thread registry (it is a grab-bag of
-        // activity rows), so cpu_thread/region tracks are NOT taken from it — they are
-        // synthesized from rocpd_region in synthesize_derived_tracks(). rocpd_track is
-        // used here ONLY to emit counter tracks: a track is a counter track iff at least
-        // one PMC-backed rocpd_sample references it — i.e. a sample row that joins
-        // rocpd_pmc_event (Q10 — v3 counters still key on rocpd_track via
-        // rocpd_sample.track_id). Region timer-sample tracks (samples with no
-        // rocpd_pmc_event) are excluded by distinct_sample_track_ids(). Classify up
-        // front.
+        // v3 rocpd_track is not a reliable cpu_thread registry, so cpu_thread/region
+        // tracks are NOT taken from it — they are synthesized from rocpd_region in
+        // synthesize_derived_tracks(). rocpd_track is used here ONLY to emit counter
+        // tracks: a track is a counter track iff a PMC-backed rocpd_sample references it
+        // (Q10 — v3 counters key on rocpd_track via rocpd_sample.track_id). Region
+        // timer-sample tracks (no rocpd_pmc_event) are excluded by
+        // distinct_sample_track_ids().
         std::unordered_set<size_t> counter_track_ids;
         for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
         {
             counter_track_ids.insert(r.track_id);
         }
 
-        // Maps counter track_id -> pmc_id (for pmc_info lookup) and track_id -> name.
         std::unordered_map<size_t, size_t>      counter_track_pmc_ids;
         std::unordered_map<size_t, std::string> counter_track_names;
         for(const auto& r : m_read_statements->counter_track_names()().to_vector())
@@ -381,8 +355,6 @@ reader_t::impl::get_tracks()
         m_track_info_list.reserve(track_info_list.size());
         for(const auto& track_info : track_info_list)
         {
-            // Only counter tracks are sourced from rocpd_track; cpu_thread/region tracks
-            // are synthesized from rocpd_region below. Skip every non-counter row.
             const bool is_counter =
                 counter_track_ids.find(track_info.id) != counter_track_ids.end();
             if(!is_counter) continue;
@@ -411,7 +383,6 @@ reader_t::impl::get_tracks()
             track_info_ptr->extdata = track_info.extdata;
             track_info_ptr->type    = reader_types::track_type_t::counter;
 
-            // counter track display name = PMC name (Q9); fall back to rocpd_track name.
             {
                 auto nit = counter_track_names.find(track_info.id);
                 if(nit != counter_track_names.end() && !nit->second.empty())
@@ -420,8 +391,6 @@ reader_t::impl::get_tracks()
                 }
             }
 
-            // Attach the full pmc_info panel so callers can key identity and metadata on
-            // the real pmc_id without a second lookup (mirrors agent_info on gpu_queue).
             {
                 auto pit = counter_track_pmc_ids.find(track_info.id);
                 if(pit != counter_track_pmc_ids.end())
@@ -467,7 +436,6 @@ reader_t::impl::get_tracks()
             m_track_ptr_to_topology.emplace(track_info_ptr, topo);
             m_topology_to_track_ptr.emplace(topo, track_info_ptr);
 
-            // Routing for track-scoped queries.
             track_query_info_t qi;
             qi.type          = track_info_ptr->type;
             qi.nid           = track_info.nid;
@@ -483,9 +451,8 @@ reader_t::impl::get_tracks()
     return m_track_info_list;
 }
 
-// gpu_queue and dma tracks do not exist as rocpd_track rows in v3; synthesize them
-// from the distinct topology of rocpd_kernel_dispatch and rocpd_memory_copy. Synthetic
-// ids are allocated above MAX(rocpd_track.id) so they never collide with real ids.
+// v3 has no rocpd_track rows for gpu_queue or dma; synthesized here from
+// rocpd_kernel_dispatch / rocpd_memory_copy topology.
 void
 reader_t::impl::synthesize_derived_tracks()
 {
@@ -526,7 +493,6 @@ reader_t::impl::synthesize_derived_tracks()
             track_info_ptr->queue_info = queue_it->second;
         }
 
-        // Q9: gpu_queue display name = queue identity.
         if(track_info_ptr->queue_info)
         {
             track_info_ptr->name = track_info_ptr->queue_info->name;
@@ -545,10 +511,9 @@ reader_t::impl::synthesize_derived_tracks()
     }
 
     // dma: one track per distinct (nid, pid, queue_id, dst_agent_id); NULL is a distinct
-    // group value (Q2 amendment). Keyed on the destination agent to match Optiq's
-    // GetRocprofMemoryCopyTrackQuery swimlane grouping (stream-level grouping lives on
-    // the separate `stream` track type). agent_info resolves from dst_agent_id;
-    // stream_info is left nullopt on dma tracks.
+    // group value. Keyed on dst_agent_id to match Optiq's GetRocprofMemoryCopyTrackQuery
+    // grouping (stream-level grouping is the separate `stream` track type). stream_info
+    // is left nullopt here.
     for(const auto& d : m_read_statements->distinct_dma_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -574,7 +539,6 @@ reader_t::impl::synthesize_derived_tracks()
             }
         }
 
-        // Q9: dma-style track display name = category label.
         track_info_ptr->name = "Memory copy";
 
         m_track_info_list.push_back(track_info_ptr);
@@ -592,7 +556,6 @@ reader_t::impl::synthesize_derived_tracks()
     // memory: one track per distinct (nid, agent_id, queue_id, pid) in
     // rocpd_memory_allocate. Keyed to match Optiq's GetRocprofMemoryAllocTrackQuery GROUP
     // BY exactly. NULL agent_id / queue_id are distinct group values, not dropped.
-    // agent_info and queue_info resolve the same way gpu_queue does.
     for(const auto& m : m_read_statements->distinct_memory_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -626,7 +589,6 @@ reader_t::impl::synthesize_derived_tracks()
             }
         }
 
-        // Q9: memory-alloc display name = category label (matching dma "Memory copy").
         track_info_ptr->name = "Memory allocation";
 
         m_track_info_list.push_back(track_info_ptr);
@@ -643,8 +605,7 @@ reader_t::impl::synthesize_derived_tracks()
 
     // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
     // rocpd_pmc_event JOIN rocpd_kernel_dispatch. Keyed to match Optiq's
-    // GetRocprofPerformanceCountersTrackQuery GROUP BY. agent_info resolves from
-    // agent_id.
+    // GetRocprofPerformanceCountersTrackQuery GROUP BY.
     for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -667,7 +628,6 @@ reader_t::impl::synthesize_derived_tracks()
             track_info_ptr->agent_info = agent_it->second;
         }
 
-        // pmc_info resolves from pmc_id (reader's existing pmc utility map).
         auto pmc_it = m_pmc_info_utility.find(k.pmc_id);
         if(pmc_it != m_pmc_info_utility.end() && pmc_it->second)
         {
@@ -690,7 +650,7 @@ reader_t::impl::synthesize_derived_tracks()
 
     // memory_activity: one scalar track per distinct (nid, pid, agent_id) from
     // rocpd_memory_allocate. Mirrors Optiq's GetRocprofMemoryActivity* per-agent
-    // cumulative running sum (load_id 7). agent_info populated; no pmc_info.
+    // cumulative running sum (load_id 7).
     for(const auto& ma : m_read_statements->distinct_mem_activity_tracks()().to_vector())
     {
         // Skip NULL agent_id rows — FREE rows in v3 may have agent_id=NULL; they
@@ -736,7 +696,7 @@ reader_t::impl::synthesize_derived_tracks()
     // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
     // memory_copy + memory_allocate events sharing that stream. Additive to the gpu_queue
     // and dma tracks above — the same events also appear in their per-op tracks, matching
-    // Optiq's Stream track. stream_info gives the identity (reused from dma).
+    // Optiq's Stream track.
     for(const auto& s : m_read_statements->distinct_stream_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -759,7 +719,6 @@ reader_t::impl::synthesize_derived_tracks()
             track_info_ptr->stream_info = stream_it->second;
         }
 
-        // Display name = stream identity.
         if(track_info_ptr->stream_info && !track_info_ptr->stream_info->name.empty())
         {
             track_info_ptr->name = track_info_ptr->stream_info->name;
@@ -810,7 +769,6 @@ reader_t::impl::synthesize_derived_tracks()
             track_info_ptr->thread_info = thread_it->second;
         }
 
-        // Display name = thread identity, with a suffix distinguishing the sample lane.
         std::string base_name;
         if(track_info_ptr->thread_info && !track_info_ptr->thread_info->name.empty())
         {
@@ -873,10 +831,9 @@ reader_t::impl::build_v4_tracks()
         memory_alloc_track_ids.insert(r.track_id);
     }
 
-    // Detect track_ids that appear in both counter and memory-allocate discovery sets.
-    // Counter classification takes precedence (is_counter checked before is_memory), so
-    // an overlapping track would silently lose its memory-allocate events. No known DB
-    // triggers this today; this set is telemetry only — no precedence change.
+    // Tracks appearing in both discovery sets: counter classification wins (is_counter
+    // checked before is_memory), so an overlapping track silently loses its
+    // memory-allocate events. This set is telemetry only — it does not change precedence.
     std::unordered_set<size_t> ambiguous_classification_ids;
     for(const auto& id : counter_track_ids)
     {
@@ -891,7 +848,6 @@ reader_t::impl::build_v4_tracks()
         }
     }
 
-    // Counter display name = PMC name (Q9) and pmc_id for identity, keyed by track id.
     std::unordered_map<size_t, size_t>      counter_track_pmc_ids;
     std::unordered_map<size_t, std::string> counter_track_names;
     for(const auto& r : m_read_statements->counter_track_names()().to_vector())
@@ -910,7 +866,6 @@ reader_t::impl::build_v4_tracks()
         track_info_ptr->id      = reader_types::track_id_t{ track_info.id };
         track_info_ptr->extdata = track_info.extdata;
 
-        // Resolve the rocpd_track name_id to a display name up front.
         std::string track_name;
         if(track_info.name_id.has_value())
         {
@@ -918,11 +873,6 @@ reader_t::impl::build_v4_tracks()
             if(sit != m_string_info_utility.end()) track_name = sit->second;
         }
 
-        // Classify the track from its identity columns. Counter is checked first (a
-        // rocpd_sample reference overrides any other column pattern). Memory-allocate is
-        // checked before gpu_queue because both may carry agent_id + queue_id on their
-        // rocpd_track row; the rocpd_memory_allocate set breaks the ambiguity. Then
-        // queue_id → gpu_queue, stream_id → dma, otherwise cpu_thread.
         const bool is_counter =
             counter_track_ids.find(track_info.id) != counter_track_ids.end();
         const bool is_memory =
@@ -974,9 +924,8 @@ reader_t::impl::build_v4_tracks()
             }
         }
 
-        // Q10: v4 rocpd_track carries agent_id directly, so counter (and queue) tracks
-        // get agent_info — the anchor rocpd_sample.track_id -> rocpd_track.agent_id ->
-        // rocpd_info_agent resolves here for every track that names an agent.
+        // v4 rocpd_track carries agent_id directly, so counter and queue tracks resolve
+        // agent_info directly from the track row (v3 has no such column — see above).
         if(track_info.agent_id.has_value())
         {
             auto agent_it = m_agent_info_utility.find(track_info.agent_id.value());
@@ -1004,8 +953,6 @@ reader_t::impl::build_v4_tracks()
             }
         }
 
-        // Q9 display-name resolution: prefer the track's own name; fall back to the
-        // per-type identity label so a swimlane is never nameless.
         track_info_ptr->name = track_name;
         if(is_counter)
         {
@@ -1014,7 +961,6 @@ reader_t::impl::build_v4_tracks()
             {
                 track_info_ptr->name = nit->second;
             }
-            // Attach the full pmc_info panel (identity + metadata) keyed on pmc_id.
             auto pit = counter_track_pmc_ids.find(track_info.id);
             if(pit != counter_track_pmc_ids.end())
             {
@@ -1096,7 +1042,6 @@ reader_t::impl::build_v4_tracks()
             track_info_ptr->stream_info = stream_it->second;
         }
 
-        // Display name = stream identity.
         if(track_info_ptr->stream_info && !track_info_ptr->stream_info->name.empty())
         {
             track_info_ptr->name = track_info_ptr->stream_info->name;
@@ -1119,10 +1064,9 @@ reader_t::impl::build_v4_tracks()
 
     // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
     // rocpd_pmc_event JOIN rocpd_kernel_dispatch JOIN rocpd_track. Keyed to match
-    // Optiq's GetRocprofPerformanceCountersTrackQuery GROUP BY. The v4 SQL uses
-    // rocpd_track.nid/pid/agent_id (same fields as the v3 SQL, which reads them
-    // directly from rocpd_kernel_dispatch). Synthesized with ids above max real id
-    // so they never collide with the real rocpd_track classification above.
+    // Optiq's GetRocprofPerformanceCountersTrackQuery GROUP BY. Synthesized with ids
+    // above max real id so they never collide with the real rocpd_track classification
+    // above.
     for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -1487,7 +1431,6 @@ reader_t::impl::build_timeline_events(
             event.category = result.category_name.value();
         }
 
-        // Track resolution: try sample-based track_id first, fall back to topology
         if(result.track_id.has_value())
         {
             auto it = m_track_info_utility.find(result.track_id.value());
@@ -2031,15 +1974,11 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
     return event_meta->line_info;
 }
 
-// Opaque-handle overloads. These build a minimal timeline_event_t from the handle's
-// private {row_id, type} and delegate to the timeline_event_t overloads above -- the
-// exact internal bridge the region case of get_event_info already uses (see the
-// get_arguments call there). The decode lives entirely inside the reader, so event_id_t
-// opacity is preserved: no public type/row_id accessor is added, and the consumer only
-// ever holds the opaque handle. resolve_event_metadata reads only
-// unique_identifier.{id,type}, so this minimal event is sufficient; types with no stack
-// or source context (sample / pmc_event) fall through to the empty-return semantics of
-// the delegates.
+// Opaque-handle overloads: build a minimal timeline_event_t from the handle's private
+// {row_id, type} and delegate to the overloads above. The decode lives entirely inside
+// the reader, so event_id_t opacity is preserved -- no public type/row_id accessor is
+// added, and the consumer only ever holds the opaque handle. Types with no stack or
+// source context (sample / pmc_event) fall through to the delegates' empty-return case.
 reader_types::call_stack_t
 reader_t::impl::get_call_stack(const reader_types::event_id_t& id)
 {
@@ -2082,14 +2021,7 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
     return args;
 }
 
-// Opaque-handle overload: build a minimal timeline_event_t from the handle's private
-// {row_id, type} and delegate to the timeline_event_t overload above -- the same internal
-// bridge as get_call_stack(event_id_t). The decode lives entirely inside the reader, so
-// event_id_t opacity is preserved: no public type/row_id accessor is added, and the
-// consumer only ever holds the opaque handle. resolve_event_metadata reads only
-// unique_identifier.{id,type}, so this minimal event is sufficient; types with no
-// arguments (sample / pmc_event) fall through to the empty-return semantics of the
-// delegate.
+// Opaque-handle overload; same bridge as get_call_stack(event_id_t) above.
 reader_types::arg_data_list_t
 reader_t::impl::get_arguments(const reader_types::event_id_t& id)
 {
@@ -2197,11 +2129,9 @@ reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 
 namespace
 {
-// Fold the per-name-id GROUP BY rows into one event_summary_t per distinct DISPLAY name.
-// resolve_name maps a raw name id to the display string using the same utilities/fallback
-// the interval path uses; rows whose ids resolve to the same string are merged (multiple
-// kernel_symbol ids can share a display_name), so the result is truly one row per name.
-// avg = total/count; the list is sorted by name for deterministic consumers/tests.
+// Folds per-name-id GROUP BY rows into one event_summary_t per distinct display name:
+// rows whose ids resolve to the same string are merged (multiple kernel_symbol ids can
+// share a display_name). Sorted by name for deterministic output.
 template <typename ResolveFn>
 reader_types::event_summary_list_t
 fold_summary_rows(const std::vector<data_storage::summary_result>& rows,
@@ -2302,16 +2232,14 @@ interval_event_type_for(reader_types::track_type_t t)
         case reader_types::track_type_t::memory:
             return reader_types::event_type_t::memory_allocate;
         case reader_types::track_type_t::kernel_dispatch_pmc:
-            // A kd_pmc interval row is really identified by the PAIR (kernel_dispatch_id,
-            // pmc_id) -- both v3 and v4 kd_pmc interval SQL SELECT K.id (a
-            // rocpd_kernel_dispatch.id), not a rocpd_pmc_event.id. event_id_t carries
-            // only (type, row_id), so we type the handle as kernel_dispatch and let it
-            // resolve through the kernel_dispatch detail path (correct name/ts/te + KD
-            // props). The specific counter value / pmc_id is NOT recoverable from the
-            // handle alone -- an accepted, documented limitation (a consumer clicking a
-            // specific pmc track already has that pmc context). Returning pmc_event here
-            // was the bug: it routed the K.id to the point pmc_event detail path (WHERE
-            // rocpd_pmc_event.id = ?), resolving wrong.
+            // A kd_pmc interval row is identified by the PAIR (kernel_dispatch_id,
+            // pmc_id): both v3 and v4 kd_pmc interval SQL SELECT K.id (a
+            // rocpd_kernel_dispatch.id), not a rocpd_pmc_event.id. The handle must be
+            // typed as kernel_dispatch to resolve correctly; typing it as pmc_event
+            // routes K.id to the wrong detail path (WHERE rocpd_pmc_event.id = ?). The
+            // specific counter value / pmc_id is not recoverable from the handle alone --
+            // an accepted limitation (a consumer clicking a specific pmc track already
+            // has that pmc context).
             return reader_types::event_type_t::kernel_dispatch;
         case reader_types::track_type_t::cpu_thread:
         default: return reader_types::event_type_t::region;
@@ -2350,7 +2278,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     std::vector<data_storage::interval_row_result> rows;
     bool                                           name_from_kernel_symbol = false;
     // Stream tracks mix ops, so name resolution is chosen per-row from op_kind rather
-    // than a single track-wide flag (see the mapping loop below).
+    // than a single track-wide flag.
     bool is_stream = false;
 
     if(m_is_v4)
@@ -2399,7 +2327,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                 break;
             case reader_types::track_type_t::counter:
             default:
-                // A counter track is scalar-only; an interval query returns nothing (Q7).
+                // A counter track is scalar-only; an interval query returns nothing.
                 return {};
         }
     }
@@ -2510,7 +2438,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                 break;
             case reader_types::track_type_t::counter:
             default:
-                // A counter track is scalar-only; an interval query returns nothing (Q7).
+                // A counter track is scalar-only; an interval query returns nothing.
                 return {};
         }
     }
@@ -2546,7 +2474,6 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         {
             if(use_kernel_symbol)
             {
-                // Q9: gpu_queue per-event label = kernel symbol display name.
                 auto kit = m_kernel_symbol_info_utility.find(r.name_ref.value());
                 if(kit != m_kernel_symbol_info_utility.end() && kit->second)
                 {
@@ -2574,19 +2501,12 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     auto       tit      = m_track_info_utility.find(track_id);
     if(tit != m_track_info_utility.end()) tit->second->max_lane = max_lane;
 
-    // Optional time-window filter uses OVERLAP, not containment. An interval bar is kept
-    // iff its extent [ev.start, ev.end]
-    // intersects the window [lo, hi]; it is dropped only when it lies entirely outside
-    // (ends before lo, or starts after hi). Boundary-inclusive (< / >, so a bar merely
-    // touching an edge is kept). This matches the two existing overlap conventions in
-    // this reader — the get_events_* SQL predicate (read_statements.hpp:808-809
-    // "a.start <= ? AND a.end >= ?") and get_flows_in_window — because a timeline render
-    // must show every bar that crosses the visible viewport, including bars straddling
-    // its edges. Containment (the previous rule) silently dropped straddling bars.
-    // The window is deliberately NOT pushed into SQL: full-track lane/parent layout is
-    // computed above (compute_interval_layout) over the entire track BEFORE this filter,
-    // so lanes stay stable across pans/zooms. Pushing the window into the query would
-    // relayout each windowed read and make lanes jump. C++ post-filter only.
+    // Time-window filter uses OVERLAP, not containment: a bar is kept iff its extent
+    // [ev.start, ev.end] intersects the window [lo, hi] (boundary-inclusive), matching
+    // the get_events_* SQL predicate and get_flows_in_window. The window is deliberately
+    // NOT pushed into SQL: full-track lane/parent layout is computed above, over the
+    // entire track, before this filter, so lanes stay stable across pans/zooms; pushing
+    // the window into the query would relayout each windowed read and make lanes jump.
     if(filter.time_window.start.has_value() || filter.time_window.end.has_value())
     {
         const auto&                         lo = filter.time_window.start;
@@ -2625,10 +2545,8 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
         auto raw_rows =
             m_read_statements->mem_activity_raw_track()(qi.nid, qi.pid).to_vector();
 
-        // address → {agent_id, size} from the most recent ALLOC at that address.
         std::unordered_map<size_t, std::pair<std::optional<size_t>, size_t>> addr_map;
-        // per-agent running sum (agent_id key; nullopt agent uses key SIZE_MAX).
-        std::unordered_map<size_t, int64_t> running;
+        std::unordered_map<size_t, int64_t>                                  running;
         constexpr size_t null_agent_key = std::numeric_limits<size_t>::max();
 
         auto agent_key = [&](std::optional<size_t> a) -> size_t {
@@ -2664,7 +2582,6 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
             }
             else if(r.type == "FREE")
             {
-                // Recover agent_id and size from the prior ALLOC at the same address.
                 std::optional<size_t> freed_agent = r.agent_id;
                 size_t                freed_size  = r.size;
                 if(r.address.has_value())
@@ -2695,14 +2612,13 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
                     events.push_back(ev);
                 }
             }
-            // REALLOC and RECLAIM are no-ops per Optiq rocprof.cpp:1098-1106.
         }
 
         paginate(events, filter.pagination);
         return events;
     }
 
-    if(qi.type != reader_types::track_type_t::counter) return {};  // Q7
+    if(qi.type != reader_types::track_type_t::counter) return {};
 
     auto rows = m_read_statements->scalar_track()(qi.real_track_id).to_vector();
 
@@ -2930,10 +2846,10 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     // external id pushed via roctx -- 8/935 events on the measured capture, all
     // group-size-1, 0 cross-track pairs), so flows sourced from it would yield a nearly
     // empty cross-track graph, whereas the stack_id clique yields 100% clean cross-track
-    // pairs. This builder makes an UNDIRECTED stack_id clique with a heuristic direction
-    // (see the direction block below), grouped by flow_id = stack_id; it does NOT
-    // implement a stricter directed, cross-track-ONLY model -- the region/sibling sets
-    // can still include same-track edges. Reversible.
+    // pairs. This builder makes an UNDIRECTED stack_id clique with a heuristic direction,
+    // grouped by flow_id = stack_id; it does NOT implement a stricter directed,
+    // cross-track-ONLY model -- the region/sibling sets can still include same-track
+    // edges.
     //
     // Direction is a heuristic; the stricter directed cross-track-only model remains
     // under consideration, so this behaviour is provisional.
@@ -2964,7 +2880,7 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
             // equals the other's parent_stack_id is the parent (src). The clique join
             // constrains both endpoints to the SAME stack_id, so this only fires on a
             // self-parent row and in practice yields to the start-ts fallback (earlier
-            // start = src; ties broken by handle order for determinism). Reversible.
+            // start = src; ties broken by handle order for determinism).
             reader_types::event_id_t src{};
             reader_types::event_id_t dst{};
             if(r.dest_parent.has_value() && *r.dest_parent == r.stack_id)
@@ -2991,14 +2907,14 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 
             // flow_id groups a causal chain. All edges of one stack_id clique share
             // flow_id = that stack_id, so a multi-hop lineage is recoverable by grouping
-            // on flow_id and sorting by src start. Reversible.
+            // on flow_id and sorting by src start.
             flows.push_back(reader_types::flow_edge_t{
                 src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
     };
 
     // kind is fixed by each set's endpoint-type pairing (order-independent, so
-    // orientation never changes it). Reversible mapping.
+    // orientation never changes it).
     using et = reader_types::event_type_t;
     using fk = reader_types::flow_kind_t;
     run(m_read_statements->region_to_kernel_dispatch_flows(),
@@ -3057,9 +2973,6 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
                                     const reader_types::time_window_t&           window,
                                     uint32_t max_edges)
 {
-    // The tracks param speaks the opaque track_id_t. Membership is tested
-    // opaque-id-to-opaque-id against track_info_t::id, so no .value unwrap is needed
-    // here.
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
@@ -3116,7 +3029,7 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
         // Window overlap uses the edge's full temporal extent
         // [min(src.start,dst.start), max(src.end,dst.end)] (conservative superset of the
         // src.end->dst.start arrow), included iff it intersects the window; empty window
-        // = no filter. Reversible.
+        // = no filter.
         if(has_window)
         {
             const auto elo = std::min(gs.start, gd.start);
@@ -3126,7 +3039,7 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
 
         // An edge is kept iff AT LEAST ONE endpoint sits on a listed track, so a
         // cross-track arrow with one endpoint off-screen still surfaces its visible half;
-        // empty tracks = all. Reversible.
+        // empty tracks = all.
         if(!track_set.empty())
         {
             bool touches = false;
@@ -3185,8 +3098,7 @@ reader_t::impl::build_pmc_event_data(const data_storage::scalar_detail_result& r
     auto tit = m_track_info_utility.find(row.track_id);
     if(tit != m_track_info_utility.end()) data.sample.track = tit->second;
 
-    // NOTE(v3): no event-by-event_id read statement exists, so the common event
-    // metadata (data.event) is left null here. Flagged as an open question.
+    // v3 has no event-by-event_id read statement, so data.event is left null here.
     return data;
 }
 
@@ -3256,11 +3168,10 @@ reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
 // Unified event detail
 // ============================================================================
 
-// Full-replace of the seven typed get_*_details public methods with this one collapsed
-// path. The typed methods survive as private impl helpers, reused here to reuse their SQL
-// + FK resolution; only their public surface is gone. Optiq is the sole consumer and
-// migrates to get_event_info. Revisit if a second consumer needs the rich typed structs
-// back on the public API.
+// Collapses the seven typed get_*_details public methods into this one path. The typed
+// methods survive as private impl helpers, reused here for their SQL + FK resolution;
+// only their public surface is gone. Optiq is the sole consumer, migrating to
+// get_event_info.
 std::optional<reader_types::event_info_t>
 reader_t::impl::get_event_info(const reader_types::event_id_t& id)
 {
@@ -3274,7 +3185,6 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
     // counts/ids/addresses -> uint64_t, counter value -> double, args -> string).
     // Optional-field policy: an absent std::optional scalar or a null linked entity is
     // OMITTED from the bag (not emitted as monostate/nullptr_t), applied uniformly.
-    // Revisit if a consumer needs presence-vs-absence disambiguation.
     auto push_u = [&](std::string key, size_t v) {
         detail.properties.push_back({ std::move(key), static_cast<uint64_t>(v) });
     };
@@ -3283,8 +3193,7 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
     };
     // Fold rocpd_arg rows into the property bag as name-keyed values. Args key on the
     // shared rocpd_event row, so region / kernel_dispatch / memory_copy / memory_allocate
-    // all carry them; point events (sample / pmc_event) do not. Builds the internal
-    // timeline_event_t from the handle exactly as get_arguments' delegate expects.
+    // all carry them; point events (sample / pmc_event) do not.
     auto fold_args = [&]() {
         reader_types::timeline_event_t ev{};
         ev.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
@@ -3330,8 +3239,7 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
             // code_object_id, node_id, process_id, thread_id, ...), NOT the resolved
             // sub-struct -- a deliberate collapse loss; the consumer does a follow-up
             // lookup by id. Entities the detail row does not carry (kd agent/
-            // stream/queue) are simply absent under the omit policy. Revisit if consumers
-            // need the resolved entity inline.
+            // stream/queue) are simply absent under the omit policy.
             if(d->kernel_symbol_info)
                 push_u("kernel_symbol_id", d->kernel_symbol_info->id);
             if(d->code_object_info) push_u("code_object_id", d->code_object_info->id);
@@ -3393,8 +3301,7 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
             // A sample-typed id is unambiguously a counter sample -- get_scalar_track
             // (counter arm) is the sole event_type_t::sample mint site. Its detail is
             // the counter name (from the track) + value (from scalar_detail()); it is a
-            // point event so te stays nullopt. build_pmc_event_data sources value +
-            // timestamp + track from the one scalar_detail row.
+            // point event so te stays nullopt.
             auto rows =
                 m_read_statements
                     ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))

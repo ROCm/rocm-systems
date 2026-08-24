@@ -83,7 +83,6 @@ struct read_statements : public read_statements_base
     read_statements& operator=(read_statements&&)      = delete;
     ~read_statements() override                        = default;
 
-    // ----- info table accessors (return by value, matching base) -----
     [[nodiscard]] string_statement_func_t string_statement() const override
     {
         return m_string_statement;
@@ -131,7 +130,6 @@ struct read_statements : public read_statements_base
         return m_pmc_info_statement;
     }
 
-    // ----- counter / scalar accessors -----
     [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const override
     {
         return m_distinct_sample_track_ids;
@@ -147,8 +145,6 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_memory_tracks;
     }
-    // v4.0: set of rocpd_track.id values referenced by rocpd_memory_allocate, used in
-    // the generic classification loop to disambiguate memory from gpu_queue tracks.
     [[nodiscard]] const memory_alloc_track_ids_func_t& memory_alloc_track_ids()
         const override
     {
@@ -224,7 +220,6 @@ struct read_statements : public read_statements_base
         return m_memory_allocate_sibling_flows;
     }
 
-    // ----- track_id-anchored interval accessors (v4.0-specific) -----
     [[nodiscard]] const interval_track_1_func_t& region_interval_track_v4() const override
     {
         return m_region_interval_track_v4;
@@ -253,7 +248,6 @@ struct read_statements : public read_statements_base
         return m_stream_interval_track;
     }
 
-    // ----- track_id-anchored stats accessors (v4.0-specific) -----
     [[nodiscard]] const stats_track_1_func_t& region_stats_track_v4() const override
     {
         return m_region_stats_track_v4;
@@ -649,11 +643,10 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Counter tracks: the PMC-backed sample tracks. A track_id is a counter iff at
-        // least one of its rocpd_sample rows joins rocpd_pmc_event on event_id; sample
-        // tracks with zero rocpd_pmc_event (e.g. region timer-samples) are not counters.
-        // The event_id join matches counter_track_names below so discovery and metadata
-        // agree on the same counter set.
+        // A track_id is a counter iff at least one of its rocpd_sample rows joins
+        // rocpd_pmc_event on event_id (sample tracks with zero pmc_event rows, e.g.
+        // region timer-samples, are not counters). Matches counter_track_names below
+        // so discovery and metadata agree on the same counter set.
         m_distinct_sample_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
                 fmt::format("SELECT DISTINCT s.track_id FROM rocpd_sample_{u} s "
@@ -710,9 +703,7 @@ private:
                 fmt::format("SELECT DISTINCT track_id FROM rocpd_memory_allocate_{}", u),
                 &sample_track_id_result::track_id);
 
-        // kernel_dispatch_pmc tracks: one per distinct (nid, agent_id, pmc_id, pid) from
-        // rocpd_pmc_event INNER JOIN rocpd_kernel_dispatch JOIN rocpd_track. Matching
-        // Optiq's GetRocprofPerformanceCountersTrackQuery v4 GROUP BY exactly.
+        // Matches Optiq's GetRocprofPerformanceCountersTrackQuery v4 GROUP BY exactly.
         m_distinct_kd_pmc_tracks =
             m_backend->create_read_statement_executor<distinct_kd_pmc_result>(
                 fmt::format("SELECT DISTINCT T.nid, T.agent_id, PMC_E.pmc_id, T.pid "
@@ -726,9 +717,8 @@ private:
                 &distinct_kd_pmc_result::pmc_id,
                 &distinct_kd_pmc_result::pid);
 
-        // memory_activity tracks: one per distinct (nid, pid, agent_id) from
-        // rocpd_memory_allocate JOIN rocpd_track. agent_id from rocpd_track is reliable
-        // in v4 (track_id always present on alloc events).
+        // agent_id (from rocpd_track) is reliable in v4: track_id is always present on
+        // alloc events.
         m_distinct_mem_activity_tracks =
             m_backend->create_read_statement_executor<distinct_mem_activity_result>(
                 fmt::format("SELECT DISTINCT T.nid, T.pid, T.agent_id "
@@ -739,8 +729,7 @@ private:
                 &distinct_mem_activity_result::pid,
                 &distinct_mem_activity_result::agent_id);
 
-        // All rocpd_memory_allocate rows for (nid, pid), ordered by start (via timestamp
-        // spine). agent_id from rocpd_track. C++ computes per-agent running sums.
+        // Per-agent running sums are computed downstream in C++, not here.
         m_mem_activity_raw_track =
             m_backend->create_read_statement_executor<mem_activity_raw_result,
                                                       bind_types<size_t, size_t>>(
@@ -773,8 +762,7 @@ private:
     {
         const auto& u = m_uuid;
 
-        // region intervals: start/end resolved through the timestamp spine. Category is
-        // resolved in-SQL to its display string via rocpd_info_category. rocpd_event /
+        // Category resolved in-SQL via rocpd_info_category; rocpd_event /
         // rocpd_info_category are LEFT JOINed so the row set is unchanged — additive.
         m_region_interval_track_v4 =
             m_backend
@@ -1288,8 +1276,7 @@ private:
         m_region_statements = make_timeline_set("rocpd_region", "R", "R.name_id");
         m_kernel_dispatch_statements =
             make_timeline_set("rocpd_kernel_dispatch", "K", "K.region_name_id");
-        // v4.0 memory_allocate has a native NOT NULL name_id (v3 lacked one and
-        // reused category as the display string); use the v4-native name_id here.
+        // v4.0 memory_allocate has a native NOT NULL name_id (v3 lacked one).
         m_memory_allocate_statements =
             make_timeline_set("rocpd_memory_allocate", "MA", "MA.name_id");
         m_memory_copy_statements =
@@ -1406,9 +1393,8 @@ private:
             make_summary_time_filtered_stmt("rocpd_region", "name_id");
     }
 
-    // Parse a JSONB array-of-strings column (rocpd_info_source_code.lines /
-    // .instructions) into a vector<string>. Matches v3 deserialize_source_context:
-    // only string elements are kept; malformed JSON yields an empty vector.
+    // Matches v3 deserialize_source_context: only string elements are kept; malformed
+    // JSON yields an empty vector.
     static std::vector<std::string> parse_json_string_array(const std::string& s)
     {
         std::vector<std::string> out;
@@ -1641,10 +1627,9 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Correlated events share the same stack_id as the queried event. The row
-        // shape matches the v4 timeline set (spine JOINs + rocpd_track identity +
-        // rocpd_info_category display string); the only difference is the WHERE
-        // clause selecting siblings by stack_id, excluding the event itself.
+        // Row shape matches the v4 timeline set (spine JOINs + rocpd_track identity +
+        // rocpd_info_category); only the WHERE clause differs, selecting stack_id
+        // siblings and excluding the event itself.
         auto make_correlated_stmt =
             [&](const std::string& table,
                 const std::string& alias,

@@ -10,13 +10,6 @@
 --   a tiny v4.0 database that DOES contain counter samples, purely to close that
 --   coverage gap. It is intentionally minimal and hand-reviewable.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} -> "_" + <hex uuid>, {{guid}} -> <hex uuid>  (mirrors the
---   substitution in get_schema_query()), then piped through the sqlite3 CLI:
---     rocpd_v4.0_tables.sql  (schema)  +  this file  (data)  ->  .db
---   The reader auto-discovers the single continuous-hex uuid from the table
---   names, detects v4.0 via the rocpd_timestamp spine, and selects the v4 backend.
---
 -- DATA SHAPE (deliberately chosen so tests assert on real values, not "no crash"):
 --   * 2 tracks:
 --       track 1 = COUNTER  (referenced by rocpd_sample rows; agent_id set -> Q10
@@ -47,10 +40,9 @@ INSERT INTO "rocpd_info_thread{{uuid}}" (id, nid, pid, tid)
 VALUES (1, 1, 4242, 4242),
        (2, 1, 4242, 4243);
 
--- GPU agent referenced by the counter track (Q10: v4 counter tracks carry agent_id)
--- type_index is required: get_all_agents() (reader_impl.cpp:206) skips any agent row
--- missing type or type_index, which would drop this agent and leave the counter
--- track's agent_id unresolved (agent_info == nullptr).
+-- GPU agent referenced by the counter track (Q10: v4 counter tracks carry agent_id).
+-- type_index is required (get_all_agents, reader_impl.cpp:206 drops rows missing
+-- it), else this agent -- and the counter track's agent_id -- would be unresolved.
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 4242, 'GPU', 0, 0, 'Synthetic GPU');
 
@@ -68,7 +60,7 @@ VALUES (1, 'GRBM_COUNT'),
 -- Tracks --------------------------------------------------------------------
 -- track 1: COUNTER (agent_id set, referenced by samples below)
 -- track 2: CPU_THREAD (tid only, never referenced by a sample)
--- track 3: COUNTER, pmc_id 99 absent from rocpd_info_pmc -> display-name fallback (F7)
+-- track 3: COUNTER (fallback path -- see PMC 99 above)
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, agent_id)
 VALUES (1, 1, 1, 1, 1);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid)

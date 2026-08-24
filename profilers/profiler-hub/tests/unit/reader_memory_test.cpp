@@ -19,12 +19,6 @@
 using namespace profiler_hub;
 using namespace profiler_hub::test;
 
-// ============================================================================
-// memory_activity track type — v3 synthetic fixture (rocpd_v3_mem_activity.db)
-// Covers: discovery, running-sum correctness (ALLOC/FREE/REALLOC/RECLAIM),
-// FREE agent_id recovery via address self-join, non-interference between agents.
-// ============================================================================
-
 class reader_v3_mem_activity_test : public ::testing::Test
 {
 protected:
@@ -52,7 +46,6 @@ TEST_F(reader_v3_mem_activity_test, v3_discovers_two_mem_activity_tracks)
                               profiler_hub::reader_types::track_type_t::memory_activity);
     ASSERT_EQ(tracks.size(), 2U);
 
-    // Each track must carry agent_info; no pmc_info (fidelity caveat #2).
     for(const auto& t : tracks)
     {
         ASSERT_NE(t->agent_info, nullptr);
@@ -85,12 +78,10 @@ TEST_F(reader_v3_mem_activity_test, v3_mem_activity_running_sum_agent1)
     auto scalars = m_reader->get_scalar_track(agent1_track->id);
     ASSERT_EQ(scalars.size(), 3U);
 
-    // Timestamps must be ascending.
     ASSERT_EQ(scalars[0].timestamp, 1000U);
     ASSERT_EQ(scalars[1].timestamp, 3000U);
     ASSERT_EQ(scalars[2].timestamp, 5000U);
 
-    // Running-sum values.
     ASSERT_DOUBLE_EQ(scalars[0].value, 4096.0);  // ALLOC +4096
     ASSERT_DOUBLE_EQ(scalars[1].value, 0.0);     // FREE -4096 (recovered)
     ASSERT_DOUBLE_EQ(scalars[2].value, 2048.0);  // ALLOC +2048
@@ -98,9 +89,8 @@ TEST_F(reader_v3_mem_activity_test, v3_mem_activity_running_sum_agent1)
 
 TEST_F(reader_v3_mem_activity_test, v3_mem_activity_free_agent_recovery)
 {
-    // The FREE row (row 3) has agent_id=NULL in the DB. Its size and agent must be
-    // recovered from the ALLOC at the same address (4096). The running sum for agent 1
-    // goes from 4096 to 0 at ts=3000, proving the recovery was correct.
+    // The FREE row (row 3) has agent_id=NULL in the DB; its size and agent are
+    // recovered from the ALLOC at the same address (4096).
     auto tracks = find_tracks(m_reader->get_tracks(),
                               profiler_hub::reader_types::track_type_t::memory_activity);
     profiler_hub::reader_types::track_info_ptr_t agent1_track;
@@ -112,15 +102,14 @@ TEST_F(reader_v3_mem_activity_test, v3_mem_activity_free_agent_recovery)
 
     auto scalars = m_reader->get_scalar_track(agent1_track->id);
     ASSERT_GE(scalars.size(), 2U);
-    // The second sample (ts=3000) reflects the FREE: cumsum drops to 0.
     ASSERT_EQ(scalars[1].timestamp, 3000U);
     ASSERT_DOUBLE_EQ(scalars[1].value, 0.0);
 }
 
 TEST_F(reader_v3_mem_activity_test, v3_mem_activity_non_interference_agent2)
 {
-    // Agent 2 has exactly 1 ALLOC (ts=2000, size=8192). Its scalar series must not
-    // include any agent-1 rows (ALLOC/FREE/REALLOC) or the REALLOC no-op.
+    // Agent 2 has exactly 1 ALLOC; its scalar series must not include any
+    // agent-1 rows or the REALLOC no-op.
     auto tracks = find_tracks(m_reader->get_tracks(),
                               profiler_hub::reader_types::track_type_t::memory_activity);
     profiler_hub::reader_types::track_info_ptr_t agent2_track;
@@ -162,14 +151,11 @@ TEST_F(reader_v3_mem_activity_test, v3_get_interval_track_returns_empty_for_mem_
 }
 
 // ============================================================================
-// memory_activity time-window straddle — v3 synthetic fixture.
-// The window `continue` filters inside get_scalar_track's memory_activity branch
-// (source/reader_impl.cpp ~2515-2520 ALLOC, ~2548-2553 FREE) are point-in-window
-// on r.start, inclusive: a row is kept iff window.start <= r.start <= window.end.
-// The fixture (rocpd_v3_mem_activity_window_data.sql) has ALLOC and FREE rows both
-// BEFORE and AFTER a [3000,5000] window, so all four filters fire; the emitted
-// running-sum values reflect the skipped pre-window rows, proving the filter runs
-// AFTER accumulation, not before.
+// memory_activity time-window straddle.
+// The window filter in get_scalar_track's memory_activity branch is inclusive
+// on both ends (window.start <= r.start <= window.end) and is applied after
+// accumulation, not before — so kept rows still reflect prior out-of-window
+// activity.
 // ============================================================================
 
 class reader_v3_mem_activity_window_test : public ::testing::Test
@@ -187,7 +173,6 @@ protected:
         m_storage.reset();
     }
 
-    // The single memory_activity track (agent 1) in the straddle fixture.
     profiler_hub::reader_types::track_info_ptr_t mem_activity_track()
     {
         auto tracks =
@@ -234,9 +219,8 @@ TEST_F(reader_v3_mem_activity_window_test, time_window_straddle_filters_alloc_an
     f.time_window.end   = 5000;
     auto scalars        = m_reader->get_scalar_track(track->id, f);
 
-    // Boundary-inclusive: rows at 3000 and 5000 are kept; the pre-window ALLOC(1000)
-    // + FREE(2000) and post-window ALLOC(6000) + FREE(7000) are all dropped, firing
-    // every ALLOC and FREE `continue` on both sides of the window.
+    // Boundary-inclusive: rows at 3000 and 5000 are kept; the pre-window
+    // ALLOC(1000)/FREE(2000) and post-window ALLOC(6000)/FREE(7000) are dropped.
     ASSERT_EQ(scalars.size(), 3U);
     ASSERT_TRUE(is_timestamp_sorted(scalars));
     ASSERT_EQ(scalars[0].timestamp, 3000U);
@@ -246,7 +230,6 @@ TEST_F(reader_v3_mem_activity_window_test, time_window_straddle_filters_alloc_an
     ASSERT_EQ(scalars[2].timestamp, 5000U);
     ASSERT_DOUBLE_EQ(scalars[2].value, 1000.0);
 
-    // The filter demonstrably removed rows (full series is 7).
     ASSERT_LT(scalars.size(), m_reader->get_scalar_track(track->id).size());
 }
 
@@ -255,8 +238,8 @@ TEST_F(reader_v3_mem_activity_window_test, time_window_start_only_drops_earlier_
     auto track = mem_activity_track();
     ASSERT_NE(track, nullptr);
 
-    // Only start set (end = nullopt): exercises the has_value() guard on the end
-    // filter while the start `continue` drops every row with start < 6000.
+    // end is left unset here specifically to exercise the has_value() guard on
+    // the end-filter branch.
     profiler_hub::reader_types::event_filter_t f;
     f.time_window.start = 6000;
     auto scalars        = m_reader->get_scalar_track(track->id, f);
@@ -373,13 +356,10 @@ TEST_F(reader_v4_mem_activity_test, v4_get_interval_track_returns_empty_for_mem_
     ASSERT_TRUE(m_reader->get_interval_track(tracks.front()->id).empty());
 }
 
-// The v4 `memory`-typed tracks (the real rocpd_track rows carrying
-// memory_allocate rows, distinct from the synthesized memory_activity tracks)
-// exercise the v4 memory arms of get_interval_track (memory_alloc_interval_track_v4)
-// and get_track_stats (memory_alloc_stats_track_v4), which no prior test lit. The
-// fixture's 5 allocate rows resolve through the rocpd_timestamp spine to:
-//   track 1 (agent 1): starts {1000,3000,4000,5000} ends {..,5100} -> count 4
-//   track 2 (agent 2): start  {2000}                end 2100       -> count 1
+// The v4 `memory`-typed tracks (real rocpd_track rows carrying memory_allocate
+// data) are distinct from the synthesized memory_activity tracks and exercise
+// get_interval_track/get_track_stats's v4 memory arms
+// (memory_alloc_interval_track_v4 / memory_alloc_stats_track_v4).
 TEST_F(reader_v4_mem_activity_test, v4_memory_track_interval_matches_stats)
 {
     auto tracks = find_tracks(m_reader->get_tracks(),

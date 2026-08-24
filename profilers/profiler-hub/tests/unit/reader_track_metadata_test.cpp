@@ -20,13 +20,11 @@ using namespace profiler_hub;
 using namespace profiler_hub::test;
 
 // =============================================================================
-// v3 track-type x schema switch-arm coverage.
-//   Fixture rocpd_v3_track_shapes.db carries exactly one track of each v3 dma /
-//   memory / cpu_thread shape the other v3 fixtures leave dark in get_track_stats
-//   / get_interval_track: dma queue-only / agent-only / queue+agent, memory
-//   queue+agent / queue-only / neither, and a cpu_thread SAMPLE track. Each test
-//   asserts exact min_ts / max_ts / count and interval start order
-//   (by-construction oracles), not merely that the call did not throw.
+// v3 track-type x schema switch-arm coverage: rocpd_v3_track_shapes.db carries one
+// track of each v3 dma/memory/cpu_thread shape that other v3 fixtures leave untested
+// in get_track_stats/get_interval_track -- dma queue-only/agent-only/queue+agent,
+// memory queue+agent/queue-only/neither, and a cpu_thread SAMPLE track. Each test
+// asserts exact min_ts/max_ts/count and interval start order.
 // =============================================================================
 class reader_v3_track_shapes_test : public ::testing::Test
 {
@@ -58,7 +56,6 @@ TEST_F(reader_v3_track_shapes_test, dma_shape_arms_interval_and_stats)
                               profiler_hub::reader_types::track_type_t::dma);
     ASSERT_EQ(tracks.size(), 3U);
 
-    // min_ts -> {expected max_ts, expected count}
     const std::map<uint64_t, std::pair<uint64_t, size_t>> expected = {
         { 1000U, { 1300U, 2U } },  // qa      (queue_id=1, dst_agent_id=1)
         { 2000U, { 2300U, 2U } },  // q_only  (queue_id=2, dst_agent_id=NULL)
@@ -181,8 +178,6 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
     std::set<size_t> track_agent_ids;
     for(const auto& track : dma)
     {
-        // Every dma track carries agent_info resolved from its dst_agent_id (stream_info
-        // is left null on dma tracks under the by-agent key).
         ASSERT_NE(track->agent_info, nullptr)
             << "dma track must resolve agent_info from dst_agent_id";
         ASSERT_EQ(track->stream_info, nullptr)
@@ -193,9 +188,6 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
         ASSERT_EQ(intervals.size(), 24U)
             << "each destination-agent track holds 24 copies (12 per stream)";
 
-        // Membership proof: every copy in this track targets the SAME destination agent
-        // as the track, and the track's copies span BOTH streams (proving the partition
-        // is by agent, not by stream). copyStreamX/copyStreamY name each copy's stream.
         std::set<std::string> stream_names;
         for(const auto& ev : intervals)
         {
@@ -224,7 +216,7 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
 // region whose thread row is entirely absent, one region whose thread has a NULL
 // name, and one agent with a NULL type_index -- so synthesize_derived_tracks()
 // must fall back to the synthetic display names and get_all_agents() must drop the
-// corrupt agent. Each test asserts the EXACT fallback string / dropped-agent count.
+// corrupt agent.
 // =============================================================================
 class reader_v3_missing_meta_test : public ::testing::Test
 {
@@ -257,8 +249,7 @@ TEST_F(reader_v3_missing_meta_test, unnamed_stream_track_falls_back_to_stream_id
 }
 
 // region whose tid matches no rocpd_info_thread row -> thread_info is entirely
-// absent, so the cpu_thread track display name is the bare "Thread". Both fixture
-// regions are non-sample (main) tracks.
+// absent, so the cpu_thread track display name is the bare "Thread".
 TEST_F(reader_v3_missing_meta_test, thread_without_thread_info_falls_back_to_thread)
 {
     auto threads = find_tracks(m_reader->get_tracks(),
@@ -272,7 +263,6 @@ TEST_F(reader_v3_missing_meta_test, thread_without_thread_info_falls_back_to_thr
     }
     ASSERT_NE(bare, nullptr) << "no cpu_thread track fell back to bare \"Thread\"";
     EXPECT_EQ(bare->name, "Thread");
-    // Fallback path taken precisely because thread_info could not be resolved.
     EXPECT_EQ(bare->thread_info, nullptr);
     EXPECT_EQ(bare->region_kind, profiler_hub::reader_types::region_track_kind_t::main);
 }
@@ -298,8 +288,7 @@ TEST_F(reader_v3_missing_meta_test, unnamed_thread_falls_back_to_thread_tid)
 }
 
 // get_all_agents() drops any agent whose type_index is NULL ("Corrupted database
-// detected" continue): the fixture has one valid agent and one with a NULL
-// type_index, so exactly one agent survives.
+// detected" continue).
 TEST_F(reader_v3_missing_meta_test, agent_with_null_type_index_is_dropped)
 {
     auto agents = m_reader->get_all_agents();
@@ -308,13 +297,11 @@ TEST_F(reader_v3_missing_meta_test, agent_with_null_type_index_is_dropped)
     EXPECT_EQ(agents.front()->name, "Synthetic GPU 0");
 }
 
-// A v3 counter track whose metric name itself contains " [" ("TCC_HIT [sum] [0]")
-// defeats the ordinal strip in ranked_pmc_resolver (the strip cuts at the first
-// " [", yielding "TCC_HIT", matching no pmc name), so the name-match rank collapses
-// and the deterministic pmc_id tiebreaker alone selects the pmc. This fixture puts
-// the correct pmc at the lower id so the tiebreaker still lands on it -- proving the
-// degradation is non-fatal on this shape while documenting that correctness now
-// rides on pmc_id ordering, not the (defeated) name match.
+// A v3 counter track whose metric name contains " [" ("TCC_HIT [sum] [0]") defeats
+// ranked_pmc_resolver's ordinal strip (cuts at the first " [", yielding "TCC_HIT",
+// matching no pmc name); the name-match rank collapses and the pmc_id tiebreaker
+// alone selects the pmc. This fixture places the correct pmc at the lower id, so
+// resolution is correct only by coincidence -- a latent, non-fatal degradation.
 class reader_v3_bracket_name_test : public ::testing::Test
 {
 protected:
@@ -340,20 +327,14 @@ TEST_F(reader_v3_bracket_name_test, delimiter_in_metric_name_resolves_via_pmc_id
     auto tracks = m_reader->get_tracks();
     auto counters =
         find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
-    // Exactly one counter track (name string "TCC_HIT [sum] [0]"), co-sampled with a
-    // sibling pmc under one event.
+    // Co-sampled with a sibling pmc under one event.
     ASSERT_EQ(counters.size(), 1U);
 
     const auto& counter = counters.front();
     ASSERT_NE(counter->pmc_info, nullptr);
 
-    // The ordinal strip is defeated by the internal " [" (yields "TCC_HIT", matching
-    // neither pmc), so both co-sampled pmcs tie on the name key and the pmc_id
-    // tiebreaker picks the lower id -- pmc 1, which by construction IS the track's own
-    // metric. Correct resolution survives here ONLY because the correct pmc has the
-    // lower id; this is the non-fatal face of that LATENT degradation.
     EXPECT_EQ(counter->pmc_info->pmc_id, 1U);
     EXPECT_EQ(counter->pmc_info->name, "TCC_HIT [sum]");
-    // Q9 display name is that same resolved pmc's name.
+    // Q9.
     EXPECT_EQ(counter->name, "TCC_HIT [sum]");
 }

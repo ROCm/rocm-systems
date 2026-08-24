@@ -37,10 +37,6 @@
 --   Windowed [3000,5000] scalar series (3 samples): {3000:500, 4000:300, 5000:1000}.
 --   Unwindowed scalar series (7 samples): {1000:100, 2000:0, 3000:500, 4000:300,
 --     5000:1000, 6000:1999, 7000:1000}.  windowed(3) < unwindowed(7) proves the filter.
---
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt): canonical v3 schema
---   (rocpd_tables.sql) + this file, {{uuid}}/{{guid}} substituted, piped through
---   sqlite3. No rocpd_timestamp table -> v3 backend selected.
 -- =============================================================================
 
 -- Bare alias views (v3 reader joins these by bare name) ----------------------
@@ -64,10 +60,10 @@ VALUES (1, 1, 1, 'GPU', 0, 0, 'GPU-0');
 INSERT INTO "rocpd_memory_allocate{{uuid}}"
     (id, nid, pid, agent_id, type, level, start, "end", size, address)
 VALUES
-    (1, 1, 1, 1, 'ALLOC', 'REAL', 1000, 1100, 100, NULL),  -- before window (skip)
-    (2, 1, 1, 1, 'FREE',  'REAL', 2000, 2100, 100, NULL),  -- before window (skip)
-    (3, 1, 1, 1, 'ALLOC', 'REAL', 3000, 3100, 500, NULL),  -- in window (emit, == start)
-    (4, 1, 1, 1, 'FREE',  'REAL', 4000, 4100, 200, NULL),  -- in window (emit)
-    (5, 1, 1, 1, 'ALLOC', 'REAL', 5000, 5100, 700, NULL),  -- in window (emit, == end)
-    (6, 1, 1, 1, 'ALLOC', 'REAL', 6000, 6100, 999, NULL),  -- after window (skip)
-    (7, 1, 1, 1, 'FREE',  'REAL', 7000, 7100, 999, NULL);  -- after window (skip)
+    (1, 1, 1, 1, 'ALLOC', 'REAL', 1000, 1100, 100, NULL),
+    (2, 1, 1, 1, 'FREE',  'REAL', 2000, 2100, 100, NULL),
+    (3, 1, 1, 1, 'ALLOC', 'REAL', 3000, 3100, 500, NULL),
+    (4, 1, 1, 1, 'FREE',  'REAL', 4000, 4100, 200, NULL),
+    (5, 1, 1, 1, 'ALLOC', 'REAL', 5000, 5100, 700, NULL),
+    (6, 1, 1, 1, 'ALLOC', 'REAL', 6000, 6100, 999, NULL),
+    (7, 1, 1, 1, 'FREE',  'REAL', 7000, 7100, 999, NULL);

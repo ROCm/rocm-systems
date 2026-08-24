@@ -22,10 +22,6 @@
 namespace profiler_hub::data_storage::schema_v3
 {
 
-// All result structs, func typedefs, and set structs are defined in
-// read_statements_base.hpp (namespace profiler_hub::data_storage) and are
-// inherited here. This is the v3 backend: same SQL as before, now overriding
-// the abstract read_statements_base accessors.
 struct read_statements : public read_statements_base
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -386,7 +382,7 @@ struct read_statements : public read_statements_base
         return m_kd_pmc_interval_track;
     }
 
-    // Track-stats accessors (aggregates matching the interval-track scoping above)
+    // Track-stats accessors
     [[nodiscard]] const stats_track_3_func_t& region_stats_track_main() const override
     {
         return m_region_stats_track_main;
@@ -1300,11 +1296,6 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
-    // GROUP-BY-name aggregates: one row per distinct name id with COUNT and
-    // (end - start) duration SUM/MIN/MAX. name_col is grouped (kernel_id for kernels,
-    // name_id for regions) and resolved to a display string by the reader. The
-    // time-filtered variant keeps events overlapping [start,end] (bind order end,start),
-    // matching the count / interval overlap convention.
     void initialize_summary_statements()
     {
         const auto& u = m_uuid;
@@ -1409,9 +1400,7 @@ private:
                 &distinct_dma_result::queue_id,
                 &distinct_dma_result::dst_agent_id);
 
-        // memory tracks: one per distinct (nid, agent_id, queue_id, pid) in
-        // rocpd_memory_allocate, matching Optiq's GetRocprofMemoryAllocTrackQuery
-        // GROUP BY. agent_id / queue_id are nullable; NULL is a distinct group value.
+        // memory tracks: keyed to match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY.
         m_distinct_memory_tracks =
             m_backend->create_read_statement_executor<distinct_memory_result>(
                 fmt::format("SELECT DISTINCT nid, agent_id, queue_id, pid "
@@ -1422,9 +1411,8 @@ private:
                 &distinct_memory_result::queue_id,
                 &distinct_memory_result::pid);
 
-        // kernel_dispatch_pmc tracks: one per distinct (nid, agent_id, pmc_id, pid) in
-        // rocpd_pmc_event INNER JOIN rocpd_kernel_dispatch, matching Optiq's
-        // GetRocprofPerformanceCountersTrackQuery v3 GROUP BY. All fields non-nullable.
+        // kernel_dispatch_pmc tracks: keyed to match Optiq's
+        // GetRocprofPerformanceCountersTrackQuery v3 GROUP BY.
         m_distinct_kd_pmc_tracks =
             m_backend->create_read_statement_executor<distinct_kd_pmc_result>(
                 fmt::format("SELECT DISTINCT K.nid, K.agent_id, PMC_E.pmc_id, K.pid "
@@ -1437,8 +1425,7 @@ private:
                 &distinct_kd_pmc_result::pmc_id,
                 &distinct_kd_pmc_result::pid);
 
-        // memory_activity tracks: one per distinct (nid, pid, agent_id) in
-        // rocpd_memory_allocate, matching Optiq's per-agent grouping. agent_id nullable.
+        // memory_activity tracks: keyed to match Optiq's per-agent grouping.
         m_distinct_mem_activity_tracks =
             m_backend->create_read_statement_executor<distinct_mem_activity_result>(
                 fmt::format("SELECT DISTINCT nid, pid, agent_id "
@@ -1448,9 +1435,8 @@ private:
                 &distinct_mem_activity_result::pid,
                 &distinct_mem_activity_result::agent_id);
 
-        // All rocpd_memory_allocate rows for (nid, pid), ordered by start. C++ computes
-        // per-agent running sums with FREE agent_id recovery via address self-join.
-        // type is a TEXT column directly on rocpd_memory_allocate.
+        // C++ computes per-agent running sums downstream, including FREE agent_id
+        // recovery via address self-join.
         m_mem_activity_raw_track =
             m_backend->create_read_statement_executor<mem_activity_raw_result,
                                                       bind_types<size_t, size_t>>(
@@ -1530,8 +1516,8 @@ private:
         // shared ranked_pmc_resolver (rn=1). See that helper for the fan-out rationale.
         // v3 rocpd_track has no agent_id/pmc_id, but per-metric sampled tracks carry the
         // metric identity + agent ordinal in their name_id string (e.g.
-        // "device_busy_gfx [0]"); the resolver's name match picks the right pmc, and the
-        // Q9 display name is that same pmc's ip.name.
+        // "device_busy_gfx [0]"); the resolver's name match picks the right pmc, whose
+        // ip.name becomes the display name.
         m_counter_track_names =
             m_backend->create_read_statement_executor<counter_track_name_result>(
                 "SELECT track_id, pmc_id, name FROM (" + ranked_pmc_resolver(u) +
@@ -1589,10 +1575,6 @@ private:
                 &interval_row_result::name_ref,
                 &interval_row_result::category);
 
-        // gpu_queue: kernel dispatches keyed on (nid, pid, agent_id, queue_id). Category
-        // is resolved in-SQL via rocpd_event/rocpd_string (LEFT JOIN, additive — mirrors
-        // the region and stream interval queries); the base SELECT list is otherwise
-        // unchanged, so the row set stays identical to get_track_stats' count.
         m_kernel_dispatch_interval_track = m_backend->create_read_statement_executor<
             interval_row_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -1612,11 +1594,8 @@ private:
 
         // dma: memory copies keyed on (nid, pid, queue_id, dst_agent_id) to match Optiq's
         // GetRocprofMemoryCopyTrackQuery by-destination-agent swimlane grouping. NULL
-        // queue_id / dst_agent_id are distinct group values, so prepare one variant per
-        // NULL pattern. Category is resolved in-SQL via rocpd_event/rocpd_string (LEFT
-        // JOIN, additive — mirrors the region/kernel_dispatch/stream interval queries);
-        // the row set stays identical to get_track_stats' count, category NULL when
-        // event/category absent.
+        // queue_id/dst_agent_id are distinct group values, so one variant per NULL
+        // pattern (category resolved the same way as the region query above).
         auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
@@ -1647,10 +1626,9 @@ private:
             make_mc_interval("mc.queue_id IS NULL AND mc.dst_agent_id IS NULL",
                              bind_types<size_t, size_t>{});
 
-        // memory: memory allocations keyed on (nid, pid, agent_id, queue_id). NULL
-        // agent_id / queue_id are distinct group values; one variant per NULL pattern.
-        // memory_allocate has no name column in v3 (name_ref stays NULL). Category is
-        // resolved via rocpd_event/rocpd_string (LEFT JOIN, additive).
+        // memory: memory allocations keyed on (nid, pid, agent_id, queue_id);
+        // memory_allocate has no name column in v3 (name_ref stays NULL). Same
+        // NULL-variant / category pattern as dma above.
         auto make_ma_interval = [&](const char* aq_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
@@ -1680,9 +1658,8 @@ private:
         m_memory_alloc_interval_neither = make_ma_interval(
             "ma.agent_id IS NULL AND ma.queue_id IS NULL", bind_types<size_t, size_t>{});
 
-        // kernel_dispatch_pmc: intervals keyed by (nid, pid, agent_id, pmc_id). name_ref
-        // is kernel_id (for kernel symbol resolution, same as gpu_queue). Category is
-        // resolved via rocpd_event/rocpd_string (LEFT JOIN, additive).
+        // kernel_dispatch_pmc: intervals keyed by (nid, pid, agent_id, pmc_id); name_ref
+        // is kernel_id (for kernel symbol resolution, same as gpu_queue).
         m_kd_pmc_interval_track = m_backend->create_read_statement_executor<
             interval_row_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -1750,7 +1727,6 @@ private:
         // MIN(start)/MAX(end)/COUNT over exactly the rows the matching interval-track
         // query returns, so per-track bounds/count agree with a full slice load.
 
-        // cpu_thread region main: regions on (nid,pid,tid) whose event has no sample.
         m_region_stats_track_main = m_backend->create_read_statement_executor<
             track_stats_result,
             bind_types<size_t, size_t, size_t>>(
@@ -1763,9 +1739,8 @@ private:
             &track_stats_result::max_ts,
             &track_stats_result::count);
 
-        // cpu_thread region sample: regions on (nid,pid,tid) whose event has a sample.
-        // COUNT(DISTINCT r.id) matches the interval query's SELECT DISTINCT r.id (a
-        // region event may have multiple samples).
+        // COUNT(DISTINCT r.id) matches the interval query's SELECT DISTINCT r.id — a
+        // region event may join multiple samples.
         m_region_stats_track_sample =
             m_backend->create_read_statement_executor<track_stats_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -1778,7 +1753,6 @@ private:
                 &track_stats_result::max_ts,
                 &track_stats_result::count);
 
-        // gpu_queue: kernel dispatches on (nid,pid,agent_id,queue_id).
         m_kernel_dispatch_stats_track = m_backend->create_read_statement_executor<
             track_stats_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -1790,10 +1764,6 @@ private:
             &track_stats_result::max_ts,
             &track_stats_result::count);
 
-        // dma: memory copies keyed on (nid,pid,queue_id,dst_agent_id) -- shape-matched to
-        // the make_mc_interval variants above so stats scope to exactly the same rows the
-        // interval track returns. One variant per NULL pattern (NULL queue_id /
-        // dst_agent_id are distinct group values).
         auto make_mc_stats = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<track_stats_result, bt>(
@@ -1818,7 +1788,6 @@ private:
         m_memory_copy_stats_neither = make_mc_stats(
             "queue_id IS NULL AND dst_agent_id IS NULL", bind_types<size_t, size_t>{});
 
-        // memory: stats shape-matched to make_ma_interval, one variant per NULL pattern.
         auto make_ma_stats = [&](const char* aq_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<track_stats_result, bt>(
@@ -1842,8 +1811,6 @@ private:
         m_memory_alloc_stats_neither = make_ma_stats(
             "agent_id IS NULL AND queue_id IS NULL", bind_types<size_t, size_t>{});
 
-        // kernel_dispatch_pmc: stats keyed by (nid, pid, agent_id, pmc_id), shape-matched
-        // to kd_pmc_interval_track so bounds/count agree with the interval query.
         m_kd_pmc_stats_track = m_backend->create_read_statement_executor<
             track_stats_result,
             bind_types<size_t, size_t, size_t, size_t>>(
@@ -1858,9 +1825,8 @@ private:
             &track_stats_result::max_ts,
             &track_stats_result::count);
 
-        // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the stream
-        // interval query (stream_id bound three times), so bounds/count agree with a full
-        // slice load.
+        // stream: same 3-way UNION as the stream interval query; stream_id bound three
+        // times.
         m_stream_stats_track =
             m_backend->create_read_statement_executor<track_stats_result,
                                                       bind_types<size_t, size_t, size_t>>(
@@ -1920,9 +1886,9 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Keyed on rocpd_sample.id (scalar_sample_t::opaque_id). resolved_pmc_join keeps
-        // only the sample's own pmc value; without it one sample joins to all co-sampled
-        // pmcs sharing its event_id and could report another metric's value.
+        // Keyed on rocpd_sample.id. resolved_pmc_join keeps only the sample's own pmc
+        // value; without it one sample joins to all co-sampled pmcs sharing its event_id
+        // and could report another metric's value.
         m_scalar_detail = m_backend->create_read_statement_executor<scalar_detail_result,
                                                                     bind_types<size_t>>(
             fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
@@ -1974,7 +1940,6 @@ private:
         // A flow leg links a SOURCE event to a DEST event sharing the same non-zero
         // stack_id (the stack-clique join, E{s}.id != E{d}.id). source/dest may be the
         // same table (region->region, same-type siblings) or different (region->GPU).
-        // The time window filters on the SOURCE row's start.
         auto make_flow_set = [&](const std::string& source_table,
                                  const std::string& source_alias,
                                  const std::string& dest_table,

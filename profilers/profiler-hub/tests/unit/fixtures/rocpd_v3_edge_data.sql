@@ -10,20 +10,6 @@
 --   deliberately out-of-order timestamps. A real blob also cannot be a
 --   by-construction oracle: you cannot assert an exact value you did not author.
 --
---   This file, together with the canonical v3 schema
---   (source/data_storage/schema/rocpd_tables.sql), deterministically builds a
---   tiny v3 database whose every row is hand-chosen so tests assert on KNOWN
---   values, not "no crash". It is the positive counterpart to the v4 counter
---   fixture and is intentionally minimal and hand-reviewable.
---
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt):
---   {{uuid}} -> "_" + <hex uuid>, {{guid}} -> <hex uuid>  (mirrors the
---   substitution in get_schema_query()), then piped through the sqlite3 CLI:
---     schema/rocpd_tables.sql  (v3 schema)  +  this file  (data)  ->  .db
---   The reader auto-discovers the single continuous-hex uuid from the table
---   names, and because there is NO rocpd_timestamp table it selects the v3
---   backend (reader_impl.cpp version dispatch).
---
 -- TRACK MATRIX (what get_tracks() must return):
 --   COUNTER tracks come from rocpd_track (a track is a counter iff a PMC-backed
 --   rocpd_sample references it -- i.e. a sample row whose event_id joins
@@ -66,13 +52,7 @@
 --   => by type: cpu_thread=1, counter=4, gpu_queue=2, dma=2, stream=2.
 -- =============================================================================
 
--- Bare alias views ----------------------------------------------------------
--- The v3 reader joins rocpd_event / rocpd_string / rocpd_sample by BARE name
--- (read_statements.hpp interval/scalar/flow queries), whereas rocpd_tables.sql
--- only creates the uuid-suffixed base tables. In a real rocpd capture these
--- bare names are VIEWS the runtime layers on top of the suffixed tables; the
--- canonical schema file does not create them, so we reproduce them here. Only
--- the three the reader references bare are needed (all other refs are suffixed).
+-- Bare alias views (the v3 reader joins these three by bare name) ----------
 CREATE VIEW rocpd_event AS SELECT * FROM "rocpd_event{{uuid}}";
 CREATE VIEW rocpd_string AS SELECT * FROM "rocpd_string{{uuid}}";
 CREATE VIEW rocpd_sample AS SELECT * FROM "rocpd_sample{{uuid}}";
@@ -81,46 +61,36 @@ CREATE VIEW rocpd_sample AS SELECT * FROM "rocpd_sample{{uuid}}";
 INSERT INTO "rocpd_info_node{{uuid}}" (id, hash, machine_id, system_name, hostname)
 VALUES (1, 222222, 'synthetic-machine-v3', 'Linux', 'synth-v3-host');
 
--- NOTE ON IDENTITY COLUMNS: throughout rocpd, the `nid`/`pid`/`tid`/`agent_id`/
--- `queue_id`/`stream_id` columns on child tables are FKs to the ROW id of the
--- corresponding rocpd_info_* table, NOT the OS-level node/process/thread number.
--- rocpd_info_process below carries the OS pid (4242) as data; every child row
--- therefore references pid = 1 (its rocpd_info_process.id), not 4242.
+-- rocpd_info_process below carries the OS pid (4242) as data; child rows'
+-- `pid` columns are FKs to this row's id (1), not the OS pid.
 INSERT INTO "rocpd_info_process{{uuid}}" (id, nid, pid, command)
 VALUES (1, 1, 4242, 'synthetic-edge-app');
 
--- Thread row id 1 (OS tid 1001 stored in the tid column, which is plain data on
--- rocpd_info_thread). rocpd_track.tid / rocpd_region.tid are FKs to THIS row's
--- id (1), so both the counter-with-tid track and the regions reference tid = 1.
+-- Thread row id=1 (OS tid 1001 is plain data here); rocpd_track.tid /
+-- rocpd_region.tid FK to this row's id (1), not the OS tid.
 INSERT INTO "rocpd_info_thread{{uuid}}" (id, nid, pid, tid)
 VALUES (1, 1, 1, 1001);
 
--- Two GPU agents (both carry type_index; get_all_agents drops agents with a NULL
--- type_index, reader_impl.cpp:206).
+-- GPU agent carries type_index (get_all_agents drops NULL type_index, reader_impl.cpp:206).
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 1, 'GPU', 0, 0, 'Synthetic GPU 0');
 
--- Two queues -> Q9: gpu_queue display name = queue identity (rocpd_info_queue.name)
+-- Q9: gpu_queue display name = queue identity (rocpd_info_queue.name).
 INSERT INTO "rocpd_info_queue{{uuid}}" (id, nid, pid, name)
 VALUES (1, 1, 1, 'Queue-A'),
        (2, 1, 1, 'Queue-B');
 
--- Two streams (dma lanes).
 INSERT INTO "rocpd_info_stream{{uuid}}" (id, nid, pid, name)
 VALUES (1, 1, 1, 'Stream-X'),
        (2, 1, 1, 'Stream-Y');
 
--- Three distinct PMCs so the three counter tracks get DIFFERENT display names (Q9).
--- PMC 99 has an intentionally empty name: ranked_pmc_resolver includes it in
--- counter_track_names (FK satisfied), but the empty-name guard (!nit->second.empty())
--- prevents it from overwriting rocpd_track.name -> the fallback path fires for track 8.
+-- Q9: three distinct PMCs give the three counter tracks different display names.
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
 VALUES (1,  1, 1, 1, 'GRBM_COUNT', 'GRBM_COUNT'),
        (2,  1, 1, 1, 'SQ_WAVES',   'SQ_WAVES'),
        (3,  1, 1, 1, 'CPU_CYCLES', 'CPU_CYCLES'),
        (99, 1, 1, 1, '',           '');           -- empty name -> display-name fallback
 
--- Code object + kernel symbol (gpu_queue per-event label = kernel display name).
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1);
 
@@ -137,35 +107,24 @@ VALUES (1, 'CPU Thread 1001'),
        (6, 'copyHtoD'),
        (7, 'FallbackCounter');  -- track 8 rocpd_track.name; pmc_id 99 absent from rocpd_info_pmc
 
--- Tracks --------------------------------------------------------------------
--- (id, nid, pid, tid, name_id). Counter classification is by sample reference,
--- NOT by any column here.
+-- Tracks (id, nid, pid, tid, name_id) -- counter classification is by sample
+-- reference, NOT by any column here. See TRACK MATRIX above for per-id detail.
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (1, 1, 1,    1,    1);      -- cpu_thread, pid+tid  -> thread_info set
+VALUES (1, 1, 1,    1,    1);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (2, 1, 1,    NULL, NULL);   -- counter, no tid      -> thread_info NULL
+VALUES (2, 1, 1,    NULL, NULL);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (3, 1, 1,    1,    NULL);   -- counter, WITH tid    -> thread_info set (#147)
+VALUES (3, 1, 1,    1,    NULL);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (4, 1, 1,    NULL, 1);      -- cpu_thread, no tid   -> thread_info NULL
+VALUES (4, 1, 1,    NULL, 1);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (5, 1, NULL, NULL, NULL);   -- non-counter, no pid -> IGNORED by discovery
+VALUES (5, 1, NULL, NULL, NULL);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (6, 1, NULL, NULL, NULL);   -- counter, no pid/tid -> process/thread_info NULL
+VALUES (6, 1, NULL, NULL, NULL);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (7, 1, 1,    NULL, NULL);   -- sampled but NOT pmc-backed -> NOT a counter
-                                   --   (regression guard: sample 7 references event 14,
-                                   --    which has NO rocpd_pmc_event. A bare
-                                   --    "DISTINCT track_id FROM rocpd_sample" would
-                                   --    mis-classify this as a counter; the pmc_event
-                                   --    join in distinct_sample_track_ids() excludes it.
-                                   --    Mirrors rocpd-transpose.db region timer-sample
-                                   --    tracks. NO rocpd_region row, so it also does not
-                                   --    become a cpu_thread track -> not returned at all.)
+VALUES (7, 1, 1,    NULL, NULL);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
-VALUES (8, 1, 1,    NULL, 7);      -- counter, pmc_id 99 has empty name in rocpd_info_pmc
-                                   --   -> empty-name guard prevents PMC name overwrite
-                                   --   -> display name falls back to rocpd_track.name
+VALUES (8, 1, 1,    NULL, 7);
 
 -- Events --------------------------------------------------------------------
 -- Flows key on stack_id (Q4): a region flows to a GPU-side event sharing the
@@ -267,10 +226,6 @@ VALUES (1, 4, 0, 'const char*', 'kernel_name', 'vecAdd'),
 --   sample 4 -> ts 500  -> value 5.0
 --   sample 5 -> ts 1500 -> value 15.0
 --   => get_scalar_track(track 3) = [(4,500,5.0),(5,1500,15.0)]
--- Track 6 (counter, NULL pid/tid) -- pmc 3 CPU_CYCLES, one sample (event 13).
--- Track 8 (counter, fallback) -- pmc_id 99 has empty name in rocpd_info_pmc;
---   ranked_pmc_resolver includes this track in counter_track_names but with name="";
---   the empty-name guard prevents the PMC name from overwriting rocpd_track.name.
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
 VALUES (1, 8,  1,  30.5),
        (2, 9,  1,  10.5),

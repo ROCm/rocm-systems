@@ -58,13 +58,11 @@ protected:
 
 TEST_F(reader_v3_kd_pmc_test, v3_discovers_two_kd_pmc_tracks)
 {
-    // Two distinct (nid, agent_id, pmc_id, pid) -> 2 kernel_dispatch_pmc tracks.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
     ASSERT_EQ(tracks.size(), 2U);
 
-    // Every kd_pmc track must carry agent_info (from agent_id=1).
     for(const auto& t : tracks)
     {
         ASSERT_NE(t->agent_info, nullptr);
@@ -77,7 +75,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_discovers_two_kd_pmc_tracks)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_pmc_info_populated)
 {
-    // pmc_info must be resolved from pmc_id for both tracks.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -95,8 +92,8 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_pmc_info_populated)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
 {
-    // The SQ_WAVES track (pmc_id=1) covers kd 1 (start=1000) and kd 2 (start=2000).
-    // Rows are inserted out of start order (kd 2 first), so this proves ORDER BY start.
+    // Rows are inserted out of start order (kd 2 first, kd 1 second); proves ORDER BY
+    // start.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -115,7 +112,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
     ASSERT_NE(sq_waves_track, nullptr);
     ASSERT_NE(grbm_track, nullptr);
 
-    // SQ_WAVES track: 2 events in ascending start order.
     auto sq_intervals = m_reader->get_interval_track(sq_waves_track->id);
     ASSERT_EQ(sq_intervals.size(), 2U);
     ASSERT_TRUE(is_start_sorted(sq_intervals));
@@ -124,7 +120,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
     ASSERT_EQ(sq_intervals[1].start, 2000U);
     ASSERT_EQ(sq_intervals[1].end, 2300U);
 
-    // GRBM_COUNT track: 1 event.
     auto grbm_intervals = m_reader->get_interval_track(grbm_track->id);
     ASSERT_EQ(grbm_intervals.size(), 1U);
     ASSERT_EQ(grbm_intervals[0].start, 3000U);
@@ -133,12 +128,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // A kd_pmc interval event's row id is a rocpd_kernel_dispatch.id, so its
-    // handle must be typed kernel_dispatch and resolve through the KD detail path -- NOT
-    // the point pmc_event path (WHERE rocpd_pmc_event.id = ?), which keys a different
-    // table. Guard bites: revert interval_event_type_for(kernel_dispatch_pmc) to
-    // pmc_event and this test fails (handle mis-types + KD detail unreachable; the
-    // kd_pmc fixture has no rocpd_sample, so the point path resolves to nullopt).
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -154,19 +143,15 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_interval_resolves_as_kernel_dispatch)
     ASSERT_FALSE(intervals.empty());
     const auto& first = intervals.front();  // start=1000 -> kd row id 1
 
-    // The minted handle is typed kernel_dispatch, not pmc_event.
     EXPECT_EQ(type_of(first.id),
               profiler_hub::reader_types::event_type_t::kernel_dispatch);
 
     auto detail = m_reader->get_event_info(first.id);
     ASSERT_TRUE(detail.has_value());
-    // Interval extent is present (kd_pmc is an interval track); a point pmc_event would
-    // leave te == nullopt.
     EXPECT_EQ(detail->ts, 1000U);
     ASSERT_TRUE(detail->te.has_value());
     EXPECT_EQ(detail->te.value(), 1200U);
 
-    // kernel_dispatch properties are populated -> the KD detail path ran.
     auto* dispatch_id = find_prop(*detail, "dispatch_id");
     ASSERT_NE(dispatch_id, nullptr);
     EXPECT_EQ(std::get<uint64_t>(*dispatch_id), 1U);
@@ -194,7 +179,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_track_stats_matches_interval_slice)
 
 TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_display_name_from_kernel_symbol)
 {
-    // Interval display_name must be resolved from kernel_symbol (vecAdd(float*, int)).
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -209,7 +193,6 @@ TEST_F(reader_v3_kd_pmc_test, v3_kd_pmc_display_name_from_kernel_symbol)
 
 TEST_F(reader_v3_kd_pmc_test, v3_get_scalar_track_returns_empty_for_kd_pmc)
 {
-    // kernel_dispatch_pmc is an interval track; scalar read must return empty (Q7 guard).
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -279,9 +262,8 @@ TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_pmc_info_populated)
 
 TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_track_count_and_order)
 {
-    // Timestamps inserted out of value order (kd 2 timestamps ids 1,2 with values
-    // 2000/2300 before kd 1 timestamps ids 3,4 with values 1000/1200). ORDER BY
-    // ts_s.value must return kd 1 before kd 2 on the SQ_WAVES track.
+    // Timestamps inserted out of value order (kd 2 rows precede kd 1 rows); proves
+    // ORDER BY ts_s.value returns kd 1 before kd 2.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -316,10 +298,6 @@ TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_track_count_and_order)
 
 TEST_F(reader_v4_kd_pmc_test, v4_kd_pmc_interval_resolves_as_kernel_dispatch)
 {
-    // v4 backend: same contract as the v3 test. The v4 kd_pmc interval SQL
-    // also SELECTs K.id (rocpd_kernel_dispatch.id), so the single-site fix in
-    // interval_event_type_for is backend-agnostic and routes this handle through the KD
-    // detail path with the interval extent (te) present.
     auto tracks =
         find_tracks(m_reader->get_tracks(),
                     profiler_hub::reader_types::track_type_t::kernel_dispatch_pmc);
@@ -392,8 +370,6 @@ TEST_F(reader_v4_kd_pmc_test, v4_get_scalar_track_returns_empty_for_kd_pmc)
     ASSERT_TRUE(m_reader->get_scalar_track(tracks.front()->id).empty());
 }
 
-// --- Tier 2: synthetic v3 ambiguous-pmc fixture ------------------------------
-
 class reader_v3_amb_pmc_test : public ::testing::Test
 {
 protected:
@@ -442,8 +418,6 @@ TEST_F(reader_v3_amb_pmc_test, v3_exactly_one_ambiguous_pmc)
     }
     EXPECT_EQ(ambiguous_count, 1U);
 }
-
-// --- Tier 3: synthetic v4.0 ambiguous-pmc fixture ----------------------------
 
 class reader_v4_amb_pmc_test : public ::testing::Test
 {
@@ -494,12 +468,9 @@ TEST_F(reader_v4_amb_pmc_test, v4_exactly_one_ambiguous_pmc)
     EXPECT_EQ(ambiguous_count, 1U);
 }
 
-// v4 track-classification ambiguity detection tests
-//
-// Fixture: rocpd_v4_amb_cls.db — a single rocpd_track row (id=1) referenced by
-//   both rocpd_sample/rocpd_pmc_event (counter set) and rocpd_memory_allocate
-//   (memory set). build_v4_tracks() must detect the overlap, log a warning, and
-//   set ambiguous_classification=true on the resulting counter track.
+// Fixture: rocpd_v4_amb_cls.db — a single rocpd_track row (id=1) referenced by both
+// rocpd_sample/rocpd_pmc_event (counter set) and rocpd_memory_allocate (memory set);
+// build_v4_tracks() must detect the overlap and set ambiguous_classification=true.
 
 class reader_v4_amb_cls_test : public ::testing::Test
 {
@@ -525,8 +496,8 @@ TEST_F(reader_v4_amb_cls_test, v4_ambiguous_classification_track_flagged)
 {
     auto tracks = m_reader->get_tracks();
 
-    // Find the counter track (the ambiguous rocpd_track row; the fixture also
-    // yields a synthetic memory_activity track from the same rocpd_memory_allocate).
+    // Fixture also yields a synthetic memory_activity track from the same
+    // rocpd_memory_allocate row.
     profiler_hub::reader_types::track_info_ptr_t counter_track;
     for(const auto& t : tracks)
     {
@@ -537,9 +508,7 @@ TEST_F(reader_v4_amb_cls_test, v4_ambiguous_classification_track_flagged)
         }
     }
     ASSERT_NE(counter_track, nullptr) << "no counter track found";
-    // Counter classification wins (existing precedence).
     EXPECT_EQ(counter_track->type, profiler_hub::reader_types::track_type_t::counter);
-    // Overlap with memory-allocate set is detected and flagged.
     EXPECT_TRUE(counter_track->ambiguous_classification);
 }
 
@@ -586,23 +555,18 @@ protected:
 TEST_F(reader_v4_counter_test, v4_counter_track_classified_named_and_agent_scoped)
 {
     auto tracks = m_reader->get_tracks();
-    // Two tracks: the counter track (sample-referenced) and a bare cpu_thread.
     auto counter =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
     ASSERT_NE(counter, nullptr);
 
-    // Q9: counter track display name is the PMC name.
     ASSERT_EQ(counter->name, "GRBM_COUNT");
-    // Q10: v4 counter track carries agent_info (its rocpd_track row has agent_id).
     ASSERT_NE(counter->agent_info, nullptr);
     ASSERT_NE(counter->thread_info, nullptr);
 
-    // v4.0 has one pmc per event (no event_id fan-out), so it is unaffected by the
-    // v3-only deterministic disambiguation (005B-4-fix-1-fix-1): the single track must
-    // still resolve to the GRBM_COUNT pmc, with name/agent consistent with the track.
+    // v4.0 has one pmc per event (no event_id fan-out).
     ASSERT_NE(counter->pmc_info, nullptr);
     ASSERT_EQ(counter->pmc_info->name, "GRBM_COUNT");
-    // 005B-4-fix-1-fix-2: numeric pmc_id exposed on pmc_info; GRBM_COUNT is pmc 1 here.
+    // GRBM_COUNT is pmc 1 here.
     ASSERT_EQ(counter->pmc_info->pmc_id, 1U);
     ASSERT_EQ(counter->name, counter->pmc_info->name);
     ASSERT_NE(counter->pmc_info->agent_info, nullptr);
@@ -618,7 +582,6 @@ TEST_F(reader_v4_counter_test, v4_get_scalar_track_returns_timestamp_ordered_val
     ASSERT_NE(counter, nullptr);
 
     auto samples = m_reader->get_scalar_track(counter->id);
-    // 3 samples, returned in ascending-timestamp order despite row-id order differing.
     ASSERT_EQ(samples.size(), 3);
     ASSERT_TRUE(is_timestamp_sorted(samples));
 
@@ -637,9 +600,6 @@ TEST_F(reader_v4_counter_test, v4_get_scalar_track_returns_timestamp_ordered_val
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 {
-    // sample row id 1 -> timestamp 3000. The scalar handle encodes the sample event
-    // type; get_event_info resolves it as a point event (te == nullopt). The counter
-    // name + value payload is asserted separately below.
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
     ASSERT_TRUE(details.has_value());
@@ -649,10 +609,6 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_resolves_sample_point_event)
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and_value)
 {
-    // v4 backend: sample row id 1 -> track 1 "GRBM_COUNT", value 30.5.
-    // Resolved through the unified get_event_info the counter sample carries the counter
-    // name (from the track) + value (as a double property). Pre-052 this arm returned a
-    // bare timestamp, dropping name+value (guard-bite).
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::sample, 1));
     ASSERT_TRUE(details.has_value());
@@ -666,12 +622,6 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_counter_sample_carries_name_and
 
 TEST_F(reader_v4_counter_test, v4_get_event_info_pmc_event_carries_value)
 {
-    // A pmc_event point handle minted from a known rocpd_pmc_event.id resolves through
-    // the unified detail path: it is a point event (te == nullopt) whose "value" property
-    // carries the counter value as a double. pmc_event id=1 -> event_id=1 -> sample
-    // timestamp 3000, value 30.5. (Reader-minted pmc_event handles on kernel_dispatch_pmc
-    // tracks carry a kernel_dispatch id and route to the interval path, so the point
-    // detail path is exercised here with a directly-minted pmc_event.id handle.)
     auto details = m_reader->get_event_info(
         make_sql_event_id(profiler_hub::reader_types::event_type_t::pmc_event, 1));
     ASSERT_TRUE(details.has_value());
@@ -685,7 +635,6 @@ TEST_F(reader_v4_counter_test, v4_get_event_info_pmc_event_carries_value)
 
 TEST_F(reader_v4_counter_test, v4_get_interval_track_on_counter_returns_empty)
 {
-    // Q7: interval query against the counter track returns empty.
     auto tracks = m_reader->get_tracks();
     auto counter =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
@@ -695,7 +644,6 @@ TEST_F(reader_v4_counter_test, v4_get_interval_track_on_counter_returns_empty)
 
 TEST_F(reader_v4_counter_test, v4_get_scalar_track_on_non_counter_returns_empty)
 {
-    // Q7: scalar query against the bare cpu_thread track (no samples) returns empty.
     auto tracks = m_reader->get_tracks();
     auto cpu =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
@@ -705,8 +653,6 @@ TEST_F(reader_v4_counter_test, v4_get_scalar_track_on_non_counter_returns_empty)
 
 TEST_F(reader_v4_counter_test, v4_get_track_stats_counter_matches_scalar_slice)
 {
-    // v4.0 scalar stats resolve MIN/MAX through the timestamp spine. Known oracle:
-    // 3 samples at timestamps 1000/2000/3000 -> min 1000, max 3000, count 3.
     auto tracks = m_reader->get_tracks();
     auto counter =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::counter);
@@ -722,8 +668,7 @@ TEST_F(reader_v4_counter_test, v4_get_track_stats_counter_matches_scalar_slice)
 
 TEST_F(reader_v4_counter_test, v4_get_track_stats_bare_cpu_thread_is_empty)
 {
-    // The bare cpu_thread track has no region rows: count 0, nullopt bounds — the
-    // honest "empty track" signal (SQL MIN/MAX over an empty set), not an error.
+    // Empty track (count 0, nullopt bounds) is the expected result, not an error.
     auto tracks = m_reader->get_tracks();
     auto cpu =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
@@ -738,10 +683,9 @@ TEST_F(reader_v4_counter_test, v4_get_track_stats_bare_cpu_thread_is_empty)
 TEST_F(reader_v4_counter_test,
        v4_counter_display_name_falls_back_to_track_name_on_pmc_miss)
 {
-    // F7 coverage (v4 backend): track 3 has rocpd_track.name_id=2 -> 'FallbackCounterV4';
-    // its pmc_event references pmc_id=99 which exists in rocpd_info_pmc with empty name.
-    // The empty-name guard (!nit->second.empty()) prevents it from overwriting
-    // rocpd_track.name -> display name falls back to "FallbackCounterV4".
+    // Track 3's pmc_event references pmc_id=99, which exists in rocpd_info_pmc with an
+    // empty name; the empty-name guard prevents it from overwriting the track name, so
+    // display name falls back to "FallbackCounterV4".
     auto tracks = m_reader->get_tracks();
     auto counters =
         find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
@@ -757,10 +701,8 @@ TEST_F(reader_v4_counter_test,
     }
     ASSERT_NE(fallback_counter, nullptr) << "v4 fallback counter track not found";
 
-    // Primary assertion: display name equals rocpd_track.name (the fallback value).
     ASSERT_EQ(fallback_counter->name, "FallbackCounterV4");
     ASSERT_FALSE(fallback_counter->name.empty());
-    // pmc_info is attached (pmc_id=99 exists in rocpd_info_pmc) but carries empty name.
     ASSERT_NE(fallback_counter->pmc_info, nullptr);
     ASSERT_TRUE(fallback_counter->pmc_info->name.empty());
     // Non-fallback path still intact: the GRBM_COUNT track carries pmc_info.

@@ -8,10 +8,6 @@
 --   hand-chosen, varied durations so each aggregate is a by-construction oracle,
 --   and it is built so a windowed call drops a subset of rows (proving the filter).
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt): canonical v3 schema
---   (source/data_storage/schema/rocpd_tables.sql) + this data, {{uuid}}/{{guid}}
---   substituted, piped through sqlite3. No rocpd_timestamp table -> v3 backend.
---
 -- ORACLE (duration = "end" - start):
 --   KERNELS (kernel_id -> kernel_symbol display_name). TWO distinct kernel_symbol
 --   ids (1 and 3) share display_name "kA(int)" so GROUP BY kernel_id yields two
@@ -34,7 +30,7 @@
 --   FAR-FUTURE window [1000000000, 1000000001]: no rows match -> empty list.
 -- =============================================================================
 
--- Bare alias views (the v3 reader joins these by bare name; see edge fixture).
+-- Bare alias views (the v3 reader joins these by bare name).
 CREATE VIEW rocpd_event AS SELECT * FROM "rocpd_event{{uuid}}";
 CREATE VIEW rocpd_string AS SELECT * FROM "rocpd_string{{uuid}}";
 CREATE VIEW rocpd_sample AS SELECT * FROM "rocpd_sample{{uuid}}";
@@ -55,29 +51,23 @@ VALUES (1, 1, 1, 'Stream-X');
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1);
 
--- Three kernel symbols -> TWO distinct display names. Symbols 1 and 3 share
--- display_name "kA(int)" so their per-id GROUP BY rows must merge by name.
 INSERT INTO "rocpd_info_kernel_symbol{{uuid}}" (id, nid, pid, code_object_id, kernel_name, display_name)
 VALUES (1, 1, 1, 1, 'kA', 'kA(int)'),
        (2, 1, 1, 1, 'kB', 'kB(float)'),
        (3, 1, 1, 1, 'kA_alias', 'kA(int)');
 
--- Two region name strings -> two distinct region names for get_region_summary.
 INSERT INTO "rocpd_string{{uuid}}" (id, string)
 VALUES (1, 'rX'),
        (2, 'rY');
 
--- One event per row (region + kernel_dispatch).
 INSERT INTO "rocpd_event{{uuid}}" (id)
 VALUES (1), (2), (3), (4), (5), (6), (7);
 
--- Regions: rX = {r1,r2}, rY = {r3}.
 INSERT INTO "rocpd_region{{uuid}}" (id, nid, pid, tid, start, "end", name_id, event_id)
 VALUES (1, 1, 1, 1,  500,  700, 1, 1),
        (2, 1, 1, 1,  800, 1000, 1, 2),
        (3, 1, 1, 1, 1000, 1600, 2, 3);
 
--- Kernel dispatches: kA(int) = {kd1,kd2 (symbol 1), kd4 (symbol 3)}, kB = {kd3}.
 INSERT INTO "rocpd_kernel_dispatch{{uuid}}"
     (id, nid, pid, agent_id, kernel_id, dispatch_id, queue_id, stream_id,
      start, "end", workgroup_size_x, workgroup_size_y, workgroup_size_z,

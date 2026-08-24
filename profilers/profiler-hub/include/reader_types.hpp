@@ -307,9 +307,6 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  * the caller calls get_interval_track() or get_scalar_track(), and which
  * get_*_details() method applies to event handles drawn from that track.
  */
-// track_type_t is domain-first (cpu_thread, gpu_queue, dma, counter, ...) and is the
-// reader's dispatch key; shape is implied by which accessor applies (get_interval_track
-// vs get_scalar_track).
 enum class track_type_t
 {
     cpu_thread,  ///< thread_info populated. Interval track of region events.
@@ -377,11 +374,6 @@ enum class region_track_kind_t
  */
 enum class nesting_model_t
 {
-    // A track is `stack` only when its overlaps are true synchronous containment
-    // (region = HIP->HSA API call nesting); every concurrency track
-    // (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`, where overlap means
-    // concurrency, not a parent/child edge. Only `stack` tracks populate
-    // interval_entry_t::parent.
     stack,  ///< Overlaps are true containment: interval_entry_t::parent is populated and
             ///< `lane` coincides with call depth on real (non-overlapping-sibling) data.
     lane,   ///< Overlaps are concurrency: interval_entry_t::parent is always no-parent;
@@ -393,14 +385,10 @@ struct track_info_t
     track_id_t
         id{};  ///< Track identifier. Pass to get_interval_track()/get_scalar_track().
                ///< Opaque and stable for the reader's lifetime; never a topology tuple.
-    track_type_t type{};  ///< Determines which identity fields below are populated and
-                          ///< which event-fetch / detail method applies.
-    region_track_kind_t region_kind{
-        region_track_kind_t::none
-    };  ///< v3 cpu_thread region tracks only: main vs.
-        ///< sample split. none for all other tracks.
-    std::string name{};
-    std::string extdata{};
+    track_type_t        type{};
+    region_track_kind_t region_kind{ region_track_kind_t::none };
+    std::string         name{};
+    std::string         extdata{};
 
     // Identity is carried as relational shared_ptr objects
     // (node/process/thread/agent/queue/stream/pmc), sharing one instance across every
@@ -499,13 +487,12 @@ using arg_data_list_t = std::vector<arg_data_ptr_t>;
 // Detail property values are a typed variant, not stringly. This mirrors the SDK rocpd
 // writer's `struct sql_insert_value`
 // (rocprofiler-sdk/source/lib/output/generateRocpd.cpp) — the exact read/write seam
-// profiler-hub sits opposite — which uses the same alternatives. We define our own copy
-// rather than depend on the SDK header. `monostate` = present-but-empty; `nullptr_t` =
-// explicitly-absent optional. Revisit if the SDK value model changes.
+// profiler-hub sits opposite — which uses the same alternatives. `monostate` =
+// present-but-empty; `nullptr_t` = explicitly-absent optional. Revisit if the SDK value
+// model changes.
 using arg_value_t =
     std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t>;
 
-/// A named, typed detail property in an event_info_t property bag.
 struct arg_t
 {
     std::string key;    ///< Property name (source struct field / argument name).
@@ -801,8 +788,7 @@ struct scalar_sample_t
 
 using scalar_sample_list_t = std::vector<scalar_sample_t>;
 
-// The flow-edge kind, tagged from the endpoint-type pairing. Reversible mapping (see
-// get_flows).
+// Reversible mapping (see get_flows).
 enum class flow_kind_t
 {
     launch_to_dispatch,   ///< region -> kernel_dispatch (CPU launch to GPU dispatch).
@@ -850,10 +836,7 @@ struct flow_id_access
 };
 }  // namespace detail
 
-// A flow is a directed, typed, chain-grouped edge. Each unordered clique pair yields
-// one directed edge (source -> dest); `flow_id` groups the edges of one stack lineage;
-// `kind` classifies the edge. Endpoints stay opaque event_id_t. The source/dest field
-// names are kept for backward compatibility.
+// The source/dest field names are kept for backward compatibility.
 struct flow_edge_t
 {
     event_id_t  source{};   ///< Opaque handle of the source event (arrow tail).

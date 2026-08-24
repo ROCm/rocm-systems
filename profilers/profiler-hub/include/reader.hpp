@@ -23,10 +23,6 @@ struct reader_t
      * @brief Construct a reader with the given storage backend
      * @param storage Storage backend to read from (takes ownership)
      */
-    // A reader is constructed directly from a storage_t backend; there is no
-    // format-autodetecting trace_t::open entry point. Multi-format detection is
-    // deferred — the Perfetto trace_processor path exists only as a POC and is not
-    // wired into this API.
     explicit reader_t(std::unique_ptr<profiler_hub::storage_t> storage);
 
     ~reader_t();
@@ -301,12 +297,8 @@ struct reader_t
     /**
      * @brief Get call stack for an event, by its opaque handle.
      *
-     * Overload for consumers that hold only an opaque event_id_t (e.g. from
-     * get_interval_track / get_scalar_track / flows) and never construct a
-     * timeline_event_t. Internally builds a timeline_event_t from the handle and
-     * delegates to the timeline_event_t overload — the decode stays private inside
-     * the reader, so event_id_t opacity is preserved; no public
-     * type/row_id accessor is exposed.
+     * Delegates to the timeline_event_t overload; event_id_t opacity is
+     * preserved (no public type/row_id accessor is exposed).
      * @param id Opaque event handle.
      * @return Call stack data (empty if not available in database).
      */

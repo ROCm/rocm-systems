@@ -42,9 +42,8 @@ protected:
         return std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
     }
 
-    // Registers node/process/thread and inserts one region event with a call stack,
-    // one arg, and a correlation stack_id, so the detail/property getters below have
-    // real data to resolve.
+    // Seeds data so the detail/property getters exercised by callers have real
+    // data to resolve against.
     void seed_region_with_full_event(writer_t& writer) const
     {
         const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
@@ -102,7 +101,6 @@ flow_id_value(const reader_types::flow_id_t& fid)
     return reader_types::detail::flow_id_access::value(fid);
 }
 
-// 1 if a handle resolves to a unified detail record, else 0.
 inline int
 count_interval_resolutions(const reader_t& r, const reader_types::event_id_t& id)
 {
@@ -120,15 +118,14 @@ find_first_track(const reader_types::track_info_list_t& tracks,
     return nullptr;
 }
 
-// Peek the per-type-table row id an opaque handle encodes. Test-only: the public
-// API treats event_id_t as opaque (equality / ordering / hashing only).
+// Test-only: the public API treats event_id_t as opaque (equality / ordering /
+// hashing only).
 inline size_t
 row_id_of(const reader_types::event_id_t& id)
 {
     return reader_types::detail::event_id_access::row_id(id);
 }
 
-// Look up a property in a unified event_info_t bag by key (nullptr if absent).
 inline const reader_types::arg_value_t*
 find_prop(const reader_types::event_info_t& d, const std::string& key)
 {
@@ -139,7 +136,6 @@ find_prop(const reader_types::event_info_t& d, const std::string& key)
     return nullptr;
 }
 
-// All tracks of a given type.
 inline reader_types::track_info_list_t
 find_tracks(const reader_types::track_info_list_t& tracks,
             reader_types::track_type_t             type)
@@ -152,8 +148,7 @@ find_tracks(const reader_types::track_info_list_t& tracks,
     return out;
 }
 
-// True if interval events are non-decreasing by start timestamp (the documented
-// ordering contract of get_interval_track).
+// Checks conformance to get_interval_track's documented ordering contract.
 inline bool
 is_start_sorted(const reader_types::interval_entry_list_t& v)
 {
@@ -164,8 +159,7 @@ is_start_sorted(const reader_types::interval_entry_list_t& v)
     return true;
 }
 
-// True if scalar events are non-decreasing by timestamp (the documented
-// ordering contract of get_scalar_track).
+// Checks conformance to get_scalar_track's documented ordering contract.
 inline bool
 is_timestamp_sorted(const reader_types::scalar_sample_list_t& v)
 {

@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS
         "guid"          TEXT DEFAULT "{{guid}}" NOT NULL,
         "hash"          BIGINT NOT NULL UNIQUE,
         "machine_id"    TEXT NOT NULL UNIQUE,
-        "name"          TEXT,           -- optional user provided name
+        "name"          TEXT,
         "system_name"   TEXT,
         "hostname"      TEXT,
         "release"       TEXT,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS
         "nid"         INTEGER NOT NULL,
         "ppid"        INTEGER,
         "pid"         INTEGER NOT NULL,
-        "name"        TEXT,           -- optional user provided name
+        "name"        TEXT,
         "init"        BIGINT,
         "fini"        BIGINT,
         "start"       BIGINT,
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS
         "ppid"    INTEGER,
         "pid"     INTEGER NOT NULL,
         "tid"     INTEGER NOT NULL,
-        "name"    TEXT,              -- optional user provided name
+        "name"    TEXT,
         "start"   BIGINT,
         "end"     BIGINT,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS
         "logical_index"  INTEGER,
         "type_index"     INTEGER,
         "uuid"           INTEGER,
-        "name"           TEXT,         -- optional user provided name
+        "name"           TEXT,
         "generic_name"   TEXT,         -- replaces user_name from v3
         "model_name"     TEXT,
         "vendor_name"    TEXT,
@@ -392,19 +392,14 @@ CREATE TABLE IF NOT EXISTS
 -- Event tables (all use track_id + timestamp_id/start_id/end_id FKs)
 -- ---------------------------------------------------------------------------
 
--- Read pattern: SELECT ts_s.value, ts_e.value, r.id
---               FROM rocpd_region r
---               JOIN rocpd_timestamp ts_s ON ts_s.id = r.start_id
---               JOIN rocpd_timestamp ts_e ON ts_e.id = r.end_id
---               WHERE r.track_id = ?
 CREATE TABLE IF NOT EXISTS
     `rocpd_region{{uuid}}` (
         "id"       INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid"     TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id" INTEGER NOT NULL,
         "name_id"  INTEGER NOT NULL,
-        "start_id" INTEGER NOT NULL,   -- FK → rocpd_timestamp
-        "end_id"   INTEGER NOT NULL,   -- FK → rocpd_timestamp
+        "start_id" INTEGER NOT NULL,
+        "end_id"   INTEGER NOT NULL,
         "event_id" INTEGER,
         "extdata"  JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}`     (id) ON UPDATE CASCADE,
@@ -424,7 +419,7 @@ CREATE TABLE IF NOT EXISTS
         "guid"         TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id"     INTEGER NOT NULL,
         "name_id"      INTEGER NOT NULL,
-        "timestamp_id" INTEGER NOT NULL,   -- FK → rocpd_timestamp
+        "timestamp_id" INTEGER NOT NULL,
         "event_id"     INTEGER,
         "extdata"      JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id)     REFERENCES `rocpd_track{{uuid}}`     (id) ON UPDATE CASCADE,
@@ -440,8 +435,8 @@ CREATE TABLE IF NOT EXISTS
         "track_id"             INTEGER NOT NULL,
         "kernel_id"            INTEGER NOT NULL,
         "dispatch_id"          INTEGER NOT NULL,
-        "start_id"             INTEGER NOT NULL,   -- FK → rocpd_timestamp
-        "end_id"               INTEGER NOT NULL,   -- FK → rocpd_timestamp
+        "start_id"             INTEGER NOT NULL,
+        "end_id"               INTEGER NOT NULL,
         "private_segment_size" INTEGER,
         "group_segment_size"   INTEGER,
         "workgroup_size_x"     INTEGER NOT NULL,
@@ -466,8 +461,8 @@ CREATE TABLE IF NOT EXISTS
         "id"             INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid"           TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id"       INTEGER NOT NULL,
-        "start_id"       INTEGER NOT NULL,   -- FK → rocpd_timestamp
-        "end_id"         INTEGER NOT NULL,   -- FK → rocpd_timestamp
+        "start_id"       INTEGER NOT NULL,
+        "end_id"         INTEGER NOT NULL,
         "name_id"        INTEGER NOT NULL,
         "dst_agent_id"   INTEGER,
         "dst_address"    INTEGER,
@@ -487,7 +482,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id)       REFERENCES `rocpd_event{{uuid}}`     (id) ON UPDATE CASCADE
     );
 
--- NOTE: gains running_total_bytes column vs v3
 CREATE TABLE IF NOT EXISTS
     `rocpd_memory_allocate{{uuid}}` (
         "id"                  INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -495,8 +489,8 @@ CREATE TABLE IF NOT EXISTS
         "track_id"            INTEGER NOT NULL,
         "type"                TEXT CHECK ("type" IN ('ALLOC', 'FREE', 'REALLOC', 'RECLAIM')),
         "level"               TEXT CHECK ("level" IN ('REAL', 'VIRTUAL', 'SCRATCH')),
-        "start_id"            INTEGER NOT NULL,   -- FK → rocpd_timestamp
-        "end_id"              INTEGER NOT NULL,   -- FK → rocpd_timestamp
+        "start_id"            INTEGER NOT NULL,
+        "end_id"              INTEGER NOT NULL,
         "name_id"             INTEGER NOT NULL,
         "address"             INTEGER,
         "size"                INTEGER NOT NULL,

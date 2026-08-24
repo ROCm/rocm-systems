@@ -18,9 +18,7 @@ namespace profiler_hub::data_storage
 {
 
 // ---------------------------------------------------------------------------
-// Shared result structs. These describe the row shapes the reader consumes and
-// are backend-agnostic: both the v3 and v4.0 read_statements implementations
-// populate the same structs (the SQL that fills them differs per schema).
+// Result structs shared by v3 and v4.0 read_statements; per-schema SQL fills them.
 // ---------------------------------------------------------------------------
 
 struct node_info_result
@@ -106,9 +104,8 @@ struct agent_info_result
     std::string                extdata;
 };
 
-// Extended with optional agent_id / queue_id / stream_id for v4.0, whose
-// rocpd_track is the universal identity anchor (carries these columns). v3's
-// track query does not select them, so they stay nullopt on v3.
+// v4.0 populates agent_id/queue_id/stream_id (rocpd_track carries them); v3 leaves
+// them nullopt.
 struct track_info_result
 {
     size_t                id{};
@@ -201,8 +198,6 @@ struct sample_timeline_event_result
     std::optional<size_t> category_id;
     size_t                track_id{};
 };
-
-// ----- Event detail result structs -----
 
 struct region_detail_result
 {
@@ -346,8 +341,6 @@ struct summary_result
     size_t                max_duration{};
 };
 
-// ----- Track-scoped query result structs (interval / scalar / flow) -----
-
 /// name_ref is a string id for region/memory_copy tracks and a kernel_symbol id for
 /// kernel_dispatch tracks; resolved to a display_name based on track type. category
 /// is nullopt when the interval query does not join a category source.
@@ -358,10 +351,9 @@ struct interval_row_result
     size_t                     end{};
     std::optional<size_t>      name_ref;
     std::optional<std::string> category;
-    /// Which per-type table this row came from, selected as an integer literal per
-    /// UNION leg by the stream interval query (values match reader_types::event_type_t:
-    /// kernel_dispatch=1, memory_copy=2, memory_allocate=3). nullopt for single-table
-    /// interval queries, which do not select it.
+    /// Row-source discriminant for the stream UNION (kernel_dispatch=1, memory_copy=2,
+    /// memory_allocate=3, matching reader_types::event_type_t); nullopt for single-table
+    /// interval queries.
     std::optional<size_t> op_kind;
 };
 
@@ -372,9 +364,8 @@ struct scalar_row_result
     double value{};
 };
 
-/// Bounds/count for a single track, computed via MIN/MAX/COUNT aggregates over the
-/// same events the matching interval/scalar track query would return. min_ts/max_ts
-/// are nullopt when the track has no events (aggregate over empty set is NULL).
+/// min_ts/max_ts are nullopt when the track has no events (aggregate over empty set
+/// is NULL).
 struct track_stats_result
 {
     std::optional<size_t> min_ts;
@@ -426,10 +417,8 @@ struct distinct_memory_result
     std::optional<size_t> queue_id;
 };
 
-/// Distinct kernel-dispatch PMC track topology. v3: synthesized from rocpd_pmc_event
-/// INNER JOIN rocpd_kernel_dispatch. v4.0: same joins plus rocpd_track for nid/pid.
 /// Keyed (nid, agent_id, pmc_id, pid) to match Optiq's
-/// GetRocprofPerformanceCountersTrackQuery GROUP BY exactly. All four fields are
+/// GetRocprofPerformanceCountersTrackQuery GROUP BY exactly; all four fields are
 /// non-nullable (Optiq uses INNER JOINs with no NULL handling).
 struct distinct_kd_pmc_result
 {
@@ -449,7 +438,6 @@ struct distinct_mem_activity_result
     std::optional<size_t> agent_id;
 };
 
-/// One raw rocpd_memory_allocate row for memory_activity running-sum computation.
 /// agent_id is nullable (FREE rows may carry NULL agent_id; recovery is done in C++
 /// via address self-join). size is always present (schema NOT NULL).
 struct mem_activity_raw_result
@@ -462,10 +450,8 @@ struct mem_activity_raw_result
     std::string           type{};  ///< "ALLOC", "FREE", "REALLOC", "RECLAIM"
 };
 
-/// Distinct stream-track topology. v3: synthesized from the inline stream_id on
-/// rocpd_kernel_dispatch / rocpd_memory_copy / rocpd_memory_allocate. v4.0: from
-/// rocpd_track.stream_id. One row per (nid, pid, stream_id) with a non-null stream_id;
-/// a stream track aggregates dispatch + copy + alloc events sharing that stream.
+/// One row per (nid, pid, stream_id) with a non-null stream_id; a stream track
+/// aggregates dispatch + copy + alloc events sharing that stream.
 struct distinct_stream_result
 {
     size_t nid{};
@@ -473,9 +459,9 @@ struct distinct_stream_result
     size_t stream_id{};
 };
 
-/// Distinct region-track topology synthesized from rocpd_region (v3). One row per
-/// (nid, pid, tid, is_sample): a thread with both plain and sampled regions yields
-/// two rows (main + sample), mirroring roc-optiq's region-main / region-sample split.
+/// One row per (nid, pid, tid, is_sample): a thread with both plain and sampled
+/// regions yields two rows (main + sample), mirroring roc-optiq's region-main /
+/// region-sample split.
 struct distinct_region_result
 {
     size_t nid{};
@@ -496,9 +482,8 @@ struct max_track_id_result
     std::optional<size_t> max_id;
 };
 
-/// pmc_id that has more than one rocpd_pmc_event row for the same event_id — a
-/// legacy producer bug where two quantities were stamped with one pmc_id. One row
-/// per ambiguous pmc_id.
+/// pmc_id with more than one rocpd_pmc_event row for the same event_id (legacy
+/// producer bug stamping two quantities with one pmc_id).
 struct ambiguous_pmc_id_result
 {
     size_t pmc_id{};
@@ -537,7 +522,6 @@ struct read_statements_base
     read_statements_base& operator=(read_statements_base&&)      = delete;
     virtual ~read_statements_base()                              = default;
 
-    // ----- func typedefs (shared) -----
     using string_statement_func_t =
         std::function<sqlite_backend::result_set<string_result>()>;
     using node_info_statement_func_t =
@@ -599,7 +583,6 @@ struct read_statements_base
     using correlated_event_func_t =
         std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
 
-    // Track-scoped query func types.
     using interval_track_1_func_t =
         std::function<sqlite_backend::result_set<interval_row_result>(size_t)>;
     using interval_track_2_func_t =
@@ -612,8 +595,8 @@ struct read_statements_base
     using scalar_track_func_t =
         std::function<sqlite_backend::result_set<scalar_row_result>(size_t)>;
 
-    // Track-stats func types: MIN/MAX/COUNT aggregates, one arity per identity-tuple
-    // shape (v4 track_id-anchored + scalar use the 1-arg form).
+    // Arity encodes the identity-tuple shape: 1-arg is used by v4 track_id-anchored +
+    // scalar variants; 2/3/4-arg by v3 multi-column keys.
     using stats_track_1_func_t =
         std::function<sqlite_backend::result_set<track_stats_result>(size_t)>;
     using stats_track_2_func_t =
@@ -640,9 +623,6 @@ struct read_statements_base
     using mem_activity_raw_func_t =
         std::function<sqlite_backend::result_set<mem_activity_raw_result>(size_t,
                                                                           size_t)>;
-    // v4.0 only: track_ids referenced by rocpd_memory_allocate, used in the generic
-    // classification loop to distinguish memory tracks from gpu_queue tracks (both may
-    // have agent_id + queue_id on their rocpd_track row).
     using memory_alloc_track_ids_func_t =
         std::function<sqlite_backend::result_set<sample_track_id_result>()>;
     using distinct_region_func_t =
@@ -662,7 +642,6 @@ struct read_statements_base
     using ambiguous_pmc_ids_func_t =
         std::function<sqlite_backend::result_set<ambiguous_pmc_id_result>()>;
 
-    // ----- set structs (shared) -----
     struct timeline_event_statement_set
     {
         timeline_event_statement_func_t               base;
@@ -685,9 +664,6 @@ struct read_statements_base
         flow_time_filtered_func_t time_filtered;
     };
 
-    // ======================================================================
-    // Shared subset — pure virtual (both backends implement).
-    // ======================================================================
     [[nodiscard]] virtual string_statement_func_t       string_statement() const    = 0;
     [[nodiscard]] virtual node_info_statement_func_t    node_info_statement() const = 0;
     [[nodiscard]] virtual process_info_statement_func_t process_info_statement()
@@ -725,11 +701,8 @@ struct read_statements_base
     [[nodiscard]] virtual const flow_statement_set& memory_allocate_sibling_flows()
         const = 0;
 
-    // ======================================================================
-    // Backend-specific — default-empty. Overridden by whichever backend
-    // implements them; the other backend inherits the empty stub (never
-    // invoked, guarded in the reader).
-    // ======================================================================
+    // Backend-specific, default-empty; unused variants are guarded by the reader
+    // before being called.
 
     // Legacy timeline event statement sets (v3).
     [[nodiscard]] virtual const timeline_event_statement_set& region_statements() const
@@ -921,9 +894,6 @@ struct read_statements_base
         static const distinct_dma_func_t e{};
         return e;
     }
-    // v3: synthesized from rocpd_memory_allocate; v4.0: via rocpd_memory_allocate JOIN
-    // rocpd_track. One row per (nid, agent_id, queue_id, pid), NULL included as a
-    // distinct group value for both nullable columns.
     [[nodiscard]] virtual const distinct_memory_func_t& distinct_memory_tracks() const
     {
         static const distinct_memory_func_t e{};
@@ -934,8 +904,6 @@ struct read_statements_base
         static const distinct_region_func_t e{};
         return e;
     }
-    // Distinct stream tracks (both backends). v3 unions the inline stream_id across the
-    // three event tables; v4.0 reads rocpd_track.stream_id. See distinct_stream_result.
     [[nodiscard]] virtual const distinct_stream_func_t& distinct_stream_tracks() const
     {
         static const distinct_stream_func_t e{};
@@ -979,9 +947,8 @@ struct read_statements_base
         return e;
     }
 
-    // Multi-column interval track statements (v3: keyed by identity tuples).
-    // Region tracks split main (regions without a sample) vs. sample (regions with
-    // one), matching the region_track_kind_t of the synthesized track.
+    // v3-only: multi-column interval track statements keyed by identity tuples. Region
+    // tracks split main (no sample) vs. sample, matching region_track_kind_t.
     [[nodiscard]] virtual const interval_track_3_func_t& region_interval_track_main()
         const
     {
@@ -1049,7 +1016,6 @@ struct read_statements_base
         return e;
     }
 
-    // track_id-anchored interval track statements (v4.0: single WHERE track_id = ?).
     [[nodiscard]] virtual const interval_track_1_func_t& region_interval_track_v4() const
     {
         static const interval_track_1_func_t e{};
@@ -1073,18 +1039,17 @@ struct read_statements_base
         static const interval_track_1_func_t e{};
         return e;
     }
-    // kernel_dispatch_pmc interval track (both backends): keyed by (nid, pid, agent_id,
-    // pmc_id). v3 uses inline start/end; v4.0 overrides with the timestamp-spine variant.
+    // kernel_dispatch_pmc interval (both backends), keyed by (nid, pid, agent_id,
+    // pmc_id). v3 uses inline start/end; v4.0 joins the timestamp spine.
     [[nodiscard]] virtual const interval_track_4_func_t& kd_pmc_interval_track() const
     {
         static const interval_track_4_func_t e{};
         return e;
     }
 
-    // Stream track interval query (both backends): a 3-way UNION over
-    // kernel_dispatch + memory_copy + memory_allocate filtered to one stream, binding
-    // stream_id once per leg (hence the 3-arg form). Each row carries op_kind so the
-    // reader can select the right name lookup and get_*_details() overload.
+    // Stream track query (both backends): a 3-way UNION binding stream_id once per leg
+    // (hence the 3-arg form); each row carries op_kind for the reader's per-type
+    // dispatch.
     [[nodiscard]] virtual const interval_track_3_func_t& stream_interval_track() const
     {
         static const interval_track_3_func_t e{};
@@ -1179,8 +1144,8 @@ struct read_statements_base
         return e;
     }
 
-    // Stream track stats (both backends): MIN(start)/MAX(end)/COUNT over the same 3-way
-    // UNION as stream_interval_track, binding stream_id once per leg.
+    // Stream track stats (both backends): same 3-way UNION as stream_interval_track,
+    // MIN/MAX/COUNT instead of full rows.
     [[nodiscard]] virtual const stats_track_3_func_t& stream_stats_track() const
     {
         static const stats_track_3_func_t e{};

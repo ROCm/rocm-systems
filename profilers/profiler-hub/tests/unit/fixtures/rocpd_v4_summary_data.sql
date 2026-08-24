@@ -8,10 +8,6 @@
 --   Same by-construction oracle as the v3 fixture so both backends are asserted
 --   against identical expected aggregates.
 --
--- HOW IT IS BUILT (see tests/unit/CMakeLists.txt): v4.0 schema
---   (fixtures/rocpd_v4.0_tables.sql) + this data, {{uuid}}/{{guid}} substituted,
---   piped through sqlite3. Presence of rocpd_timestamp -> v4 backend.
---
 -- ORACLE (duration = ts_end.value - ts_start.value); identical to the v3 fixture.
 --   Symbols 1 and 3 share display_name "kA(int)" so their GROUP BY rows merge by
 --   name in fold_summary_rows (kd1,kd2 on symbol 1; kd4 on symbol 3):
@@ -36,14 +32,11 @@ VALUES (1, 1, 100, 'GPU', 0, 0, 'Synthetic GPU v4');
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 100, 1);
 
--- Three kernel symbols -> TWO distinct display names. Symbols 1 and 3 share
--- display_name "kA(int)" so their per-id GROUP BY rows must merge by name.
 INSERT INTO "rocpd_info_kernel_symbol{{uuid}}" (id, nid, pid, code_object_id, kernel_name, display_name)
 VALUES (1, 1, 100, 1, 'kA', 'kA(int)'),
        (2, 1, 100, 1, 'kB', 'kB(float)'),
        (3, 1, 100, 1, 'kA_alias', 'kA(int)');
 
--- Two region name strings -> two distinct region names.
 INSERT INTO "rocpd_string{{uuid}}" (id, string)
 VALUES (1, 'rX'),
        (2, 'rY');
@@ -52,7 +45,6 @@ VALUES (1, 'rX'),
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, agent_id)
 VALUES (1, 1, 1, 1);
 
--- One event per row (4 kernels + 3 regions).
 INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2), (3), (4), (5), (6), (7);
 
 -- Timestamp spine: kernels (ids 1-6, 13-14) then regions (ids 7-12).
@@ -67,13 +59,11 @@ VALUES (1, 1000, 1), (2, 1100, 1),
        (11, 1000, 1), (12, 1600, 1),
        (13, 4000, 1), (14, 4200, 1);
 
--- Regions: rX = {r1,r2}, rY = {r3}.
 INSERT INTO "rocpd_region{{uuid}}" (id, track_id, name_id, start_id, end_id, event_id)
 VALUES (1, 1, 1,  7,  8, 4),
        (2, 1, 1,  9, 10, 5),
        (3, 1, 2, 11, 12, 6);
 
--- Kernel dispatches: kA(int) = {kd1,kd2 (symbol 1), kd4 (symbol 3)}, kB = {kd3}.
 INSERT INTO "rocpd_kernel_dispatch{{uuid}}"
     (id, track_id, kernel_id, dispatch_id, start_id, end_id,
      workgroup_size_x, workgroup_size_y, workgroup_size_z,
