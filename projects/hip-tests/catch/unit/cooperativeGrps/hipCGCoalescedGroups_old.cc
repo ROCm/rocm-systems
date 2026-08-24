@@ -251,6 +251,14 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
+    // The last tile may be partial: its size is participatingThreads % tileSz, or
+    // participatingThreads itself when participatingThreads < tileSz. reduction_kernel
+    // only produces correct results for power-of-2 group sizes, so only verify the last
+    // tile if its actual size is a power of 2.
+    int lastTileSize = participatingThreads % (int)tileSz;
+    bool lastTileIsPow2 = (lastTileSize == 0) || ((lastTileSize & (lastTileSize - 1)) == 0);
+    int verifyCount = lastTileIsPow2 ? numTiles : participatingThreads / (int)tileSz;
+
     // Build an array of expected reduction sum output on the host
     // based on the sum of their respective thread ranks to use for verification
     int* expectedSum = new int[numTiles];
@@ -260,9 +268,11 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       temp = (((tileSz * j) - 1) * (tileSz * j)) / 2;
       expectedSum[j - 1] = temp - sum;
     }
-    // Last tile may be partial; expected sum = sum of coalesced-group ranks in that tile
-    if (participatingThreads % tileSz != 0 && numTiles > 0) {
-      int startRank = (numTiles - 1) * tileSz;
+    // Correct the last tile's expected sum when it is partial but power-of-2 sized.
+    // The loop above assumes tileSz members per tile; a partial tile covers ranks
+    // [startRank, participatingThreads-1] only.
+    if (lastTileSize != 0 && lastTileIsPow2) {
+      int startRank = (numTiles - 1) * (int)tileSz;
       int endRank = participatingThreads - 1;
       expectedSum[numTiles - 1] = (endRank - startRank + 1) * (startRank + endRank) / 2;
     }
@@ -302,7 +312,7 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     }
 
     HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost))
-    verifyResultsSimpleCoalescedGroups(expectedSum, hResult, numTiles);
+    verifyResultsSimpleCoalescedGroups(expectedSum, hResult, verifyCount);
     // Free all allocated memory on host and device
     HIP_CHECK(hipFree(dResult))
     HIP_CHECK(hipHostFree(hResult))
