@@ -28,6 +28,16 @@ INSPECTOR_COLL_PERF_FIELDS = {
     "coll_algobw_gbs": (int, float),
     "coll_busbw_gbs": (int, float),
 }
+INSPECTOR_P2P_PERF_FIELDS = {
+    "p2p": str,
+    "p2p_sn": int,
+    "p2p_peer": int,
+    "p2p_msg_size_bytes": int,
+    "p2p_exec_time_us": int,
+    "p2p_timing_source": str,
+    "p2p_algobw_gbs": (int, float),
+    "p2p_busbw_gbs": (int, float),
+}
 
 
 def validate_inspector_log_line(line):
@@ -135,6 +145,54 @@ def count_inspector_records(filepath, coll=None):
     return count
 
 
+def validate_inspector_p2p_line(line):
+    """Validate a single inspector JSONL line holding a p2p record. Returns (is_valid, record_dict_or_None, error_message)."""
+    try:
+        record = json.loads(line.strip())
+    except json.JSONDecodeError as e:
+        return False, None, f"Invalid JSON: {e}"
+
+    for section in ("header", "metadata", "p2p_perf"):
+        if section not in record:
+            return False, record, f"Missing top-level section: '{section}'"
+
+    for field, expected_type in INSPECTOR_HEADER_FIELDS.items():
+        if field not in record["header"]:
+            return False, record, f"Missing header field: '{field}'"
+        if not isinstance(record["header"][field], expected_type):
+            return False, record, f"header.{field} has wrong type"
+
+    for field, expected_type in INSPECTOR_P2P_PERF_FIELDS.items():
+        if field not in record["p2p_perf"]:
+            return False, record, f"Missing p2p_perf field: '{field}'"
+        if not isinstance(record["p2p_perf"][field], expected_type):
+            return False, record, f"p2p_perf.{field} has wrong type"
+
+    return True, record, "OK"
+
+
+def count_inspector_p2p_records(filepath):
+    """Count p2p records in an inspector log file."""
+    if not os.path.exists(filepath):
+        return 0
+
+    count = 0
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    if "p2p_perf" in json.loads(line):
+                        count += 1
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+    return count
+
+
 def validate_inspector_verbose_record(record):
     """Validate that an inspector record contains verbose event trace fields. Returns (is_valid, error_message)."""
     coll_perf = record.get("coll_perf", {})
@@ -188,6 +246,8 @@ def inspector_helpers():
         validate_inspector_log_file=validate_inspector_log_file,
         count_inspector_records=count_inspector_records,
         validate_inspector_verbose_record=validate_inspector_verbose_record,
+        validate_inspector_p2p_line=validate_inspector_p2p_line,
+        count_inspector_p2p_records=count_inspector_p2p_records,
     )
 
 
