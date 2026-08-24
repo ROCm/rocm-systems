@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
 
 #include <dlfcn.h>
 #include <filesystem>
@@ -33,7 +33,7 @@ THE SOFTWARE.
 #include <va/va_drmcommon.h>
 
 // Function pointer table for all VA-API entry points used by rocdecode.
-// Populated by VaapiLoader via dlsym after dlmopen into a private namespace.
+// Populated by VaapiLoader via dlsym after dlopen.
 struct VaapiVtable {
     // va-drm
     VADisplay       (*vaGetDisplayDRM)(int fd);
@@ -77,18 +77,17 @@ struct VaapiVtable {
 };
 
 // Loads librocm_sysdeps_va-drm.so.2 (and its transitive dependency
-// librocm_sysdeps_va.so.2) into a private dlmopen namespace, then resolves
+// librocm_sysdeps_va.so.2) via dlopen(RTLD_LOCAL | RTLD_DEEPBIND), then resolves
 // all VA-API symbols via dlsym into the VaapiVtable.
 //
-// Using a private namespace (LM_ID_NEWLM) means that va* symbols from the
-// sysdeps libva are completely isolated from any system libva.so.2 that may
-// be loaded by other libraries (e.g. libavcodec) in the same process.
+// RTLD_LOCAL keeps sysdeps va* symbols out of the global scope, isolating them
+// from any system libva.so.2 loaded by other libraries (e.g. libavcodec).
 class VaapiLoader {
 public:
     VaapiVtable fn{};
 
     // Detects the path of librocm_sysdeps_va-drm.so.2 at runtime (relative
-    // to librocdecode.so's own location) and dlmopens it.
+    // to librocdecode.so's own location) and dlopens it.
     VaapiLoader();
     ~VaapiLoader();
 
@@ -108,4 +107,4 @@ private:
     void LoadSym(const char *name, T *&fn_ptr);
 };
 
-#endif // ROCDECODE_USE_DLMOPEN_VA
+#endif // ROCDECODE_USE_DLOPEN_VA

@@ -40,7 +40,7 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
 #include "vaapi_loader.h"
 #endif
 #include "../../commons.h"
@@ -166,7 +166,7 @@ private:
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
 
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
     // Owns the private-namespace dlmopen handle and all VA function pointers.
     // Initialized once on first use; outlives all VADisplay handles.
     std::unique_ptr<VaapiLoader> va_loader_;

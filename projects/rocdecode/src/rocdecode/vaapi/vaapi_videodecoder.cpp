@@ -26,9 +26,9 @@ THE SOFTWARE.
 #include <cctype>
 #include <stdlib.h>
 
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
 // ---------------------------------------------------------------------------
-// VA-API call redirection through the private-namespace dlmopen vtable.
+// VA-API call redirection through the dlopen vtable.
 //
 // All va*() calls in this translation unit are macro-redirected through
 // g_va_loader->fn.*, which resolves to the isolated librocm_sysdeps_va.so.2
@@ -69,7 +69,7 @@ static VaapiLoader *g_va_loader = nullptr;
 #define vaSyncSurface(...)            (g_va_loader->fn.vaSyncSurface(__VA_ARGS__))
 #define vaExportSurfaceHandle(...)    (g_va_loader->fn.vaExportSurfaceHandle(__VA_ARGS__))
 // clang-format on
-#endif // ROCDECODE_USE_DLMOPEN_VA
+#endif // ROCDECODE_USE_DLOPEN_VA
 
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
@@ -707,7 +707,7 @@ rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
 }
 
 VaContext::VaContext() {
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
     // Create the loader before any VA call so the redirect macros are valid.
     // Throws std::runtime_error on failure (propagates to the first caller of
     // VaContext::GetInstance()).
@@ -728,7 +728,7 @@ VaContext::~VaContext() {
             }
         }
     }
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
     // Null the global pointer before destroying the loader so that any
     // accidental post-destruction macro invocation fails visibly rather than
     // silently calling through a dangling pointer.

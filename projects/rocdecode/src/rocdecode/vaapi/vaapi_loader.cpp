@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifdef ROCDECODE_USE_DLMOPEN_VA
+#ifdef ROCDECODE_USE_DLOPEN_VA
 
 #include "vaapi_loader.h"
 
@@ -160,4 +160,4 @@ VaapiLoader::~VaapiLoader() {
     }
 }
 
-#endif // ROCDECODE_USE_DLMOPEN_VA
+#endif // ROCDECODE_USE_DLOPEN_VA
