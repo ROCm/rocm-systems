@@ -126,6 +126,49 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize(
+    'arch_name',
+    (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ),
+)
+def test_shared_scalar_pair_selector_contract_matches_in_tree_isas(
+    arch_name: str,
+) -> None:
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+
+    CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
+def test_shared_scalar_pair_selector_contract_rejects_value_drift() -> None:
+    arch_name = 'cdna4'
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    selector = next(
+        item for item in spec.opnd_selectors if item.operand_type == 'OPR_SSRC'
+    )
+    selector.op_sel_vals = [
+        (name, '105' if name == 'OPR_SSRC_VCC_LO' else value)
+        for name, value in selector.op_sel_vals
+    ]
+
+    with pytest.raises(ValueError, match=r'OPR_SSRC_VCC_LO=106'):
+        CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
 def gen_mfma(
     inst: Instruction,
     dst: list[str],

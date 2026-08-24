@@ -9,8 +9,13 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -3707,6 +3712,97 @@ constexpr uint32_t tr_b16_halfword_value(uint32_t lane, uint32_t halfword) {
 
 constexpr uint32_t pack_u16_pair(uint32_t lo, uint32_t hi) {
   return (lo & 0xffffu) | ((hi & 0xffffu) << 16);
+}
+
+constexpr uint32_t tr_b8_byte_value(uint32_t lane, uint32_t byte) {
+  return (0x40u + lane * 7u + byte) & 0xffu;
+}
+
+constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
+                                   uint32_t dest_byte_base) {
+  uint32_t word = 0;
+  for (uint32_t byte = 0; byte < 4; ++byte)
+    word |= tr_b8_byte_value(source_base + 2 * (dest_byte_base + byte), source_byte) << (byte * 8);
+  return word;
+}
+
+void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
+  VmFixture f(arch, 1, 10);
+  auto *snap = f.capture_halts();
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t TID_REG = 0;
+  constexpr uint32_t ADDR_REG = 1;
+  constexpr uint32_t BYTES_PER_LANE = 8;
+
+  std::array<uint32_t, 7> code{};
+  if (arch == "cdna5") {
+    const auto add_tid = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna5::build_sopp(cdna5::kSWaitDscntSopp);
+    const auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  } else {
+    ASSERT_EQ(arch, "cdna4");
+    const auto add_tid = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna4::build_ds(cdna4::kDsReadB64TrB8Ds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna4::build_sopp(cdna4::kSWaitcntSopp);
+    const auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  }
+  uint64_t ko = f.write_kernel(0x1000, code.data(), sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/0,
+                               /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/1);
+
+  auto *cu = f.cu();
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte) {
+      lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
+      hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+    }
+    cu->lds().write32(lane * BYTES_PER_LANE, lo);
+    cu->lds().write32(lane * BYTES_PER_LANE + 4, hi);
+  }
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, /*grid_size_x=*/wave_size, /*workgroup_size_x=*/wave_size);
+  f.engine->run();
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    const uint32_t source_byte = lane & 7u;
+    const uint32_t source_base = (lane & ~0xfu) | ((lane >> 3) & 1u);
+    EXPECT_EQ(wf.vgpr(VDST, lane), pack_tr_b8_word(source_base, source_byte, 0))
+        << "lane " << lane << " v" << VDST;
+    EXPECT_EQ(wf.vgpr(VDST + 1, lane), pack_tr_b8_word(source_base, source_byte, 4))
+        << "lane " << lane << " v" << (VDST + 1);
+  }
+}
+
+TEST(DsTransposeTest, ReadB64TrB8_LaneLayout) {
+  verify_b64_tr_b8_lane_layout("cdna4", /*wave_size=*/64);
+}
+
+TEST(DsTransposeTest, Gfx1250LoadTr8B64_LaneLayout) {
+  verify_b64_tr_b8_lane_layout("cdna5", /*wave_size=*/32);
 }
 
 // Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,
