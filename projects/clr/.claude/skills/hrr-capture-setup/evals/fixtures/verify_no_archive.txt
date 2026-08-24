@@ -1,0 +1,5 @@
+Archive: /tmp/never-created.hrr
+
+The runtime wrote nothing here. Either the workload failed before its first HIP call, or the runtime it loaded has no capture support. Run 'hrr_capture.sh preflight' in the same environment to tell those apart.
+
+Verdict: no archive. The directory was never created, so capture never started.

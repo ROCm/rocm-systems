@@ -16,6 +16,10 @@ outputs:
 
 # HRR Decode & Triage
 
+**No archive yet?** This skill starts from one. To record a failing workload
+into an archive first, use
+[hrr-capture-setup](../../../../../.claude/skills/hrr-capture-setup/SKILL.md).
+
 **Platform (Linux):** AMD GPU host. Full skill workflow via `triage_archive.sh`:
 native GPU replay (auto-builds `hrr-playback` when missing), optional Docker replay,
 manifest preflight, and finding output.
