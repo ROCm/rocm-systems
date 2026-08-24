@@ -1603,6 +1603,19 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    packed_f64_binary = {
+        'V_PK_ADD_F64': 'add',
+        'V_PK_MUL_F64': 'mul',
+        'V_PK_MAX_NUM_F64': 'max_num',
+        'V_PK_MIN_NUM_F64': 'min_num',
+    }
+    if name in packed_f64_binary:
+        return InstructionSemantics(
+            name,
+            'pk_binop_f64',
+            operation=packed_f64_binary[name],
+            data_type='f64',
+        )
     if name in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64'):
         operation = 'add' if name == 'V_PK_ADD_NC_U64' else 'sub'
         return InstructionSemantics(
