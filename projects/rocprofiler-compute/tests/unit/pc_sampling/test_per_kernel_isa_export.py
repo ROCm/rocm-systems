@@ -70,8 +70,18 @@ def test_resolve_isa_export_path_names_kernel_code_object_and_process():
 
     assert export_path == Path(
         "/results/per_kernel_pc_sampling/vector_copy/MI300X_A1"
-        "/vecCopy_2_7/isa_code_object_id_5_pid_42.csv"
+        "/vecCopy_2_uuid_7/isa_code_object_id_5_pid_42.csv"
     )
+
+
+def test_resolve_isa_export_path_falls_back_when_no_short_name_was_captured():
+    """A kernel with no short name keeps the folder name earlier releases used."""
+    export_path = _resolve_isa_export_path(
+        Path("/results/per_kernel_pc_sampling"),
+        ("vector_copy", "MI300X_A1", 7, None, 5, 42),
+    )
+
+    assert export_path.parent.name == "kernel_uuid_7"
 
 
 def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
@@ -97,6 +107,7 @@ def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
         ("my kernel", "my_kernel"),
         ("$_0::__cxx11", "0_cxx11"),
         ("a" * 100, "a" * MAX_SHORT_NAME_LENGTH),
+        (None, None),
     ],
     ids=[
         "plain_identifier",
@@ -106,6 +117,7 @@ def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
         "whitespace",
         "lambda_spelling",
         "over_length",
+        "missing",
     ],
 )
 def test_sanitize_short_name(short_name, expected):
@@ -158,10 +170,10 @@ def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
         str(export_path.relative_to(tmp_path))
         for export_path in tmp_path.rglob("*.csv")
     ) == [
-        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_5_pid_42.csv",
-        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_6_pid_42.csv",
-        "vector_copy/MI300X_A1/vecCopy_1/isa_code_object_id_6_pid_43.csv",
-        "vector_copy/MI300X_A1/vecCopy_2/isa_code_object_id_6_pid_43.csv",
+        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv",
+        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_6_pid_42.csv",
+        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_6_pid_43.csv",
+        "vector_copy/MI300X_A1/vecCopy_uuid_2/isa_code_object_id_6_pid_43.csv",
     ]
 
 
@@ -175,7 +187,7 @@ def test_write_per_kernel_isa_files_numbers_instruction_lines_per_file(tmp_path)
 
     _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [])
 
-    workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "vecCopy_1"
+    workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "vecCopy_uuid_1"
     first_rows = read_exported_rows(
         workload_directory / "isa_code_object_id_5_pid_42.csv"
     )
@@ -207,7 +219,7 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
         tmp_path
         / "vector_copy"
         / "MI300X_A1"
-        / "vecCopy_1"
+        / "vecCopy_uuid_1"
         / "isa_code_object_id_5_pid_42.csv"
     )
     assert exported_rows[1] == [

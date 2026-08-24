@@ -15,7 +15,7 @@ import csv
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from utils.logger import console_debug, console_warning
 
@@ -26,11 +26,13 @@ STALL_COLUMN_PREFIX = "Stall "
 FILE_KEY_COLUMN_COUNT = 6
 
 # Characters a short name can hold that a path component should not. `_` is
-# left out of the safe set so a run of them collapses to the one replacing it.
+# not in the safe set, so consecutive underscores are collapsed into one.
 UNSAFE_PATH_CHARACTERS = re.compile(r"[^A-Za-z0-9.-]+")
 KERNEL_DESCRIPTOR_SUFFIX = ".kd"
 # Generous for a truncated name, and keeps the whole path inside PATH_MAX.
 MAX_SHORT_NAME_LENGTH = 64
+# Names the folder of a kernel with no short name
+UNNAMED_KERNEL_FOLDER_PREFIX = "kernel"
 
 BASE_COLUMNS = (
     "Instruction line number",
@@ -49,7 +51,7 @@ TRAILING_COLUMNS = (
 )
 
 # (workload name, workload sub-name, kernel uuid, short name, code object id, pid)
-FileKey = tuple[str, str, int, str, int, int]
+FileKey = tuple[str, str, int, Optional[str], int, int]
 
 
 class WorkloadIsaExport(NamedTuple):
@@ -109,9 +111,8 @@ def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> P
     """Return the file one kernel's ISA is written to.
 
     The folder leads with the kernel's short name so it reads as the kernel it
-    holds. Overloads and template instantiations share a short name, so the
-    kernel uuid follows it to keep the folder unique and to map back to the
-    row ``kernel.csv`` carries for it.
+    holds. Two kernels can share a short name, so the kernel uuid follows it to
+    keep the folder unique and to map it back to its ``kernel.csv`` row.
     """
     (
         workload_name,
@@ -121,21 +122,25 @@ def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> P
         code_object_id,
         pid,
     ) = file_key
+    folder_prefix = _sanitize_short_name(short_name) or UNNAMED_KERNEL_FOLDER_PREFIX
     return (
         per_kernel_directory
         / workload_name
         / workload_sub_name
-        / f"{_sanitize_short_name(short_name)}_{kernel_uuid}"
+        / f"{folder_prefix}_uuid_{kernel_uuid}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
 
 
-def _sanitize_short_name(short_name: str) -> str:
+def _sanitize_short_name(short_name: Optional[str]) -> Optional[str]:
     """Reduce a kernel's short name to a path component.
 
-    ``truncate_name`` strips a signature down to its identifier, which still
-    leaves spellings a path cannot hold, such as ``operator/`` or a lambda.
+    A short name is the identifier a C++ signature demangles down to, which can
+    still hold characters a path cannot, such as the ``/`` of ``operator/``.
     """
+    if short_name is None:
+        return None
+
     identifier = short_name
     if identifier.endswith(KERNEL_DESCRIPTOR_SUFFIX):
         identifier = identifier[: -len(KERNEL_DESCRIPTOR_SUFFIX)]
