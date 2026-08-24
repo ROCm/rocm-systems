@@ -34,13 +34,30 @@ static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    if (!ctx->collPoolUsed[i]) {
-      ctx->collPoolUsed[i] = 1;
-      memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
-      pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
-      pthread_mutex_unlock(&ctx->collPoolMutex);
-      return &ctx->collPool[i];
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+      if (!ctx->collPoolUsed[i]) {
+        ctx->collPoolUsed[i] = 1;
+        memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
+        pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+        pthread_mutex_unlock(&ctx->collPoolMutex);
+        return &ctx->collPool[i];
+      }
+    }
+    if (pass == 0) {
+      // Pool full — reclaim slots stuck by teardown (collStopped but
+      // nKernelChCompleted < nChannels, so acclShouldFinalize never fired).
+      int reclaimed = 0;
+      for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+        if (ctx->collPoolUsed[i] && ctx->collPool[i].collStopped
+            && !ctx->collPool[i].finalized) {
+          ctx->collPool[i].finalized = 1;
+          pthread_mutex_destroy(&ctx->collPool[i].mutex);
+          ctx->collPoolUsed[i] = 0;
+          reclaimed++;
+        }
+      }
+      if (reclaimed == 0) break;
     }
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
@@ -146,8 +163,6 @@ static double acclBusBwFactor(const char* func, int nRanks) {
   if (strcmp(func, "Broadcast") == 0)       return 1.0;
   if (strcmp(func, "Reduce") == 0)          return 1.0;
   if (strcmp(func, "AlltoAll") == 0)        return (n - 1.0) / n;
-  if (strcmp(func, "AlltoAllPivot") == 0)   return (n - 1.0) / n;
-  if (strcmp(func, "AlltoAllGda") == 0)     return (n - 1.0) / n;
   return 1.0;
 }
 
