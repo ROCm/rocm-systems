@@ -16,7 +16,6 @@
 | **Multi-pass imputation** | **Shipped** | `utils_analysis.py` — stitches counters across passes |
 | **`ValuDualIssueDetector`** (VALU > 100% exception) | **Shipped** | `utils/metrics/common.py` — warnings, no clamp |
 | **`BOUND_RATIO`** (`to_bound_ratio`) | **Proposed** | Helper + YAML registration — follow-up PR |
-| **Element-wise `to_min`** (two Series) | **Proposed** | Needed for `SUM(MIN(a,b))/SUM(b)` in expressions — follow-up PR |
 | **`SUM(MIN(a,b))/SUM(b)`** on partition avg (e.g. HBM Read Traffic) | **Proposed** | `1700_l2_cache.yaml` — follow-up PR |
 | **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Proposed** | Panel YAML updates — follow-up PR |
 | **Clamp diagnostics** (`BOUND_RATIO`, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today |
@@ -491,4 +490,4 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 - `src/utils/utils_analysis.py` — Multi-pass data imputation
 - `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml` — Coalescing priorities
 - `src/utils/metrics/noise_clamper.py` — `NOISE_CLAMP` implementation
-- `src/utils/metrics/aggregation.py` — `BOUND_RATIO`, `to_min` (element-wise; **proposed** in follow-up PR)
+- `src/utils/metrics/aggregation.py` — `BOUND_RATIO` (**proposed** in follow-up PR)
