@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -24,7 +23,11 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovkI32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_movk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -39,7 +42,11 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSVersionSopk(const MachineInst *opcode) {
+DecodeResult decodeSVersionSopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_version", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SVersionSopk>(opcode);
 }
 } // namespace detail
@@ -61,7 +68,11 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmovkI32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmovk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -82,7 +93,11 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAddkCoI32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSAddkCoI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_addk_co_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAddkCoI32Sopk>(opcode);
 }
 } // namespace detail
@@ -100,7 +115,11 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMulkI32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_mulk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMulkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -117,7 +136,11 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSGetregB32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_getreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SGetregB32Sopk>(opcode);
 }
 } // namespace detail
@@ -134,7 +157,11 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetregB32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetregB32Sopk>(opcode);
 }
 } // namespace detail
@@ -159,7 +186,12 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetregImm32B32Sopk(const MachineInst *opcode) {
+DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_imm32_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetregImm32B32Sopk>(opcode);
 }
 } // namespace detail
@@ -188,7 +220,11 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCallB64Sopk(const MachineInst *opcode) {
+DecodeResult decodeSCallB64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_call_b64", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCallB64Sopk>(opcode);
 }
 } // namespace detail

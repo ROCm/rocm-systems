@@ -35,6 +35,13 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # The kernel-count leak guards (src/device/test_generate_kernel_counts.py and
+  # src/device/symmetric/test_generate_symmetric.py) are intentionally NOT
+  # registered as ctest cases here: nothing in RCCL CI runs `ctest`, so an
+  # add_test() would never gate. They run in CI via the CPU-only host-test
+  # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
+  # folded into `run`).
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -202,6 +209,7 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
+    CollImplInfoTests.cpp
     BroadcastTests.cpp
     DoneEventOrderingTests.cpp
     GatherTests.cpp
@@ -298,6 +306,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestTDM.cpp
@@ -436,6 +445,22 @@ if(BUILD_TESTS)
       net_ib_header_symlinks rma_header_symlinks)
   endif()
 
+  # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the
+  # segment-math header (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) is
+  # compiled with GIN_SDMA_HOST_ONLY so it needs neither a built librccl nor device
+  # codegen. It exercises the exact ginPutSegmentCount/ginPutSegmentAt the SDMA
+  # backend Put drives on device. Runs under `ctest -L unit`.
+  add_executable(rccl-UnitTestsGinSdmaPolicy gin/gin_sdma_policy_test.cpp)
+  set_source_files_properties(gin/gin_sdma_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinSdmaPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsGinSdmaPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+  target_link_libraries(rccl-UnitTestsGinSdmaPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
+  set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -447,6 +472,7 @@ if(BUILD_TESTS)
       ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
@@ -456,8 +482,10 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
+      PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
@@ -469,6 +497,7 @@ if(BUILD_TESTS)
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
+      transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -500,9 +529,11 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
-    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
+    # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
+    # executable's dynamic symbols.
     target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
@@ -652,20 +683,41 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      RmaExternalPluginPutSignalMPITests.cpp
+      plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      InspectorPromP2pMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
+      test_sparse_send_recv.cpp
+      DdaAllReduceMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
+    # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process
+    # via STATIC_PLUGIN (dlopen(NULL))
+    target_link_options(rccl-UnitTestsMPI PRIVATE
+      "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+      "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
+    # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
+    if(TARGET rccl-profiler-inspector)
+      add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)

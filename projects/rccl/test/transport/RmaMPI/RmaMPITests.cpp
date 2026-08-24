@@ -234,6 +234,8 @@ TEST_P(RmaMPITest, IPutSignalAtOffset)
     {
         FillSentinel(recvBuf, kBufSize,    kSentinel);
         FillSentinel(sigBuf,  kSigBufSize, kSentinel);
+        FillSentinel(static_cast<uint8_t*>(sigBuf) + kSigOff,
+                     sizeof(uint64_t), /*value=*/0x00);
     }
 
     void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;

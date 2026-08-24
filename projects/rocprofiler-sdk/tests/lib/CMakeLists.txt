@@ -22,3 +22,6 @@ endif()
 
 # libraries used by integration test apps which DO link to rocprofiler-sdk-roctx
 add_subdirectory(transpose)
+
+# Python test packages and their native libraries
+add_subdirectory(python)
