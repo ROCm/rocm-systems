@@ -8,7 +8,7 @@
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
-#include "io-verify.hpp"
+#include "io-verify.h"
 #include "test-common.h"
 #include "test-options.h"
 
