@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import gzip
 import json
 import sqlite3
 from pathlib import Path
@@ -9,10 +8,17 @@ from pathlib import Path
 import common
 import pandas as pd
 
+from utils import rocpd_data
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
-    convert_dbs_to_csv,
+    compact_pass_rocpd_dbs,
+    compact_rocpd_db,
+    convert_dbs_to_marker_csv,
+    iter_counter_rows,
+    iter_pass_rows,
+    native_counters_csv,
+    read_kernel_info,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -132,7 +138,7 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
-# ---- Test 2: convert_dbs_to_csv populates Correlation_Id from stack_id ----
+# ---- rocpd query output: Correlation_Id from stack_id ----
 
 
 def create_rocpd_test_db(workload_dir):
@@ -180,17 +186,14 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
-
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    rows = list(iter_counter_rows(db_path))
 
-    df = pd.read_csv(counter_csv)
-    assert "Correlation_Id" in df.columns
+    assert rows
+    assert "Correlation_Id" in rows[0]
 
     expected_ids = [row[2] for row in COUNTER_ROWS]
-    assert list(df["Correlation_Id"]) == expected_ids
+    assert [row["Correlation_Id"] for row in rows] == expected_ids
 
     common.clean_output_dir(True, workload_dir)
 
@@ -200,11 +203,10 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
 
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    convert_dbs_to_marker_csv([db_path], marker_csv)
 
     df = pd.read_csv(marker_csv)
     assert "Correlation_Id" in df.columns
@@ -365,24 +367,23 @@ def build_kernel_top_df():
 
 
 def test_ml_api_trace_counter_copy_stays_compressed(tmp_path):
-    """Counter copy stays compressed when results_*.csv is .csv.gz."""
-    src_counter = tmp_path / "results_run0.csv.gz"
-    with gzip.open(src_counter, "wt", newline="") as f:
-        build_counter_df(include_guid=True).to_csv(f, index=False)
-    src_dir = tmp_path / "out" / "pmc_1"
-    src_dir.mkdir(parents=True)
-    build_marker_df(include_guid=True).to_csv(
-        src_dir / "run0_marker_api_trace.csv.gz", index=False
-    )
+    """ML API trace counter CSV is written compressed from pass artifacts."""
+    pass_path = tmp_path / "out" / "run0"
+    pid_dir = pass_path / "100"
+    pid_dir.mkdir(parents=True)
+    db_path = create_rocpd_test_db(str(pid_dir))
+    Path(db_path).rename(pid_dir / "100.db")
 
-    save_ml_api_trace_inputs(str(tmp_path), "run0", src_counter)
+    save_ml_api_trace_inputs(str(tmp_path), "run0", pass_path)
 
     dst = tmp_path / "ml_api_trace_run0_counter_collection.csv.gz"
-    assert dst.is_file(), "counter copy should keep the compressed name"
-    assert dst.read_bytes() == src_counter.read_bytes(), "should be a byte copy"
+    assert dst.is_file()
+    df = pd.read_csv(dst)
+    assert not df.empty
+    assert "Correlation_Id" in df.columns
 
     consolidated_df, _ = process_ml_api_trace_output(str(tmp_path))
-    assert not consolidated_df.empty, "analyze must resolve the compressed copy"
+    assert not consolidated_df.empty
 
 
 def test_ml_api_trace_output_same_for_rocpd_and_csv():
@@ -483,3 +484,163 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     )
     assert backend_by_operator.get("torch.mm") == "triton"
     assert backend_by_operator.get("nn.Module.Linear.forward") == "torch"
+
+
+# ---- rocpd compaction after native counter collection ----
+
+
+def test_compact_rocpd_db_keeps_the_catalog_and_reclaims_the_payload(tmp_path):
+    db_path = common.write_rocpd_pass_db(tmp_path, "12345")
+    before = db_path.stat().st_size
+
+    removed = compact_rocpd_db(db_path)
+
+    assert removed > 0
+    assert db_path.stat().st_size < before
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute("SELECT COUNT(*) FROM rocpd_kernel_dispatch").fetchone()[0]
+            == 2
+        )
+        assert conn.execute("SELECT COUNT(*) FROM rocpd_info_pmc").fetchone()[0] == 64
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM rocpd_info_pmc WHERE symbol IS NOT NULL"
+            ).fetchone()[0]
+            == 64
+        )
+        assert (
+            conn.execute("SELECT SUM(LENGTH(extdata)) FROM rocpd_info_pmc").fetchone()[
+                0
+            ]
+            == 0
+        )
+        events = f"rocpd_pmc_event{common.UUID}"
+        assert conn.execute(f'SELECT COUNT(*) FROM "{events}"').fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_compact_leaves_analyze_output_unchanged(tmp_path):
+    pass_path = tmp_path / "pmc_perf_0"
+    common.write_rocpd_pass_db(pass_path, "12345")
+    common.write_native_counter_csv(pass_path, "12345")
+
+    before = list(iter_pass_rows(pass_path))
+    assert before, "fixture produced no rows, so the check proves nothing"
+
+    compact_pass_rocpd_dbs(pass_path)
+
+    assert list(iter_pass_rows(pass_path)) == before
+
+
+def test_compact_skips_databases_whose_counter_csv_is_unusable(tmp_path):
+    for name, payload in (
+        ("missing", None),
+        ("empty", b""),
+        ("truncated", b"\x1f\x8b\x08\x00" + b"\x00" * 8),
+        ("header_only", None),
+    ):
+        pass_path = tmp_path / name
+        db_path = common.write_rocpd_pass_db(pass_path, "12345")
+        before = db_path.stat().st_size
+        if payload is not None:
+            common.native_counter_csv_path(pass_path, "12345").write_bytes(payload)
+        elif name == "header_only":
+            common.write_native_counter_csv(pass_path, "12345", rows=0)
+
+        assert compact_pass_rocpd_dbs(pass_path) == 0, name
+        assert db_path.stat().st_size == before, name
+
+
+def test_compact_pass_rocpd_dbs_compacts_when_the_csv_has_counters(tmp_path):
+    pass_path = tmp_path / "pmc_perf_0"
+    db_path = common.write_rocpd_pass_db(pass_path, "12345")
+    native_csv = common.write_native_counter_csv(pass_path, "12345")
+    before = db_path.stat().st_size
+
+    assert native_counters_csv(pass_path, db_path) == native_csv
+    assert compact_pass_rocpd_dbs(pass_path) > 0
+    assert db_path.stat().st_size < before
+
+
+def test_compact_failure_never_costs_the_run(tmp_path, monkeypatch):
+    pass_path = tmp_path / "pmc_perf_0"
+    db_path = common.write_rocpd_pass_db(pass_path, "12345")
+    common.write_native_counter_csv(pass_path, "12345")
+    before = db_path.stat().st_size
+
+    def boom(_db_path):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr(rocpd_data, "compact_rocpd_db", boom)
+
+    assert compact_pass_rocpd_dbs(pass_path) == 0
+    assert db_path.stat().st_size == before
+
+
+def test_compact_leaves_unrelated_pmc_named_tables_alone(tmp_path):
+    db_path = common.write_rocpd_pass_db(tmp_path, "12345")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE native_tool_pmc_event_values (v INTEGER)")
+    conn.execute("INSERT INTO native_tool_pmc_event_values VALUES (42)")
+    conn.commit()
+    conn.close()
+
+    compact_rocpd_db(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM native_tool_pmc_event_values"
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+
+def test_read_kernel_info_scopes_dispatch_ids_to_one_process(tmp_path):
+    db_path = common.write_rocpd_pass_db(tmp_path, "111")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        f'INSERT INTO "rocpd_info_process{common.UUID}" VALUES (2, ?, 222)',
+        (common.GUID,),
+    )
+    conn.executemany(
+        f'INSERT INTO "rocpd_kernel_dispatch{common.UUID}" VALUES '
+        f"(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                10 + d,
+                common.GUID,
+                d,
+                0,
+                1,
+                d,
+                2,
+                300 + d,
+                400 + d,
+                0,
+                0,
+                64,
+                1,
+                1,
+                256,
+                1,
+                1,
+            )
+            for d in (1, 2)
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    assert len(read_kernel_info(str(db_path))) == 2
+
+    for pid in ("111", "222"):
+        scoped = read_kernel_info(str(db_path), pid)
+        assert len(scoped) == 2, pid
+        assert {r["PID"] for r in scoped.values()} == {int(pid)}
