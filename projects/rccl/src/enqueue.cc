@@ -2250,12 +2250,21 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // Fused launch + doneEvent record. Sizes are work-items (grid*block), not blocks; stopEvent IS the doneEvent
+    // record, silently deleted by #3741 -> ROCM-29677, so don't delete it again (a separate record is ~2.8us/launch).
+    // Fast path only: hipGraph capture drops a fused stopEvent (never BindCommand'd), and !persistent => not capturing.
+    CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
+                                           block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
+                                           /*stopEvent=*/comm->doneEvent, /*flags=*/0),
+                  ret, do_return);
+#else
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                extra),
                 ret, do_return);
-    // Record while launchStream is guaranteed live; bookkeeping after, so a failed record
-    // leaves no false claim of a recorded event.
-    CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+    // Record while launchStream is guaranteed live; bookkeeping after, so a failed record leaves no false claim.
+    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
     comm->lastStreamTag = ncclStreamTag(launchStream);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
@@ -2346,7 +2355,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
               ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror the fast path.
+  // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
+  // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
   CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
   comm->lastStreamTag = ncclStreamTag(launchStream);
 
