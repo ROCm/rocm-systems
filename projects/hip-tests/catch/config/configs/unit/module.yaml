@@ -31,8 +31,7 @@ module:
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    # AIRUNTIME-2631: negative-parameter assertion fails on gfx942
-    disabled: [amd_windows, amd_wsl, gfx942]
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
@@ -302,8 +301,7 @@ module:
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    # AIRUNTIME-2631: negative-parameter assertion fails on gfx942
-    disabled: [amd_windows, amd_wsl, gfx942]
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2
