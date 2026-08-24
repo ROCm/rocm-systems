@@ -771,11 +771,17 @@ program created the allocation.
 
 - `BLOCK` `ADD`/`DEL` maintain a live set keyed by recorded base.
 - `SEGMENT` `ADD` records the bounds and allocates nothing. Materialisation is
-  **lazy**, driven from the moment a kernel-argument pointer fails to translate:
-  the map then allocates a buffer of the recorded size and registers it with
-  `record_alloc`, which is the entire HIP-bypass fix — it reuses `alloc_map` and
-  therefore leaves `translate_ptr` unchanged. Contents are unknown to the archive
-  and get `HIP_HRR_REPLAY_FILL_BYTE`.
+  **lazy**, driven from the moment a pointer fails to translate: the map then
+  allocates a buffer of the recorded size and registers it with `record_alloc`,
+  which is the entire HIP-bypass fix — it reuses `alloc_map` and therefore leaves
+  `translate_ptr` unchanged. Contents are unknown to the archive and get
+  `HIP_HRR_REPLAY_FILL_BYTE`.
+
+  "Fails to translate" means at any point of use, not only a kernel argument. A
+  copy can be the first thing that touches a bypassed allocation, so the memcpy
+  handlers go through `translate_or_materialize` rather than `translate_ptr`;
+  without that the handler gave up before the sidecar was consulted, which
+  contradicted the shared timeline advance described above.
 
   Laziness is not an optimisation, it is what makes the answer correct. A
   segment's `ADD` generally arrives *before* replay has reached the `hipMalloc`

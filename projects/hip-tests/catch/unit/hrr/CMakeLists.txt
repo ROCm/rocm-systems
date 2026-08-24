@@ -87,6 +87,22 @@ target_include_directories(HrrTest PRIVATE
     ${HRR_CLR_DIR}/playback
 )
 
+# hrr_regions_test.cc needs one allocation that never crosses the HIP dispatch
+# table, so that a memcpy into it is genuinely unresolvable from the archive
+# alone. HSA is the only way to get that: the buffer is real and GPU-reachable,
+# but HRR never saw it. Optional on purpose — where the package is absent the
+# workload and its test compile out and the test reports itself skipped, rather
+# than failing a build that is otherwise fine.
+find_package(hsa-runtime64 CONFIG QUIET)
+if(hsa-runtime64_FOUND)
+  target_link_libraries(HrrTest hsa-runtime64::hsa-runtime64)
+  target_compile_definitions(HrrTest PRIVATE HRR_HAVE_HSA=1)
+  message(STATUS "HRR tests: HSA available, memcpy-first-touch test enabled")
+else()
+  message(STATUS "HRR tests: hsa-runtime64 not found, "
+                 "Unit_HRR_Regions_MemcpyFirstTouchMaterialization will skip")
+endif()
+
 # hrr_api_args.h uses a compile-time guard to emit the hrr_api_names[] string
 # table in exactly one translation unit.
 target_compile_definitions(HrrTest PRIVATE

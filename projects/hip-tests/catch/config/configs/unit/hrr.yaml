@@ -390,3 +390,9 @@ hrr:
   Unit_HRR_Regions_Direct:
     <<: *level_2
     tags: [direct, regions]
+  Unit_HRR_Regions_MemcpyDirect:
+    <<: *level_2
+    tags: [direct, regions]
+  Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, regions, memcpy]
