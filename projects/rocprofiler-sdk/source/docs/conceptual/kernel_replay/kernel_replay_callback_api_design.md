@@ -43,6 +43,8 @@ deliberate:
   snapshot because a single pass is the ordinary path.
 - **Localized start/stop as function pointers on the PASS payload**, mirroring
   `rocprofiler_start_context` / `rocprofiler_stop_context`, rather than a new public API.
+  Contexts are configured and started globally before replay; the toggles only mask which
+  already-active contexts participate in each pass.
 - **No pass-count environment variable.** A tool (including the stacked `rocprofv3` integration)
   derives N itself — for example from `--pmc` groups per agent.
 
@@ -96,6 +98,11 @@ CONFIG PHASE_EXIT
 fire application's original completion signal
 release writer lock
 ```
+
+Replay serializes dispatches **on the agent** through the per-agent reader/writer lock described in
+[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md). It does **not** call the
+process-wide `QueueController::enable_serialization()` / `batch_packets` path used by counters, SPM,
+and thread trace. Other agents are not blocked.
 
 ## Snapshot design choice
 

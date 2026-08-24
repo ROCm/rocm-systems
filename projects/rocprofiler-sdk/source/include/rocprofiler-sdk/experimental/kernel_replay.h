@@ -73,7 +73,8 @@ ROCPROFILER_EXTERN_C_INIT
  * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
  * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
  * Declining every replay while any such trackable allocation is live is not viable because the HIP
- * runtime itself keeps them live under interception.
+ * runtime itself keeps them live under interception. A failed restore aborts the process rather
+ * than continuing with partially restored memory.
  *
  * @see `docs/how-to/using-kernel-replay.rst` for the full limitation list and
  * `docs/conceptual/kernel_replay/kernel_replay_memory_snapshot.md` for what the snapshot covers
@@ -113,7 +114,9 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// @var replay_continue_cb
     /// @brief [CONFIG] Optional tool-provided callback invoked after each pass completes.
     /// Return non-zero to continue the replay loop, zero to break out.
-    /// Required when @c pass_count_cb returns 0; if it returns N > 0, allows early exit.
+    /// Required when @c pass_count_cb returns 0; if it returns N > 0, allows early exit only —
+    /// it cannot extend the loop past N. @c rocprofv3 does not set this callback; adaptive or
+    /// early-exit control is a custom-tool feature.
     /// @c dispatch_info and @c user_data (the per-dispatch user data set during CONFIG
     /// PHASE_ENTER) are provided; the same @c user_data is threaded through all callbacks
     /// for this dispatch.
@@ -127,11 +130,12 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///
     /// @var replay_local_start_context_cb
     /// @var replay_local_stop_context_cb
-    /// @brief [PASS] Localized context control. The SDK populates these function
+    /// @brief [PASS] Localized context toggles. The SDK populates these function
     /// pointers before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool
-    /// invokes them (in lieu of the global @ref rocprofiler_start_context /
-    /// @ref rocprofiler_stop_context) to enable or disable a context for the current
-    /// replay loop. Semantics:
+    /// invokes them instead of the global @ref rocprofiler_start_context /
+    /// @ref rocprofiler_stop_context to enable or disable an already-active context
+    /// for the current replay loop only. They record overrides in a thread-scoped map;
+    /// global context state is never modified. Semantics:
     ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
     ///  - Sticky across passes: a context stopped in one pass stays stopped until it
     ///    is started again within the same replay loop (and vice versa). A tool therefore
