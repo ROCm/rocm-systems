@@ -956,25 +956,10 @@ Torch trace collector
 ---------------------
 
 Torch trace is collected by ``torch_trace_collector``, a C++ extension built for a
-specific PyTorch version. The copy installed with ROCm Compute Profiler is used when
-it matches the PyTorch version of the workload interpreter.
-
-Otherwise the extension is built on first use, which requires an installation that
-ships the collector sources, that is one built with ``SKIP_NATIVE_TOOL_BUILD=ON``.
-That build runs beside the installed sources when their directory is writable and
-under ``~/.cache/rocprofiler-compute/torch_trace_collector`` when it is not;
-``XDG_CACHE_HOME`` overrides ``~/.cache``. It needs CMake, a C++ compiler, and the
-ROCprofiler-SDK, AMD Comgr and libdw development files.
-
-When neither an installed copy matches nor a build can run, profiling continues with
-a slower Python implementation.
-
-Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE`` to ``1`` in the workload environment to
-discard the build directory and build the extension again.
-
-.. code-block:: shell-session
-
-   $ ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+specific PyTorch version. Profiling loads the installed
+``torch_trace_collector-<torch-version>.so`` that matches the workload PyTorch
+version. If none matches, profiling stops with an error that lists the supported
+PyTorch versions and the workload version.
 
 Output
 ------

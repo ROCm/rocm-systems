@@ -406,11 +406,11 @@ must tolerate the missing field: `_parse_function_backend` in
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
   are resolved under `${TORCH_INSTALL_PREFIX}/lib`.
-- The artifact is named `torch_trace_collector-<torch-version>.so`. The version
-  is `torch.__version__` with any local `+...` suffix removed. The loader passes
-  it as `TORCH_TRACE_TORCH_VERSION`; a project configure uses `Torch_VERSION`
-  from `find_package(Torch)`. Set `ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1` to
-  discard a cached build and compile again.
+- The artifact is named `torch_trace_collector-<torch-version>.so`, using
+  `Torch_VERSION` from `find_package(Torch)`. At runtime the loader selects the
+  installed artifact that matches the workload `torch.__version__` (local
+  `+...` suffix removed). A mismatch raises an error listing the supported
+  versions and the workload version.
 - A static core library carries the shared source and its usage requirements, the
   torch and roctx includes and libraries, `synchronized`, `gsl_assert`, and the
   debug-info flag, and both the pybind11 `MODULE` and the gtest binary link it and
@@ -420,19 +420,13 @@ must tolerate the missing field: `_parse_function_backend` in
   leaves Python symbols undefined and names no `libpython` of its own, so only a
   consumer already loaded by an interpreter can resolve them.
 - A compile check selects the debug-info slot.
-- One build path serves both entry points. The directory is registered
-  unconditionally from `src/lib/CMakeLists.txt`, so the project build and the
-  runtime build configure the same targets; the runtime build differs only in the
-  options it passes. The module omits the `lib` prefix, is named by PyTorch
-  version, and lands in the build tree's `lib/`. The directory publishes the
-  target name as `TORCH_TRACE_COLLECTOR_TARGET`, and the root
-  `CMakeLists.txt` installs it to `<libdir>/rocprofiler-compute/` alongside the
-  other native libraries, where the loader globs for it. `SKIP_NATIVE_TOOL_BUILD`
-  installs the `src/lib/` sources instead, for the runtime build to compile. The
-  gtest is added only when `ENABLE_TESTS` is on and `gtest_main` exists; the
-  directory publishes its library search path as `ROCPROF_TEST_LD_LIBRARY_PATH`
-  and the root `CMakeLists.txt` registers the test, matching the other native
-  gtests.
+- The collector directory is registered from `src/lib/CMakeLists.txt`. The
+  module omits the `lib` prefix, is named by PyTorch version, and is installed
+  to `<libdir>/rocprofiler-compute/` as `TORCH_TRACE_COLLECTOR_TARGET`. The
+  loader searches that directory. The gtest is added when `ENABLE_TESTS` is on
+  and `gtest_main` exists; the directory publishes
+  `ROCPROF_TEST_LD_LIBRARY_PATH` and the root `CMakeLists.txt` registers the
+  test.
 
 ## Validation
 
