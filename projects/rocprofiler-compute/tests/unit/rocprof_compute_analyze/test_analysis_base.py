@@ -106,7 +106,7 @@ def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> N
 
 
 def test_join_workload_csvs_reuses_existing_merge(tmp_path, monkeypatch) -> None:
-    """An existing merge wins over results_*.csv.gz instead of being rebuilt."""
+    """Reuse pmc_perf.csv.gz when no out/ artifacts are present."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
@@ -120,6 +120,50 @@ def test_join_workload_csvs_reuses_existing_merge(tmp_path, monkeypatch) -> None
     inst.join_workload_csvs(tmp_path)
 
     assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
+
+
+def test_join_workload_csvs_rebuilds_from_out_when_merge_exists(
+    tmp_path, monkeypatch
+) -> None:
+    """out/ artifacts win over an existing pmc_perf.csv.gz."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
+
+    common.write_pmc_perf(tmp_path, "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,99\n")
+    pass_path = tmp_path / "out" / "pmc_perf_0"
+    common.write_rocpd_pass_db(pass_path, "100")
+    common.write_native_counter_csv(pass_path, "100")
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst.join_workload_csvs(tmp_path)
+
+    merged = pd.read_csv(common.pmc_perf_path(tmp_path))
+    assert "SQ_WAVES" in set(merged["Counter_Name"])
+    assert 99 not in merged["Counter_Value"].tolist()
+
+
+def test_merge_profile_artifacts_errors_on_truncated_counter_csv(
+    tmp_path, monkeypatch
+) -> None:
+    """A truncated native counter CSV must fail without leaving output behind."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
+
+    pass_path = tmp_path / "out" / "pmc_perf_0"
+    (pass_path / "100").mkdir(parents=True)
+    common.write_rocpd_pass_db(pass_path, "100")
+    whole = gzip.compress(
+        b"dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
+        b"counter_id,counter_name,counter_value\n" + b"1,0,1,0,0,SQ_WAVES,5\n" * 2000
+    )
+    (pass_path / "100_native_counter_collection.csv.gz").write_bytes(
+        whole[: len(whole) // 2]
+    )
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    output = common.pmc_perf_path(tmp_path)
+    with pytest.raises(SystemExit):
+        inst.merge_profile_artifacts(tmp_path, output)
+
+    assert not output.exists(), "a failed merge must not leave a partial intermediate"
 
 
 def test_concat_result_csvs_errors_on_truncated_compressed_results(
