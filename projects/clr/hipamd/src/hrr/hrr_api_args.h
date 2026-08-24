@@ -13,7 +13,7 @@
  * One packed struct per HIP API covering both HipDispatchTable (runtime) and
  * HipCompilerDispatchTable (compiler stubs).
  *
- * Archive format (v3):
+ * Archive format (v6):
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
@@ -38,6 +38,14 @@
  * Extra fields on selected APIs (blob hashes, module_id) are appended AFTER
  * the normal parameters — see EXTRA_FIELDS in gen_hrr_api_args.py.
  *
+ * Dereferenced pointer arguments (DEREF_FIELDS in gen_hrr_api_args.py) add,
+ * for a pointer argument whose pointee must survive into the archive:
+ *   - uint8_t  <param>_bytes[N]   the pointee's bytes, copied at capture
+ *   - uint8_t  <param>_present    1 when the argument was non-null
+ *   - uint32_t <param>_n          element count, for array arguments only
+ * Without them a pointer argument reaches the archive as a capture-time host
+ * address and nothing else, which is the payload-loss class of section 8.3.
+ *
  * The structs use #pragma pack(1) so layout is identical on all platforms.
  * ============================================================================
  */
@@ -59,8 +67,12 @@
  * table and needs an ID translation to be read back. From v5 on a new API
  * takes the next free ID in its table and no existing runtime ID moves, so
  * adding APIs no longer needs a version bump. A retired dispatch-table slot
- * (nulled void*) still occupies an ID. */
-#define HRR_VERSION ((uint16_t)5u)
+ * (nulled void*) still occupies an ID.
+ * v6: pointer arguments whose pointee used to be dropped now carry it inline
+ * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
+ * before v6 cannot be read by a v6 reader: re-capture rather than replay an
+ * old recording. */
+#define HRR_VERSION ((uint16_t)6u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -226,7 +238,13 @@ typedef struct {
     uint64_t size;
     int32_t constant;
     int32_t global;
+    uint8_t deviceVar_bytes[256];  /* char inline copy */
+    uint8_t deviceVar_present;  /* 1 when deviceVar was non-null */
+    uint64_t dev_addr;  /* capture-time device address of the symbol, 0 if unresolved */
 } hrr_args___hipRegisterVar;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(char) <= 1, "hrr_args___hipRegisterVar::deviceVar_bytes too small for char");
+#endif
 
 /* void __hipUnregisterFatBinary(void** modules) */
 typedef struct {
@@ -348,7 +366,12 @@ typedef struct {
     int32_t ret;
     uint64_t device;
     uint64_t prop;
+    uint8_t prop_bytes[1472];  /* hipDeviceProp_t inline copy */
+    uint8_t prop_present;  /* 1 when prop was non-null */
 } hrr_args_hipChooseDevice;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipDeviceProp_t) <= 1472, "hrr_args_hipChooseDevice::prop_bytes too small for hipDeviceProp_t");
+#endif
 
 /* hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties) */
 typedef struct {
@@ -356,7 +379,12 @@ typedef struct {
     int32_t ret;
     uint64_t device;
     uint64_t properties;
+    uint8_t properties_bytes[792];  /* hipDeviceProp_tR0000 inline copy */
+    uint8_t properties_present;  /* 1 when properties was non-null */
 } hrr_args_hipChooseDeviceR0000;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipDeviceProp_tR0000) <= 792, "hrr_args_hipChooseDeviceR0000::properties_bytes too small for hipDeviceProp_tR0000");
+#endif
 
 /* hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream) */
 typedef struct {
@@ -611,7 +639,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     int32_t device;
-    uint64_t /* hipGraphMemAttributeType */ attr;
+    int32_t attr;
     uint64_t value;
 } hrr_args_hipDeviceGetGraphMemAttribute;
 
@@ -746,7 +774,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     int32_t device;
-    uint64_t /* hipGraphMemAttributeType */ attr;
+    int32_t attr;
     uint64_t value;
 } hrr_args_hipDeviceSetGraphMemAttribute;
 
@@ -820,7 +848,16 @@ typedef struct {
     uint64_t numDependencies;
     uint64_t copyParams;
     uint64_t ctx;
+    uint8_t dependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t dependencies_present;  /* 1 when dependencies was non-null */
+    uint32_t dependencies_n;  /* elements copied from dependencies */
+    uint8_t copyParams_bytes[184];  /* HIP_MEMCPY3D inline copy */
+    uint8_t copyParams_present;  /* 1 when copyParams was non-null */
 } hrr_args_hipDrvGraphAddMemcpyNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipDrvGraphAddMemcpyNode::dependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(HIP_MEMCPY3D) <= 184, "hrr_args_hipDrvGraphAddMemcpyNode::copyParams_bytes too small for HIP_MEMCPY3D");
+#endif
 
 /* hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) */
 typedef struct {
@@ -1046,7 +1083,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t value;
-    uint64_t /* hipFunction_attribute */ attrib;
+    int32_t attrib;
     uint64_t hfunc;
 } hrr_args_hipFuncGetAttribute;
 
@@ -1090,7 +1127,7 @@ typedef struct {
     uint64_t pHipDeviceCount;
     uint64_t pHipDevices;
     uint32_t hipDeviceCount;
-    uint64_t /* hipGLDeviceList */ deviceList;
+    int32_t deviceList;
 } hrr_args_hipGLGetDevices;
 
 /* hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array) */
@@ -1232,7 +1269,13 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t childGraph;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddChildGraphNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddChildGraphNode::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from, const hipGraphNode_t* to, size_t numDependencies) */
 typedef struct {
@@ -1242,7 +1285,17 @@ typedef struct {
     uint64_t from;
     uint64_t to;
     uint64_t numDependencies;
+    uint8_t from_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t from_present;  /* 1 when from was non-null */
+    uint32_t from_n;  /* elements copied from from */
+    uint8_t to_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t to_present;  /* 1 when to was non-null */
+    uint32_t to_n;  /* elements copied from to */
 } hrr_args_hipGraphAddDependencies;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddDependencies::from_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddDependencies::to_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies) */
 typedef struct {
@@ -1252,7 +1305,13 @@ typedef struct {
     uint64_t graph;
     uint64_t pDependencies;
     uint64_t numDependencies;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddEmptyNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddEmptyNode::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, hipEvent_t event) */
 typedef struct {
@@ -1263,7 +1322,13 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t event;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddEventRecordNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddEventRecordNode::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, hipEvent_t event) */
 typedef struct {
@@ -1274,7 +1339,13 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t event;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddEventWaitNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddEventWaitNode::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipHostNodeParams* pNodeParams) */
 typedef struct {
@@ -1296,7 +1367,16 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t pNodeParams;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint8_t pNodeParams_bytes[64];  /* hipKernelNodeParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphAddKernelNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddKernelNode::pDependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipKernelNodeParams) <= 64, "hrr_args_hipGraphAddKernelNode::pNodeParams_bytes too small for hipKernelNodeParams");
+#endif
 
 /* hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, hipMemAllocNodeParams* pNodeParams) */
 typedef struct {
@@ -1307,7 +1387,16 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t pNodeParams;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint8_t pNodeParams_bytes[120];  /* hipMemAllocNodeParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphAddMemAllocNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemAllocNode::pDependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipMemAllocNodeParams) <= 120, "hrr_args_hipGraphAddMemAllocNode::pNodeParams_bytes too small for hipMemAllocNodeParams");
+#endif
 
 /* hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, void* dev_ptr) */
 typedef struct {
@@ -1318,7 +1407,13 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t dev_ptr;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddMemFreeNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemFreeNode::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipMemcpy3DParms* pCopyParams) */
 typedef struct {
@@ -1329,7 +1424,16 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t pCopyParams;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint8_t pCopyParams_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint8_t pCopyParams_present;  /* 1 when pCopyParams was non-null */
 } hrr_args_hipGraphAddMemcpyNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemcpyNode::pDependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipMemcpy3DParms) <= 160, "hrr_args_hipGraphAddMemcpyNode::pCopyParams_bytes too small for hipMemcpy3DParms");
+#endif
 
 /* hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst, const void* src, size_t count, hipMemcpyKind kind) */
 typedef struct {
@@ -1343,7 +1447,13 @@ typedef struct {
     uint64_t src;
     uint64_t count;
     int32_t kind;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
 } hrr_args_hipGraphAddMemcpyNode1D;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemcpyNode1D::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst, const void* symbol, size_t count, size_t offset, hipMemcpyKind kind) */
 typedef struct {
@@ -1358,7 +1468,15 @@ typedef struct {
     uint64_t count;
     uint64_t offset;
     int32_t kind;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint64_t blob_hash_lo;  /* unused; the destination is written at replay */
+    uint64_t blob_hash_hi;  /* unused */
 } hrr_args_hipGraphAddMemcpyNodeFromSymbol;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemcpyNodeFromSymbol::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind) */
 typedef struct {
@@ -1373,7 +1491,15 @@ typedef struct {
     uint64_t count;
     uint64_t offset;
     int32_t kind;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint64_t blob_hash_lo;  /* host src blob hash lo, 0 if src is a device pointer */
+    uint64_t blob_hash_hi;  /* host src blob hash hi */
 } hrr_args_hipGraphAddMemcpyNodeToSymbol;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemcpyNodeToSymbol::pDependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipMemsetParams* pMemsetParams) */
 typedef struct {
@@ -1384,7 +1510,16 @@ typedef struct {
     uint64_t pDependencies;
     uint64_t numDependencies;
     uint64_t pMemsetParams;
+    uint8_t pDependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t pDependencies_present;  /* 1 when pDependencies was non-null */
+    uint32_t pDependencies_n;  /* elements copied from pDependencies */
+    uint8_t pMemsetParams_bytes[48];  /* hipMemsetParams inline copy */
+    uint8_t pMemsetParams_present;  /* 1 when pMemsetParams was non-null */
 } hrr_args_hipGraphAddMemsetNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddMemsetNode::pDependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipMemsetParams) <= 48, "hrr_args_hipGraphAddMemsetNode::pMemsetParams_bytes too small for hipMemsetParams");
+#endif
 
 /* hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph) */
 typedef struct {
@@ -1515,7 +1650,12 @@ typedef struct {
     uint64_t hGraphExec;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[64];  /* hipKernelNodeParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphExecKernelNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipKernelNodeParams) <= 64, "hrr_args_hipGraphExecKernelNodeSetParams::pNodeParams_bytes too small for hipKernelNodeParams");
+#endif
 
 /* hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, hipMemcpy3DParms* pNodeParams) */
 typedef struct {
@@ -1524,7 +1664,12 @@ typedef struct {
     uint64_t hGraphExec;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphExecMemcpyNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemcpy3DParms) <= 160, "hrr_args_hipGraphExecMemcpyNodeSetParams::pNodeParams_bytes too small for hipMemcpy3DParms");
+#endif
 
 /* hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraphNode_t node, void* dst, const void* src, size_t count, hipMemcpyKind kind) */
 typedef struct {
@@ -1562,6 +1707,8 @@ typedef struct {
     uint64_t count;
     uint64_t offset;
     int32_t kind;
+    uint64_t blob_hash_lo;  /* host src blob hash lo, 0 if src is a device pointer */
+    uint64_t blob_hash_hi;  /* host src blob hash hi */
 } hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol;
 
 /* hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipMemsetParams* pNodeParams) */
@@ -1571,7 +1718,12 @@ typedef struct {
     uint64_t hGraphExec;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[48];  /* hipMemsetParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphExecMemsetNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemsetParams) <= 48, "hrr_args_hipGraphExecMemsetNodeSetParams::pNodeParams_bytes too small for hipMemsetParams");
+#endif
 
 /* hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph, hipGraphNode_t* hErrorNode_out, hipGraphExecUpdateResult* updateResult_out) */
 typedef struct {
@@ -1679,7 +1831,12 @@ typedef struct {
     uint64_t hNode;
     int32_t attr;
     uint64_t value;
+    uint8_t value_bytes[64];  /* hipKernelNodeAttrValue inline copy */
+    uint8_t value_present;  /* 1 when value was non-null */
 } hrr_args_hipGraphKernelNodeSetAttribute;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipKernelNodeAttrValue) <= 64, "hrr_args_hipGraphKernelNodeSetAttribute::value_bytes too small for hipKernelNodeAttrValue");
+#endif
 
 /* hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams) */
 typedef struct {
@@ -1687,7 +1844,12 @@ typedef struct {
     int32_t ret;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[64];  /* hipKernelNodeParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphKernelNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipKernelNodeParams) <= 64, "hrr_args_hipGraphKernelNodeSetParams::pNodeParams_bytes too small for hipKernelNodeParams");
+#endif
 
 /* hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) */
 typedef struct {
@@ -1727,7 +1889,12 @@ typedef struct {
     int32_t ret;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphMemcpyNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemcpy3DParms) <= 160, "hrr_args_hipGraphMemcpyNodeSetParams::pNodeParams_bytes too small for hipMemcpy3DParms");
+#endif
 
 /* hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const void* src, size_t count, hipMemcpyKind kind) */
 typedef struct {
@@ -1762,6 +1929,8 @@ typedef struct {
     uint64_t count;
     uint64_t offset;
     int32_t kind;
+    uint64_t blob_hash_lo;  /* host src blob hash lo, 0 if src is a device pointer */
+    uint64_t blob_hash_hi;  /* host src blob hash hi */
 } hrr_args_hipGraphMemcpyNodeSetParamsToSymbol;
 
 /* hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams) */
@@ -1778,7 +1947,12 @@ typedef struct {
     int32_t ret;
     uint64_t node;
     uint64_t pNodeParams;
+    uint8_t pNodeParams_bytes[48];  /* hipMemsetParams inline copy */
+    uint8_t pNodeParams_present;  /* 1 when pNodeParams was non-null */
 } hrr_args_hipGraphMemsetNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemsetParams) <= 48, "hrr_args_hipGraphMemsetNodeSetParams::pNodeParams_bytes too small for hipMemsetParams");
+#endif
 
 /* hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t originalNode, hipGraph_t clonedGraph) */
 typedef struct {
@@ -1875,7 +2049,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t resource;
-    uint64_t /* GLuint */ buffer;
+    uint32_t buffer;
     uint32_t flags;
 } hrr_args_hipGraphicsGLRegisterBuffer;
 
@@ -1884,8 +2058,8 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t resource;
-    uint64_t /* GLuint */ image;
-    uint64_t /* GLenum */ target;
+    uint32_t image;
+    uint32_t target;
     uint32_t flags;
 } hrr_args_hipGraphicsGLRegisterImage;
 
@@ -2037,24 +2211,35 @@ typedef struct {
     int32_t ret;
     uint64_t handle;
     uint64_t devPtr;
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t inline copy */
+    uint8_t handle_present;  /* 1 when handle was non-null */
 } hrr_args_hipIpcGetMemHandle;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipIpcMemHandle_t) <= 64, "hrr_args_hipIpcGetMemHandle::handle_bytes too small for hipIpcMemHandle_t");
+#endif
 
 /* hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t event;
-    uint64_t /* hipIpcEventHandle_t */ handle;
+    uint8_t handle_bytes[64];  /* hipIpcEventHandle_t passed by value, inline copy */
 } hrr_args_hipIpcOpenEventHandle;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipIpcEventHandle_t) <= 64, "hrr_args_hipIpcOpenEventHandle::handle_bytes too small for hipIpcEventHandle_t");
+#endif
 
 /* hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t devPtr;
-    uint64_t /* hipIpcMemHandle_t */ handle;
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t passed by value, inline copy */
     uint32_t flags;
 } hrr_args_hipIpcOpenMemHandle;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipIpcMemHandle_t) <= 64, "hrr_args_hipIpcOpenMemHandle::handle_bytes too small for hipIpcMemHandle_t");
+#endif
 
 /* const char* hipKernelNameRef(const hipFunction_t f) */
 typedef struct {
@@ -2141,8 +2326,11 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t pitchedDevPtr;
-    uint64_t /* hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
 } hrr_args_hipMalloc3D;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMalloc3D::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMalloc3DArray(hipArray_t* array, const struct hipChannelFormatDesc* desc, struct hipExtent extent, unsigned int flags) */
 typedef struct {
@@ -2150,9 +2338,12 @@ typedef struct {
     int32_t ret;
     uint64_t array;
     uint64_t desc;
-    uint64_t /* struct hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
     uint32_t flags;
 } hrr_args_hipMalloc3DArray;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMalloc3DArray::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, size_t width, size_t height, unsigned int flags) */
 typedef struct {
@@ -2207,10 +2398,13 @@ typedef struct {
     int32_t ret;
     uint64_t mipmappedArray;
     uint64_t desc;
-    uint64_t /* struct hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
     uint32_t numLevels;
     uint32_t flags;
 } hrr_args_hipMallocMipmappedArray;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMallocMipmappedArray::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height) */
 typedef struct {
@@ -2278,7 +2472,12 @@ typedef struct {
     uint64_t size;
     uint64_t prop;
     uint64_t flags;
+    uint8_t prop_bytes[32];  /* hipMemAllocationProp inline copy */
+    uint8_t prop_present;  /* 1 when prop was non-null */
 } hrr_args_hipMemCreate;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemAllocationProp) <= 32, "hrr_args_hipMemCreate::prop_bytes too small for hipMemAllocationProp");
+#endif
 
 /* hipError_t hipMemExportToShareableHandle(void* shareableHandle, hipMemGenericAllocationHandle_t handle, hipMemAllocationHandleType handleType, unsigned long long flags) */
 typedef struct {
@@ -2286,7 +2485,7 @@ typedef struct {
     int32_t ret;
     uint64_t shareableHandle;
     uint64_t handle;
-    uint64_t /* hipMemAllocationHandleType */ handleType;
+    int32_t handleType;
     uint64_t flags;
 } hrr_args_hipMemExportToShareableHandle;
 
@@ -2297,7 +2496,15 @@ typedef struct {
     uint64_t flags;
     uint64_t location;
     uint64_t ptr;
+    uint8_t location_bytes[8];  /* hipMemLocation inline copy */
+    uint8_t location_present;  /* 1 when location was non-null */
+    uint8_t flags_bytes[8];  /* unsigned long long inline copy */
+    uint8_t flags_present;  /* 1 when flags was non-null */
 } hrr_args_hipMemGetAccess;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemLocation) <= 8, "hrr_args_hipMemGetAccess::location_bytes too small for hipMemLocation");
+static_assert(sizeof(unsigned long long) <= 8, "hrr_args_hipMemGetAccess::flags_bytes too small for unsigned long long");
+#endif
 
 /* hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) */
 typedef struct {
@@ -2343,7 +2550,7 @@ typedef struct {
     int32_t ret;
     uint64_t handle;
     uint64_t osHandle;
-    uint64_t /* hipMemAllocationHandleType */ shHandleType;
+    int32_t shHandleType;
 } hrr_args_hipMemImportFromShareableHandle;
 
 /* hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle, unsigned long long flags) */
@@ -2399,7 +2606,7 @@ typedef struct {
     int32_t ret;
     uint64_t shared_handle;
     uint64_t mem_pool;
-    uint64_t /* hipMemAllocationHandleType */ handle_type;
+    int32_t handle_type;
     uint32_t flags;
 } hrr_args_hipMemPoolExportToShareableHandle;
 
@@ -2428,7 +2635,7 @@ typedef struct {
     int32_t ret;
     uint64_t mem_pool;
     uint64_t shared_handle;
-    uint64_t /* hipMemAllocationHandleType */ handle_type;
+    int32_t handle_type;
     uint32_t flags;
 } hrr_args_hipMemPoolImportFromShareableHandle;
 
@@ -2828,7 +3035,15 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t pCopy;
+    uint8_t drv2d_bytes[136];  /* hip_Memcpy2D inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipMemcpyParam2D;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hip_Memcpy2D) <= 136, "hrr_args_hipMemcpyParam2D::drv2d_bytes[136] too small for hip_Memcpy2D");
+#endif
 
 /* hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) */
 typedef struct {
@@ -2836,7 +3051,15 @@ typedef struct {
     int32_t ret;
     uint64_t pCopy;
     uint64_t stream;
+    uint8_t drv2d_bytes[136];  /* hip_Memcpy2D inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipMemcpyParam2DAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hip_Memcpy2D) <= 136, "hrr_args_hipMemcpyParam2DAsync::drv2d_bytes[136] too small for hip_Memcpy2D");
+#endif
 
 /* hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDeviceId, size_t sizeBytes) */
 typedef struct {
@@ -2945,20 +3168,28 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipPitchedPtr */ pitchedDevPtr;
+    uint8_t pitchedDevPtr_bytes[32];  /* hipPitchedPtr passed by value, inline copy */
     int32_t value;
-    uint64_t /* hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
 } hrr_args_hipMemset3D;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipPitchedPtr) <= 32, "hrr_args_hipMemset3D::pitchedDevPtr_bytes too small for hipPitchedPtr");
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMemset3D::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent, hipStream_t stream) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipPitchedPtr */ pitchedDevPtr;
+    uint8_t pitchedDevPtr_bytes[32];  /* hipPitchedPtr passed by value, inline copy */
     int32_t value;
-    uint64_t /* hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
     uint64_t stream;
 } hrr_args_hipMemset3DAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipPitchedPtr) <= 32, "hrr_args_hipMemset3DAsync::pitchedDevPtr_bytes too small for hipPitchedPtr");
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMemset3DAsync::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t stream) */
 typedef struct {
@@ -3252,7 +3483,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t data;
-    uint64_t /* hipPointer_attribute */ attribute;
+    int32_t attribute;
     uint64_t ptr;
 } hrr_args_hipPointerGetAttribute;
 
@@ -3269,7 +3500,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t value;
-    uint64_t /* hipPointer_attribute */ attribute;
+    int32_t attribute;
     uint64_t ptr;
 } hrr_args_hipPointerSetAttribute;
 
@@ -3313,7 +3544,13 @@ typedef struct {
     uint64_t arg;
     uint64_t size;
     uint64_t offset;
+    uint8_t arg_bytes[256];  /* unsigned char[256] inline copy */
+    uint8_t arg_present;  /* 1 when arg was non-null */
+    uint32_t arg_n;  /* elements copied from arg */
 } hrr_args_hipSetupArgument;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(unsigned char) <= 1, "hrr_args_hipSetupArgument::arg_bytes too small for unsigned char");
+#endif
 
 /* hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray, const hipExternalSemaphoreSignalParams* paramsArray, unsigned int numExtSems, hipStream_t stream) */
 typedef struct {
@@ -3711,7 +3948,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t texRef;
-    uint64_t /* hipArray_Format */ fmt;
+    int32_t fmt;
     int32_t NumPackedComponents;
 } hrr_args_hipTexRefSetFormat;
 
@@ -3811,7 +4048,7 @@ typedef struct {
 /* hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f) */
 typedef struct {
     hrr_event_header hdr;
-    uint64_t /* hipChannelFormatDesc */ ret;
+    uint8_t ret_bytes[20];
     int32_t x;
     int32_t y;
     int32_t z;
@@ -3978,20 +4215,28 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipPitchedPtr */ pitchedDevPtr;
+    uint8_t pitchedDevPtr_bytes[32];  /* hipPitchedPtr passed by value, inline copy */
     int32_t value;
-    uint64_t /* hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
     uint64_t stream;
 } hrr_args_hipMemset3DAsync_spt;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipPitchedPtr) <= 32, "hrr_args_hipMemset3DAsync_spt::pitchedDevPtr_bytes too small for hipPitchedPtr");
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMemset3DAsync_spt::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMemset3D_spt(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipPitchedPtr */ pitchedDevPtr;
+    uint8_t pitchedDevPtr_bytes[32];  /* hipPitchedPtr passed by value, inline copy */
     int32_t value;
-    uint64_t /* hipExtent */ extent;
+    uint8_t extent_bytes[24];  /* hipExtent passed by value, inline copy */
 } hrr_args_hipMemset3D_spt;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipPitchedPtr) <= 32, "hrr_args_hipMemset3D_spt::pitchedDevPtr_bytes too small for hipPitchedPtr");
+static_assert(sizeof(hipExtent) <= 24, "hrr_args_hipMemset3D_spt::extent_bytes too small for hipExtent");
+#endif
 
 /* hipError_t hipMemcpyAsync_spt(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream) */
 typedef struct {
@@ -4282,7 +4527,16 @@ typedef struct {
     uint64_t numDependencies;
     uint64_t memsetParams;
     uint64_t ctx;
+    uint8_t dependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t dependencies_present;  /* 1 when dependencies was non-null */
+    uint32_t dependencies_n;  /* elements copied from dependencies */
+    uint8_t memsetParams_bytes[48];  /* hipMemsetParams inline copy */
+    uint8_t memsetParams_present;  /* 1 when memsetParams was non-null */
 } hrr_args_hipDrvGraphAddMemsetNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipDrvGraphAddMemsetNode::dependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipMemsetParams) <= 48, "hrr_args_hipDrvGraphAddMemsetNode::memsetParams_bytes too small for hipMemsetParams");
+#endif
 
 /* hipError_t hipGraphAddExternalSemaphoresWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipExternalSemaphoreWaitNodeParams* nodeParams) */
 typedef struct {
@@ -4407,7 +4661,12 @@ typedef struct {
     int32_t hipVersion;
     uint64_t flags;
     uint64_t symbolStatus;
+    uint8_t symbol_bytes[256];  /* char inline copy */
+    uint8_t symbol_present;  /* 1 when symbol was non-null */
 } hrr_args_hipGetProcAddress;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(char) <= 1, "hrr_args_hipGetProcAddress::symbol_bytes too small for char");
+#endif
 
 /* hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph, const hipGraphNode_t* dependencies, const hipGraphEdgeData* dependencyData, size_t numDependencies, hipStreamCaptureMode mode) */
 typedef struct {
@@ -4419,7 +4678,17 @@ typedef struct {
     uint64_t dependencyData;
     uint64_t numDependencies;
     int32_t mode;
+    uint8_t dependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t dependencies_present;  /* 1 when dependencies was non-null */
+    uint32_t dependencies_n;  /* elements copied from dependencies */
+    uint8_t dependencyData_bytes[128];  /* hipGraphEdgeData[16] inline copy */
+    uint8_t dependencyData_present;  /* 1 when dependencyData was non-null */
+    uint32_t dependencyData_n;  /* elements copied from dependencyData */
 } hrr_args_hipStreamBeginCaptureToGraph;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipStreamBeginCaptureToGraph::dependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipGraphEdgeData) <= 8, "hrr_args_hipStreamBeginCaptureToGraph::dependencyData_bytes too small for hipGraphEdgeData");
+#endif
 
 /* hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) */
 typedef struct {
@@ -4514,7 +4783,13 @@ typedef struct {
     uint64_t dependencies;
     uint64_t numDependencies;
     uint64_t dptr;
+    uint8_t dependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t dependencies_present;  /* 1 when dependencies was non-null */
+    uint32_t dependencies_n;  /* elements copied from dependencies */
 } hrr_args_hipDrvGraphAddMemFreeNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipDrvGraphAddMemFreeNode::dependencies_bytes too small for hipGraphNode_t");
+#endif
 
 /* hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) */
 typedef struct {
@@ -4524,7 +4799,12 @@ typedef struct {
     uint64_t hNode;
     uint64_t copyParams;
     uint64_t ctx;
+    uint8_t copyParams_bytes[184];  /* HIP_MEMCPY3D inline copy */
+    uint8_t copyParams_present;  /* 1 when copyParams was non-null */
 } hrr_args_hipDrvGraphExecMemcpyNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(HIP_MEMCPY3D) <= 184, "hrr_args_hipDrvGraphExecMemcpyNodeSetParams::copyParams_bytes too small for HIP_MEMCPY3D");
+#endif
 
 /* hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams, hipCtx_t ctx) */
 typedef struct {
@@ -4534,7 +4814,12 @@ typedef struct {
     uint64_t hNode;
     uint64_t memsetParams;
     uint64_t ctx;
+    uint8_t memsetParams_bytes[48];  /* hipMemsetParams inline copy */
+    uint8_t memsetParams_present;  /* 1 when memsetParams was non-null */
 } hrr_args_hipDrvGraphExecMemsetNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemsetParams) <= 48, "hrr_args_hipDrvGraphExecMemsetNodeSetParams::memsetParams_bytes too small for hipMemsetParams");
+#endif
 
 /* hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* flags) */
 typedef struct {
@@ -4584,7 +4869,12 @@ typedef struct {
     int32_t ret;
     uint64_t hNode;
     uint64_t nodeParams;
+    uint8_t nodeParams_bytes[184];  /* HIP_MEMCPY3D inline copy */
+    uint8_t nodeParams_present;  /* 1 when nodeParams was non-null */
 } hrr_args_hipDrvGraphMemcpyNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(HIP_MEMCPY3D) <= 184, "hrr_args_hipDrvGraphMemcpyNodeSetParams::nodeParams_bytes too small for HIP_MEMCPY3D");
+#endif
 
 /* hipError_t hipExtHostAlloc(void** ptr, size_t size, unsigned int flags) */
 typedef struct {
@@ -4602,7 +4892,15 @@ typedef struct {
     uint64_t maxWidthInElements;
     uint64_t fmtDesc;
     int32_t device;
+    uint8_t fmtDesc_bytes[20];  /* hipChannelFormatDesc inline copy */
+    uint8_t fmtDesc_present;  /* 1 when fmtDesc was non-null */
+    uint8_t maxWidthInElements_bytes[8];  /* size_t inline copy */
+    uint8_t maxWidthInElements_present;  /* 1 when maxWidthInElements was non-null */
 } hrr_args_hipDeviceGetTexture1DLinearMaxWidth;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipChannelFormatDesc) <= 20, "hrr_args_hipDeviceGetTexture1DLinearMaxWidth::fmtDesc_bytes too small for hipChannelFormatDesc");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipDeviceGetTexture1DLinearMaxWidth::maxWidthInElements_bytes too small for size_t");
+#endif
 
 /* hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams* paramArray, unsigned int flags) */
 typedef struct {
@@ -4612,7 +4910,13 @@ typedef struct {
     uint32_t count;
     uint64_t paramArray;
     uint32_t flags;
+    uint8_t paramArray_bytes[768];  /* hipStreamBatchMemOpParams[16] inline copy */
+    uint8_t paramArray_present;  /* 1 when paramArray was non-null */
+    uint32_t paramArray_n;  /* elements copied from paramArray */
 } hrr_args_hipStreamBatchMemOp;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipStreamBatchMemOpParams) <= 48, "hrr_args_hipStreamBatchMemOp::paramArray_bytes too small for hipStreamBatchMemOpParams");
+#endif
 
 /* hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams) */
 typedef struct {
@@ -4623,7 +4927,16 @@ typedef struct {
     uint64_t dependencies;
     uint64_t numDependencies;
     uint64_t nodeParams;
+    uint8_t dependencies_bytes[128];  /* hipGraphNode_t[16] inline copy */
+    uint8_t dependencies_present;  /* 1 when dependencies was non-null */
+    uint32_t dependencies_n;  /* elements copied from dependencies */
+    uint8_t nodeParams_bytes[32];  /* hipBatchMemOpNodeParams inline copy */
+    uint8_t nodeParams_present;  /* 1 when nodeParams was non-null */
 } hrr_args_hipGraphAddBatchMemOpNode;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipGraphNode_t) <= 8, "hrr_args_hipGraphAddBatchMemOpNode::dependencies_bytes too small for hipGraphNode_t");
+static_assert(sizeof(hipBatchMemOpNodeParams) <= 32, "hrr_args_hipGraphAddBatchMemOpNode::nodeParams_bytes too small for hipBatchMemOpNodeParams");
+#endif
 
 /* hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams_out) */
 typedef struct {
@@ -4639,7 +4952,12 @@ typedef struct {
     int32_t ret;
     uint64_t hNode;
     uint64_t nodeParams;
+    uint8_t nodeParams_bytes[32];  /* hipBatchMemOpNodeParams inline copy */
+    uint8_t nodeParams_present;  /* 1 when nodeParams was non-null */
 } hrr_args_hipGraphBatchMemOpNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipBatchMemOpNodeParams) <= 32, "hrr_args_hipGraphBatchMemOpNodeSetParams::nodeParams_bytes too small for hipBatchMemOpNodeParams");
+#endif
 
 /* hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams) */
 typedef struct {
@@ -4648,39 +4966,72 @@ typedef struct {
     uint64_t hGraphExec;
     uint64_t hNode;
     uint64_t nodeParams;
+    uint8_t nodeParams_bytes[32];  /* hipBatchMemOpNodeParams inline copy */
+    uint8_t nodeParams_present;  /* 1 when nodeParams was non-null */
 } hrr_args_hipGraphExecBatchMemOpNodeSetParams;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipBatchMemOpNodeParams) <= 32, "hrr_args_hipGraphExecBatchMemOpNodeSetParams::nodeParams_bytes too small for hipBatchMemOpNodeParams");
+#endif
 
 /* hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-    uint64_t /* hipJitInputType */ type;
+    uint64_t state;
+    int32_t type;
     uint64_t data;
     uint64_t size;
     uint64_t name;
     uint32_t numOptions;
     uint64_t options;
     uint64_t optionValues;
+    uint8_t name_bytes[256];  /* char inline copy */
+    uint8_t name_present;  /* 1 when name was non-null */
+    uint8_t options_bytes[128];  /* hipJitOption[32] inline copy */
+    uint8_t options_present;  /* 1 when options was non-null */
+    uint32_t options_n;  /* elements copied from options */
+    uint8_t optionValues_bytes[256];  /* void*[32] inline copy */
+    uint8_t optionValues_present;  /* 1 when optionValues was non-null */
+    uint32_t optionValues_n;  /* elements copied from optionValues */
+    uint64_t blob_hash_lo;  /* linker input image blob hash lo */
+    uint64_t blob_hash_hi;  /* linker input image blob hash hi */
 } hrr_args_hipLinkAddData;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(char) <= 1, "hrr_args_hipLinkAddData::name_bytes too small for char");
+static_assert(sizeof(hipJitOption) <= 4, "hrr_args_hipLinkAddData::options_bytes too small for hipJitOption");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipLinkAddData::optionValues_bytes too small for void*");
+#endif
 
 /* hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-    uint64_t /* hipJitInputType */ type;
+    uint64_t state;
+    int32_t type;
     uint64_t path;
     uint32_t numOptions;
     uint64_t options;
     uint64_t optionValues;
+    uint8_t path_bytes[256];  /* char inline copy */
+    uint8_t path_present;  /* 1 when path was non-null */
+    uint8_t options_bytes[128];  /* hipJitOption[32] inline copy */
+    uint8_t options_present;  /* 1 when options was non-null */
+    uint32_t options_n;  /* elements copied from options */
+    uint8_t optionValues_bytes[256];  /* void*[32] inline copy */
+    uint8_t optionValues_present;  /* 1 when optionValues was non-null */
+    uint32_t optionValues_n;  /* elements copied from optionValues */
 } hrr_args_hipLinkAddFile;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(char) <= 1, "hrr_args_hipLinkAddFile::path_bytes too small for char");
+static_assert(sizeof(hipJitOption) <= 4, "hrr_args_hipLinkAddFile::options_bytes too small for hipJitOption");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipLinkAddFile::optionValues_bytes too small for void*");
+#endif
 
 /* hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
+    uint64_t state;
     uint64_t hipBinOut;
     uint64_t sizeOut;
 } hrr_args_hipLinkComplete;
@@ -4693,13 +5044,23 @@ typedef struct {
     uint64_t options;
     uint64_t optionValues;
     uint64_t stateOut;
+    uint8_t options_bytes[128];  /* hipJitOption[32] inline copy */
+    uint8_t options_present;  /* 1 when options was non-null */
+    uint32_t options_n;  /* elements copied from options */
+    uint8_t optionValues_bytes[256];  /* void*[32] inline copy */
+    uint8_t optionValues_present;  /* 1 when optionValues was non-null */
+    uint32_t optionValues_n;  /* elements copied from optionValues */
 } hrr_args_hipLinkCreate;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipJitOption) <= 4, "hrr_args_hipLinkCreate::options_bytes too small for hipJitOption");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipLinkCreate::optionValues_bytes too small for void*");
+#endif
 
 /* hipError_t hipLinkDestroy(hipLinkState_t state) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
+    uint64_t state;
 } hrr_args_hipLinkDestroy;
 
 /* hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int flags) */
@@ -4737,7 +5098,7 @@ typedef struct {
     uint64_t handle;
     uint64_t dptr;
     uint64_t size;
-    uint64_t /* hipMemRangeHandleType */ handleType;
+    int32_t handleType;
     uint64_t flags;
 } hrr_args_hipMemGetHandleForAddressRange;
 
@@ -4823,7 +5184,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t stream;
-    uint64_t /* hipStreamAttrID */ attr;
+    int32_t attr;
     uint64_t value_out;
 } hrr_args_hipStreamGetAttribute;
 
@@ -4832,7 +5193,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t stream;
-    uint64_t /* hipStreamAttrID */ attr;
+    int32_t attr;
     uint64_t value;
     uint8_t stream_attr_bytes[64];  /* hipStreamAttrValue inline copy */
 } hrr_args_hipStreamSetAttribute;
@@ -4861,7 +5222,32 @@ typedef struct {
     uint64_t numAttrs;
     uint64_t failIdx;
     uint64_t stream;
+    uint8_t dsts_bytes[128];  /* void*[16] inline copy */
+    uint8_t dsts_present;  /* 1 when dsts was non-null */
+    uint32_t dsts_n;  /* elements copied from dsts */
+    uint8_t srcs_bytes[128];  /* void*[16] inline copy */
+    uint8_t srcs_present;  /* 1 when srcs was non-null */
+    uint32_t srcs_n;  /* elements copied from srcs */
+    uint8_t sizes_bytes[128];  /* size_t[16] inline copy */
+    uint8_t sizes_present;  /* 1 when sizes was non-null */
+    uint32_t sizes_n;  /* elements copied from sizes */
+    uint8_t attrs_bytes[384];  /* hipMemcpyAttributes[16] inline copy */
+    uint8_t attrs_present;  /* 1 when attrs was non-null */
+    uint32_t attrs_n;  /* elements copied from attrs */
+    uint8_t attrsIdxs_bytes[128];  /* size_t[16] inline copy */
+    uint8_t attrsIdxs_present;  /* 1 when attrsIdxs was non-null */
+    uint32_t attrsIdxs_n;  /* elements copied from attrsIdxs */
+    uint8_t failIdx_bytes[8];  /* size_t inline copy */
+    uint8_t failIdx_present;  /* 1 when failIdx was non-null */
 } hrr_args_hipMemcpyBatchAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(void*) <= 8, "hrr_args_hipMemcpyBatchAsync::dsts_bytes too small for void*");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipMemcpyBatchAsync::srcs_bytes too small for void*");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipMemcpyBatchAsync::sizes_bytes too small for size_t");
+static_assert(sizeof(hipMemcpyAttributes) <= 24, "hrr_args_hipMemcpyBatchAsync::attrs_bytes too small for hipMemcpyAttributes");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipMemcpyBatchAsync::attrsIdxs_bytes too small for size_t");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipMemcpyBatchAsync::failIdx_bytes too small for size_t");
+#endif
 
 /* hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx, unsigned long long flags, hipStream_t stream) */
 typedef struct {
@@ -4872,7 +5258,16 @@ typedef struct {
     uint64_t failIdx;
     uint64_t flags;
     uint64_t stream;
+    uint8_t opList_bytes[1792];  /* hipMemcpy3DBatchOp[16] inline copy */
+    uint8_t opList_present;  /* 1 when opList was non-null */
+    uint32_t opList_n;  /* elements copied from opList */
+    uint8_t failIdx_bytes[8];  /* size_t inline copy */
+    uint8_t failIdx_present;  /* 1 when failIdx was non-null */
 } hrr_args_hipMemcpy3DBatchAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemcpy3DBatchOp) <= 112, "hrr_args_hipMemcpy3DBatchAsync::opList_bytes too small for hipMemcpy3DBatchOp");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipMemcpy3DBatchAsync::failIdx_bytes too small for size_t");
+#endif
 
 /* hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) */
 typedef struct {
@@ -4915,10 +5310,13 @@ typedef struct {
     int32_t ret;
     uint64_t dev_ptr;
     uint64_t count;
-    uint64_t /* hipMemLocation */ location;
+    uint8_t location_bytes[8];  /* hipMemLocation passed by value, inline copy */
     uint32_t flags;
     uint64_t stream;
 } hrr_args_hipMemPrefetchAsync_v2;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemLocation) <= 8, "hrr_args_hipMemPrefetchAsync_v2::location_bytes too small for hipMemLocation");
+#endif
 
 /* hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) */
 typedef struct {
@@ -4927,8 +5325,11 @@ typedef struct {
     uint64_t dev_ptr;
     uint64_t count;
     int32_t advice;
-    uint64_t /* hipMemLocation */ device;
+    uint8_t device_bytes[8];  /* hipMemLocation passed by value, inline copy */
 } hrr_args_hipMemAdvise_v2;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemLocation) <= 8, "hrr_args_hipMemAdvise_v2::device_bytes too small for hipMemLocation");
+#endif
 
 /* hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) */
 typedef struct {
@@ -5042,7 +5443,12 @@ typedef struct {
     int32_t hipVersion;
     uint64_t flags;
     uint64_t symbolStatus;
+    uint8_t symbol_bytes[256];  /* char inline copy */
+    uint8_t symbol_present;  /* 1 when symbol was non-null */
 } hrr_args_hipGetProcAddress_spt;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(char) <= 1, "hrr_args_hipGetProcAddress_spt::symbol_bytes too small for char");
+#endif
 
 /* hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize) */
 typedef struct {
@@ -5082,7 +5488,12 @@ typedef struct {
     uint64_t location;
     int32_t type;
     uint64_t pool;
+    uint8_t location_bytes[8];  /* hipMemLocation inline copy */
+    uint8_t location_present;  /* 1 when location was non-null */
 } hrr_args_hipMemSetMemPool;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemLocation) <= 8, "hrr_args_hipMemSetMemPool::location_bytes too small for hipMemLocation");
+#endif
 
 /* hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location, hipMemAllocationType type) */
 typedef struct {
@@ -5091,7 +5502,12 @@ typedef struct {
     uint64_t pool;
     uint64_t location;
     int32_t type;
+    uint8_t location_bytes[8];  /* hipMemLocation inline copy */
+    uint8_t location_present;  /* 1 when location was non-null */
 } hrr_args_hipMemGetMemPool;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hipMemLocation) <= 8, "hrr_args_hipMemGetMemPool::location_bytes too small for hipMemLocation");
+#endif
 
 /* hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device) */
 typedef struct {
@@ -5107,7 +5523,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t pi;
-    uint64_t /* hipFunction_attribute */ attrib;
+    int32_t attrib;
     uint64_t kernel;
     uint64_t dev;
 } hrr_args_hipKernelGetAttribute;
@@ -5116,7 +5532,7 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t /* hipFunction_attribute */ attrib;
+    int32_t attrib;
     int32_t value;
     uint64_t kernel;
     uint64_t dev;
@@ -5195,7 +5611,7 @@ typedef struct {
     int32_t ret;
     uint64_t device;
     uint64_t resource;
-    uint64_t /* hipDevResourceType */ type;
+    int32_t type;
 } hrr_args_hipDeviceGetDevResource;
 
 /* hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups, const hipDevResource* input, hipDevResource* remainder, unsigned int flags, unsigned int minCount) */
@@ -5245,7 +5661,7 @@ typedef struct {
     int32_t ret;
     uint64_t ctx;
     uint64_t resource;
-    uint64_t /* hipDevResourceType */ type;
+    int32_t type;
 } hrr_args_hipExecutionCtxGetDevResource;
 
 /* hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) */
@@ -5270,7 +5686,7 @@ typedef struct {
     int32_t ret;
     uint64_t hStream;
     uint64_t resource;
-    uint64_t /* hipDevResourceType */ type;
+    int32_t type;
 } hrr_args_hipStreamGetDevResource;
 
 /* hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) */

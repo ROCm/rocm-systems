@@ -39,6 +39,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 // These global tables are defined (non-static) in hip_capture.cpp
@@ -117,8 +118,8 @@ static hipError_t capture_hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent*
   if (r == hipSuccess) {
     hrr_args_hipArrayGetInfo a{};
     a.ret         = static_cast<int32_t>(r);
-    a.desc = 0;  // non-castable type skipped
-    a.extent = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
+    a.extent = reinterpret_cast<uint64_t>(extent);
     a.flags = reinterpret_cast<uint64_t>(flags);
     a.array = reinterpret_cast<uint64_t>(array);
     hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYGETINFO, &a.hdr, sizeof(a));
@@ -135,7 +136,7 @@ static hipError_t capture_hipBindTexture(size_t* offset, const textureReference*
     a.offset = reinterpret_cast<uint64_t>(offset);
     a.tex = reinterpret_cast<uint64_t>(tex);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     a.size = static_cast<decltype(a.size)>(size);
     hrr_cap::writer::write_event_raw(HRR_API_HIPBINDTEXTURE, &a.hdr, sizeof(a));
   }
@@ -151,7 +152,7 @@ static hipError_t capture_hipBindTexture2D(size_t* offset, const textureReferenc
     a.offset = reinterpret_cast<uint64_t>(offset);
     a.tex = reinterpret_cast<uint64_t>(tex);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     a.width = static_cast<decltype(a.width)>(width);
     a.height = static_cast<decltype(a.height)>(height);
     a.pitch = static_cast<decltype(a.pitch)>(pitch);
@@ -168,7 +169,7 @@ static hipError_t capture_hipBindTextureToArray(const textureReference* tex, hip
     a.ret         = static_cast<int32_t>(r);
     a.tex = reinterpret_cast<uint64_t>(tex);
     a.array = reinterpret_cast<uint64_t>(array);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     hrr_cap::writer::write_event_raw(HRR_API_HIPBINDTEXTURETOARRAY, &a.hdr, sizeof(a));
   }
   return r;
@@ -182,7 +183,7 @@ static hipError_t capture_hipBindTextureToMipmappedArray(const textureReference*
     a.ret         = static_cast<int32_t>(r);
     a.tex = reinterpret_cast<uint64_t>(tex);
     a.mipmappedArray = reinterpret_cast<uint64_t>(mipmappedArray);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     hrr_cap::writer::write_event_raw(HRR_API_HIPBINDTEXTURETOMIPMAPPEDARRAY, &a.hdr, sizeof(a));
   }
   return r;
@@ -196,6 +197,10 @@ static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_t* pr
     a.ret         = static_cast<int32_t>(r);
     a.device = reinterpret_cast<uint64_t>(device);
     a.prop = reinterpret_cast<uint64_t>(prop);
+    if (prop) {
+      std::memcpy(a.prop_bytes, prop, sizeof(hipDeviceProp_t));
+      a.prop_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICE, &a.hdr, sizeof(a));
   }
   return r;
@@ -209,6 +214,10 @@ static hipError_t capture_hipChooseDeviceR0000(int* device, const hipDeviceProp_
     a.ret         = static_cast<int32_t>(r);
     a.device = reinterpret_cast<uint64_t>(device);
     a.properties = reinterpret_cast<uint64_t>(properties);
+    if (properties) {
+      std::memcpy(a.properties_bytes, properties, sizeof(hipDeviceProp_tR0000));
+      a.properties_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICER0000, &a.hdr, sizeof(a));
   }
   return r;
@@ -963,11 +972,32 @@ static hipError_t capture_hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, 
     hrr_args_hipDrvGraphAddMemcpyNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.hGraph = reinterpret_cast<uint64_t>(hGraph);
+    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.copyParams = reinterpret_cast<uint64_t>(copyParams);
     a.ctx = reinterpret_cast<uint64_t>(ctx);
     if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
-    if (dependencies) a.dependencies = reinterpret_cast<uint64_t>(*dependencies);
+    if (dependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencies = false;
+        if (!warned_dependencies) {
+          warned_dependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipDrvGraphAddMemcpyNode: recording only the first 16 "
+                  "of %u dependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.dependencies_n   = _n;
+      a.dependencies_present = 1;
+    }
+    if (copyParams) {
+      std::memcpy(a.copyParams_bytes, copyParams, sizeof(HIP_MEMCPY3D));
+      a.copyParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHADDMEMCPYNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1337,7 +1367,7 @@ static hipError_t capture_hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray
   if (r == hipSuccess) {
     hrr_args_hipGetChannelDesc a{};
     a.ret         = static_cast<int32_t>(r);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     a.array = reinterpret_cast<uint64_t>(array);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETCHANNELDESC, &a.hdr, sizeof(a));
   }
@@ -1553,10 +1583,27 @@ static hipError_t capture_hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, 
     hrr_args_hipGraphAddChildGraphNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.childGraph = reinterpret_cast<uint64_t>(childGraph);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddChildGraphNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDCHILDGRAPHNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1569,9 +1616,43 @@ static hipError_t capture_hipGraphAddDependencies(hipGraph_t graph, const hipGra
     hrr_args_hipGraphAddDependencies a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.from = reinterpret_cast<uint64_t>(from);
+    a.to = reinterpret_cast<uint64_t>(to);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    if (from) a.from = reinterpret_cast<uint64_t>(*from);
-    if (to) a.to = reinterpret_cast<uint64_t>(*to);
+    if (from && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_from = false;
+        if (!warned_from) {
+          warned_from = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddDependencies: recording only the first 16 "
+                  "of %u from entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.from_bytes, from, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.from_n   = _n;
+      a.from_present = 1;
+    }
+    if (to && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_to = false;
+        if (!warned_to) {
+          warned_to = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddDependencies: recording only the first 16 "
+                  "of %u to entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.to_bytes, to, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.to_n   = _n;
+      a.to_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDDEPENDENCIES, &a.hdr, sizeof(a));
   }
   return r;
@@ -1584,9 +1665,26 @@ static hipError_t capture_hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGr
     hrr_args_hipGraphAddEmptyNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddEmptyNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDEMPTYNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1599,10 +1697,27 @@ static hipError_t capture_hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode,
     hrr_args_hipGraphAddEventRecordNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.event = reinterpret_cast<uint64_t>(event);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddEventRecordNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDEVENTRECORDNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1615,10 +1730,27 @@ static hipError_t capture_hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, h
     hrr_args_hipGraphAddEventWaitNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.event = reinterpret_cast<uint64_t>(event);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddEventWaitNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDEVENTWAITNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1631,30 +1763,15 @@ static hipError_t capture_hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGra
     hrr_args_hipGraphAddHostNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDHOSTNODE, &a.hdr, sizeof(a));
   }
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipKernelNodeParams* pNodeParams) {
-  hipError_t r = g_real_table.hipGraphAddKernelNode_fn(pGraphNode, graph, pDependencies, numDependencies, pNodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphAddKernelNode a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graph = reinterpret_cast<uint64_t>(graph);
-    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
-    if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDKERNELNODE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, hipMemAllocNodeParams* pNodeParams) {
@@ -1663,10 +1780,31 @@ static hipError_t capture_hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hi
     hrr_args_hipGraphAddMemAllocNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddMemAllocNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
+    if (pNodeParams) {
+      std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipMemAllocNodeParams));
+      a.pNodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMALLOCNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1679,10 +1817,27 @@ static hipError_t capture_hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hip
     hrr_args_hipGraphAddMemFreeNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddMemFreeNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMFREENODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1695,10 +1850,31 @@ static hipError_t capture_hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipG
     hrr_args_hipGraphAddMemcpyNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.pCopyParams = reinterpret_cast<uint64_t>(pCopyParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddMemcpyNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
+    if (pCopyParams) {
+      std::memcpy(a.pCopyParams_bytes, pCopyParams, sizeof(hipMemcpy3DParms));
+      a.pCopyParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1711,57 +1887,36 @@ static hipError_t capture_hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hi
     hrr_args_hipGraphAddMemcpyNode1D a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.dst = reinterpret_cast<uint64_t>(dst);
     a.src = reinterpret_cast<uint64_t>(src);
     a.count = static_cast<decltype(a.count)>(count);
     a.kind = static_cast<decltype(a.kind)>(kind);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddMemcpyNode1D: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODE1D, &a.hdr, sizeof(a));
   }
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst, const void* symbol, size_t count, size_t offset, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipGraphAddMemcpyNodeFromSymbol_fn(pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count, offset, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphAddMemcpyNodeFromSymbol a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graph = reinterpret_cast<uint64_t>(graph);
-    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.symbol = reinterpret_cast<uint64_t>(symbol);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.offset = static_cast<decltype(a.offset)>(offset);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipGraphAddMemcpyNodeToSymbol_fn(pGraphNode, graph, pDependencies, numDependencies, symbol, src, count, offset, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphAddMemcpyNodeToSymbol a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graph = reinterpret_cast<uint64_t>(graph);
-    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    a.symbol = reinterpret_cast<uint64_t>(symbol);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.offset = static_cast<decltype(a.offset)>(offset);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipMemsetParams* pMemsetParams) {
@@ -1770,10 +1925,31 @@ static hipError_t capture_hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipG
     hrr_args_hipGraphAddMemsetNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.pMemsetParams = reinterpret_cast<uint64_t>(pMemsetParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
+    if (pDependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_pDependencies = false;
+        if (!warned_pDependencies) {
+          warned_pDependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipGraphAddMemsetNode: recording only the first 16 "
+                  "of %u pDependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.pDependencies_n   = _n;
+      a.pDependencies_present = 1;
+    }
+    if (pMemsetParams) {
+      std::memcpy(a.pMemsetParams_bytes, pMemsetParams, sizeof(hipMemsetParams));
+      a.pMemsetParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMSETNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1976,19 +2152,6 @@ static hipError_t capture_hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExe
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipKernelNodeParams* pNodeParams) {
-  hipError_t r = g_real_table.hipGraphExecKernelNodeSetParams_fn(hGraphExec, node, pNodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphExecKernelNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
-    a.node = reinterpret_cast<uint64_t>(node);
-    a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, hipMemcpy3DParms* pNodeParams) {
@@ -1999,6 +2162,10 @@ static hipError_t capture_hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphE
     a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    if (pNodeParams) {
+      std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipMemcpy3DParms));
+      a.pNodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2039,23 +2206,6 @@ static hipError_t capture_hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipGraphExecMemcpyNodeSetParamsToSymbol_fn(hGraphExec, node, symbol, src, count, offset, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
-    a.node = reinterpret_cast<uint64_t>(node);
-    a.symbol = reinterpret_cast<uint64_t>(symbol);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.offset = static_cast<decltype(a.offset)>(offset);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipMemsetParams* pNodeParams) {
@@ -2066,6 +2216,10 @@ static hipError_t capture_hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphE
     a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    if (pNodeParams) {
+      std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipMemsetParams));
+      a.pNodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECMEMSETNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2234,23 +2388,15 @@ static hipError_t capture_hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, h
     a.hNode = reinterpret_cast<uint64_t>(hNode);
     a.attr = static_cast<decltype(a.attr)>(attr);
     a.value = reinterpret_cast<uint64_t>(value);
+    if (value) {
+      std::memcpy(a.value_bytes, value, sizeof(hipKernelNodeAttrValue));
+      a.value_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE, &a.hdr, sizeof(a));
   }
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams) {
-  hipError_t r = g_real_table.hipGraphKernelNodeSetParams_fn(node, pNodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphKernelNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.node = reinterpret_cast<uint64_t>(node);
-    a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHKERNELNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
@@ -2312,6 +2458,10 @@ static hipError_t capture_hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const
     a.ret         = static_cast<int32_t>(r);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    if (pNodeParams) {
+      std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipMemcpy3DParms));
+      a.pNodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2350,22 +2500,6 @@ static hipError_t capture_hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t n
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind) {
-  hipError_t r = g_real_table.hipGraphMemcpyNodeSetParamsToSymbol_fn(node, symbol, src, count, offset, kind);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphMemcpyNodeSetParamsToSymbol a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.node = reinterpret_cast<uint64_t>(node);
-    a.symbol = reinterpret_cast<uint64_t>(symbol);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.offset = static_cast<decltype(a.offset)>(offset);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams) {
@@ -2388,6 +2522,10 @@ static hipError_t capture_hipGraphMemsetNodeSetParams(hipGraphNode_t node, const
     a.ret         = static_cast<int32_t>(r);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    if (pNodeParams) {
+      std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipMemsetParams));
+      a.pNodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHMEMSETNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2497,9 +2635,9 @@ static hipError_t capture_hipGraphRemoveDependencies(hipGraph_t graph, const hip
     hrr_args_hipGraphRemoveDependencies a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.from = reinterpret_cast<uint64_t>(from);
+    a.to = reinterpret_cast<uint64_t>(to);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    if (from) a.from = reinterpret_cast<uint64_t>(*from);
-    if (to) a.to = reinterpret_cast<uint64_t>(*to);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHREMOVEDEPENDENCIES, &a.hdr, sizeof(a));
   }
   return r;
@@ -2756,7 +2894,7 @@ static hipError_t capture_hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipE
   if (r == hipSuccess) {
     hrr_args_hipIpcGetEventHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    a.handle = 0;  // non-castable type skipped
+    a.handle = reinterpret_cast<uint64_t>(handle);
     a.event = reinterpret_cast<uint64_t>(event);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCGETEVENTHANDLE, &a.hdr, sizeof(a));
   }
@@ -2769,8 +2907,12 @@ static hipError_t capture_hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* de
   if (r == hipSuccess) {
     hrr_args_hipIpcGetMemHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    a.handle = 0;  // non-castable type skipped
+    a.handle = reinterpret_cast<uint64_t>(handle);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
+    if (handle) {
+      std::memcpy(a.handle_bytes, handle, sizeof(hipIpcMemHandle_t));
+      a.handle_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCGETMEMHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -2782,7 +2924,7 @@ static hipError_t capture_hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHa
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenEventHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    a.handle = 0;  // non-castable type skipped
+    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
     if (event) a.event = reinterpret_cast<uint64_t>(*event);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENEVENTHANDLE, &a.hdr, sizeof(a));
   }
@@ -2795,7 +2937,7 @@ static hipError_t capture_hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t h
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenMemHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    a.handle = 0;  // non-castable type skipped
+    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (devPtr) a.devPtr = reinterpret_cast<uint64_t>(*devPtr);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENMEMHANDLE, &a.hdr, sizeof(a));
@@ -2829,26 +2971,6 @@ static const char* capture_hipKernelNameRefByPtr(const void* hostFunction, hipSt
 }
 
 
-// Generated shim
-static hipError_t capture_hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDimX, void** kernelParams, unsigned int sharedMemBytes, hipStream_t stream) {
-  hipError_t r = g_real_table.hipLaunchCooperativeKernel_fn(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipLaunchCooperativeKernel a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.gridDim_x = gridDim.x;
-    a.gridDim_y = gridDim.y;
-    a.gridDim_z = gridDim.z;
-    a.blockDimX_x = blockDimX.x;
-    a.blockDimX_y = blockDimX.y;
-    a.blockDimX_z = blockDimX.z;
-    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (kernelParams) a.kernelParams = reinterpret_cast<uint64_t>(*kernelParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHCOOPERATIVEKERNEL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
@@ -2898,8 +3020,8 @@ static hipError_t capture_hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent ex
   if (r == hipSuccess) {
     hrr_args_hipMalloc3D a{};
     a.ret         = static_cast<int32_t>(r);
-    a.pitchedDevPtr = 0;  // non-castable type skipped
-    a.extent = 0;  // non-castable type skipped
+    a.pitchedDevPtr = reinterpret_cast<uint64_t>(pitchedDevPtr);
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     hrr_cap::writer::write_event_raw(HRR_API_HIPMALLOC3D, &a.hdr, sizeof(a));
   }
   return r;
@@ -2911,8 +3033,8 @@ static hipError_t capture_hipMalloc3DArray(hipArray_t* array, const struct hipCh
   if (r == hipSuccess) {
     hrr_args_hipMalloc3DArray a{};
     a.ret         = static_cast<int32_t>(r);
-    a.desc = 0;  // non-castable type skipped
-    a.extent = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (array) a.array = reinterpret_cast<uint64_t>(*array);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMALLOC3DARRAY, &a.hdr, sizeof(a));
@@ -2926,7 +3048,7 @@ static hipError_t capture_hipMallocArray(hipArray_t* array, const hipChannelForm
   if (r == hipSuccess) {
     hrr_args_hipMallocArray a{};
     a.ret         = static_cast<int32_t>(r);
-    a.desc = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
     a.width = static_cast<decltype(a.width)>(width);
     a.height = static_cast<decltype(a.height)>(height);
     a.flags = static_cast<decltype(a.flags)>(flags);
@@ -2998,8 +3120,8 @@ static hipError_t capture_hipMallocMipmappedArray(hipMipmappedArray_t* mipmapped
   if (r == hipSuccess) {
     hrr_args_hipMallocMipmappedArray a{};
     a.ret         = static_cast<int32_t>(r);
-    a.desc = 0;  // non-castable type skipped
-    a.extent = 0;  // non-castable type skipped
+    a.desc = reinterpret_cast<uint64_t>(desc);
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     a.numLevels = static_cast<decltype(a.numLevels)>(numLevels);
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (mipmappedArray) a.mipmappedArray = reinterpret_cast<uint64_t>(*mipmappedArray);
@@ -3106,6 +3228,10 @@ static hipError_t capture_hipMemCreate(hipMemGenericAllocationHandle_t* handle, 
     a.prop = reinterpret_cast<uint64_t>(prop);
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (handle) a.handle = reinterpret_cast<uint64_t>(*handle);
+    if (prop) {
+      std::memcpy(a.prop_bytes, prop, sizeof(hipMemAllocationProp));
+      a.prop_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCREATE, &a.hdr, sizeof(a));
   }
   return r;
@@ -3133,8 +3259,16 @@ static hipError_t capture_hipMemGetAccess(unsigned long long* flags, const hipMe
     hrr_args_hipMemGetAccess a{};
     a.ret         = static_cast<int32_t>(r);
     a.flags = reinterpret_cast<uint64_t>(flags);
-    a.location = 0;  // non-castable type skipped
+    a.location = reinterpret_cast<uint64_t>(location);
     a.ptr = reinterpret_cast<uint64_t>(ptr);
+    if (location) {
+      std::memcpy(a.location_bytes, location, sizeof(hipMemLocation));
+      a.location_present = 1;
+    }
+    if (flags) {
+      std::memcpy(a.flags_bytes, flags, sizeof(unsigned long long));
+      a.flags_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETACCESS, &a.hdr, sizeof(a));
   }
   return r;
@@ -3274,7 +3408,7 @@ static hipError_t capture_hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPo
     a.ret         = static_cast<int32_t>(r);
     a.flags = reinterpret_cast<uint64_t>(flags);
     a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
-    a.location = 0;  // non-castable type skipped
+    a.location = reinterpret_cast<uint64_t>(location);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLGETACCESS, &a.hdr, sizeof(a));
   }
   return r;
@@ -3635,30 +3769,7 @@ static hipError_t capture_hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, c
 
 
 
-// Generated shim
-static hipError_t capture_hipMemcpyParam2D(const hip_Memcpy2D* pCopy) {
-  hipError_t r = g_real_table.hipMemcpyParam2D_fn(pCopy);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpyParam2D a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pCopy = reinterpret_cast<uint64_t>(pCopy);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYPARAM2D, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemcpyParam2DAsync_fn(pCopy, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpyParam2DAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pCopy = reinterpret_cast<uint64_t>(pCopy);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYPARAM2DASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDeviceId, size_t sizeBytes) {
@@ -3797,9 +3908,9 @@ static hipError_t capture_hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hi
   if (r == hipSuccess) {
     hrr_args_hipMemset3D a{};
     a.ret         = static_cast<int32_t>(r);
-    a.pitchedDevPtr = 0;  // non-castable type skipped
+    std::memcpy(a.pitchedDevPtr_bytes, &pitchedDevPtr, sizeof(pitchedDevPtr));
     a.value = static_cast<decltype(a.value)>(value);
-    a.extent = 0;  // non-castable type skipped
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSET3D, &a.hdr, sizeof(a));
   }
   return r;
@@ -3811,9 +3922,9 @@ static hipError_t capture_hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int valu
   if (r == hipSuccess) {
     hrr_args_hipMemset3DAsync a{};
     a.ret         = static_cast<int32_t>(r);
-    a.pitchedDevPtr = 0;  // non-castable type skipped
+    std::memcpy(a.pitchedDevPtr_bytes, &pitchedDevPtr, sizeof(pitchedDevPtr));
     a.value = static_cast<decltype(a.value)>(value);
-    a.extent = 0;  // non-castable type skipped
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     a.stream = reinterpret_cast<uint64_t>(stream);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSET3DASYNC, &a.hdr, sizeof(a));
   }
@@ -3997,26 +4108,6 @@ static hipError_t capture_hipModuleGetTexRef(textureReference** texRef, hipModul
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams) {
-  hipError_t r = g_real_table.hipModuleLaunchCooperativeKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
-  if (r == hipSuccess) {
-    hrr_args_hipModuleLaunchCooperativeKernel a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.gridDimX = static_cast<decltype(a.gridDimX)>(gridDimX);
-    a.gridDimY = static_cast<decltype(a.gridDimY)>(gridDimY);
-    a.gridDimZ = static_cast<decltype(a.gridDimZ)>(gridDimZ);
-    a.blockDimX = static_cast<decltype(a.blockDimX)>(blockDimX);
-    a.blockDimY = static_cast<decltype(a.blockDimY)>(blockDimY);
-    a.blockDimZ = static_cast<decltype(a.blockDimZ)>(blockDimZ);
-    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (kernelParams) a.kernelParams = reinterpret_cast<uint64_t>(*kernelParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList, unsigned int numDevices, unsigned int flags) {
@@ -4278,6 +4369,23 @@ static hipError_t capture_hipSetupArgument(const void* arg, size_t size, size_t 
     a.arg = reinterpret_cast<uint64_t>(arg);
     a.size = static_cast<decltype(a.size)>(size);
     a.offset = static_cast<decltype(a.offset)>(offset);
+    if (arg && size > 0) {
+      uint32_t _n = static_cast<uint32_t>(size);
+      if (_n > 256u) {
+        static bool warned_arg = false;
+        if (!warned_arg) {
+          warned_arg = true;
+          fprintf(stderr,
+                  "[HRR] hipSetupArgument: recording only the first 256 "
+                  "of %u arg entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 256u;
+      }
+      std::memcpy(a.arg_bytes, arg, static_cast<size_t>(_n) * sizeof(unsigned char));
+      a.arg_n   = _n;
+      a.arg_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPSETUPARGUMENT, &a.hdr, sizeof(a));
   }
   return r;
@@ -5245,9 +5353,9 @@ static hipError_t capture_hipMemset3DAsync_spt(hipPitchedPtr pitchedDevPtr, int 
   if (r == hipSuccess) {
     hrr_args_hipMemset3DAsync_spt a{};
     a.ret         = static_cast<int32_t>(r);
-    a.pitchedDevPtr = 0;  // non-castable type skipped
+    std::memcpy(a.pitchedDevPtr_bytes, &pitchedDevPtr, sizeof(pitchedDevPtr));
     a.value = static_cast<decltype(a.value)>(value);
-    a.extent = 0;  // non-castable type skipped
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     a.stream = reinterpret_cast<uint64_t>(stream);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSET3DASYNC_SPT, &a.hdr, sizeof(a));
   }
@@ -5260,9 +5368,9 @@ static hipError_t capture_hipMemset3D_spt(hipPitchedPtr pitchedDevPtr, int value
   if (r == hipSuccess) {
     hrr_args_hipMemset3D_spt a{};
     a.ret         = static_cast<int32_t>(r);
-    a.pitchedDevPtr = 0;  // non-castable type skipped
+    std::memcpy(a.pitchedDevPtr_bytes, &pitchedDevPtr, sizeof(pitchedDevPtr));
     a.value = static_cast<decltype(a.value)>(value);
-    a.extent = 0;  // non-castable type skipped
+    std::memcpy(a.extent_bytes, &extent, sizeof(extent));
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSET3D_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -5506,47 +5614,7 @@ static hipError_t capture_hipEventRecord_spt(hipEvent_t event, hipStream_t strea
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim, void** kernelParams, uint32_t sharedMemBytes, hipStream_t hStream) {
-  hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
-  if (r == hipSuccess) {
-    hrr_args_hipLaunchCooperativeKernel_spt a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.gridDim_x = gridDim.x;
-    a.gridDim_y = gridDim.y;
-    a.gridDim_z = gridDim.z;
-    a.blockDim_x = blockDim.x;
-    a.blockDim_y = blockDim.y;
-    a.blockDim_z = blockDim.z;
-    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
-    a.hStream = reinterpret_cast<uint64_t>(hStream);
-    if (kernelParams) a.kernelParams = reinterpret_cast<uint64_t>(*kernelParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream) {
-  hipError_t r = g_real_table.hipLaunchKernel_spt_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipLaunchKernel_spt a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.function_address = reinterpret_cast<uint64_t>(function_address);
-    a.numBlocks_x = numBlocks.x;
-    a.numBlocks_y = numBlocks.y;
-    a.numBlocks_z = numBlocks.z;
-    a.dimBlocks_x = dimBlocks.x;
-    a.dimBlocks_y = dimBlocks.y;
-    a.dimBlocks_z = dimBlocks.z;
-    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (args) a.args = reinterpret_cast<uint64_t>(*args);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHKERNEL_SPT, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
@@ -5657,11 +5725,32 @@ static hipError_t capture_hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, 
     hrr_args_hipDrvGraphAddMemsetNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.hGraph = reinterpret_cast<uint64_t>(hGraph);
+    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.memsetParams = reinterpret_cast<uint64_t>(memsetParams);
     a.ctx = reinterpret_cast<uint64_t>(ctx);
     if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
-    if (dependencies) a.dependencies = reinterpret_cast<uint64_t>(*dependencies);
+    if (dependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencies = false;
+        if (!warned_dependencies) {
+          warned_dependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipDrvGraphAddMemsetNode: recording only the first 16 "
+                  "of %u dependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.dependencies_n   = _n;
+      a.dependencies_present = 1;
+    }
+    if (memsetParams) {
+      std::memcpy(a.memsetParams_bytes, memsetParams, sizeof(hipMemsetParams));
+      a.memsetParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHADDMEMSETNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -5674,10 +5763,10 @@ static hipError_t capture_hipGraphAddExternalSemaphoresWaitNode(hipGraphNode_t* 
     hrr_args_hipGraphAddExternalSemaphoresWaitNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -5690,10 +5779,10 @@ static hipError_t capture_hipGraphAddExternalSemaphoresSignalNode(hipGraphNode_t
     hrr_args_hipGraphAddExternalSemaphoresSignalNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -5786,10 +5875,10 @@ static hipError_t capture_hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t
     hrr_args_hipGraphAddNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.pDependencies = reinterpret_cast<uint64_t>(pDependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
-    if (pDependencies) a.pDependencies = reinterpret_cast<uint64_t>(*pDependencies);
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -5857,6 +5946,22 @@ static hipError_t capture_hipGetProcAddress(const char* symbol, void** pfn, int 
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
     if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    if (symbol) {
+      size_t _n = std::strlen(symbol);
+      if (_n > 255u) {
+        static bool warned_symbol = false;
+        if (!warned_symbol) {
+          warned_symbol = true;
+          fprintf(stderr,
+                  "[HRR] hipGetProcAddress: symbol is %zu characters; "
+                  "recording the first 255 only.\n", _n);
+        }
+        _n = 255u;
+      }
+      std::memcpy(a.symbol_bytes, symbol, _n);
+      a.symbol_bytes[_n] = 0;
+      a.symbol_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETPROCADDRESS, &a.hdr, sizeof(a));
   }
   return r;
@@ -5870,10 +5975,44 @@ static hipError_t capture_hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
     a.ret         = static_cast<int32_t>(r);
     a.stream = reinterpret_cast<uint64_t>(stream);
     a.graph = reinterpret_cast<uint64_t>(graph);
+    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
     a.dependencyData = reinterpret_cast<uint64_t>(dependencyData);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.mode = static_cast<decltype(a.mode)>(mode);
-    if (dependencies) a.dependencies = reinterpret_cast<uint64_t>(*dependencies);
+    if (dependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencies = false;
+        if (!warned_dependencies) {
+          warned_dependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
+                  "of %u dependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.dependencies_n   = _n;
+      a.dependencies_present = 1;
+    }
+    if (dependencyData && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencyData = false;
+        if (!warned_dependencyData) {
+          warned_dependencyData = true;
+          fprintf(stderr,
+                  "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
+                  "of %u dependencyData entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencyData_bytes, dependencyData, static_cast<size_t>(_n) * sizeof(hipGraphEdgeData));
+      a.dependencyData_n   = _n;
+      a.dependencyData_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH, &a.hdr, sizeof(a));
   }
   return r;
@@ -6010,10 +6149,27 @@ static hipError_t capture_hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode,
     hrr_args_hipDrvGraphAddMemFreeNode a{};
     a.ret         = static_cast<int32_t>(r);
     a.hGraph = reinterpret_cast<uint64_t>(hGraph);
+    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.dptr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptr));
     if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
-    if (dependencies) a.dependencies = reinterpret_cast<uint64_t>(*dependencies);
+    if (dependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencies = false;
+        if (!warned_dependencies) {
+          warned_dependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipDrvGraphAddMemFreeNode: recording only the first 16 "
+                  "of %u dependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.dependencies_n   = _n;
+      a.dependencies_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHADDMEMFREENODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -6029,6 +6185,10 @@ static hipError_t capture_hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGra
     a.hNode = reinterpret_cast<uint64_t>(hNode);
     a.copyParams = reinterpret_cast<uint64_t>(copyParams);
     a.ctx = reinterpret_cast<uint64_t>(ctx);
+    if (copyParams) {
+      std::memcpy(a.copyParams_bytes, copyParams, sizeof(HIP_MEMCPY3D));
+      a.copyParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -6044,6 +6204,10 @@ static hipError_t capture_hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGra
     a.hNode = reinterpret_cast<uint64_t>(hNode);
     a.memsetParams = reinterpret_cast<uint64_t>(memsetParams);
     a.ctx = reinterpret_cast<uint64_t>(ctx);
+    if (memsetParams) {
+      std::memcpy(a.memsetParams_bytes, memsetParams, sizeof(hipMemsetParams));
+      a.memsetParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -6124,6 +6288,10 @@ static hipError_t capture_hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, c
     a.ret         = static_cast<int32_t>(r);
     a.hNode = reinterpret_cast<uint64_t>(hNode);
     a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
+    if (nodeParams) {
+      std::memcpy(a.nodeParams_bytes, nodeParams, sizeof(HIP_MEMCPY3D));
+      a.nodeParams_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -6150,8 +6318,16 @@ static hipError_t capture_hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthIn
     hrr_args_hipDeviceGetTexture1DLinearMaxWidth a{};
     a.ret         = static_cast<int32_t>(r);
     a.maxWidthInElements = reinterpret_cast<uint64_t>(maxWidthInElements);
-    a.fmtDesc = 0;  // non-castable type skipped
+    a.fmtDesc = reinterpret_cast<uint64_t>(fmtDesc);
     a.device = static_cast<decltype(a.device)>(device);
+    if (fmtDesc) {
+      std::memcpy(a.fmtDesc_bytes, fmtDesc, sizeof(hipChannelFormatDesc));
+      a.fmtDesc_present = 1;
+    }
+    if (maxWidthInElements) {
+      std::memcpy(a.maxWidthInElements_bytes, maxWidthInElements, sizeof(size_t));
+      a.maxWidthInElements_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH, &a.hdr, sizeof(a));
   }
   return r;
@@ -6167,26 +6343,28 @@ static hipError_t capture_hipStreamBatchMemOp(hipStream_t stream, unsigned int c
     a.count = static_cast<decltype(a.count)>(count);
     a.paramArray = reinterpret_cast<uint64_t>(paramArray);
     a.flags = static_cast<decltype(a.flags)>(flags);
+    if (paramArray && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_paramArray = false;
+        if (!warned_paramArray) {
+          warned_paramArray = true;
+          fprintf(stderr,
+                  "[HRR] hipStreamBatchMemOp: recording only the first 16 "
+                  "of %u paramArray entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.paramArray_bytes, paramArray, static_cast<size_t>(_n) * sizeof(hipStreamBatchMemOpParams));
+      a.paramArray_n   = _n;
+      a.paramArray_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMBATCHMEMOP, &a.hdr, sizeof(a));
   }
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams) {
-  hipError_t r = g_real_table.hipGraphAddBatchMemOpNode_fn(phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphAddBatchMemOpNode a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraph = reinterpret_cast<uint64_t>(hGraph);
-    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
-    if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
-    if (dependencies) a.dependencies = reinterpret_cast<uint64_t>(*dependencies);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDBATCHMEMOPNODE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams_out) {
@@ -6201,51 +6379,8 @@ static hipError_t capture_hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, 
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams) {
-  hipError_t r = g_real_table.hipGraphBatchMemOpNodeSetParams_fn(hNode, nodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphBatchMemOpNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hNode = reinterpret_cast<uint64_t>(hNode);
-    a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams) {
-  hipError_t r = g_real_table.hipGraphExecBatchMemOpNodeSetParams_fn(hGraphExec, hNode, nodeParams);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphExecBatchMemOpNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
-    a.hNode = reinterpret_cast<uint64_t>(hNode);
-    a.nodeParams = reinterpret_cast<uint64_t>(nodeParams);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues) {
-  hipError_t r = g_real_table.hipLinkAddData_fn(state, type, data, size, name, numOptions, options, optionValues);
-  if (r == hipSuccess) {
-    hrr_args_hipLinkAddData a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.state = 0;  // non-castable type skipped
-    a.type = static_cast<decltype(a.type)>(type);
-    a.data = reinterpret_cast<uint64_t>(data);
-    a.size = static_cast<decltype(a.size)>(size);
-    a.name = reinterpret_cast<uint64_t>(name);
-    a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
-    a.options = reinterpret_cast<uint64_t>(options);
-    if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKADDDATA, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) {
@@ -6253,12 +6388,62 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
   if (r == hipSuccess) {
     hrr_args_hipLinkAddFile a{};
     a.ret         = static_cast<int32_t>(r);
-    a.state = 0;  // non-castable type skipped
+    a.state = reinterpret_cast<uint64_t>(state);
     a.type = static_cast<decltype(a.type)>(type);
     a.path = reinterpret_cast<uint64_t>(path);
     a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
     a.options = reinterpret_cast<uint64_t>(options);
     if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
+    if (path) {
+      size_t _n = std::strlen(path);
+      if (_n > 255u) {
+        static bool warned_path = false;
+        if (!warned_path) {
+          warned_path = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: path is %zu characters; "
+                  "recording the first 255 only.\n", _n);
+        }
+        _n = 255u;
+      }
+      std::memcpy(a.path_bytes, path, _n);
+      a.path_bytes[_n] = 0;
+      a.path_present = 1;
+    }
+    if (options && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_options = false;
+        if (!warned_options) {
+          warned_options = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: recording only the first 32 "
+                  "of %u options entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
+      a.options_n   = _n;
+      a.options_present = 1;
+    }
+    if (optionValues && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_optionValues = false;
+        if (!warned_optionValues) {
+          warned_optionValues = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: recording only the first 32 "
+                  "of %u optionValues entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
+      a.optionValues_n   = _n;
+      a.optionValues_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPLINKADDFILE, &a.hdr, sizeof(a));
   }
   return r;
@@ -6270,7 +6455,7 @@ static hipError_t capture_hipLinkComplete(hipLinkState_t state, void** hipBinOut
   if (r == hipSuccess) {
     hrr_args_hipLinkComplete a{};
     a.ret         = static_cast<int32_t>(r);
-    a.state = 0;  // non-castable type skipped
+    a.state = reinterpret_cast<uint64_t>(state);
     a.sizeOut = reinterpret_cast<uint64_t>(sizeOut);
     if (hipBinOut) a.hipBinOut = reinterpret_cast<uint64_t>(*hipBinOut);
     hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCOMPLETE, &a.hdr, sizeof(a));
@@ -6286,8 +6471,42 @@ static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* o
     a.ret         = static_cast<int32_t>(r);
     a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
     a.options = reinterpret_cast<uint64_t>(options);
-    a.stateOut = 0;  // non-castable type skipped
     if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
+    if (stateOut) a.stateOut = reinterpret_cast<uint64_t>(*stateOut);
+    if (options && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_options = false;
+        if (!warned_options) {
+          warned_options = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkCreate: recording only the first 32 "
+                  "of %u options entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
+      a.options_n   = _n;
+      a.options_present = 1;
+    }
+    if (optionValues && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_optionValues = false;
+        if (!warned_optionValues) {
+          warned_optionValues = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkCreate: recording only the first 32 "
+                  "of %u optionValues entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
+      a.optionValues_n   = _n;
+      a.optionValues_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCREATE, &a.hdr, sizeof(a));
   }
   return r;
@@ -6299,7 +6518,7 @@ static hipError_t capture_hipLinkDestroy(hipLinkState_t state) {
   if (r == hipSuccess) {
     hrr_args_hipLinkDestroy a{};
     a.ret         = static_cast<int32_t>(r);
-    a.state = 0;  // non-castable type skipped
+    a.state = reinterpret_cast<uint64_t>(state);
     hrr_cap::writer::write_event_raw(HRR_API_HIPLINKDESTROY, &a.hdr, sizeof(a));
   }
   return r;
@@ -6319,34 +6538,7 @@ static hipError_t capture_hipEventRecordWithFlags(hipEvent_t event, hipStream_t 
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args) {
-  hipError_t r = g_real_table.hipLaunchKernelExC_fn(config, fPtr, args);
-  if (r == hipSuccess) {
-    hrr_args_hipLaunchKernelExC a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.config = reinterpret_cast<uint64_t>(config);
-    a.fPtr = reinterpret_cast<uint64_t>(fPtr);
-    if (args) a.args = reinterpret_cast<uint64_t>(*args);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHKERNELEXC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params, void** extra) {
-  hipError_t r = g_real_table.hipDrvLaunchKernelEx_fn(config, f, params, extra);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvLaunchKernelEx a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.config = reinterpret_cast<uint64_t>(config);
-    a.f = reinterpret_cast<uint64_t>(f);
-    if (params) a.params = reinterpret_cast<uint64_t>(*params);
-    if (extra) a.extra = reinterpret_cast<uint64_t>(*extra);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVLAUNCHKERNELEX, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size, hipMemRangeHandleType handleType, unsigned long long flags) {
@@ -6519,6 +6711,95 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
     a.stream = reinterpret_cast<uint64_t>(stream);
     if (dsts) a.dsts = reinterpret_cast<uint64_t>(*dsts);
     if (srcs) a.srcs = reinterpret_cast<uint64_t>(*srcs);
+    if (dsts && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_dsts = false;
+        if (!warned_dsts) {
+          warned_dsts = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+                  "of %u dsts entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dsts_bytes, dsts, static_cast<size_t>(_n) * sizeof(void*));
+      a.dsts_n   = _n;
+      a.dsts_present = 1;
+    }
+    if (srcs && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_srcs = false;
+        if (!warned_srcs) {
+          warned_srcs = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+                  "of %u srcs entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.srcs_bytes, srcs, static_cast<size_t>(_n) * sizeof(void*));
+      a.srcs_n   = _n;
+      a.srcs_present = 1;
+    }
+    if (sizes && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_sizes = false;
+        if (!warned_sizes) {
+          warned_sizes = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+                  "of %u sizes entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.sizes_bytes, sizes, static_cast<size_t>(_n) * sizeof(size_t));
+      a.sizes_n   = _n;
+      a.sizes_present = 1;
+    }
+    if (attrs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrs = false;
+        if (!warned_attrs) {
+          warned_attrs = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+                  "of %u attrs entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.attrs_bytes, attrs, static_cast<size_t>(_n) * sizeof(hipMemcpyAttributes));
+      a.attrs_n   = _n;
+      a.attrs_present = 1;
+    }
+    if (attrsIdxs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrsIdxs = false;
+        if (!warned_attrsIdxs) {
+          warned_attrsIdxs = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+                  "of %u attrsIdxs entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.attrsIdxs_bytes, attrsIdxs, static_cast<size_t>(_n) * sizeof(size_t));
+      a.attrsIdxs_n   = _n;
+      a.attrsIdxs_present = 1;
+    }
+    if (failIdx) {
+      std::memcpy(a.failIdx_bytes, failIdx, sizeof(size_t));
+      a.failIdx_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYBATCHASYNC, &a.hdr, sizeof(a));
   }
   return r;
@@ -6535,6 +6816,27 @@ static hipError_t capture_hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3
     a.failIdx = reinterpret_cast<uint64_t>(failIdx);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.stream = reinterpret_cast<uint64_t>(stream);
+    if (opList && numOps > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOps);
+      if (_n > 16u) {
+        static bool warned_opList = false;
+        if (!warned_opList) {
+          warned_opList = true;
+          fprintf(stderr,
+                  "[HRR] hipMemcpy3DBatchAsync: recording only the first 16 "
+                  "of %u opList entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.opList_bytes, opList, static_cast<size_t>(_n) * sizeof(hipMemcpy3DBatchOp));
+      a.opList_n   = _n;
+      a.opList_present = 1;
+    }
+    if (failIdx) {
+      std::memcpy(a.failIdx_bytes, failIdx, sizeof(size_t));
+      a.failIdx_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DBATCHASYNC, &a.hdr, sizeof(a));
   }
   return r;
@@ -6603,7 +6905,7 @@ static hipError_t capture_hipMemPrefetchAsync_v2(const void* dev_ptr, size_t cou
     a.ret         = static_cast<int32_t>(r);
     a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
     a.count = static_cast<decltype(a.count)>(count);
-    a.location = 0;  // non-castable type skipped
+    std::memcpy(a.location_bytes, &location, sizeof(location));
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.stream = reinterpret_cast<uint64_t>(stream);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHASYNC_V2, &a.hdr, sizeof(a));
@@ -6620,7 +6922,7 @@ static hipError_t capture_hipMemAdvise_v2(const void* dev_ptr, size_t count, hip
     a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
     a.count = static_cast<decltype(a.count)>(count);
     a.advice = static_cast<decltype(a.advice)>(advice);
-    a.device = 0;  // non-castable type skipped
+    std::memcpy(a.device_bytes, &device, sizeof(device));
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMADVISE_V2, &a.hdr, sizeof(a));
   }
   return r;
@@ -6795,6 +7097,22 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
     if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    if (symbol) {
+      size_t _n = std::strlen(symbol);
+      if (_n > 255u) {
+        static bool warned_symbol = false;
+        if (!warned_symbol) {
+          warned_symbol = true;
+          fprintf(stderr,
+                  "[HRR] hipGetProcAddress_spt: symbol is %zu characters; "
+                  "recording the first 255 only.\n", _n);
+        }
+        _n = 255u;
+      }
+      std::memcpy(a.symbol_bytes, symbol, _n);
+      a.symbol_bytes[_n] = 0;
+      a.symbol_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETPROCADDRESS_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -6857,9 +7175,13 @@ static hipError_t capture_hipMemSetMemPool(hipMemLocation* location, hipMemAlloc
   if (r == hipSuccess) {
     hrr_args_hipMemSetMemPool a{};
     a.ret         = static_cast<int32_t>(r);
-    a.location = 0;  // non-castable type skipped
+    a.location = reinterpret_cast<uint64_t>(location);
     a.type = static_cast<decltype(a.type)>(type);
     a.pool = reinterpret_cast<uint64_t>(pool);
+    if (location) {
+      std::memcpy(a.location_bytes, location, sizeof(hipMemLocation));
+      a.location_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSETMEMPOOL, &a.hdr, sizeof(a));
   }
   return r;
@@ -6871,9 +7193,13 @@ static hipError_t capture_hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* l
   if (r == hipSuccess) {
     hrr_args_hipMemGetMemPool a{};
     a.ret         = static_cast<int32_t>(r);
-    a.location = 0;  // non-castable type skipped
+    a.location = reinterpret_cast<uint64_t>(location);
     a.type = static_cast<decltype(a.type)>(type);
     if (pool) a.pool = reinterpret_cast<uint64_t>(*pool);
+    if (location) {
+      std::memcpy(a.location_bytes, location, sizeof(hipMemLocation));
+      a.location_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETMEMPOOL, &a.hdr, sizeof(a));
   }
   return r;
@@ -6944,7 +7270,7 @@ static hipError_t capture_hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* size
     a.ret         = static_cast<int32_t>(r);
     a.sizes = reinterpret_cast<uint64_t>(sizes);
     a.count = static_cast<decltype(a.count)>(count);
-    a.prefetch_locs = 0;  // non-castable type skipped
+    a.prefetch_locs = reinterpret_cast<uint64_t>(prefetch_locs);
     a.prefetch_loc_idxs = reinterpret_cast<uint64_t>(prefetch_loc_idxs);
     a.num_prefetch_locs = static_cast<decltype(a.num_prefetch_locs)>(num_prefetch_locs);
     a.flags = static_cast<decltype(a.flags)>(flags);
@@ -7262,7 +7588,7 @@ static hipError_t capture_hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_
     a.ret         = static_cast<int32_t>(r);
     a.sizes = reinterpret_cast<uint64_t>(sizes);
     a.count = static_cast<decltype(a.count)>(count);
-    a.prefetchLocs = 0;  // non-castable type skipped
+    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
     a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
     a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
     a.flags = static_cast<decltype(a.flags)>(flags);
@@ -7282,7 +7608,7 @@ static hipError_t capture_hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* 
     a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
     a.sizes = reinterpret_cast<uint64_t>(sizes);
     a.count = static_cast<decltype(a.count)>(count);
-    a.prefetchLocs = 0;  // non-castable type skipped
+    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
     a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
     a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
     a.flags = static_cast<decltype(a.flags)>(flags);
@@ -7298,7 +7624,7 @@ static hipError_t capture_hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemL
   if (r == hipSuccess) {
     hrr_args_hipMemGetDefaultMemPool a{};
     a.ret         = static_cast<int32_t>(r);
-    a.location = 0;  // non-castable type skipped
+    a.location = reinterpret_cast<uint64_t>(location);
     a.type = static_cast<decltype(a.type)>(type);
     if (memPool) a.memPool = reinterpret_cast<uint64_t>(*memPool);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETDEFAULTMEMPOOL, &a.hdr, sizeof(a));
@@ -7429,6 +7755,22 @@ static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, c
     a.constant = static_cast<decltype(a.constant)>(constant);
     a.global = static_cast<decltype(a.global)>(global);
     if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+    if (deviceVar) {
+      size_t _n = std::strlen(deviceVar);
+      if (_n > 255u) {
+        static bool warned_deviceVar = false;
+        if (!warned_deviceVar) {
+          warned_deviceVar = true;
+          fprintf(stderr,
+                  "[HRR] __hipRegisterVar: deviceVar is %zu characters; "
+                  "recording the first 255 only.\n", _n);
+        }
+        _n = 255u;
+      }
+      std::memcpy(a.deviceVar_bytes, deviceVar, _n);
+      a.deviceVar_bytes[_n] = 0;
+      a.deviceVar_present = 1;
+    }
     hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
   }
 }
@@ -7444,9 +7786,17 @@ extern hipError_t capture_hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DE
 extern hipError_t capture_hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy);
 extern hipError_t capture_hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy);
 extern hipError_t capture_hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream);
+extern hipError_t capture_hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipKernelNodeParams* pNodeParams);
+extern hipError_t capture_hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst, const void* symbol, size_t count, size_t offset, hipMemcpyKind kind);
+extern hipError_t capture_hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
+extern hipError_t capture_hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
+extern hipError_t capture_hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
+extern hipError_t capture_hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
+extern hipError_t capture_hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 extern hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
 extern hipError_t capture_hipHostUnregister(void* hostPtr);
 extern hipError_t capture_hipLaunchByPtr(const void* func);
+extern hipError_t capture_hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDimX, void** kernelParams, unsigned int sharedMemBytes, hipStream_t stream);
 extern hipError_t capture_hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
 extern hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp* prop, hipMemAllocationGranularity_flags option);
 extern hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_props);
@@ -7463,7 +7813,10 @@ extern hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t si
 extern hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream);
 extern hipError_t capture_hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
 extern hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBytes, hipStream_t stream);
+extern hipError_t capture_hipMemcpyParam2D(const hip_Memcpy2D* pCopy);
+extern hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream);
 extern hipError_t capture_hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);
+extern hipError_t capture_hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams);
 extern hipError_t capture_hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams, void** extra);
 extern hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname);
 extern hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image);
@@ -7471,6 +7824,14 @@ extern hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* i
 extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags);
 extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);
+extern hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim, void** kernelParams, uint32_t sharedMemBytes, hipStream_t hStream);
+extern hipError_t capture_hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
+extern hipError_t capture_hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams);
+extern hipError_t capture_hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams);
+extern hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams);
+extern hipError_t capture_hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues);
+extern hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
+extern hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params, void** extra);
 extern hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr, const hipStreamAttrValue* value);
 extern hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 extern void** capture___hipRegisterFatBinary(const void* data);
