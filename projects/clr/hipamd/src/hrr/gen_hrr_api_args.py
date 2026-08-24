@@ -940,6 +940,9 @@ class ApiEntry:
     ret_type: str
     params:   List[Param]
     table:    str   # "runtime" | "compiler"
+    # Retired or unparsable dispatch-table slot. Occupies an hrr_api_id_t so
+    # later members keep their IDs; no capture shim is installed.
+    reserved: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1115,48 +1118,104 @@ _COMPILER_APIS = [
 ]
 
 
+def _dispatch_table_slots(text: str, struct_name: str) -> List[Tuple[str, bool]]:
+    """(func_name, reserved) in dispatch-table member declaration order.
+
+    hip_api_trace.hpp mandates that new members are appended to the end of a
+    dispatch table and that existing ones are never re-ordered or removed (a
+    retired slot becomes a nulled void*), because anything else breaks the ABI.
+    That makes member order append-only, which is what hrr_api_id_t needs: the
+    IDs are written into every captured event, so an ID that shifts silently
+    re-interprets existing archives. Typedef declaration order carries no such
+    guarantee — it is maintained roughly alphabetically, so a new API lands in
+    the middle and pushes every later ID up by one.
+
+    A member may span two lines when the typedef name is long, so the type and
+    the member name are matched across whitespace rather than within one line.
+    Both `t_hipFoo hipFoo_fn;` and a retired `void* hipFoo_fn;` occupy a slot;
+    the latter is returned with reserved=True.
+    """
+    m = re.search(r'struct\s+' + struct_name + r'\s*\{(.*?)\n\}\s*;', text, re.S)
+    if not m:
+        return []
+    slots: List[Tuple[str, bool]] = []
+    # t_hipFoo hipFoo_fn;  or  void* hipFoo_fn;  (possibly split across lines)
+    for tm in re.finditer(
+            r'^\s*(?:t_(\w+)\s+(\w+)|void\s*\*\s*(\w+))\s*;', m.group(1), re.M):
+        if tm.group(1) is not None:
+            slots.append((tm.group(1), False))
+        else:
+            member = tm.group(3)
+            name = member[:-3] if member.endswith('_fn') else member
+            slots.append((name, True))
+    return slots
+
+
 def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     text = path.read_text(encoding='utf-8')
     text = _strip_comments(text)
 
     entries: List[ApiEntry] = []
 
-    # ---- Compiler stubs (fixed list, specific typedef name) ----
-    for func_name in _COMPILER_APIS:
+    def reserve(func_name: str, table: str, why: str) -> None:
+        print(f"WARNING: {why} for {func_name}; reserving ID so later slots "
+              f"do not shift", file=sys.stderr)
+        entries.append(ApiEntry(name=func_name, ret_type="void", params=[],
+                                table=table, reserved=True))
+
+    def add_entry(func_name: str, table: str, reserved: bool = False) -> None:
+        if reserved:
+            reserve(func_name, table, "retired void* dispatch slot")
+            return
         typedef_name = "t_" + func_name   # e.g. t___hipRegisterFatBinary
         full = find_typedef_for(text, typedef_name)
         if not full:
-            print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        # For parsing, strip the leading underscores from func_name for the needle match
+            reserve(func_name, table, "typedef not found")
+            return
         entry = _parse_typedef_text(full, func_name)
         if not entry:
-            print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "compiler"
+            reserve(func_name, table, "failed to parse typedef")
+            return
+        entry.table = table
         entries.append(entry)
 
-    # ---- Runtime APIs — find all t_hipXxx typedefs ----
-    # Locate every  (*t_hipXxx)  occurrence, then extract the full typedef
-    runtime_name_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
+    # Runtime first. Compiler-first put every runtime ID at a
+    # compiler-table-size offset, so one new HipCompilerDispatchTable member
+    # renumbered all 500+ runtime IDs — the opposite of the append-only scheme
+    # this function exists to implement. A new HipDispatchTable member still
+    # shifts the compiler-ID tail (playback no-ops); that is cheaper than
+    # shifting the IDs written into every captured event.
+    runtime_slots = _dispatch_table_slots(text, "HipDispatchTable")
+    if not runtime_slots:
+        sys.exit("ERROR: HipDispatchTable missing or has no dispatch slots in "
+                 "hip_api_trace.hpp; refusing to invent hrr_api_id_t order")
+
+    compiler_slots = _dispatch_table_slots(text, "HipCompilerDispatchTable")
+    if not compiler_slots:
+        print("WARNING: HipCompilerDispatchTable missing or empty; "
+              "using built-in compiler API list", file=sys.stderr)
+        compiler_slots = [(n, False) for n in _COMPILER_APIS]
+
+    for func_name, reserved in runtime_slots:
+        add_entry(func_name, "runtime", reserved=reserved)
+    for func_name, reserved in compiler_slots:
+        add_entry(func_name, "compiler", reserved=reserved)
+
+    # A t_hipXxx typedef with no member in HipDispatchTable has no append-only
+    # position to take an ID from. None exist today; if one appears, it is still
+    # captured rather than dropped, and it goes last so the table-ordered IDs
+    # ahead of it keep their values.
+    in_table = {n for n, _ in runtime_slots} | {n for n, _ in compiler_slots}
+    stray_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
     seen = set()
-    for m in runtime_name_pattern.finditer(text):
-        func_name = m.group(1)  # e.g. "hipMalloc"
-        if func_name in seen:
+    for m in stray_pattern.finditer(text):
+        func_name = m.group(1)
+        if func_name in in_table or func_name in seen:
             continue
         seen.add(func_name)
-
-        typedef_name = "t_" + func_name
-        full = find_typedef_for(text, typedef_name)
-        if not full:
-            print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        entry = _parse_typedef_text(full, func_name)
-        if not entry:
-            print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "runtime"
-        entries.append(entry)
+        print(f"WARNING: {func_name} has no HipDispatchTable member; "
+              f"appending it after the table-ordered APIs", file=sys.stderr)
+        add_entry(func_name, "runtime")
 
     return entries
 
@@ -1218,8 +1277,17 @@ _HEADER_PREAMBLE = """\
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
 /* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
  * larger than 65535 bytes (many args / long mangled names / large by-value
- * structs) are no longer dropped. */
-#define HRR_VERSION ((uint16_t)4u)
+ * structs) are no longer dropped.
+ * v5: hrr_api_id_t is assigned from HipDispatchTable member order, then
+ * HipCompilerDispatchTable member order, instead of typedef declaration
+ * order, which renumbered 496 of the 552 IDs once. Runtime IDs occupy 0..N-1
+ * so a new compiler-table member cannot shift them. Every event stores its
+ * ID, so a pre-v5 archive names the wrong API when decoded against this
+ * table and needs an ID translation to be read back. From v5 on a new API
+ * takes the next free ID in its table and no existing runtime ID moves, so
+ * adding APIs no longer needs a version bump. A retired dispatch-table slot
+ * (nulled void*) still occupies an ID. */
+#define HRR_VERSION ((uint16_t)5u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -1308,11 +1376,14 @@ def generate_struct(entry: ApiEntry) -> str:
     sname = f"hrr_args_{entry.name}"
 
     # Comment showing original signature
-    param_sig = ', '.join(
-        (p.raw_type + ' ' + p.name).strip()
-        for p in entry.params
-    )
-    lines.append(f"/* {entry.ret_type} {entry.name}({param_sig}) */")
+    if entry.reserved:
+        lines.append(f"/* retired/unparsable dispatch slot {entry.name}; ID placeholder */")
+    else:
+        param_sig = ', '.join(
+            (p.raw_type + ' ' + p.name).strip()
+            for p in entry.params
+        )
+        lines.append(f"/* {entry.ret_type} {entry.name}({param_sig}) */")
     lines.append("typedef struct {")
     lines.append("    hrr_event_header hdr;")
 
@@ -1661,6 +1732,8 @@ def generate_shim(entry: ApiEntry) -> str:
     """Generate a single capture shim function.
     MANUAL_CAPTURE_APIS: returns empty string — hand-written in hip_capture.cpp.
     """
+    if entry.reserved:
+        return ""
     if entry.name in CUSTOM_CAPTURE_SHIMS:
         return CUSTOM_CAPTURE_SHIMS[entry.name]
     is_manual   = entry.name in MANUAL_CAPTURE_APIS
@@ -1793,6 +1866,8 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("")
     lines.append("  // Override every runtime slot with its capture shim")
     for e in runtime_entries:
+        if e.reserved:
+            continue  # retired void* slot; leave the nullptr from the real table
         lines.append(f"  g_cap_table.{e.name}_fn = capture_{e.name};")
     lines.append("}")
     lines.append("")
@@ -1805,6 +1880,8 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("  g_real_compiler_table = *hip::GetHipCompilerDispatchTable();")
     lines.append("  HipCompilerDispatchTable cap = g_real_compiler_table;")
     for e in compiler_entries:
+        if e.reserved:
+            continue
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
     lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
     lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
@@ -1823,6 +1900,8 @@ def generate_capture_cpp(entries: List[ApiEntry]) -> str:
     parts.append("")
 
     for e in entries:
+        if e.reserved:
+            continue
         parts.append(generate_shim(e))
 
     parts.append("// ============================================================")
@@ -2031,6 +2110,13 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     sname = f"hrr_args_{entry.name}"
     fname = f"playback_{entry.name}"
     sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
+
+    if entry.reserved:
+        return (f"static hipError_t {fname}"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"  (void)ctx; (void)payload;\n"
+                f"  return hipSuccess;\n"
+                f"}}\n")
 
     # Error-stub playback APIs: explicit graph construction that HRR cannot
     # replay. Emit a loud, attributable (per-API) warning, but return hipSuccess
@@ -2316,10 +2402,12 @@ def main() -> None:
     entries = parse_hip_api_trace(in_path)
     n_compiler       = sum(1 for e in entries if e.table == "compiler")
     n_runtime        = sum(1 for e in entries if e.table == "runtime")
+    n_reserved       = sum(1 for e in entries if e.reserved)
     n_manual_cap     = sum(1 for e in entries if e.name in MANUAL_CAPTURE_APIS)
     n_manual_play    = sum(1 for e in entries if e.name in MANUAL_PLAYBACK_APIS)
     n_noop_play      = sum(1 for e in entries if e.name in NOOP_PLAYBACK_APIS)
-    print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total")
+    print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total"
+          f" ({n_reserved} reserved slots)")
 
     # -------------------------------------------------------------------------
     # Cross-validate classification sets against parsed API names.
