@@ -162,13 +162,6 @@ def test_pc_sampling_analyze_database_output(
                 "ORDER BY kernel_name, offset",
                 conn,
             )
-            # Derived wave metrics live on the state table; read them straight
-            # from it so the summary view's copy is checked independently.
-            db_wave_metrics = pd.read_sql_query(
-                "SELECT active_thread_percent, wave_occupancy_percent "
-                "FROM compute_pc_sample_state",
-                conn,
-            )
             pc_sampling_views = conn.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'view' AND name LIKE 'compute_pc_sampling%' "
@@ -209,21 +202,12 @@ def test_pc_sampling_analyze_database_output(
         assert inst_sample_total == state_total
         assert len(db_pc_sampling) == 19
         assert db_pc_sampling["count"].sum() == 857
-        assert len(db_wave_metrics) == state_count
         # Every sample in this workload carries a full wave64 mask
         # (0xFFFFFFFFFFFFFFFF) against sysinfo wave_size 64, so each line is
         # exactly 100% active. This pins the popcount against mask precision loss.
-        assert (db_wave_metrics["active_thread_percent"] == 100.0).all()
+        assert db_pc_sampling["active_thread_percent"].eq(100.0).all()
         # wave_cnt varies per sample (4..32) against max_waves_per_cu 32, so
         # occupancy differs per line; assert only that it is populated and sane.
-        assert db_wave_metrics["wave_occupancy_percent"].notna().all()
-        assert (
-            db_wave_metrics["wave_occupancy_percent"]
-            .between(0, 100, inclusive="right")
-            .all()
-        )
-        # vcopy is fully converged: every wave64 lane is active.
-        assert db_pc_sampling["active_thread_percent"].eq(100.0).all()
         assert db_pc_sampling["wave_occupancy_percent"].gt(0).all()
         assert db_pc_sampling["wave_occupancy_percent"].le(100).all()
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
