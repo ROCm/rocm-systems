@@ -45,9 +45,7 @@ option(CLR_BUILD_OCL "Build OCL" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 
-# Strict warnings default to ON for Linux, OFF elsewhere (MSVC has its own /wd
-# flags). Defined here so the clr_warnings target below is visible to every
-# subtree added via add_subdirectory().
+# Strict warnings default to OFF
 option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" OFF)
 
 # Single source of truth for strict-warning flags. First-party targets opt in
