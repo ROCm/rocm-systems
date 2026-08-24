@@ -10,6 +10,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`BUILD_CUID` now defaults to `ON`, building the CUID library as part of amd-smi by default.**  
+  - CUID's source is resolved automatically: from a sibling `projects/cuid` checkout when present, otherwise fetched and pinned to the matching commit.
+  - Set `-DBUILD_CUID=OFF` to restore the previous opt-in behavior.
+
 ### Optimized
 
 ### Resolved Issues

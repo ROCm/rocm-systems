@@ -125,39 +125,110 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
-option(BUILD_CUID "Build CUID library" OFF)
+option(BUILD_CUID "Build CUID library" ON)
 
 if(BUILD_CUID)
-    set(ROCM_DIR_CORE "/opt/rocm/core")
-    # include CUID library
-    find_library(
-        AMDCUID_LIB
-        NAMES libamdcuid_static.a amdcuid_static
-        HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
-        REQUIRED
-    )
-    find_path(
-        AMDCUID_INCLUDE_DIR
-        NAMES amd_cuid.h
-        HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
-        REQUIRED
-    )
-    find_package(OpenSSL REQUIRED)
-endif(BUILD_CUID)
+    # Prefer the projects/cuid checkout that sits next to projects/amdsmi
+    set(CUID_LIB_DIR "${PROJECT_SOURCE_DIR}/../cuid/lib")
+    if(NOT EXISTS "${CUID_LIB_DIR}/CMakeLists.txt")
+        # No sibling checkout (e.g. this repo's own sparse-checkout CI, which
+        # only fetches projects/amdsmi): fetch just projects/cuid
+        if(NOT GIT_FOUND)
+            message(
+                FATAL_ERROR
+                "BUILD_CUID=ON requires git to fetch projects/cuid (no sibling checkout found at ${CUID_LIB_DIR})."
+            )
+        endif()
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE CUID_FETCH_COMMIT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(NOT CUID_FETCH_COMMIT)
+            message(
+                FATAL_ERROR
+                "BUILD_CUID=ON requires either ${CUID_LIB_DIR} or a git checkout of amd-smi to resolve a matching projects/cuid commit from."
+            )
+        endif()
+
+        set(CUID_FETCH_DIR "${CMAKE_BINARY_DIR}/_deps/cuid-src")
+        set(CUID_FETCH_CURRENT_COMMIT "")
+        if(EXISTS "${CUID_FETCH_DIR}/.git")
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+                WORKING_DIRECTORY "${CUID_FETCH_DIR}"
+                OUTPUT_VARIABLE CUID_FETCH_CURRENT_COMMIT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+        endif()
+        # Reuse an existing fetch pinned to the right commit (offline-safe);
+        # only re-fetch when absent or the pin has moved.
+        if(NOT CUID_FETCH_CURRENT_COMMIT STREQUAL CUID_FETCH_COMMIT)
+            message(
+                STATUS
+                "Fetching projects/cuid@${CUID_FETCH_COMMIT} from rocm-systems (no sibling checkout present)..."
+            )
+            file(REMOVE_RECURSE "${CUID_FETCH_DIR}")
+            execute_process(
+                COMMAND
+                    ${GIT_EXECUTABLE} clone --filter=blob:none --no-checkout --sparse
+                    https://github.com/ROCm/rocm-systems.git "${CUID_FETCH_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} sparse-checkout set projects/cuid
+                WORKING_DIRECTORY "${CUID_FETCH_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} fetch --depth 1 origin ${CUID_FETCH_COMMIT}
+                WORKING_DIRECTORY "${CUID_FETCH_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} checkout FETCH_HEAD
+                WORKING_DIRECTORY "${CUID_FETCH_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+        endif()
+        set(CUID_LIB_DIR "${CUID_FETCH_DIR}/projects/cuid/lib")
+    endif()
+
+    # cuid's lib/CMakeLists.txt normally inherits these two from cuid's top-level
+    # CMakeLists.txt; set them directly since only cuid's lib/ is added below
+    set(LIB_COMPONENT "cuid_library")
+    if(WIN32)
+        set(AMDCUID_SHARED_CONFIG_DIR "C:/ProgramData/AMD/AMDCUID/config")
+    else()
+        set(AMDCUID_SHARED_CONFIG_DIR "/etc/amdcuid")
+    endif()
+    add_subdirectory("${CUID_LIB_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/cuid_lib" EXCLUDE_FROM_ALL)
+    # amd-smi builds with -fno-rtti globally; cuid relies on dynamic_cast internally.
+    target_compile_options(amdcuid_static PRIVATE -frtti)
+    set_target_properties(amdcuid_static PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "")
+    set(AMDCUID_INCLUDE_DIR "${CUID_LIB_DIR}/include")
+endif()
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
 #   Otherwise: build one library (BUILD_SHARED_LIBS).
 #
+set(_CUID_EXPORT_TARGET)
+if(BUILD_CUID)
+    set(_CUID_EXPORT_TARGET amdcuid_static)
+endif()
 if(BUILD_BOTH_LIBS)
     add_library(${AMD_SMI} SHARED ${SRC_LIST} ${INC_LIST})
     add_library(${AMD_SMI}_static STATIC ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI}_static PARENT_SCOPE)
-    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic ${_CUID_EXPORT_TARGET} PARENT_SCOPE)
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI} ${AMD_SMI}_static)
 else()
     add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI} PARENT_SCOPE)
-    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic ${_CUID_EXPORT_TARGET} PARENT_SCOPE)
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI})
 endif()
 
@@ -208,7 +279,7 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+        target_link_libraries(${_TARGET} PRIVATE amdcuid_static)
         target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
     endif()
 
@@ -316,6 +387,9 @@ endif()
 set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)
     list(APPEND _INSTALL_TARGETS ${AMD_SMI}_static)
+endif()
+if(BUILD_CUID)
+    list(APPEND _INSTALL_TARGETS amdcuid_static)
 endif()
 install(
     TARGETS ${_INSTALL_TARGETS}
