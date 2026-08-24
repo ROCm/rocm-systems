@@ -147,11 +147,14 @@ extern int g_initChannelLastId;
 // -------------------------------------------------------------------------
 extern int g_ncclOsCpuCountValue;
 extern int g_ncclOsCpuCountCalls;
-// Every mask ncclOsCpuCount was handed, in call order: [0] is :1608, the last is exit::2403.
+// Every mask ncclOsCpuCount was handed, in call order. Which index is which call site is PATH-DEPENDENT:
+// a path running :1607-1611 and reaching exit: gives [0]=:1608 and [1]=exit::2403; a path stopping before
+// :1607 gives [0]=exit::2403; a path bypassing exit: (:1618) gives only :1608. Check .size() first.
 extern std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 extern ncclResult_t g_ncclOsSetAffinityResult;
-// Every mask handed to ncclOsSetAffinity, in call order: [0] is :1610, [1] is exit::2404. A single
-// "last" slot is not enough -- the exit: write masks whatever :1610 forwarded.
+// Every mask handed to ncclOsSetAffinity, in call order; same path-dependence as above -- [0] is :1610
+// only when :1607-1611 ran, otherwise it is exit::2404. A single "last" slot is not enough, because
+// the exit: write masks whatever :1610 forwarded.
 extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 extern ncclResult_t g_ncclMnnvlCheckResult;
 extern int g_ncclMnnvlCheckCalls;  // the oracle for the :1503-1509 enable/auto/disable logic
@@ -180,6 +183,8 @@ extern ncclResult_t g_ncclNvlsInitResult;
 extern int g_ncclNvlsInitCalls;
 extern ncclResult_t g_ncclTopoComputeResult;
 extern int g_ncclTopoComputeCalls;
+// Every ncclTopoGraph* handed to ncclTopoCompute, in call order; [0] is the :1648 ring compute.
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 
 // Enable the full commAlloc() happy path in one call: flips the HIP deep-path
 // seams (attribute/PCIBusId/event/mempool/stream) to success and resets the

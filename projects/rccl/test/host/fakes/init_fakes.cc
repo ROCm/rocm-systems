@@ -332,24 +332,28 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char
 
 // Topology-detection and CPU-affinity seams (:1576-1618). All succeed by default so a test can walk the
 // block and inject exactly one failure; ncclTopoCompute is the exception -- it is the rung-2 terminator.
-int g_tuningIndexValue                     = 0;
+int g_tuningIndexValue                      = 0;
 std::string g_tuningIndexLastArch;
-int g_ncclTopoComputePathsCalls            = 0;
-int g_ncclTopoComputePathsFailAt           = -1;
-ncclResult_t g_ncclTopoTrimSystemResult    = ncclSuccess;
-ncclResult_t g_ncclTopoSearchInitResult    = ncclSuccess;
+int g_ncclTopoComputePathsCalls             = 0;
+int g_ncclTopoComputePathsFailAt            = -1;
+ncclResult_t g_ncclTopoTrimSystemResult     = ncclSuccess;
+ncclResult_t g_ncclTopoSearchInitResult     = ncclSuccess;
 ncclResult_t g_ncclTopoComputeCommCPUResult = ncclSuccess;
-ncclResult_t g_ncclTopoPrintResult         = ncclSuccess;
-int g_ncclTopoGetCpuAffinityLastRank       = -1;
+ncclResult_t g_ncclTopoPrintResult          = ncclSuccess;
+int g_ncclTopoGetCpuAffinityLastRank        = -1;
 // Writes an EMPTY mask by default, so ncclOsCpuCount's 0 default stays consistent and :1609-1610 are skipped.
 std::function<ncclResult_t(struct ncclTopoSystem*, int, ncclAffinity*)> g_ncclTopoGetCpuAffinity =
     [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
 std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity =
     [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
-ncclResult_t g_ncclNvlsInitResult          = ncclSuccess;
-int g_ncclNvlsInitCalls                    = 0;
-ncclResult_t g_ncclTopoComputeResult       = ncclInternalError;  // rung-2 terminator
+ncclResult_t g_ncclNvlsInitResult           = ncclSuccess;
+int g_ncclNvlsInitCalls                     = 0;
+// Same sentinel as the rung-1 terminator, and unambiguous for the same reason it is a sentinel at all:
+// every rung-2 test calls installTopo(), which replaces g_ncclTopoGetSystem with a succeeding lambda,
+// so ncclRemoteError here can only have come from :1648.
+ncclResult_t g_ncclTopoComputeResult       = ncclRemoteError;  // rung-2 terminator
 int g_ncclTopoComputeCalls                 = 0;
+std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
@@ -434,6 +438,7 @@ void ResetInitFakes() {
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclNvlsInitResult = ncclSuccess;
   g_ncclNvlsInitCalls = 0;
-  g_ncclTopoComputeResult = ncclInternalError;
+  g_ncclTopoComputeResult = ncclRemoteError;
   g_ncclTopoComputeCalls = 0;
+  g_ncclTopoComputeGraphs.clear();
 }

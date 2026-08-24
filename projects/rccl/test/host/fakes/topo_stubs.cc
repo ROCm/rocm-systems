@@ -11,6 +11,7 @@
 
 #include <cstdlib>
 #include <functional>
+#include <vector>
 #include <sched.h>
 
 #include "nccl.h"
@@ -22,12 +23,16 @@ struct ncclTopoRanks;
 struct ncclTopoSystem;
 
 ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
-// Controllable (was fail-loud). Defaults to FAILURE: this is the phase-3/4/5 ladder terminator at :1648,
-// and its four later call sites (:1649 onward, the tree/NVLS graphs) are on paths no test drives yet.
+// Controllable (was fail-loud). Defaults to FAILURE: this is the rung-2 ladder terminator at :1648, and
+// its four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are on paths
+// no test drives yet. Records the graph pointer: without it, :1648 being handed treeGraph instead of
+// ringGraph is invisible, the same "a fake that drops an argument untests it" rule as nccl_stubs.cc:83.
 extern ncclResult_t g_ncclTopoComputeResult;
 extern int g_ncclTopoComputeCalls;
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
 ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   g_ncclTopoComputeCalls++;
+  g_ncclTopoComputeGraphs.push_back(graph);
   return g_ncclTopoComputeResult;
 }
 extern ncclResult_t g_ncclTopoComputeCommCPUResult;
