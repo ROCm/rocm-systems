@@ -689,6 +689,15 @@ class TestRenderMembwGuidance:
         assert "No bottlenecks detected (GL1 / GL2 / EA)" in output
 
     def test_active_bottleneck_shows_guidance_panel(self):
+        active_node = BottleneckNode(
+            id="gl1_tcp_utcl1_stall",
+            label="TCP UTCL1 stall",
+            level="GL1",
+            state="active",
+            supporting=(),
+            children=(),
+            guidance_id="g1",
+        )
         result = make_membw_result(
             guidance_blocks=(
                 "[GL1] TCP stalled by UTCL1\n"
@@ -696,6 +705,7 @@ class TestRenderMembwGuidance:
                 "  Measured  : 18.7%\n"
                 "  Impact    : Address translation pressure",
             ),
+            nodes=(active_node,),
         )
         output = _render_membw_guidance(result)
         plain = strip_ansi(output)
@@ -737,3 +747,17 @@ class TestRenderMembwGuidance:
         output = _render_membw_guidance(result)
         assert "Inconclusive" in output
         assert "insufficient counter data" in output
+
+    def test_active_node_without_guidance_shows_fallback(self):
+        active_parent = BottleneckNode(
+            id="gl2_mem_bw_bound",
+            label="GL2 memory BW bound",
+            level="GL2",
+            state="active",
+            supporting=(),
+            children=(),
+        )
+        result = make_membw_result(nodes=(active_parent,), guidance_blocks=())
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected" not in output
+        assert "Bottlenecks detected" in output

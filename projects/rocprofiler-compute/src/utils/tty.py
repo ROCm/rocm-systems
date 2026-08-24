@@ -863,13 +863,25 @@ def _render_membw_guidance(
     chart_width: int = 0,
 ) -> str:
     """Render membw guidance text to append below the memory chart."""
-    active_count = sum(1 for block in membw_result.guidance_blocks if block)
-    if active_count == 0:
+    if not _has_active_nodes(membw_result.nodes):
         return _render_membw_status_line(membw_result)
-    return _render_membw_guidance_panel(
+    panel_output = _render_membw_guidance_panel(
         membw_result.guidance_blocks,
         chart_width=chart_width,
     )
+    if panel_output:
+        return panel_output
+    return "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations).\n"
+
+
+def _has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
+    """True when any node in the tree is active."""
+    for node in nodes:
+        if node.state == "active":
+            return True
+        if _has_active_nodes(node.children):
+            return True
+    return False
 
 
 def _all_nodes_indeterminate(
