@@ -384,8 +384,7 @@ TEST_F(writer_test, register_kernel_symbol_info_is_readable_after_flush)
 // DISABLED: renamed get_all_tracks->get_tracks compiles, but the semantics
 // differ — our get_tracks() synthesizes tracks from actual event/sample data, so a track
 // registered with no events is not surfaced (returns 0), whereas develop's
-// get_all_tracks() returned raw registered rocpd_track rows. Semantic collision beyond a
-// mechanical rename; equivalent coverage is a deferred port chunk.
+// get_all_tracks() returned raw registered rocpd_track rows.
 TEST_F(writer_test, DISABLED_register_track_info_is_readable_after_flush)
 {
     auto writer = make_writer();

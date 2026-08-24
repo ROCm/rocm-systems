@@ -256,12 +256,7 @@ database_backend<SqlitePolicy>::discover_uuids()
     //
     // Preferred path: read the authoritative rocpd_info_node.guid column and
     // normalize '-'->'_' to match the underscore suffix the reader concatenates as
-    // `rocpd_X_<uuid>`. This replaces the previous query, which used the SQLite
-    // "substring after the last underscore" idiom
-    // (replace(name, rtrim(name, replace(name,'_','')), '')) and truncated a
-    // hyphenated v4 GUID (stored as `..._00001eca_d4de_..._c34ecf8c3a87`) down to
-    // only its final segment (`c34ecf8c3a87`), yielding a UUID that matched no real
-    // table. rocpd_metadata.uuid is deliberately NOT used: it stores a
+    // `rocpd_X_<uuid>`. rocpd_metadata.uuid is deliberately NOT used: it stores a
     // LEADING-underscore variant (`_00001eca_...`) that would double the separator
     // when concatenated.
     //
@@ -269,8 +264,7 @@ database_backend<SqlitePolicy>::discover_uuids()
     // rocpd_views.sql (e.g. some generated unit fixtures) have no unsuffixed
     // rocpd_info_node view to read guid from. For those, derive the UUID from the
     // suffixed rocpd_info_node table name by taking everything after the
-    // `rocpd_info_node_` prefix -- the correct parse the old idiom failed to do.
-    // DISTINCT (both paths) preserves multi-node enumeration.
+    // `rocpd_info_node_` prefix. DISTINCT (both paths) preserves multi-node enumeration.
     struct count_result
     {
         std::int64_t value{ 0 };
