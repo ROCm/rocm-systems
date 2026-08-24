@@ -1016,16 +1016,6 @@ Examples:
         help="\t\tList the installation dependency.",
     )
     analyze_advanced_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. "
-        "Lower the level, shorter the kernel name. "
-        "(DEFAULT: 5) (DISABLE: 5)",
-        default=5,
-        type=int,
-    )
-    analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
     )
     analyze_advanced_group.add_argument(

@@ -35,7 +35,6 @@ def test_returns_valid_dataframes() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
             sortby="sum",
         )
 
@@ -70,7 +69,6 @@ def test_grouping_and_aggregation() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
             sortby="sum",
         )
 
@@ -89,7 +87,6 @@ def test_grouping_and_aggregation() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
             sortby="kernel",
         )
 
@@ -108,7 +105,6 @@ def test_filters() -> None:
             filter_gpu_ids="0",
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 3
 
@@ -119,7 +115,6 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=["> 2"],
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
         assert all(dispatch_df["Dispatch_ID"] > 2)
@@ -131,7 +126,6 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=["1", "2"],
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
 
@@ -149,7 +143,6 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(kernel_top_df) == 0
         assert len(dispatch_df) == 0
@@ -173,7 +166,7 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     )
     (tmp_path / "pmc_perf.csv").write_text(long_form_csv)
 
-    df = create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
+    df = create_df_pmc(str(tmp_path), verbose=0)
 
     assert len(df) == 1
     assert df["SQ_WAVES"].iloc[0] == 4
@@ -193,11 +186,11 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
     (tmp_path / "pmc_perf.csv").write_text(wide_csv)
 
     with pytest.raises(SystemExit):
-        create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
+        create_df_pmc(str(tmp_path), verbose=0)
 
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
-    assert create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0).empty
+    assert create_df_pmc(str(tmp_path), verbose=0).empty
 
 
 @pytest.mark.misc
