@@ -17,14 +17,8 @@
 
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 
-#include "amd_smi/impl/amd_smi_wsl_syms.h"
-
-#if __has_include(<hsakmt/rocdxg_smi.h>)
-#define AMDSMI_HAS_ROCDXG_SMI 1
-#endif
-
-#include <dlfcn.h>
 #include <fcntl.h>
+#include <ntstatus.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -38,33 +32,27 @@
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
+#include "amd_smi/impl/wsl/dxcore_loader.h"
+#include "amd_smi/impl/wsl/wsl_pmlog.h"
+#include "amd_smi/impl/wsl/wsl_status.h"
+#include "amd_smi/impl/wsl/wsl_vram.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
 namespace {
 
-static amdsmi_bdf_t make_bdf(const HsaNodeProperties& props) {
+static constexpr const char* kDxgDevPath = "/dev/dxg";
+
+// PCIe generation (1-5) -> max link speed in MT/s. Index 0 (unknown gen) maps to 0.
+static constexpr uint32_t kGenSpeed[] = {0, 2500, 5000, 8000, 16000, 32000};
+
+static amdsmi_bdf_t make_bdf(const Wkmi::DeviceInfo& dev) {
   amdsmi_bdf_t bdf = {};
-  bdf.bdf.domain_number = props.Domain;
-  bdf.bdf.bus_number = (props.LocationId >> 8) & 0xff;
-  bdf.bdf.device_number = (props.LocationId >> 3) & 0x1f;
-  bdf.bdf.function_number = props.LocationId & 0x7;
+  bdf.bdf.domain_number = dev.domain;
+  bdf.bdf.bus_number = (dev.pci_bus_addr >> 8) & 0xff;
+  bdf.bdf.device_number = (dev.pci_bus_addr >> 3) & 0x1f;
+  bdf.bdf.function_number = dev.pci_bus_addr & 0x7;
   return bdf;
-}
-
-static std::string marketing_name_from_hsa(const HsaNodeProperties& props) {
-  std::string name;
-  for (auto ch : props.MarketingName) {
-    if (ch == 0) break;
-    name.push_back(static_cast<char>(ch));
-  }
-  if (!name.empty()) return name;
-
-  for (auto ch : props.AMDName) {
-    if (ch == 0) break;
-    name.push_back(static_cast<char>(ch));
-  }
-  return name;
 }
 
 static void copy_string(char* dst, const std::string& src) {
@@ -73,193 +61,68 @@ static void copy_string(char* dst, const std::string& src) {
   std::snprintf(dst, AMDSMI_MAX_STRING_LENGTH, "%s", src.c_str());
 }
 
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-static amdsmi_status_t rocdxg_to_amdsmi_status(HSAKMT_STATUS status) {
-  switch (status) {
-    case HSAKMT_STATUS_SUCCESS:
-      return AMDSMI_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_PARAMETER:
-    case HSAKMT_STATUS_INVALID_HANDLE:
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return AMDSMI_STATUS_INVAL;
-    case HSAKMT_STATUS_NO_MEMORY:
-      return AMDSMI_STATUS_OUT_OF_RESOURCES;
-    case HSAKMT_STATUS_BUFFER_TOO_SMALL:
-      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    case HSAKMT_STATUS_NOT_IMPLEMENTED:
-      return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    case HSAKMT_STATUS_UNAVAILABLE:
-      return AMDSMI_STATUS_SETTING_UNAVAILABLE;
-    case HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED:
-    case HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR:
-      return AMDSMI_STATUS_DRIVER_NOT_LOADED;
-    default:
-      return AMDSMI_STATUS_API_FAILED;
-  }
-}
-
-static void copy_rocdxg_string(char* dst, const char* src) {
+static void copy_c_string(char* dst, const char* src) {
   if (dst == nullptr) return;
   std::memset(dst, 0, AMDSMI_MAX_STRING_LENGTH);
   if (src != nullptr) std::snprintf(dst, AMDSMI_MAX_STRING_LENGTH, "%s", src);
 }
-#endif  // AMDSMI_HAS_ROCDXG_SMI
 
-static constexpr const char* kDxgDevPath = "/dev/dxg";
-static constexpr const char* kRocdxgSoV = "librocdxg.so.1";
-static constexpr const char* kRocdxgSo = "librocdxg.so";
-
-// librocdxg handle — owned by TryPopulate, valid for the process lifetime.
-static void* g_rocdxg_handle = nullptr;
-
-// Helper: resolve one dlsym symbol; print and return false on failure.
-template <typename T>
-static bool bind_sym(void* handle, const char* name, T& fn) {
-  fn = reinterpret_cast<T>(dlsym(handle, name));
-  if (!fn) {
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | missing symbol: " << name;
-    LOG_ERROR(ss);
-    return false;
-  }
-  return true;
-}
-
-// dlopen librocdxg.so and bind all required symbols into g_wsl_syms.
-static bool load_rocdxg() {
-  if (g_rocdxg_handle) return true;
-  g_rocdxg_handle = dlopen(kRocdxgSoV, RTLD_NOW | RTLD_LOCAL);
-  if (!g_rocdxg_handle) g_rocdxg_handle = dlopen(kRocdxgSo, RTLD_NOW | RTLD_LOCAL);
-  if (!g_rocdxg_handle) {
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | dlopen librocdxg failed: " << dlerror();
-    LOG_ERROR(ss);
-    return false;
-  }
-
-  bool ok = true;
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtOpenKFD", g_wsl_syms.hsaKmtOpenKFD);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtCloseKFD", g_wsl_syms.hsaKmtCloseKFD);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtAcquireSystemProperties",
-                 g_wsl_syms.hsaKmtAcquireSystemProperties);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtReleaseSystemProperties",
-                 g_wsl_syms.hsaKmtReleaseSystemProperties);
-  ok &= bind_sym(g_rocdxg_handle, "hsaKmtGetNodeProperties", g_wsl_syms.hsaKmtGetNodeProperties);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_device_info",
-                 g_wsl_syms.rocdxg_smi_get_device_info);
-  ok &=
-      bind_sym(g_rocdxg_handle, "rocdxg_smi_get_vram_usage", g_wsl_syms.rocdxg_smi_get_vram_usage);
-  ok &=
-      bind_sym(g_rocdxg_handle, "rocdxg_smi_get_power_info", g_wsl_syms.rocdxg_smi_get_power_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_temperature",
-                 g_wsl_syms.rocdxg_smi_get_temperature);
-  ok &=
-      bind_sym(g_rocdxg_handle, "rocdxg_smi_get_clock_info", g_wsl_syms.rocdxg_smi_get_clock_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_pcie_info", g_wsl_syms.rocdxg_smi_get_pcie_info);
-  ok &= bind_sym(g_rocdxg_handle, "rocdxg_smi_get_gpu_metrics_info",
-                 g_wsl_syms.rocdxg_smi_get_gpu_metrics_info);
-  ok &=
-      bind_sym(g_rocdxg_handle, "rocdxg_smi_enum_processes", g_wsl_syms.rocdxg_smi_enum_processes);
-
-  if (!ok) {
-    dlclose(g_rocdxg_handle);
-    g_rocdxg_handle = nullptr;
-    g_wsl_syms = WslSyms{};
-    return false;
-  }
-  return true;
-}
-
-static amdsmi_status_t hsakmt_to_amdsmi(HSAKMT_STATUS s) {
-  switch (s) {
-    case HSAKMT_STATUS_SUCCESS:
-      return AMDSMI_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_PARAMETER:
-    case HSAKMT_STATUS_INVALID_HANDLE:
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return AMDSMI_STATUS_INVAL;
-    case HSAKMT_STATUS_NO_MEMORY:
-      return AMDSMI_STATUS_OUT_OF_RESOURCES;
-    case HSAKMT_STATUS_BUFFER_TOO_SMALL:
-      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    case HSAKMT_STATUS_NOT_IMPLEMENTED:
-      return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    case HSAKMT_STATUS_UNAVAILABLE:
-      return AMDSMI_STATUS_SETTING_UNAVAILABLE;
-    case HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED:
-    case HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR:
-      return AMDSMI_STATUS_DRIVER_NOT_LOADED;
-    default:
-      return AMDSMI_STATUS_API_FAILED;
-  }
+// Derives a short driver "date" field (up to 6 chars after the first '-') from
+// a driver_version string such as "31.0.24027-250101a-...". Returns "N/A" if
+// no '-' is present. There is no dedicated driver-date field on WslAdapterInfo
+// (only driver_version/driver_desc registry strings are available), so this
+// reimplements the old rocdxg driver_date convention locally.
+static std::string derive_driver_date(const char* driver_version) {
+  if (driver_version == nullptr) return "N/A";
+  const char* dash = std::strchr(driver_version, '-');
+  if (dash == nullptr || *(dash + 1) == '\0') return "N/A";
+  std::string date(dash + 1, std::min<size_t>(6, std::strlen(dash + 1)));
+  return date;
 }
 
 // Placeholder DRM instance for WSL devices — WSL has no /dev/dri.
 static AMDSmiDrm g_wsl_drm;
 
-}  // namespace
-
-// Definition of the global WSL symbol table (declared extern in amd_smi_wsl_syms.h).
-WslSyms g_wsl_syms;
-
-// True iff TryPopulate succeeded — tracks whether hsaKmtCloseKFD is needed.
+// Adapters opened by try_populate, torn down by shutdown(). Idempotent: cleared
+// after a successful shutdown() so a second call is a no-op.
+static std::vector<wsl::WslAdapterInfo> g_wsl_adapters;
 static bool g_wsl_active = false;
 
+}  // namespace
+
 // -----------------------------------------------------------------------------
-// WSLGPUBackend constructor and TryPopulate
+// WSLGPUBackend constructor and try_populate
 // -----------------------------------------------------------------------------
 
-WSLGPUBackend::WSLGPUBackend(uint32_t gpu_id, uint32_t node_id, const HsaNodeProperties& props)
-    : gpu_id_(gpu_id),
-      node_id_(node_id),
-      vendor_id_(props.VendorId),
-      device_id_(props.DeviceId),
-      family_id_(props.FamilyID),
-      num_compute_units_(props.NumCUPerArray * props.NumArrays),
-      num_xcc_(props.NumXcc),
-      unique_id_(props.UniqueID),
-      local_mem_size_(props.LocalMemSize),
-      bdf_(make_bdf(props)),
-      marketing_name_(marketing_name_from_hsa(props)) {}
+WSLGPUBackend::WSLGPUBackend(uint32_t gpu_id, const wsl::WslAdapterInfo& adapter)
+    : gpu_id_(gpu_id), bdf_(make_bdf(adapter.device_info)), adapter_(adapter) {}
 
-amdsmi_status_t WSLGPUBackend::TryPopulate(std::vector<AMDSmiSocket*>& sockets,
-                                           std::set<AMDSmiProcessor*>& processors) {
+amdsmi_status_t WSLGPUBackend::try_populate(std::vector<AMDSmiSocket*>& sockets,
+                                            std::set<AMDSmiProcessor*>& processors) {
   // Not WSL if /dev/dxg is absent.
   if (access(kDxgDevPath, F_OK) != 0) return AMDSMI_STATUS_NOT_SUPPORTED;
 
-  if (!load_rocdxg()) return AMDSMI_STATUS_DRIVER_NOT_LOADED;
+  if (!wsl::thunk::dxcore::DxcoreLoader::Instance().Initialize())
+    return AMDSMI_STATUS_DRIVER_NOT_LOADED;
 
-  HSAKMT_STATUS hstatus = g_wsl_syms.hsaKmtOpenKFD();
-  if (hstatus != HSAKMT_STATUS_SUCCESS && hstatus != HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return hsakmt_to_amdsmi(hstatus);
-  }
-
-  HsaSystemProperties system_props = {};
-  hstatus = g_wsl_syms.hsaKmtAcquireSystemProperties(&system_props);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) {
-    g_wsl_syms.hsaKmtCloseKFD();
-    return hsakmt_to_amdsmi(hstatus);
-  }
+  std::vector<wsl::WslAdapterInfo> adapters;
+  NTSTATUS status = wsl::EnumerateWslAdapters(&adapters);
+  if (status != STATUS_SUCCESS) return wsl::ToAmdsmiStatus(status);
 
   uint32_t gpu_index = 0;
-  for (uint32_t node_id = 0; node_id < system_props.NumNodes; ++node_id) {
-    HsaNodeProperties node_props = {};
-    hstatus = g_wsl_syms.hsaKmtGetNodeProperties(node_id, &node_props);
-    if (hstatus != HSAKMT_STATUS_SUCCESS) {
-      g_wsl_syms.hsaKmtReleaseSystemProperties();
-      g_wsl_syms.hsaKmtCloseKFD();
-      return hsakmt_to_amdsmi(hstatus);
+  for (auto& adapter : adapters) {
+    status = wsl::OpenWslAdapter(&adapter);
+    if (status != STATUS_SUCCESS) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | wsl::OpenWslAdapter failed: 0x" << std::hex << status;
+      LOG_ERROR(ss);
+      continue;
     }
+    g_wsl_adapters.push_back(adapter);
 
-    if (node_props.NumFComputeCores == 0) continue;
+    auto* backend = new WSLGPUBackend(gpu_index, adapter);
 
-    auto* backend = new WSLGPUBackend(gpu_index, node_id, node_props);
-
-    std::string path = "wsl_node" + std::to_string(node_id);
+    std::string path = "wsl_adapter" + std::to_string(gpu_index);
     auto* device = new AMDSmiGPUDevice(gpu_index++, path, backend->bdf(), g_wsl_drm);
     device->set_backend(backend);
 
@@ -274,33 +137,22 @@ amdsmi_status_t WSLGPUBackend::TryPopulate(std::vector<AMDSmiSocket*>& sockets,
     processors.insert(device);
   }
 
-  // Don't release system properties here — topology_drop_snapshot() clears
-  // wdevices_, which rocdxg_smi_* functions need for the process lifetime.
-  // hsaKmtReleaseSystemProperties() is called in Shutdown().
-
   if (gpu_index == 0) {
-    g_wsl_syms.hsaKmtReleaseSystemProperties();
-    g_wsl_syms.hsaKmtCloseKFD();
+    wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
     return AMDSMI_STATUS_NOT_FOUND;
   }
   g_wsl_active = true;
   return AMDSMI_STATUS_SUCCESS;
 }
 
-bool WSLGPUBackend::IsActive() { return g_wsl_active; }
+bool WSLGPUBackend::is_active() { return g_wsl_active; }
 
-amdsmi_status_t WSLGPUBackend::Shutdown() {
+amdsmi_status_t WSLGPUBackend::shutdown() {
   if (!g_wsl_active) return AMDSMI_STATUS_SUCCESS;
   g_wsl_active = false;
-  g_wsl_syms.hsaKmtReleaseSystemProperties();
-  HSAKMT_STATUS hret = g_wsl_syms.hsaKmtCloseKFD();
-  if (hret != HSAKMT_STATUS_SUCCESS && hret != HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED)
-    return hsakmt_to_amdsmi(hret);
-  if (g_rocdxg_handle) {
-    dlclose(g_rocdxg_handle);
-    g_rocdxg_handle = nullptr;
-    g_wsl_syms = WslSyms{};
-  }
+  for (auto& adapter : g_wsl_adapters) wsl::CloseWslAdapter(&adapter);
+  g_wsl_adapters.clear();
+  wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -308,186 +160,217 @@ amdsmi_status_t WSLGPUBackend::Shutdown() {
 // IGPUBackend method implementations
 // -----------------------------------------------------------------------------
 
-#ifdef AMDSMI_HAS_ROCDXG_SMI
 amdsmi_status_t WSLGPUBackend::load_device_info() const {
   std::call_once(device_info_once_, [this]() {
-    HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_device_info(node_id_, &device_info_);
-    device_info_status_ = rocdxg_to_amdsmi_status(hstatus);
+    const auto& dev = adapter_.device_info;
+    WslDeviceSnapshot snap;
+
+    snap.subvendor_id = adapter_.sub_vendor_id;
+    snap.subsystem_id = adapter_.sub_system_id;
+
+    snap.asic_serial = dev.uuid;
+
+    // Pack major/minor/stepping (three separate ints on Wkmi::DeviceInfo) using
+    // the same major<<16|minor<<8|stepping encoding as
+    // rocdxg_smi.cpp's target_graphics_version(wsl::thunk::WDDMDevice&).
+    snap.target_graphics_version = (static_cast<uint64_t>(dev.major) << 16) |
+                                   (static_cast<uint64_t>(dev.minor) << 8) |
+                                   static_cast<uint64_t>(dev.stepping);
+
+    // Cache hierarchy: l1/l2/l3_cache_size are in bytes; amdsmi reports KB.
+    // level/properties/max_num_cu_shared/num_cache_instance have no equivalent
+    // on Wkmi::DeviceInfo, so use reasonable single-instance-per-level defaults
+    // (matches the shape rocdxg reported for these ASICs: one CU-shared L1 per
+    // CU, one L2 shared across the whole ASIC, one L3/MALL if present).
+    uint32_t idx = 0;
+    if (dev.l1_cache_size > 0 && idx < AMDSMI_MAX_CACHE_TYPES) {
+      snap.cache[idx].cache_size_kb = dev.l1_cache_size / 1024;
+      snap.cache[idx].cache_level = 1;
+      snap.cache[idx].cache_properties = AMDSMI_CACHE_PROPERTY_DATA_CACHE;
+      snap.cache[idx].max_num_cu_shared = 2;
+      snap.cache[idx].num_cache_instance = 1;
+      ++idx;
+    }
+    if (dev.l2_cache_size > 0 && idx < AMDSMI_MAX_CACHE_TYPES) {
+      snap.cache[idx].cache_size_kb = dev.l2_cache_size / 1024;
+      snap.cache[idx].cache_level = 2;
+      snap.cache[idx].cache_properties =
+          AMDSMI_CACHE_PROPERTY_ENABLED | AMDSMI_CACHE_PROPERTY_DATA_CACHE;
+      snap.cache[idx].max_num_cu_shared = dev.compute_unit_count;
+      snap.cache[idx].num_cache_instance = 1;
+      ++idx;
+    }
+    if (dev.l3_cache_size > 0 && idx < AMDSMI_MAX_CACHE_TYPES) {
+      snap.cache[idx].cache_size_kb = dev.l3_cache_size / 1024;
+      snap.cache[idx].cache_level = 3;
+      snap.cache[idx].cache_properties =
+          AMDSMI_CACHE_PROPERTY_ENABLED | AMDSMI_CACHE_PROPERTY_DATA_CACHE;
+      snap.cache[idx].max_num_cu_shared = dev.compute_unit_count;
+      snap.cache[idx].num_cache_instance = 1;
+      ++idx;
+    }
+    snap.num_cache_types = idx;
+
+    // Firmware: only MEC/SDMA versions are available on Wkmi::DeviceInfo.
+    uint32_t fw_idx = 0;
+    if (fw_idx < AMDSMI_FW_ID__MAX) {
+      snap.fw_info_list[fw_idx].fw_id = AMDSMI_FW_ID_CP_MEC1;
+      snap.fw_info_list[fw_idx].fw_version = dev.mec_fw_version;
+      ++fw_idx;
+    }
+    if (fw_idx < AMDSMI_FW_ID__MAX) {
+      snap.fw_info_list[fw_idx].fw_id = AMDSMI_FW_ID_SDMA0;
+      snap.fw_info_list[fw_idx].fw_version = dev.sdma_fw_version;
+      ++fw_idx;
+    }
+    snap.num_fw_info = fw_idx;
+
+    // PCIe static capabilities (best-effort; non-fatal if the escape fails).
+    Wkmi::ChipsetIdInfo chipset = {};
+    if (wsl::QueryChipsetInfo(adapter_, &chipset)) {
+      snap.max_pcie_lane_width = chipset.max_pcie_lane_width;
+      snap.pcie_gen = chipset.pcie_gen;
+    }
+
+    // VBIOS info (best-effort; non-fatal if the escape fails).
+    Wkmi::VideoBiosInfo vbios = {};
+    if (wsl::QueryVideoBios(adapter_, &vbios)) {
+      // Wkmi::VideoBiosInfo has no "name" field; fall back to the product name.
+      snap.vbios_name = dev.product_name;
+      snap.vbios_build_date = vbios.date;
+      snap.vbios_part_number = vbios.part_number;
+      snap.vbios_version = vbios.version;
+    }
+
+    snap.uuid_seed = snap.asic_serial != 0 ? snap.asic_serial : bdf_.as_uint;
+
+    device_info_ = snap;
+    device_info_status_ = AMDSMI_STATUS_SUCCESS;
   });
   return device_info_status_;
 }
-#else
-amdsmi_status_t WSLGPUBackend::load_device_info() const { return AMDSMI_STATUS_NOT_SUPPORTED; }
-#endif
 
-amdsmi_status_t WSLGPUBackend::GetKfdInfo(amdsmi_kfd_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_kfd_info(amdsmi_kfd_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  // No KFD in WSL — the KFD ID and node ID concepts don't apply.
+  // No KFD in WSL — the KFD ID and node ID concepts don't apply. Preserved
+  // verbatim from the old implementation (there was never a rocdxg-backed
+  // KFD path either).
   std::memset(info, 0xFF, sizeof(*info));
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+amdsmi_status_t WSLGPUBackend::get_asic_info(amdsmi_asic_info_t* info) {
   amdsmi_status_t r = load_device_info();
-  if (r == AMDSMI_STATUS_SUCCESS) {
-    const auto& a = device_info_.asic;
-    std::memset(info, 0, sizeof(*info));
-    copy_rocdxg_string(info->market_name, a.market_name);
-    info->vendor_id = a.vendor_id;
-    if (info->vendor_id == 0x1002)
-      copy_string(info->vendor_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-    info->subvendor_id = a.subvendor_id;
-    info->device_id = a.device_id;
-    info->rev_id = a.rev_id;
-    std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    info->oam_id = gpu_id_;
-    info->num_of_compute_units = a.num_of_compute_units;
-    // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
-    // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").
-    {
-      uint32_t maj = (a.target_graphics_version >> 16) & 0xFF;
-      uint32_t min = (a.target_graphics_version >> 8) & 0xFF;
-      uint32_t stp = a.target_graphics_version & 0xFF;
-      info->target_graphics_version = ((maj / 10) << 12) | ((maj % 10) << 8) | (min << 4) | stp;
-    }
-    info->subsystem_id = a.subsystem_id;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-#endif
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  const auto& dev = adapter_.device_info;
+
   std::memset(info, 0, sizeof(*info));
-  copy_string(info->market_name, marketing_name_);
-  info->vendor_id = vendor_id_;
-  if (vendor_id_ == 0x1002)
+  copy_string(info->market_name, dev.product_name);
+  info->vendor_id = adapter_.vendor_id;
+  if (info->vendor_id == 0x1002)
     copy_string(info->vendor_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->device_id = device_id_;
-  info->rev_id = std::numeric_limits<uint32_t>::max();
-  copy_string(info->asic_serial, "ffffffffffffffff");
+  info->subvendor_id = device_info_.subvendor_id;
+  info->device_id = adapter_.device_id;
+  info->rev_id = dev.asic_revision;
+  std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx",
+                static_cast<unsigned long>(device_info_.asic_serial));
   info->oam_id = gpu_id_;
-  info->num_of_compute_units =
-      num_compute_units_ ? num_compute_units_ : std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->flags = family_id_;
+  info->num_of_compute_units = dev.compute_unit_count;
+  info->target_graphics_version = device_info_.target_graphics_version;
+  info->subsystem_id = device_info_.subsystem_id;
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetBoardInfo(amdsmi_board_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_board_info(amdsmi_board_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  amdsmi_status_t r = load_device_info();
-  if (r == AMDSMI_STATUS_SUCCESS) {
-    std::memset(info, 0, sizeof(*info));
-    copy_rocdxg_string(info->product_name, device_info_.board.product_name);
-    copy_rocdxg_string(info->manufacturer_name, device_info_.board.manufacturer_name);
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-#endif
   std::memset(info, 0, sizeof(*info));
-  copy_string(info->product_name, marketing_name_);
+  copy_c_string(info->product_name, adapter_.board_product_name);
   copy_string(info->manufacturer_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetVramInfo(amdsmi_vram_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_vram_info(amdsmi_vram_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  amdsmi_status_t r = load_device_info();
-  if (r == AMDSMI_STATUS_SUCCESS) {
-    std::memset(info, 0, sizeof(*info));
-    info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-    copy_string(info->vram_vendor, "UNKNOWN");
-    info->vram_size = device_info_.vram.vram_size_mb;
-    info->vram_bit_width = device_info_.vram.vram_bit_width;
-    info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-#endif
   std::memset(info, 0, sizeof(*info));
   info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
   copy_string(info->vram_vendor, "UNKNOWN");
-  info->vram_size = local_mem_size_ / (1024 * 1024);
-  info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
+  info->vram_size = wsl::VramTotal(adapter_) / (1024 * 1024);
+  info->vram_bit_width = adapter_.device_info.memory_bus_width;
   info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetMemoryTotal(amdsmi_memory_type_t mem_type, uint64_t* total) {
-  if (total == nullptr) return AMDSMI_STATUS_INVAL;
+amdsmi_status_t WSLGPUBackend::get_memory_total(amdsmi_memory_type_t mem_type, uint64_t* total) {
   if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM)
     return AMDSMI_STATUS_NOT_SUPPORTED;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  amdsmi_status_t r = load_device_info();
-  if (r == AMDSMI_STATUS_SUCCESS) {
-    *total = device_info_.vram.vram_size_mb * 1024 * 1024;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-#endif
-  *total = local_mem_size_;
+  if (total == nullptr) return AMDSMI_STATUS_INVAL;
+  *total = wsl::VramTotal(adapter_);
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetMemoryUsage(amdsmi_memory_type_t mem_type, uint64_t* used) {
-  if (used == nullptr) return AMDSMI_STATUS_INVAL;
+amdsmi_status_t WSLGPUBackend::get_memory_usage(amdsmi_memory_type_t mem_type, uint64_t* used) {
   if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM)
     return AMDSMI_STATUS_NOT_SUPPORTED;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_vram_usage_t usage = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_vram_usage(node_id_, &usage);
-  if (hstatus == HSAKMT_STATUS_SUCCESS) {
-    *used = usage.vram_used_mb * 1024 * 1024;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  return rocdxg_to_amdsmi_status(hstatus);
-#else
-  (void)mem_type;
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
+  if (used == nullptr) return AMDSMI_STATUS_INVAL;
+  if (!wsl::QueryVramUsage(adapter_, used)) return AMDSMI_STATUS_API_FAILED;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetTempMetric(amdsmi_temperature_type_t sensor_type,
-                                             amdsmi_temperature_metric_t metric,
-                                             int64_t* temperature) {
+amdsmi_status_t WSLGPUBackend::get_temp_metric(amdsmi_temperature_type_t sensor_type,
+                                               amdsmi_temperature_metric_t metric,
+                                               int64_t* temperature) {
+  if (metric != AMDSMI_TEMP_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (temperature == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_temperature(
-      node_id_, static_cast<uint32_t>(sensor_type), static_cast<uint32_t>(metric), temperature);
-  return rocdxg_to_amdsmi_status(hstatus);
-#else
-  (void)sensor_type;
-  (void)metric;
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
+
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+
+  uint32_t value = Wkmi::kSensorUnavailable;
+  switch (sensor_type) {
+    case AMDSMI_TEMPERATURE_TYPE_EDGE:
+      value = wsl::PmlogValue(snap, Wkmi::kPmlogTempEdge);
+      if (value == Wkmi::kSensorUnavailable)
+        value = wsl::PmlogValue(snap, Wkmi::kPmlogTempGfx);  // APU fallback
+      break;
+    case AMDSMI_TEMPERATURE_TYPE_HOTSPOT:  // == AMDSMI_TEMPERATURE_TYPE_JUNCTION
+      value = wsl::PmlogValue(snap, Wkmi::kPmlogTempHotspot);
+      if (value == Wkmi::kSensorUnavailable)
+        value = wsl::PmlogValue(snap, Wkmi::kPmlogTempSoc);  // APU fallback
+      break;
+    case AMDSMI_TEMPERATURE_TYPE_VRAM:
+      value = wsl::PmlogValue(snap, Wkmi::kPmlogTempMem);  // no fallback
+      break;
+    default:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  if (value == Wkmi::kSensorUnavailable) return AMDSMI_STATUS_NOT_SUPPORTED;
+  *temperature = static_cast<int64_t>(value);
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetVoltMetric(amdsmi_voltage_type_t sensor_type,
-                                             amdsmi_voltage_metric_t metric, int64_t* voltage) {
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
+amdsmi_status_t WSLGPUBackend::get_volt_metric(amdsmi_voltage_type_t sensor_type,
+                                               amdsmi_voltage_metric_t metric, int64_t* voltage) {
+  // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL,
+  // matching old behavior.
   if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
-  rocdxg_smi_power_info_t power = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  *voltage = power.gfx_voltage;
+
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  uint32_t value = wsl::PmlogValue(snap, Wkmi::kPmlogGfxVoltage);
+  if (value == Wkmi::kSensorUnavailable) return AMDSMI_STATUS_NOT_SUPPORTED;
+  *voltage = static_cast<int64_t>(value);
   return AMDSMI_STATUS_SUCCESS;
-#else
-  (void)sensor_type;
-  (void)metric;
-  (void)voltage;
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetPowerInfo(amdsmi_power_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_power_info(amdsmi_power_info_t* info) {
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
+
   std::memset(info, 0, sizeof(*info));
   info->socket_power = std::numeric_limits<decltype(info->socket_power)>::max();
   info->current_socket_power = std::numeric_limits<decltype(info->current_socket_power)>::max();
@@ -497,231 +380,270 @@ amdsmi_status_t WSLGPUBackend::GetPowerInfo(amdsmi_power_info_t* info) {
   info->mem_voltage = std::numeric_limits<decltype(info->mem_voltage)>::max();
   info->power_limit = std::numeric_limits<decltype(info->power_limit)>::max();
   info->ubb_power = std::numeric_limits<decltype(info->ubb_power)>::max();
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_power_info_t power = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  info->current_socket_power = power.current_socket_power;
-  info->average_socket_power = power.current_socket_power;
-  info->socket_power = power.current_socket_power;
-  info->gfx_voltage = power.gfx_voltage;
-  info->soc_voltage = power.soc_voltage;
-  info->mem_voltage = power.mem_voltage;
-  info->power_limit = power.power_limit;
+
+  uint32_t power = wsl::PmlogValue(snap, Wkmi::kPmlogBoardPower);
+  if (power == Wkmi::kSensorUnavailable)
+    power = wsl::PmlogValue(snap, Wkmi::kPmlogAsicPower);  // board power -> asic power fallback
+  if (power != Wkmi::kSensorUnavailable) {
+    info->current_socket_power = power;
+    info->average_socket_power = power;
+    info->socket_power = power;
+  }
+
+  uint32_t gfx_v = wsl::PmlogValue(snap, Wkmi::kPmlogGfxVoltage);
+  if (gfx_v != Wkmi::kSensorUnavailable) info->gfx_voltage = gfx_v;
+  uint32_t soc_v = wsl::PmlogValue(snap, Wkmi::kPmlogSocVoltage);
+  if (soc_v != Wkmi::kSensorUnavailable) info->soc_voltage = soc_v;
+  uint32_t mem_v = wsl::PmlogValue(snap, Wkmi::kPmlogMemVoltage);
+  if (mem_v != Wkmi::kSensorUnavailable) info->mem_voltage = mem_v;
+
+  uint32_t limit = wsl::PmlogMaxLimit(snap, Wkmi::kPmlogBoardPower);
+  if (limit == Wkmi::kSensorUnavailable) limit = wsl::PmlogMaxLimit(snap, Wkmi::kPmlogAsicPower);
+  if (limit != Wkmi::kSensorUnavailable) info->power_limit = limit;
+
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetBusyPercent(uint32_t* gpu_busy_percent) {
+amdsmi_status_t WSLGPUBackend::get_busy_percent(uint32_t* gpu_busy_percent) {
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  uint32_t value = wsl::PmlogValue(snap, Wkmi::kPmlogGfxActivity);
+  if (value == Wkmi::kSensorUnavailable) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_gpu_metrics_info_t metrics = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  *gpu_busy_percent = metrics.average_gfx_activity;
+  *gpu_busy_percent = value;
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetGpuActivity(amdsmi_engine_usage_t* info) {
+amdsmi_status_t WSLGPUBackend::get_gpu_activity(amdsmi_engine_usage_t* info) {
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_gpu_metrics_info_t metrics = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
   std::memset(info, 0, sizeof(*info));
-  info->gfx_activity = metrics.average_gfx_activity;
-  info->umc_activity = metrics.average_umc_activity;
+  uint32_t gfx = wsl::PmlogValue(snap, Wkmi::kPmlogGfxActivity);
+  uint32_t mem = wsl::PmlogValue(snap, Wkmi::kPmlogMemActivity);
+  info->gfx_activity = gfx != Wkmi::kSensorUnavailable ? gfx : 0x0000FFFF;
+  info->umc_activity = mem != Wkmi::kSensorUnavailable ? mem : std::numeric_limits<uint32_t>::max();
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetClockInfo(amdsmi_clk_type_t clk_type, amdsmi_clk_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_clock_info(amdsmi_clk_type_t clk_type, amdsmi_clk_info_t* info) {
+  Wkmi::PmlogSensorId sensor;
+  switch (clk_type) {
+    case AMDSMI_CLK_TYPE_SYS:  // == AMDSMI_CLK_TYPE_GFX
+      sensor = Wkmi::kPmlogGfxClk;
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      sensor = Wkmi::kPmlogMemClk;
+      break;
+    case AMDSMI_CLK_TYPE_SOC:
+      sensor = Wkmi::kPmlogSocClk;
+      break;
+    default:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_clock_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus =
-      g_wsl_syms.rocdxg_smi_get_clock_info(node_id_, static_cast<uint32_t>(clk_type), &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+
+  wsl::PmlogSnapshot snap;
+  uint32_t clk = Wkmi::kSensorUnavailable;
+  if (wsl::QueryPmlogSnapshot(adapter_, &snap)) clk = wsl::PmlogValue(snap, sensor);
+
   std::memset(info, 0, sizeof(*info));
-  info->clk = rocdxg_info.clk;
-  info->min_clk = rocdxg_info.min_clk;
-  info->max_clk = rocdxg_info.max_clk;
-  info->clk_locked = rocdxg_info.clk_locked;
-  info->clk_deep_sleep = rocdxg_info.clk_deep_sleep;
-  return AMDSMI_STATUS_SUCCESS;
-#else
-  (void)clk_type;
+  if (clk != Wkmi::kSensorUnavailable) {
+    info->clk = clk;
+    info->max_clk = clk_type == AMDSMI_CLK_TYPE_MEM ? adapter_.device_info.max_memory_clock_mhz
+                                                    : adapter_.device_info.max_engine_clock_mhz;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  // Fallback: static max only, for GFX and MEM (matches
+  // rocdxg_smi_get_clock_info's behavior when the PMLog sensor is unavailable).
+  if (clk_type == AMDSMI_CLK_TYPE_SYS) {
+    info->max_clk = adapter_.device_info.max_engine_clock_mhz;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  if (clk_type == AMDSMI_CLK_TYPE_MEM) {
+    info->max_clk = adapter_.device_info.max_memory_clock_mhz;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetPcieInfo(amdsmi_pcie_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_pcie_info_t rocdxg_info = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_pcie_info(node_id_, &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  std::memset(info, 0, sizeof(*info));
-  info->pcie_static.max_pcie_width = rocdxg_info.max_pcie_width;
-  info->pcie_static.max_pcie_speed = rocdxg_info.max_pcie_speed;
-  info->pcie_static.pcie_interface_version = rocdxg_info.pcie_interface_version;
-  info->pcie_static.slot_type = static_cast<amdsmi_card_form_factor_t>(rocdxg_info.slot_type);
-  info->pcie_metric.pcie_width = rocdxg_info.pcie_width;
-  info->pcie_metric.pcie_speed = rocdxg_info.pcie_speed;
-  info->pcie_metric.pcie_bandwidth = rocdxg_info.pcie_bandwidth;
-  info->pcie_metric.pcie_replay_count = rocdxg_info.pcie_replay_count;
-  info->pcie_metric.pcie_l0_to_recovery_count = rocdxg_info.pcie_l0_to_recovery_count;
-  info->pcie_metric.pcie_replay_roll_over_count = rocdxg_info.pcie_replay_roll_over_count;
-  info->pcie_metric.pcie_nak_sent_count = rocdxg_info.pcie_nak_sent_count;
-  info->pcie_metric.pcie_nak_received_count = rocdxg_info.pcie_nak_received_count;
-  return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
-}
-
-amdsmi_status_t WSLGPUBackend::GetDriverInfo(amdsmi_driver_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+amdsmi_status_t WSLGPUBackend::get_pcie_info(amdsmi_pcie_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+
   std::memset(info, 0, sizeof(*info));
-  copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
-  copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
-  copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
+  // pcie_gen == 0 means Wkmi::QueryChipsetId failed; leave static fields at
+  // their zero default instead of aborting before the dynamic PMLog query below.
+  info->pcie_static.max_pcie_width = static_cast<uint16_t>(device_info_.max_pcie_lane_width);
+  uint32_t gen = std::min<uint32_t>(device_info_.pcie_gen, 5);
+  info->pcie_static.max_pcie_speed = kGenSpeed[gen];
+  info->pcie_static.pcie_interface_version = device_info_.pcie_gen;
+  // No equivalent on Wkmi::ChipsetIdInfo for these two fields.
+  info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_UNKNOWN;
+  info->pcie_static.max_pcie_interface_version = std::numeric_limits<uint32_t>::max();
+
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  uint32_t width = wsl::PmlogValue(snap, Wkmi::kPmlogBusLanes);
+  uint32_t speed_gen = wsl::PmlogValue(snap, Wkmi::kPmlogBusSpeed);
+  info->pcie_metric.pcie_width =
+      width != Wkmi::kSensorUnavailable ? static_cast<uint16_t>(width) : 0;
+  if (speed_gen != Wkmi::kSensorUnavailable) {
+    uint32_t cur_gen = std::min<uint32_t>(speed_gen, 5);
+    info->pcie_metric.pcie_speed = kGenSpeed[cur_gen];
+  } else {
+    info->pcie_metric.pcie_speed = 0;
+  }
+  // No PMLog sensor equivalents exist for these counters/bandwidth.
+  info->pcie_metric.pcie_bandwidth = 0;
+  info->pcie_metric.pcie_replay_count = 0;
+  info->pcie_metric.pcie_l0_to_recovery_count = 0;
+  info->pcie_metric.pcie_replay_roll_over_count = 0;
+  info->pcie_metric.pcie_nak_sent_count = 0;
+  info->pcie_metric.pcie_nak_received_count = 0;
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetVbiosInfo(amdsmi_vbios_info_t* info) {
+amdsmi_status_t WSLGPUBackend::get_driver_info(amdsmi_driver_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  amdsmi_status_t r = load_device_info();
-  if (r != AMDSMI_STATUS_SUCCESS) return r;
   std::memset(info, 0, sizeof(*info));
-  copy_rocdxg_string(info->name, device_info_.vbios.name);
-  copy_rocdxg_string(info->build_date, device_info_.vbios.build_date);
-  copy_rocdxg_string(info->part_number, device_info_.vbios.part_number);
-  copy_rocdxg_string(info->version, device_info_.vbios.version);
-  copy_rocdxg_string(info->boot_firmware, device_info_.vbios.boot_firmware);
+  copy_c_string(info->driver_version, adapter_.driver_version);
+  copy_string(info->driver_date, derive_driver_date(adapter_.driver_version));
+  copy_c_string(info->driver_name, adapter_.driver_desc);
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetGpuCacheInfo(amdsmi_gpu_cache_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+amdsmi_status_t WSLGPUBackend::get_vbios_info(amdsmi_vbios_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  const auto& c = device_info_.cache;
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
+  copy_string(info->name, device_info_.vbios_name);
+  copy_string(info->build_date, device_info_.vbios_build_date);
+  copy_string(info->part_number, device_info_.vbios_part_number);
+  copy_string(info->version, device_info_.vbios_version);
+  // No boot_firmware equivalent on Wkmi::VideoBiosInfo.
+  copy_string(info->boot_firmware, "N/A");
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t WSLGPUBackend::get_gpu_cache_info(amdsmi_gpu_cache_info_t* info) {
+  amdsmi_status_t r = load_device_info();
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
   info->num_cache_types =
-      std::min(c.num_cache_types, static_cast<uint32_t>(AMDSMI_MAX_CACHE_TYPES));
+      std::min(device_info_.num_cache_types, static_cast<uint32_t>(AMDSMI_MAX_CACHE_TYPES));
   for (uint32_t i = 0; i < info->num_cache_types; ++i) {
-    info->cache[i].cache_size = c.cache[i].cache_size_kb;
-    info->cache[i].cache_level = c.cache[i].cache_level;
-    info->cache[i].cache_properties = c.cache[i].cache_properties;
-    info->cache[i].max_num_cu_shared = c.cache[i].max_num_cu_shared;
-    info->cache[i].num_cache_instance = c.cache[i].num_cache_instance;
+    info->cache[i].cache_size = device_info_.cache[i].cache_size_kb;
+    info->cache[i].cache_level = device_info_.cache[i].cache_level;
+    info->cache[i].cache_properties = device_info_.cache[i].cache_properties;
+    info->cache[i].max_num_cu_shared = device_info_.cache[i].max_num_cu_shared;
+    info->cache[i].num_cache_instance = device_info_.cache[i].num_cache_instance;
   }
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetFwInfo(amdsmi_fw_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+amdsmi_status_t WSLGPUBackend::get_fw_info(amdsmi_fw_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  const auto& fw = device_info_.fw;
-  info->num_fw_info = std::min(fw.num_fw_info, static_cast<uint32_t>(AMDSMI_FW_ID__MAX));
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
+  info->num_fw_info = std::min(device_info_.num_fw_info, static_cast<uint32_t>(AMDSMI_FW_ID__MAX));
   for (uint32_t i = 0; i < info->num_fw_info; ++i) {
-    info->fw_info_list[i].fw_id = static_cast<amdsmi_fw_block_t>(fw.entries[i].fw_id);
-    info->fw_info_list[i].fw_version = fw.entries[i].fw_version;
+    info->fw_info_list[i].fw_id = device_info_.fw_info_list[i].fw_id;
+    info->fw_info_list[i].fw_version = device_info_.fw_info_list[i].fw_version;
   }
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetFanRpms(uint32_t /* sensor_ind */, int64_t* /* speed */) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-}
-
-amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* speed) {
+amdsmi_status_t WSLGPUBackend::get_fan_rpms(uint32_t /* sensor_ind */, int64_t* speed) {
+  // Old code always returned NOT_SUPPORTED here even with rocdxg present. The
+  // new PMLog stack does expose a Wkmi::kPmlogFanRpm sensor, so this is
+  // implemented rather than preserved as an unconditional stub -- flagged as
+  // a deliberate improvement/deviation from old behavior.
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  uint32_t value = wsl::PmlogValue(snap, Wkmi::kPmlogFanRpm);
+  if (value == Wkmi::kSensorUnavailable) return AMDSMI_STATUS_NOT_SUPPORTED;
   if (speed == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_gpu_metrics_info_t metrics = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
-  *speed = static_cast<int64_t>(metrics.current_fan_speed_percent);
+  *speed = static_cast<int64_t>(value);
   return AMDSMI_STATUS_SUCCESS;
-#else
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
-amdsmi_status_t WSLGPUBackend::GetFanSpeedMax(uint32_t /* sensor_ind */, uint64_t* max_speed) {
+amdsmi_status_t WSLGPUBackend::get_fan_speed(uint32_t /* sensor_ind */, int64_t* speed) {
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  uint32_t value = wsl::PmlogValue(snap, Wkmi::kPmlogFanPercent);
+  if (value == Wkmi::kSensorUnavailable) return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
+  *speed = static_cast<int64_t>(value);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t WSLGPUBackend::get_fan_speed_max(uint32_t /* sensor_ind */, uint64_t* max_speed) {
   if (max_speed == nullptr) return AMDSMI_STATUS_INVAL;
   *max_speed = 100;
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetPowerCapInfo(amdsmi_power_cap_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
-#ifdef AMDSMI_HAS_ROCDXG_SMI
+amdsmi_status_t WSLGPUBackend::get_power_cap_info(amdsmi_power_cap_info_t* info) {
   amdsmi_power_info_t power = {};
-  amdsmi_status_t r = GetPowerInfo(&power);
+  amdsmi_status_t r = get_power_info(&power);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+
+  std::memset(info, 0, sizeof(*info));
+  // Only power_cap has a PMLog-derived source (matches old rocdxg behavior);
+  // default/min/max/dpm caps have no equivalent and are left zeroed.
   if (power.power_limit != std::numeric_limits<uint32_t>::max())
     info->power_cap = power.power_limit;
-#endif
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
+amdsmi_status_t WSLGPUBackend::get_gpu_metrics_info(amdsmi_gpu_metrics_t* info) {
+  wsl::PmlogSnapshot snap;
+  if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
+
   // Init all numeric fields to sentinel (0xFF = max for all uint types); keep the pointer null.
   std::memset(info, 0xFF, sizeof(*info));
   info->apu_metrics = nullptr;
-#ifdef AMDSMI_HAS_ROCDXG_SMI
-  rocdxg_smi_gpu_metrics_info_t metrics = {};
-  HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
 
-  // rocdxg temperatures are in degrees C (uint32_t); amdsmi_gpu_metrics_t uses uint16_t degrees C.
-  info->temperature_edge = static_cast<uint16_t>(metrics.temperature_edge);
-  info->temperature_hotspot = static_cast<uint16_t>(metrics.temperature_hotspot);
-  info->average_gfx_activity = static_cast<uint16_t>(metrics.average_gfx_activity);
-  info->average_umc_activity = static_cast<uint16_t>(metrics.average_umc_activity);
-  info->current_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
-  info->average_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
-  // Populate current clocks from rocdxg. Guard against UINT32_MAX sentinel
-  // (rocdxg returns UINT32_MAX when a field is unsupported on this version).
-  if (metrics.current_gfxclk <= 0xFFFEU) {
-    // All XCCs run at the same GFX clock on MI300X; propagate to all XCC slots.
-    uint32_t n = std::min(num_xcc_, static_cast<uint32_t>(AMDSMI_MAX_NUM_GFX_CLKS));
-    for (uint32_t i = 0; i < n; ++i)
-      info->current_gfxclks[i] = static_cast<uint16_t>(metrics.current_gfxclk);
+  auto set_u16_if_avail = [&](uint16_t* dst, Wkmi::PmlogSensorId id) {
+    uint32_t v = wsl::PmlogValue(snap, id);
+    if (v != Wkmi::kSensorUnavailable) *dst = static_cast<uint16_t>(v);
+  };
+
+  set_u16_if_avail(&info->temperature_edge, Wkmi::kPmlogTempEdge);
+  set_u16_if_avail(&info->temperature_hotspot, Wkmi::kPmlogTempHotspot);
+  set_u16_if_avail(&info->temperature_mem, Wkmi::kPmlogTempMem);
+  set_u16_if_avail(&info->average_gfx_activity, Wkmi::kPmlogGfxActivity);
+  set_u16_if_avail(&info->average_umc_activity, Wkmi::kPmlogMemActivity);
+  set_u16_if_avail(&info->current_fan_speed, Wkmi::kPmlogFanRpm);
+  set_u16_if_avail(&info->voltage_soc, Wkmi::kPmlogSocVoltage);
+  set_u16_if_avail(&info->voltage_gfx, Wkmi::kPmlogGfxVoltage);
+  set_u16_if_avail(&info->voltage_mem, Wkmi::kPmlogMemVoltage);
+
+  uint32_t power = wsl::PmlogValue(snap, Wkmi::kPmlogBoardPower);
+  if (power == Wkmi::kSensorUnavailable) power = wsl::PmlogValue(snap, Wkmi::kPmlogAsicPower);
+  if (power != Wkmi::kSensorUnavailable) {
+    info->current_socket_power = static_cast<uint16_t>(power);
+    info->average_socket_power = static_cast<uint16_t>(power);
   }
-  if (metrics.current_socclk <= 0xFFFEU)
-    info->current_socclk = static_cast<uint16_t>(metrics.current_socclk);
+
+  uint32_t gfxclk = wsl::PmlogValue(snap, Wkmi::kPmlogGfxClk);
+  if (gfxclk != Wkmi::kSensorUnavailable) {
+    // All XCCs run at the same GFX clock; propagate to all XCC slots.
+    uint32_t n =
+        std::min(adapter_.device_info.num_xcc, static_cast<uint32_t>(AMDSMI_MAX_NUM_GFX_CLKS));
+    n = std::max(n, 1U);
+    for (uint32_t i = 0; i < n; ++i) info->current_gfxclks[i] = static_cast<uint16_t>(gfxclk);
+  }
+  set_u16_if_avail(&info->current_socclk, Wkmi::kPmlogSocClk);
+
   // VCN/JPEG decoders report 0% activity in WSL (no video workloads on this path).
   std::fill(info->vcn_activity, info->vcn_activity + AMDSMI_MAX_NUM_VCN, static_cast<uint16_t>(0));
   std::fill(info->jpeg_activity, info->jpeg_activity + AMDSMI_MAX_NUM_JPEG,
@@ -730,16 +652,17 @@ amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
   info->gfxclk_lock_status = 0;
   // No throttle telemetry in WSL; report unthrottled.
   info->throttle_status = 0;
-#endif
+
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetUuid(unsigned int* uuid_length, char* uuid) {
+amdsmi_status_t WSLGPUBackend::get_uuid(unsigned int* uuid_length, char* uuid) {
+  amdsmi_status_t r = load_device_info();
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
   if (uuid_length == nullptr || uuid == nullptr || *uuid_length < AMDSMI_GPU_UUID_SIZE)
     return AMDSMI_STATUS_INVAL;
 
-  const uint64_t id = unique_id_ ? unique_id_ : bdf_.as_uint;
-  amdsmi_status_t status = amdsmi_uuid_gen(uuid, id, device_id_, 0xff);
+  amdsmi_status_t status = amdsmi_uuid_gen(uuid, device_info_.uuid_seed, adapter_.device_id, 0xff);
   if (status == AMDSMI_STATUS_SUCCESS) *uuid_length = AMDSMI_GPU_UUID_SIZE;
   return status;
 }

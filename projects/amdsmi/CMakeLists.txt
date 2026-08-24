@@ -128,6 +128,17 @@ option(ENABLE_ASAN_PACKAGING "" OFF)
 # ON, the WSL intercept hooks and mock backend are compiled
 option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
 
+if(ENABLE_WSL_BACKEND)
+    if(NOT WIN_SDK OR NOT EXISTS "${WIN_SDK}/ntstatus.h")
+        message(
+            FATAL_ERROR
+            "ENABLE_WSL_BACKEND requires -DWIN_SDK=<windows_kit_root>/shared "
+            "(the 'shared' subdirectory, not the SDK root) -- WIN_SDK is unset "
+            "or '${WIN_SDK}/ntstatus.h' does not exist."
+        )
+    endif()
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 else()

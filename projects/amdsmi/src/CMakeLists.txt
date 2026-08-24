@@ -60,12 +60,24 @@ set(SRC_LIST
 )
 
 if(ENABLE_WSL_BACKEND)
-    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_device.cc")
+    list(
+        APPEND SRC_LIST
+        "${SRC_DIR}/amd_smi_wsl_device.cc"
+        "${SRC_DIR}/wsl/dxcore_loader.cc"
+        "${SRC_DIR}/wsl/wsl_status.cc"
+        "${SRC_DIR}/wsl/wsl_adapter.cc"
+        "${SRC_DIR}/wsl/wsl_vram.cc"
+        "${SRC_DIR}/wsl/wsl_pmlog.cc"
+    )
 endif()
 
 # CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
 # impl header triggers a regenerate instead of going unnoticed until a clean build.
 file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
+if(ENABLE_WSL_BACKEND)
+    file(GLOB WSL_IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/wsl/*.h")
+    list(APPEND IMPL_HEADERS ${WSL_IMPL_HEADERS})
+endif()
 set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
@@ -173,8 +185,26 @@ function(amdsmi_configure_common_target _TARGET)
     )
 
     if(ENABLE_WSL_BACKEND)
-        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
-        target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND)
+        target_compile_definitions(${_TARGET} PRIVATE LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
+        if(
+            NOT EXISTS "${PROJECT_SOURCE_DIR}/../../shared/amdgpu-windows-interop/wkmi"
+            OR NOT EXISTS "${PROJECT_SOURCE_DIR}/../../shared/amdgpu-windows-interop/wkmi/lnx/lib/libwkmi.a"
+        )
+            message(
+                FATAL_ERROR
+                "ENABLE_WSL_BACKEND requires the wkmi headers and libwkmi.a in "
+                "'${PROJECT_SOURCE_DIR}/../../shared/amdgpu-windows-interop/wkmi' -- "
+                "the directory or its 'lnx/lib/libwkmi.a' does not exist."
+            )
+        endif()
+        target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../../shared/amdgpu-windows-interop/wkmi)
+        target_include_directories(${_TARGET} SYSTEM PRIVATE ${WIN_SDK})
+        target_link_directories(
+            ${_TARGET}
+            PRIVATE ${PROJECT_SOURCE_DIR}/../../shared/amdgpu-windows-interop/wkmi/lnx/lib
+        )
+        target_link_libraries(${_TARGET} PRIVATE wkmi)
     endif()
 
     target_include_directories(
@@ -333,7 +363,7 @@ install(
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
-list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "impl/wsl/")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)

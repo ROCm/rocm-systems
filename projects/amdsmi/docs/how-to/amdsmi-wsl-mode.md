@@ -21,22 +21,22 @@ the WDDM path instead of DRM/sysfs; everything else behaves as before.
 ```{note}
 The WSL backend is experimental and gated behind a build flag that is **off by
 default**. A default AMD SMI build and its packages are byte-for-byte the native
-tool. When enabled, the backend reads real GPU telemetry through `librocdxg`
-(`rocdxg_smi_*` APIs); queries with no WDDM equivalent return
+tool. When enabled, the backend reads real GPU telemetry through D3DKMT/DXCore
+calls (linked against `libwkmi.a`); queries with no WDDM equivalent return
 `AMDSMI_STATUS_NOT_SUPPORTED`.
 ```
 
 ## How it works
 
 AMD SMI keeps a single code path per API. The WSL-versus-native decision is made
-**once per process**, on the first API call, not scattered through every
+**once per process**, during `amdsmi_init()`, not scattered through every
 function:
 
 ```text
 amdsmi_get_gpu_* (one dispatcher, backend-agnostic)
         │
         ├─ native  → DRM ioctls / sysfs        (default)
-        └─ WSL     → AMDSmiWslBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
+        └─ WSL     → WSLGPUBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
 ```
 
 Queries that WDDM cannot serve (for example CPU/HSMP metrics, NIC, xGMI fabric,
@@ -59,9 +59,13 @@ The backend is compiled in only when you enable the CMake option. It is off by
 default:
 
 ```bash
-cmake -S . -B build -DENABLE_WSL_BACKEND=ON
+cmake -S . -B build -DENABLE_WSL_BACKEND=ON -DWIN_SDK=<windows_kit_root>/shared
 cmake --build build --target amd_smi -j"$(nproc)"
 ```
+
+`WIN_SDK` must point at the Windows Kit's `shared` subdirectory, not the kit
+root -- the root only contains a `shared/` subdirectory, and pointing at it
+directly fails with a confusing `ntstatus.h` not-found error.
 
 A build without `-DENABLE_WSL_BACKEND=ON` produces the standard native library;
 the WSL source is not compiled and the intercept hooks expand to nothing.
@@ -98,8 +102,10 @@ fields and `N/A` for the rest.
 ## Limitations
 
 - Experimental: the supported-query set is a subset of the native API and will
-  grow as `librocdxg` exposes more telemetry.
+  grow as the D3DKMT/DXCore path exposes more telemetry.
 - CPU/ESMI, NIC, switch, fabric, ECC, and partition features are not available
   under WSL; those queries return `AMDSMI_STATUS_NOT_SUPPORTED`.
 - PCIe info, VRAM type, subvendor/subsystem IDs, and full VBIOS fields depend on
-  the installed `librocdxg` version and may show `N/A` on older drivers.
+  the installed WDDM driver version and may show `N/A` on older drivers.
+- Per-process GPU usage (`amd-smi process`, `amdsmi_get_gpu_process_list`) is
+  not available under WSL and returns `AMDSMI_STATUS_NOT_SUPPORTED`.

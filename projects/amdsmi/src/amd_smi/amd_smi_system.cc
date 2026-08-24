@@ -359,9 +359,9 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
 #ifdef ENABLE_WSL_BACKEND
-  // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
+  // WSL path: try_populate handles /dev/dxg detection, librocdxg loading, and
   // device enumeration. Returns NOT_SUPPORTED when not on WSL.
-  amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  amdsmi_status_t wsl_status = WSLGPUBackend::try_populate(sockets_, processors_);
   if (wsl_status != AMDSMI_STATUS_NOT_SUPPORTED) return wsl_status;
   // Fall through to native Linux path if not on WSL.
 #endif
@@ -709,8 +709,8 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     }
     drm_.cleanup();
 #ifdef ENABLE_WSL_BACKEND
-    bool used_wsl = WSLGPUBackend::IsActive();
-    amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
+    bool used_wsl = WSLGPUBackend::is_active();
+    amdsmi_status_t wsl_ret = WSLGPUBackend::shutdown();
     if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
     if (!used_wsl) {
 #endif
