@@ -9,6 +9,7 @@
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 
 namespace rocprofsys::trace_cache
 {

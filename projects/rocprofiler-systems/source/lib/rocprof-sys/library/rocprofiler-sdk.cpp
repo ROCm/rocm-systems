@@ -2489,11 +2489,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events();
     auto _version = sdk_tracing_config<wrapper, default_sdk_externals>::get_version();
 
-    const auto _spm_config = rocprofiler_sdk::spm::configuration{
-        .counter_events  = rocprofiler_sdk::spm::get_events(),
-        .sample_interval = rocprofiler_sdk::spm::get_sample_interval(),
-    };
-
     if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2505,10 +2500,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
 
-    if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_config, _counter_events,
-                                                config::get_gpu_perf_counters(),
-                                                config::get_use_rocpd()))
-        return -1;
+    if(!rocprofiler_sdk::spm::configure_runtime(_data)) return -1;
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
@@ -2882,7 +2874,7 @@ tool_fini(void* callback_data)
     }
 
     auto* _data = as_client_data(callback_data);
-    rocprofiler_sdk::spm::log_data_loss(_data);
+    rocprofiler_sdk::spm::finalize_runtime(_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
     delete tool_data;

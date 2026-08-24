@@ -31,7 +31,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1403,9 +1402,8 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
+perfetto_processor_t::handle(const spm_sample& _spm)
 {
-#if ROCPROFSYS_USE_SPM
     using counter_collection_track =
         core::perfetto::counter_track<category::rocm_counter_collection>;
 
@@ -1441,16 +1439,13 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
         {
             // Warn rather than debug: the usual cause is a child/MPI process, whose
             // metadata file does not carry SPM counter names yet, and the only other
-            // symptom is an SPM track that never appears. Deduplicated per
-            // (device, counter instance) so a long run does not flood the log.
-            static auto reported = std::set<std::pair<std::uint32_t, std::uint64_t>>{};
-            static auto reported_mutex = std::mutex{};
-            auto        should_report  = false;
-            {
-                std::lock_guard scope{ reported_mutex };
-                should_report =
-                    reported.emplace(device_id, counter.counter_instance_id).second;
-            }
+            // symptom is an SPM track that never appears. Deduplicated per processor
+            // instance and per (device, counter instance) so a long run does not flood
+            // the log.
+            const auto should_report =
+                m_missing_spm_counter_metadata
+                    .emplace(device_id, counter.counter_instance_id)
+                    .second;
             if(should_report)
             {
                 LOG_WARNING(
@@ -1491,7 +1486,6 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
                           sample.timestamp, value.value);
         }
     }
-#endif
 }
 
 void

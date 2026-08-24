@@ -23,6 +23,8 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl_internal.hpp
     ${CMAKE_CURRENT_LIST_DIR}/spm.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_internal.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_sample.hpp
 )
 
 target_sources(

@@ -640,7 +640,11 @@ rocpd_processor_t::handle(
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
-{}
+{
+    // SPM samples are Perfetto-only in this beta PR. The runtime emits a config-time
+    // warning when SPM is requested with RocPD enabled; keep this handler explicit so
+    // the visitor surface is complete without silently implying RocPD export exists.
+}
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)

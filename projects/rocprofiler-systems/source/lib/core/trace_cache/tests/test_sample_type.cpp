@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 
 #include <array>
 #include <cstdint>
@@ -542,15 +543,21 @@ TEST_F(sample_type_test, spm_sample_serialize_deserialize)
         spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
     };
     auto samples = std::vector<spm_timestamp_sample>{
-        spm_timestamp_sample{ 1000,
-                              {
-                                  spm_counter_value{ 0, 123.5 },
-                                  spm_counter_value{ 1, 456.75 },
-                              } },
-        spm_timestamp_sample{ 1200,
-                              {
-                                  spm_counter_value{ 0, 789.25 },
-                              } },
+        spm_timestamp_sample{
+            .timestamp = 1000,
+            .values =
+                {
+                    spm_counter_value{ .counter_info_index = 0, .value = 123.5 },
+                    spm_counter_value{ .counter_info_index = 1, .value = 456.75 },
+                },
+        },
+        spm_timestamp_sample{
+            .timestamp = 1200,
+            .values =
+                {
+                    spm_counter_value{ .counter_info_index = 0, .value = 789.25 },
+                },
+        },
     };
     spm_sample original{
         .agent_id_handle         = 7,
@@ -611,15 +618,21 @@ TEST_F(sample_type_test, spm_sample_get_size)
         spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
     };
     auto samples = std::vector<spm_timestamp_sample>{
-        spm_timestamp_sample{ 1000,
-                              {
-                                  spm_counter_value{ 0, 123.5 },
-                                  spm_counter_value{ 1, 456.75 },
-                              } },
-        spm_timestamp_sample{ 1200,
-                              {
-                                  spm_counter_value{ 0, 789.25 },
-                              } },
+        spm_timestamp_sample{
+            .timestamp = 1000,
+            .values =
+                {
+                    spm_counter_value{ .counter_info_index = 0, .value = 123.5 },
+                    spm_counter_value{ .counter_info_index = 1, .value = 456.75 },
+                },
+        },
+        spm_timestamp_sample{
+            .timestamp = 1200,
+            .values =
+                {
+                    spm_counter_value{ .counter_info_index = 0, .value = 789.25 },
+                },
+        },
     };
     const spm_sample sample{
         .agent_id_handle         = 7,
