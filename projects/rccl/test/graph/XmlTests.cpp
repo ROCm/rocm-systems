@@ -1805,4 +1805,24 @@ TEST_F(XmlTest, FillLinkTclass_MissingTclass_DoesNotLeaveUnset) {
   ASSERT_NE(tclass, nullptr);
   EXPECT_STREQ(tclass, PCI_NVSWITCH_CLASS);
 }
+
+// HIP may name a GPU at a BDF that is not a physical function (sysfs can be a
+// NIC, or the BDF may be absent). Missing tclass must not become that NIC class
+// or NVSwitch — UALoE configured or not.
+TEST_F(XmlTest, FillLinkTclass_MissingTclass_NonGpuSysfs_UsesAccelerator) {
+  struct ncclXmlNode *gpuNode = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, rootNode, "gpu", &gpuNode), ncclSuccess);
+
+  struct ncclXmlNode *xgmi = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, gpuNode, "xgmi", &xgmi), ncclSuccess);
+  // 0001:01:00.1 is a HIP logical GPU BDF on gfx1250 DPX; sysfs may be a NIC.
+  ASSERT_EQ(xmlSetAttr(xgmi, "target", "0001:01:00.1"), ncclSuccess);
+
+  ASSERT_EQ(ncclTopoXmlFillLinkTclass(gpuNode), ncclSuccess);
+
+  const char *tclass = nullptr;
+  ASSERT_EQ(xmlGetAttr(xgmi, "tclass", &tclass), ncclSuccess);
+  ASSERT_NE(tclass, nullptr);
+  EXPECT_STREQ(tclass, PCI_ACCELERATOR_CLASS);
+}
 #endif

@@ -998,12 +998,11 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             lowerId[c] = tolower(busIdStr[c]);
             if (busIdStr[c] == 0) break;
           }
-          // gfx1250 takes this branch only when SMI reports fabricSupported on both
-          // devices in the same clique; otherwise it uses 1-hop XGMI below. On this
-          // DPX+NPS2 package ualink is link_type=invalid / accel_state=unconfigured,
-          // so canUseUALoE is false and discovery uses 1-hop XGMI. Either way the
-          // peer is an enumerated GPU, so stamp accelerator tclass rather than
-          // PCI_NVSWITCH_CLASS (switch fallback is the missing-tclass sysfs path).
+          // UALoE when both peers report a usable fabric (ready/active, same clique).
+          // Unconfigured ualink is a node setup issue, not a missing interconnect:
+          // fabricSupported is false and discovery falls through to 1-hop XGMI.
+          // Either path stamps accelerator tclass: HIP bus IDs need not exist on
+          // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
           int created = 0;
           NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
           if (nvlNode == NULL) created = 1;
@@ -1178,6 +1177,12 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
 }
 
 ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Sysfs class is only meaningful for a physical PCI function. HIP can name a
+  // logical GPU at a BDF that is not on the bus (e.g. function .1); ualink
+  // configured or not does not change that. Trust GPU/accelerator/switch class,
+  // otherwise keep the peer as an accelerator.
+#endif
   for (int s = 0; s < gpuNode->nSubs; s++) {
     struct ncclXmlNode* sub = gpuNode->subs[s];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -1199,11 +1204,32 @@ ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
         deviceClass[0] = '\0';
         if (ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass)) == ncclSuccess &&
             deviceClass[0] != '\0') {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          int gpuOrSwitch = 0;
+          if (strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0) gpuOrSwitch = 1;
+          else if (strncmp(deviceClass, PCI_NVSWITCH_CLASS, strlen(PCI_NVSWITCH_CLASS)) == 0) gpuOrSwitch = 1;
+          else if (strncmp(deviceClass, "0x03", 4) == 0) gpuOrSwitch = 1;
+          if (!gpuOrSwitch) {
+            INFO(NCCL_GRAPH,
+                 "XGMI target %s sysfs class %s is not a GPU/switch (HIP logical BDF?); using accelerator tclass",
+                 busId, deviceClass);
+            NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+          } else {
+            NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
+            TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+          }
+#else
           NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
           TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+#endif
         } else {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          INFO(NCCL_GRAPH, "No sysfs PCI class for XGMI target %s; using accelerator tclass", busId);
+          NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+#else
           INFO(NCCL_GRAPH, "Could not get device class for NVLink target %s, assuming NVSwitch", busId);
           NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_NVSWITCH_CLASS));
+#endif
         }
       }
     }
