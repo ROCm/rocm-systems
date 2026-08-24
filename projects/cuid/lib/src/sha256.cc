@@ -33,6 +33,10 @@
 namespace rocm {
 namespace sha2 {
 
+/// FIPS 180-4 section 5.3.3 initial hash value.
+constexpr std::array<uint32_t, 8> sha256_initial_state = {
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+
 void secure_zero(void* p, size_t n) {
   auto* volatile q = static_cast<volatile unsigned char*>(p);
   while (n-- > 0) *q++ = 0;
@@ -59,6 +63,7 @@ void sha256::update(const uint8_t* data, size_t len) {
 }
 
 void sha256::update(const std::string& data) {
+  if (m_finalized) return;
   update(reinterpret_cast<const uint8_t*>(data.data()), data.size());
 }
 
@@ -172,8 +177,7 @@ void sha256::transform() {
 }
 
 void sha256::reset() {
-  m_state = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  m_state = sha256_initial_state;
   m_data = {};
   m_datalen = 0;
   m_bitlen = 0;
