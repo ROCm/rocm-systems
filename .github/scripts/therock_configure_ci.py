@@ -183,13 +183,6 @@ def get_pr_labels(args) -> List[str]:
     return labels
 
 
-def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
-    """Returns true if any files under projects/rccl/ were modified."""
-    if modified_paths is None:
-        return False
-    return any(path.startswith("projects/rccl/") for path in modified_paths)
-
-
 # The workflow that runs the RCCL host unit tests. It is invoked via workflow_call
 # from therock-ci.yml, so it has no paths: trigger of its own and would otherwise
 # never be exercised by a PR that edits it -- a breakage would first surface on an
@@ -197,19 +190,24 @@ def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
 RCCL_HOST_TESTS_WORKFLOW = ".github/workflows/rccl-host-unit-tests.yml"
 
 
-def check_rccl_host_test_changes(modified_paths: Optional[Iterable[str]]) -> bool:
-    """Returns true if the RCCL host unit tests need to run.
+def check_rccl_changes(
+    modified_paths: Optional[Iterable[str]],
+    include_host_test_workflow: bool = False,
+) -> bool:
+    """Returns true if any files under projects/rccl/ were modified.
 
-    This is check_rccl_changes() plus the host-test workflow itself, so that
-    workflow stays self-testing. Kept separate from check_rccl_changes() on
-    purpose: widening that predicate would also pull in the multi-hour GPU
-    job (therock-rccl-ci-linux) on a CI-only edit.
+    include_host_test_workflow also matches the host-test workflow's own path, so
+    that workflow stays self-testing. It defaults to False because only the
+    CPU-only host tests want it: the GPU job (therock-rccl-ci-linux) starts with a
+    ~60 min package build per family, and a CI-only edit must not pull that in.
     """
     if modified_paths is None:
         return False
-    if check_rccl_changes(modified_paths):
+    if any(path.startswith("projects/rccl/") for path in modified_paths):
         return True
-    return any(path == RCCL_HOST_TESTS_WORKFLOW for path in modified_paths)
+    return include_host_test_workflow and any(
+        path == RCCL_HOST_TESTS_WORKFLOW for path in modified_paths
+    )
 
 
 def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
@@ -522,7 +520,7 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
-            if check_rccl_host_test_changes(modified_paths):
+            if check_rccl_changes(modified_paths, include_host_test_workflow=True):
                 outputs["run_rccl_host_tests"] = "true"
             else:
                 outputs["run_rccl_host_tests"] = "false"

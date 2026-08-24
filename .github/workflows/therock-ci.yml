@@ -237,7 +237,8 @@ jobs:
   # runs in parallel with the GPU jobs rather than waiting on a package build.
   # Gated on run_rccl_host_tests, which is run_linux_rccl_ci plus the host-test
   # workflow's own path so that workflow stays self-testing -- see
-  # check_rccl_host_test_changes() in .github/scripts/therock_configure_ci.py.
+  # check_rccl_changes(include_host_test_workflow=True) in
+  # .github/scripts/therock_configure_ci.py.
   rccl-host-unit-tests:
     name: RCCL Host Unit Tests
     needs: setup

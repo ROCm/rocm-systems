@@ -7,7 +7,8 @@ name: RCCL host unit tests
 #
 # Invoked by TheRock CI (.github/workflows/therock-ci.yml), which gates this on
 # `run_rccl_host_tests` -- projects/rccl/ changes PLUS this file's own path, so
-# editing this workflow still exercises it (check_rccl_host_test_changes() in
+# editing this workflow still exercises it
+# (check_rccl_changes(include_host_test_workflow=True) in
 # .github/scripts/therock_configure_ci.py). That workflow has no `paths:` filter
 # of its own, so its required `TheRock CI Summary` check always reports; folding
 # in here is what makes a host-test failure block a merge without stalling PRs

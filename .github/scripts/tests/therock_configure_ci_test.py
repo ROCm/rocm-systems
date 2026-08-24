@@ -376,7 +376,12 @@ class ConfigureCITest(unittest.TestCase):
     @patch("therock_configure_ci.get_modified_paths")
     def test_rccl_host_tests_triggered_by_own_workflow(self, mock_get_modified):
         """Editing the host-test workflow runs the host tests, so it stays
-        self-testing -- but must NOT pull in the multi-hour GPU job."""
+        self-testing -- but must NOT pull in the multi-hour GPU job.
+
+        The second assertion also pins check_rccl_changes()'s
+        include_host_test_workflow default to False: that predicate gates the
+        GPU job and the push-event subtree fallback, so a CI-only edit must
+        not reach either."""
         args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
 
         mock_get_modified.return_value = [therock_configure_ci.RCCL_HOST_TESTS_WORKFLOW]
