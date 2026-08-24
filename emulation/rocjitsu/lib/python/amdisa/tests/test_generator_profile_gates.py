@@ -5001,7 +5001,7 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
         assert 'has an invalid packed U64 element layout' in body
         assert 'has an invalid unused src2 encoding' in body
         assert 'does not support combined source negation and clamp' not in body
-        assert 'vdst register tuple that exceeds the selector range' in body
+        assert 'vdst register tuple that exceeds the selector range' not in body
         assert 'src0 register tuple that exceeds the selector range' in body
         assert 'src1 register tuple that exceeds the selector range' in body
         assert 'invalid vdst register tuple alignment' in body
@@ -5020,7 +5020,7 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     lshl_constructor = _generated_constructor_body(source, 'VPkLshlAddU64Vop3p')
     assert 'has an invalid packed U64 element layout' in lshl
     assert 'does not support source modifiers or clamp' in lshl
-    assert 'vdst register tuple that exceeds the selector range' in lshl
+    assert 'vdst register tuple that exceeds the selector range' not in lshl
     assert 'src0 register tuple that exceeds the selector range' in lshl
     assert 'src1 register tuple that exceeds the selector range' in lshl
     assert 'src2 register tuple that exceeds the selector range' in lshl
@@ -5054,7 +5054,7 @@ def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples
         body = _generated_decode_body(source, class_name)
         assert 'has an invalid packed F64 element layout' in body
         assert 'has an invalid unused src2 encoding' in body
-        assert 'vdst register tuple that exceeds the selector range' in body
+        assert 'vdst register tuple that exceeds the selector range' not in body
         assert 'src0 register tuple that exceeds the selector range' in body
         assert 'src1 register tuple that exceeds the selector range' in body
         assert 'invalid vdst register tuple alignment' in body
@@ -5073,10 +5073,33 @@ def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples
             assert f'{operand_name} <= 248u' in body
             assert f'{operand_name} == 255u' in body
             assert f'{operand_name} >= 256u' in body
-            assert f'{operand_name} <= 508u' in body
+            assert f'{operand_name} <= 510u' in body
             for invalid_selector in (230, 231, 235, 236, 253):
                 assert f'{operand_name} == {invalid_selector}u' not in body
         assert 'does not support source modifiers or clamp' not in body
+
+
+def test_gfx1251_packed_f64_fma_rejects_undefined_layouts_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    body = _generated_decode_body(source, 'VPkFmaF64Vop3p')
+
+    assert 'has an invalid packed F64 element layout' in body
+    assert 'has an invalid unused src2 encoding' not in body
+    assert 'vdst register tuple that exceeds the selector range' not in body
+    assert 'invalid vdst register tuple alignment' in body
+    assert 'src0 register tuple that exceeds the selector range' in body
+    assert 'invalid src0 register tuple alignment' in body
+    assert 'invalid src0 packed F64 source selector' in body
+    assert 'src1 register tuple that exceeds the selector range' in body
+    assert 'invalid src1 register tuple alignment' in body
+    assert 'invalid src1 packed F64 source selector' in body
+    assert 'src2 register tuple that exceeds the selector range' in body
+    assert 'invalid src2 register tuple alignment' in body
+    assert 'invalid src2 packed F64 source selector' in body
+    for operand_name in ('src0', 'src1', 'src2'):
+        assert f'{operand_name} <= 510u' in body
 
 
 def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(
@@ -5181,10 +5204,7 @@ def test_split_execution_ids_name_and_match_callbacks(
 def test_cdna5_variant_execution_callback_inventory(
     gfx1250_generated_root: Path,
 ) -> None:
-    model_only_classes = (
-        'VPkFmaF64Vop3p',
-        'VWmmaF6416x16x4F64Vop3p',
-    )
+    model_only_classes = ('VWmmaF6416x16x4F64Vop3p',)
     header = (gfx1250_generated_root / 'vop3p.h').read_text()
     model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
     backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
@@ -5203,6 +5223,7 @@ def test_cdna5_variant_execution_callback_inventory(
         assert class_name not in execution_source
 
     executable_classes = (
+        'VPkFmaF64Vop3p',
         'VPkMulF64Vop3p',
         'VPkAddF64Vop3p',
         'VPkAddNcU64Vop3p',
@@ -5234,6 +5255,13 @@ def test_cdna5_variant_execution_callback_inventory(
     )[0]
     assert 'const auto reg = operand.to_register_ref();' in u64_read_helper
     assert 'if (!reg || reg->cls != RegClass::VGPR)' in u64_read_helper
+    assert 'packed_vgpr_physical_base(operand, wf)' in u64_read_helper
+    assert 'packed_register_dword_offset' not in execution_source
+    assert 'make_after_selector_validation' not in execution_source
+    assert 'Isa::resolved_vgpr_offset(' in execution_source
+    assert 'operand.vgpr_msb_role()' in execution_source
+    assert 'read_vgpr64(base + 2, lane)' in execution_source
+    assert 'write_vgpr64(base + 2, lane, value.hi)' in execution_source
     u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
         '\n}', 1
     )[0]

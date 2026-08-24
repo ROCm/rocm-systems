@@ -14,6 +14,7 @@ from amdisa.codegen.execute.packed import (
     gen_pk_binop,
     gen_pk_binop_f32,
     gen_pk_binop_f64,
+    gen_pk_ternary_f64,
     gen_pk_fmac_vop2,
     gen_pk_fmac_vop3,
     gen_pk_binop_u64,
@@ -382,6 +383,30 @@ def test_pk_f64_binop_rejects_unknown_operation():
 
     with pytest.raises(ValueError, match='unsupported packed F64 binary operation'):
         gen_pk_binop_f64(['vdst'], ['src0', 'src1'], 'divide')
+
+
+def test_pk_f64_fma_uses_mode_aware_fused_two_element_execution():
+    cpp = gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'fma')
+
+    assert 'const auto multiplicand = read_pk_u64_pair(src0, wf, lane);' in cpp
+    assert 'const auto multiplier = read_pk_u64_pair(src1, wf, lane);' in cpp
+    assert 'const auto addend = read_pk_u64_pair(src2, wf, lane);' in cpp
+    assert cpp.count('amdgpu::fp_mode::fma_f64(') == 1
+    assert 'wf.fp_round_mode_f16_f64()' in cpp
+    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+    assert 'multiplicand_bits ^= kSignBit' in cpp
+    assert 'multiplier_bits ^= kSignBit' in cpp
+    assert 'addend_bits ^= kSignBit' in cpp
+    assert 'amdgpu::fp_mode::finish_f64(' in cpp
+    assert 'inst_.clamp' in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+
+
+def test_pk_f64_ternary_rejects_unknown_operation():
+    import pytest
+
+    with pytest.raises(ValueError, match='unsupported packed F64 ternary operation'):
+        gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
 
 
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():

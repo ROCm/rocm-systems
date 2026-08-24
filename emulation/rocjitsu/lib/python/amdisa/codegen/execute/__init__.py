@@ -120,6 +120,7 @@ def _register_handlers() -> None:
         gen_pk_binop_f32,
         gen_pk_binop_f64,
         gen_pk_ternary_f32,
+        gen_pk_ternary_f64,
         gen_pk_binop_u64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
@@ -334,6 +335,9 @@ def _register_handlers() -> None:
     )
     DISPATCH['pk_binop_u64'] = lambda c: gen_pk_binop_u64(c.dst_ops, c.src_ops, c.op)
     DISPATCH['pk_binop_f64'] = lambda c: gen_pk_binop_f64(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['pk_ternary_f64'] = lambda c: gen_pk_ternary_f64(
+        c.dst_ops, c.src_ops, c.op
+    )
     DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
         c.dst_ops,
