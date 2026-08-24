@@ -87,7 +87,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ${{ inputs.package_version }}
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-Dhip-tests_CMAKE_ARGS='-DHIP_TESTS_ENABLE_WERROR=ON' -Dhip-clr_CMAKE_ARGS='-DCLR_ENABLE_WERROR=ON' -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
