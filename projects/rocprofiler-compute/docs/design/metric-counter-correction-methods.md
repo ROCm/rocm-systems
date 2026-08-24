@@ -3,7 +3,69 @@
 **Status:** Draft design guidance  
 **Context:** Percent and ratio metrics that violate expected bounds (e.g. > 100%, negative splits) due to multi-pass profiling variance, counter pairing semantics, or potential hardware counter issues — observed across CDNA/RDNA architectures during full-panel analyze runs.  
 **Audience:** Primary — internal designers choosing correction methods for metric YAML; secondary — source material for future public-facing explanations.  
-**Related code:** `src/utils/metrics/noise_clamper.py`, `src/utils/metrics/aggregation.py`, `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`
+**Related code (shipped):** `src/utils/metrics/noise_clamper.py`, `src/utils/utils_analysis.py`, `src/rocprof_compute_soc/soc_base.py`, `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`, `src/utils/metrics/common.py` (`ValuDualIssueDetector`)
+
+**Related code (proposed):** `src/utils/metrics/aggregation.py` (`BOUND_RATIO` / `to_bound_ratio` — follow-up PR)
+
+---
+
+## 0. How to use this document (internal designers)
+
+This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR review, plus **SHOULD** / **MAY** patterns where rollout scope is still evolving. **§0 is the authoritative rule set**; later sections explain and illustrate — they do not override §0.
+
+| Label | Meaning |
+|---|---|
+| **MUST** / **MUST NOT** | Required for new or changed metric formulas; PR reviewers **MUST block** violations |
+| **SHOULD** | Strong default; deviate only with rationale documented in the PR or a follow-up issue |
+| **MAY** | Optional; designer judgment based on §5 validation |
+
+### Terminology
+
+| Term | Meaning in this doc |
+|---|---|
+| **Correction method** | End-to-end approach: collection (single-pass grouping) or analyze-time formula helper |
+| **Clamp / cap** | Analyze-time adjustment that bounds a computed value (e.g. `NOISE_CLAMP` → 0, `BOUND_RATIO` → 100%) |
+| **Ratio cap** | Upper-bound correction: `BOUND_RATIO` or `SUM(MIN(a,b))/SUM(b)` only — not `NOISE_CLAMP` |
+
+### Definitions (used in MUST rules and §5.4)
+
+| Term | Definition |
+|---|---|
+| **Partition metric** | `a` is a subset of `b` by construction (e.g. HBM Read Traffic: `TCC_EA0_RDREQ_DRAM_sum ⊆ TCC_EA0_RDREQ_sum`; CPF Utilization: `busy / (busy + idle)`) |
+| **Non-partition pair** | Numerator and denominator are not a strict subset (e.g. Workgroup Manager Utilization: `GRBM_SPI_BUSY / GRBM_GUI_ACTIVE`) |
+| **Sporadic violation** | Under **single-pass** validation (§5), ratio or subtraction anomalies affect a **minority** of dispatches, with small excess (often ≈1–5% on avg) or one outlier max on a short dispatch; violations shrink vs multi-pass full panel |
+| **Systematic violation** | Under **single-pass** validation on a stable workload, a **majority** of dispatches show the same violation direction (e.g. most rows `a > b` by a similar margin), reproducible across runs |
+| **Escalate** | Do **not** merge clamp-only YAML; investigate root cause (counter definition, driver/firmware, hardware) via JIRA or team process; attach single-pass evidence |
+
+### Normative rules (MUST / MUST NOT)
+
+1. **MUST** document the **co-collection strategy** in the PR for any new or changed ratio or subtraction formula (`--block`, `--set`, or grouping-policy entry).
+2. **MUST** use `NOISE_CLAMP` (not raw `a − b` alone) in Percent metrics where a subtraction result must be ≥ 0 (e.g. remote traffic, cache splits).  
+   *Rationale:* Shipped pattern with analyze-time warnings (≥ 1% relative error). Negative values are clearly invalid; ratio caps (Rules 3–6) stay silent today and require validate-first.
+3. **MUST** run §5 **single-pass validation** before merging any PR that adds **`BOUND_RATIO`** or **`SUM(MIN(a,b))/SUM(b)`** (no other ratio cap helpers without updating this doc). **MUST** attach in the PR: profile command, workload, and validation conclusion (sporadic → cap acceptable / systematic → escalate / no cap needed).
+4. **MUST NOT** merge **clamp-only** formula changes when single-pass validation shows **systematic violations** (§0 Definitions); **escalate** instead.
+5. **Partition metrics only — MUST NOT** apply caps when single-pass data is already ≤ 100% (no change needed). **MUST NOT** cap-only when violations are **systematic** under single-pass.
+6. **Non-partition pairs — MUST NOT** use `SUM(MIN(a,b))/SUM(b)` — falsely implies a subset. **MUST NOT** cap the **avg** column with ratio caps; min/max caps only per Rule 3 validation.
+7. **MUST NOT** apply `BOUND_RATIO`, `SUM(MIN(a,b))/SUM(b)`, or similar ratio caps to metrics in `ValuDualIssueDetector.candidate_metrics` (`VALU Utilization`, `VALU FLOPs (F64)` on gfx942) — use existing detectors and user-facing warnings.
+
+### Advisory guidance (SHOULD / MAY)
+
+- **SHOULD** use **single-pass collection** when perfmon budget allows (`--block`, `--set`, grouping policy).
+- **SHOULD** apply `BOUND_RATIO` (min/max) or `SUM(MIN(a,b))/SUM(b)` (partition avg only) **after** Rule 3 validation confirms **sporadic** noise — same validate-first gate for partition and non-partition metrics.
+- **SHOULD** add unit tests in `tests/test_metric_utils.py` (or single-pass workload golden data) when introducing new cap helpers or capped YAML formulas.
+- **SHOULD** add grouping-policy entries for high-priority ratio partners on specific arches.
+- **MAY** adopt numeric thresholds in §5.4 later if the team agrees — **intentionally qualitative for now**.
+- **MAY** add diagnostics when `BOUND_RATIO` or `SUM(MIN)` adjust values (open question §6).
+- **MAY** derive public-facing explanations from §7 when product/docs are updated.
+
+### PR review checklist (ratio / split metrics)
+
+- [ ] **Rule 1:** Co-collection approach documented (`--block`, `--set`, or policy)
+- [ ] **Rule 2:** Subtraction uses `NOISE_CLAMP` where result must be ≥ 0
+- [ ] **Rule 3:** Single-pass validation attached (§5.3 recipe); cap decision stated
+- [ ] **Rules 4–6:** Systematic single-pass violations escalated, not clamp-only; no `SUM(MIN)/SUM(b)` on non-partition; no avg cap on non-partition
+- [ ] **Rule 7:** No ratio cap on `ValuDualIssueDetector.candidate_metrics`
+- [ ] **SHOULD:** Tests or golden workload data for new caps
 
 ### Implementation status
 
@@ -19,36 +81,6 @@
 | **`SUM(MIN(a,b))/SUM(b)`** on partition avg (e.g. HBM Read Traffic) | **Proposed** | `1700_l2_cache.yaml` — follow-up PR |
 | **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Proposed** | Panel YAML updates — follow-up PR |
 | **Clamp diagnostics** (`BOUND_RATIO`, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today |
-
----
-
-## 0. How to use this document (internal designers)
-
-This guidance is **hybrid**: a small set of **normative** rules for PR review, plus **advisory** patterns where thresholds and rollout scope are still evolving.
-
-| Label | Meaning |
-|---|---|
-| **MUST** | Required for new or changed metric formulas; PR reviewers should block violations |
-| **SHOULD** | Strong default; deviate only with rationale documented in PR or follow-up issue |
-| **MAY** | Optional; designer judgment based on §5 validation |
-
-### Normative rules (MUST)
-
-1. **Prefer single-pass collection** for counters that appear in the same ratio or subtraction formula when perfmon budget allows (`--block`, `--set`, grouping policy).
-2. **Subtraction formulas** where the result must be ≥ 0 (e.g. remote traffic, cache splits) **MUST** use `NOISE_CLAMP` — not raw `a − b` alone in Percent metrics.
-3. **Validate-first (all ratio caps):** Before applying `BOUND_RATIO`, `SUM(MIN(a,b))/SUM(b)`, or similar caps on **any** Percent ratio — partition or non-partition — run §5 single-pass validation. Capping is a **decision after validation**, not a default.
-4. **Partition metrics** (`a` is a subset of `b`, e.g. HBM Read Traffic): after §5 validation, if raw single-pass data already satisfies bounds, caps may be unnecessary. If violations are sporadic, `SUM(MIN(a,b))/SUM(b)` (avg) and/or `BOUND_RATIO` (min/max) may be appropriate. If systematic under single-pass, escalate — do not cap-only.
-5. **Non-partition pairs** (e.g. Workgroup Manager Utilization) **MUST NOT** use `SUM(MIN(a,b))/SUM(b)`. After §5 validation, consider `BOUND_RATIO` on min/max only if violations are sporadic noise — capping is a display choice, not a physical invariant.
-6. **VALU Utilization** and other **documented dual-issue exceptions MUST NOT** use `BOUND_RATIO` or similar capping; use existing detectors and user-facing warnings instead.
-7. **Systematic violations under single-pass** on stable workloads **MUST NOT** be addressed by clamping alone — run §5.2 cross-checks and apply qualitative criteria in §5.4 before merging formula changes.
-
-### Advisory guidance (SHOULD / MAY)
-
-- Apply `BOUND_RATIO` or `SUM(MIN(a,b))/SUM(b)` **after** single-pass validation (§5) confirms clamping is appropriate — partition and non-partition metrics use the same validate-first gate.
-- Add grouping-policy entries for high-priority ratio partners on specific arches.
-- Adopt numeric thresholds in §5.4 **later** if the team agrees — **intentionally qualitative for now**; designers apply judgment with §5.2 cross-checks.
-- Add diagnostics when `BOUND_RATIO` or `SUM(MIN)` adjust values (open question §6).
-- Derive public-facing explanations from §7 when product/docs are updated.
 
 ---
 
@@ -78,7 +110,7 @@ These symptoms appear across architectures more or less.
 
 **Key insight:** A single PMC table row does **not** guarantee that all counters on that row were measured simultaneously unless they were collected in **one profiling pass**.
 
-**Noise vs hardware bug:** Multi-pass variance and async sampling usually produce **sporadic, small** violations (often ≤ a few percent on avg; occasional large max on short dispatches). A **potential hardware counter bug** should be suspected when violations remain **large, frequent, or systematic** after controlling for collection conditions (single-pass, co-located counters, stable synthetic workload, sufficient dispatch count). Correction methods are designed for the former; they must not become the only signal for the latter.
+**Noise vs hardware bug:** See §0 Definitions (*sporadic* vs *systematic*). Multi-pass variance and async sampling usually produce sporadic violations. Suspect a **potential hardware counter bug** when violations remain systematic after single-pass validation. Correction methods address sporadic noise; they must not become the only signal for systematic issues.
 
 ### 1.3 Correction methods (overview)
 
@@ -89,7 +121,7 @@ These symptoms appear across architectures more or less.
 | **`BOUND_RATIO`** | Analyze (formula) | Per-row ratio > 100% before min/max aggregation | Upper bound → 100% (silent today) |
 | **`SUM(MIN(a,b))/SUM(b)`** | Analyze (formula) | Aggregate avg inflation from `SUM(a)/SUM(b)` | Cap numerator per row before summing (avg columns only) |
 
-Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are downstream guards when multi-pass or noise remains unavoidable. None of the analyze-time helpers **prove** a violation is noise — see §2.5 (masking risk) and §5 (validation cross-checks).
+Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are downstream guards when multi-pass or noise remains unavoidable. None of the analyze-time helpers **prove** a violation is noise — see §2.5 (masking risk) and §5 (validation per §0 Rule 3).
 
 ---
 
@@ -134,16 +166,16 @@ result = difference if difference >= 0 else 0.0
 
 **Masking risk (HW bugs):** **Moderate.** A warning fires at ≥ 1% relative error, which helps surface frequent subtraction failures. However, clamping still **replaces** the raw value in the metric output, so a **persistent** negative (bug or mis-defined counter pair) can look like a clean 0% with only a summary warning at end of analyze. Cross-check raw PMC rows under single-pass before trusting corrected Remote/split metrics alone.
 
-**When to use:** Formulas that **subtract** counters where the result must be ≥ 0 (remote traffic, cache residency splits).
+**When to use:** Formulas that **subtract** counters where the result must be ≥ 0 (remote traffic, cache residency splits). Required by **§0 Rule 2** (no validate-first gate — shipped helper with warnings).
 
 ---
 
-### 2.3 `BOUND_RATIO` (`to_bound_ratio`)
+### 2.3 `BOUND_RATIO` (`to_bound_ratio`) *(proposed)*
 
 **Definition:** Compute per-row `(numerator / denominator) × scale`, capping the result at `cap` (default 100). Used before `MIN()` / `MAX()` aggregation on min/max columns.
 
 ```python
-# src/utils/metrics/aggregation.py
+# src/utils/metrics/aggregation.py (proposed)
 return (num / safe_den * scale).clip(upper=cap)
 ```
 
@@ -158,9 +190,9 @@ return (num / safe_den * scale).clip(upper=cap)
 
 **When to use:** Min/max columns for Percent metrics where `numerator / denominator` should represent a utilization or traffic **share**.
 
-**Validate before cap:** Applies to **partition and non-partition** metrics equally. Run §5 single-pass cross-checks first. Apply `BOUND_RATIO` only when violations shrink to sporadic noise (short dispatches, multi-pass residual). If violations remain systematic under single-pass, **do not cap** — investigate counter semantics or potential hardware issues instead.
+**Validate before cap:** Per **§0 Rules 3–6**. Run §5 single-pass cross-checks first. Apply `BOUND_RATIO` only when violations are **sporadic** (§0 Definitions). If **systematic**, **escalate** — do not cap.
 
-**Non-partition pairs** (e.g. Workgroup Manager Utilization): capping is a display choice, not a physical invariant — validation is required before any cap decision.
+**Non-partition pairs** (e.g. Workgroup Manager Utilization): capping is a display choice, not a physical invariant — min/max only; never avg (§0 Rule 6).
 
 ---
 
@@ -183,9 +215,9 @@ Mathematical guarantee: `MIN(aᵢ, bᵢ) ≤ bᵢ` for all rows → aggregate ra
 
 **Masking risk (HW bugs):** **High when silent.** Discards `a − b` excess on every inflated row before summing, so a **biased** subset counter that consistently over-reports can still yield a plausible avg ≤ 100%. The under-count is invisible unless raw `a` and `b` are inspected. Always cross-check uncapped `SUM(a)/SUM(b)` under single-pass when validating new counter definitions.
 
-**Validate before cap:** Same gate as §2.3 — run §5 single-pass cross-checks first for **all** partition metrics. Apply `SUM(MIN(a,b))/SUM(b)` only when single-pass data shows sporadic avg inflation (not systematic `a > b`). If single-pass raw data is already ≤ 100%, no cap is needed.
+**Validate before cap:** Per **§0 Rules 3–5**. Apply `SUM(MIN(a,b))/SUM(b)` only when single-pass data shows **sporadic** avg inflation. If single-pass raw data is already ≤ 100%, no cap is needed.
 
-**When to use (if validation supports it):** Avg columns for **partition** Percent metrics (HBM traffic, busy/(busy+idle) when structurally safe).
+**When to use (if validation supports it):** Avg columns for **partition** Percent metrics only (HBM traffic, CPF Utilization `busy/(busy+idle)`).
 
 ---
 
@@ -260,7 +292,19 @@ All methods agree; clamping is a no-op. Residual violations (> 100%) should be r
 
 #### Problem E — distinguishing noise from potential HW bug
 
-Same partition counters, **single-pass** collection, stable workload:
+**Scenario A — multi-pass full panel** (partition counters):
+
+| Dispatch | `a` | `b` | Notes |
+|---:|---:|---:|---|
+| 1 | 110 | 100 | One inflated row among many |
+| 2 | 98 | 100 | Normal |
+| 3 | 99 | 100 | Normal |
+
+| Interpretation | Action |
+|---|---|
+| Sporadic under multi-pass | Often shrinks with single-pass re-profile (§5.3); then apply §0 Rules 3–5 |
+
+**Scenario B — single-pass** collection, stable workload (same counters):
 
 | Dispatch | `a` | `b` | `a/b` |
 |---:|---:|---:|---:|
@@ -270,15 +314,14 @@ Same partition counters, **single-pass** collection, stable workload:
 
 | Interpretation | Action |
 |---|---|
-| Multi-pass noise (typical) | Sporadic rows, small excess (≈1–5%), disappears or shrinks with single-pass |
-| Potential HW counter bug | **Systematic** excess on most/all dispatches under single-pass; reproducible across runs |
-| After `BOUND_RATIO` / `SUM(MIN)` | User sees ≤ 100%; **bug signal is hidden** unless raw PMC or uncapped formula is checked |
+| **Systematic** under single-pass (§0 Definitions) | **Escalate** — do not cap-only; investigate counter/driver/hardware |
+| After `BOUND_RATIO` / `SUM(MIN)` without validation | User sees ≤ 100%; **bug signal is hidden** unless raw PMC is checked |
 
 ---
 
 ### 3.2 rocprof-compute metric examples
 
-Examples below include **shipped** and **proposed** patterns — see **Implementation status** at the top of this doc.
+Examples below include **shipped** and **proposed** patterns — see **Implementation status** in §0.
 
 #### Single-pass grouping *(shipped infrastructure; arch policy varies)*
 
@@ -345,11 +388,13 @@ Reproduction example (occupancy workload, multi-pass analyze): raw avg **103.23%
 
 **Real metric:** *VALU Utilization* (gfx942)
 
-Dual-issue on gfx942 can legitimately report > 100% (up to ~200%). Handled by `ValuDualIssueDetector` with user-facing warnings — **do not** apply `BOUND_RATIO`.
+Dual-issue on gfx942 can legitimately report > 100% (up to ~200%). Listed in `ValuDualIssueDetector.candidate_metrics` — **§0 Rule 7** forbids ratio caps; use existing warnings.
 
 ---
 
 ## 4. Practical Mental Model
+
+**Decision flow:** Follow the diagram below; all cap decisions defer to **§0** (Rules 3–7) and **§5** validation.
 
 ```mermaid
 flowchart TD
@@ -370,17 +415,10 @@ flowchart TD
     L2 -->|Yes| M["Consider BOUND_RATIO on min/max"]
     L2 -->|No — systematic| P
     A --> N{"VALU dual-issue?"}
-    N -->|Yes| O["Documented exception<br/>— do not clamp"]
+    N -->|Yes| O["§0 Rule 7<br/>— do not ratio-cap"]
 ```
 
-**Decision shortcut:**
-
-1. **MUST — Prefer** single-pass grouping for counters in the same formula.
-2. **MUST — Subtract** counters in Percent splits → `NOISE_CLAMP`.
-3. **MUST — Validate first** (§5) before any ratio cap — **partition and non-partition** use the same gate.
-4. **SHOULD — After validation:** sporadic noise → consider `BOUND_RATIO` (min/max) or `SUM(MIN(a,b))/SUM(b)` (partition avg only); systematic violations → escalate, do not cap-only.
-5. **MUST NOT —** `SUM(MIN(a,b))/SUM(b)` on non-partition pairs; `BOUND_RATIO` on VALU / documented exceptions.
-6. **MUST — Document** intentional > 100% behavior (VALU) instead of clamping.
+**PR review:** Use the **§0 PR review checklist** — do not duplicate rules here.
 
 ---
 
@@ -413,34 +451,35 @@ Reduce confounding factors before comparing raw vs corrected values:
 
 ### 5.3 Recommended validation profile recipe
 
-Example for validating *HBM Read Traffic* counter pair on gfx942:
+Example for validating *HBM Read Traffic* counter pair on gfx942 (adjust kernel name and paths for your environment; confirm flags via `rocprof-compute profile --help`):
 
 ```bash
 # 1. Profile L2 block only (single-pass friendly subset)
-rocprof-compute profile --block 17.1 ... -n occupancy --output-directory workloads/validate_hbm/
+rocprof-compute profile --block 17.1 --kernel-name <kernel> --output-directory workloads/validate_hbm/
 
-# 2. Analyze with variance warnings enabled (default kernel-level summary)
+# 2. Analyze (variance warnings enabled by default at kernel level)
 rocprof-compute analyze --block 17.1 --path workloads/validate_hbm/
 
 # 3. Inspect raw PMC: per-dispatch TCC_EA0_RDREQ_DRAM_sum vs TCC_EA0_RDREQ_sum
 # 4. Compare uncapped SUM(a)/SUM(b) vs SUM(MIN(a,b))/SUM(b) on same data
+# 5. Record conclusion in PR per §0 Rule 3
 ```
 
 Repeat with `--set` when a predefined set already co-packages the needed counters.
 
 ### 5.4 When to clamp vs when to escalate
 
-**Threshold policy:** Criteria below are **qualitative by design** (option A). Internal designers apply professional judgment supported by §5.2 cross-checks — not fixed numeric gates or CI enforcement at this stage. Tighten to numeric thresholds only if the team agrees after collecting single-pass validation data.
+**Threshold policy:** Criteria use **§0 Definitions** (*sporadic* / *systematic* / *escalate*). Qualitative by design — not fixed numeric gates or CI enforcement until the team agrees after collecting single-pass data.
 
 | Observation under single-pass + stable workload | Likely cause | Action |
 |---|---|---|
-| Sporadic ratio > 100% (**partition or non-partition**) under single-pass | Multi-pass residual, short dispatch, or async sampling | Consider cap (`SUM(MIN)` for partition avg; `BOUND_RATIO` for min/max) if §5 confirms noise |
-| **Partition** metric systematic > 100% under single-pass | Potential HW counter bug or wrong event pairing | **Do not** cap-only; escalate — subset invariant should hold co-temporally |
-| **Non-partition** metric (e.g. Workgroup Manager Utilization) > 100% | May be semantics or denominator collapse | Same validate-first gate; cap min/max only if sporadic after single-pass |
-| Single dispatch max spike (e.g. >> 200%) with tiny denominator | Denominator collapse / short dispatch | `BOUND_RATIO` on max; note in docs |
-| Most dispatches > 100% by similar margin | Potential HW counter bug or wrong event pairing | **Do not** rely on clamp alone; file driver/hardware investigation |
+| **Sporadic** ratio > 100% (partition or non-partition) | Short dispatch, async sampling, or residual multi-pass noise | **SHOULD** consider cap after Rule 3 validation (`SUM(MIN)` partition avg; `BOUND_RATIO` min/max) |
+| **Systematic** partition metric > 100% | Potential HW counter bug or wrong event pairing | **MUST NOT** cap-only (**§0 Rule 4–5**); **escalate** |
+| **Systematic** non-partition metric > 100% | Semantics or denominator collapse | Same gate; **SHOULD** cap min/max only if reclassified as sporadic after investigation |
+| Single-dispatch max spike (e.g. >> 200%) with tiny denominator | Denominator collapse / short dispatch | After validation confirms **sporadic** spike: **SHOULD** `BOUND_RATIO` on max; document in PR |
+| Most dispatches > 100% by similar margin | Potential HW counter bug | **Escalate** (**§0 Rule 4**) |
 | Persistent negative subtraction | Bug or mis-defined subset | Fix formula or counter definition; `NOISE_CLAMP` is display-only |
-| Documented exception (VALU dual-issue) | Intentional hardware behavior | Warn user; exclude from ≤ 100% acceptance criteria |
+| `ValuDualIssueDetector.candidate_metrics` | Intentional dual-issue | **§0 Rule 7** — warn user; no ratio cap |
 
 ---
 
@@ -452,15 +491,15 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 3. **Scope of `BOUND_RATIO` rollout:** Which Percent metrics across gfx940/942/950 (and other arches) should be updated, and in what priority order?
 
-4. **Avg column consistency:** Should avg columns using `SUM(n)/SUM(d)` for non-partition pairs (e.g. Workgroup Manager Utilization) ever be capped, or only min/max after single-pass validation shows sporadic noise?
+4. **Avg column consistency:** **§0 Rule 6** forbids `SUM(MIN)/SUM(b)` and avg ratio caps on non-partition pairs — confirm no exceptions needed.
 
-5. **Complementary metric consistency:** After independent clamping on HBM (`MIN`/`BOUND_RATIO`) and Remote (`NOISE_CLAMP`), should we enforce or document that splits may not sum to exactly 100%?
+5. **Complementary metric consistency:** After independent clamping on HBM (`SUM(MIN)` / `BOUND_RATIO`) and Remote (`NOISE_CLAMP`), should we enforce or document that splits may not sum to exactly 100%?
 
-6. **Single-pass validation:** Can we add analyze-time metadata (pass-id per counter group) to detect when ratio partners were not co-collected and warn before clamping?
+6. **Single-pass validation metadata:** Can we add analyze-time metadata (pass-id per counter group) to detect when ratio partners were not co-collected and warn before clamping?
 
-7. **Source of truth:** Panel YAML headers say `Generated from utils/unified_config.yaml` / `split_config.py`, but those paths are **not present in this repository tree** (likely legacy or internal-only). Today, metric formulas live in `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml` and are validated via `tools/config_management/` (see `CONTRIBUTING.md`). Should correction patterns be documented/enforced there instead?
+7. **Source of truth:** Panel YAML headers reference `utils/unified_config.yaml` / `split_config.py`, but those paths are **not in this repository** (likely legacy or internal-only). Metric formulas live in `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml` and are validated via `tools/config_management/` (see `CONTRIBUTING.md`). Should correction patterns be documented/enforced there instead?
 
-8. **Acceptance criteria for Percent metrics:** Should product/docs explicitly list exceptions (VALU dual-issue) rather than requiring all Percent ≤ 100%?
+8. **Acceptance criteria for Percent metrics:** Should product/docs list `ValuDualIssueDetector.candidate_metrics` and other exceptions rather than requiring all Percent ≤ 100%?
 
 9. **Imputation alternatives:** Is forward/backward fill imputation the best merge strategy, or should ratio metrics skip rows where partners came from different passes?
 
@@ -476,8 +515,8 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 *Secondary audience — port to FAQ, conceptual docs, or analyze warnings when ready. Not user documentation yet.*
 
-- **Why can some Percent metrics exceed 100%?** Multi-pass profiling merges counters from different replay passes; occasional misalignment can inflate ratios. Corrections cap physically implausible values for display.
-- **Why is VALU Utilization sometimes > 100%?** On some GPUs (e.g. gfx942), dual-issue execution can exceed 100% — this is expected, not a bug.
+- **Why can some Percent metrics exceed 100%?** Multi-pass profiling merges counters from different replay passes; occasional misalignment can inflate ratios. When caps are applied in product, they follow internal single-pass validation (§0 Rule 3) — display values reflect known collection noise, not a substitute for counter correctness review.
+- **Why is VALU Utilization sometimes > 100%?** On some GPUs (e.g. gfx942), dual-issue execution can exceed 100% — this is expected (`ValuDualIssueDetector.candidate_metrics`), not a bug; ratio caps are not applied.
 - **What do “counter variance corrected” warnings mean?** A subtraction-based metric had a negative intermediate value (usually multi-pass noise) and was clamped to zero.
 - **Do HBM + Remote always sum to 100%?** Not exactly after independent corrections; each split is sanitized separately.
 
