@@ -23,7 +23,7 @@
 
 namespace {
 
-using meta::comms::kDdaLLRsMaxBytes;
+using meta::comms::kDdaLLMaxBytes;
 using meta::comms::kDdaLLRsSlotStridePkts;
 using meta::comms::LLPacket16;
 
@@ -113,12 +113,12 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   }
 
   const size_t bytes = recvcount * ncclTypeSize(datatype); // per-rank shard
-  // Payload is staged as 8-byte LL packets, so the shard must be a whole
-  // number of packets.
-  if (bytes % 8 != 0) {
+
+  if (bytes % 16 != 0) {
     return false;
   }
-  if (bytes > kDdaLLRsMaxBytes) {
+  // expand from 8B to 16B
+  if (bytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

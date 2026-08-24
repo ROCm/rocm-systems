@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
+#include "util/except.h"
 #include <cstring>
 #include <string>
 
@@ -442,9 +443,10 @@ void Vop1::build_modifiers(std::string &out) const {
 void Vop1::implicit_uses(RegisterSet &uses) const {
   bool sdwa_preserve =
       sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
-  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
-                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
-                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP &&
+      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+       (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
   if (sdwa_preserve || dpp_partial)
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
@@ -733,9 +735,10 @@ void Vop2::build_modifiers(std::string &out) const {
 void Vop2::implicit_uses(RegisterSet &uses) const {
   bool sdwa_preserve =
       sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
-  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
-                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
-                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP &&
+      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+       (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
   if (sdwa_preserve || dpp_partial)
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
@@ -1210,9 +1213,10 @@ void Vop3::build_modifiers(std::string &out) const {
 }
 
 void Vop3::implicit_uses(RegisterSet &uses) const {
-  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
-                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
-                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP &&
+      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+       (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
   if (dpp_partial)
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
@@ -1313,9 +1317,10 @@ void Vop3p::build_modifiers(std::string &out) const {
 }
 
 void Vop3p::implicit_uses(RegisterSet &uses) const {
-  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
-                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
-                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP &&
+      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+       (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
   if (dpp_partial)
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
@@ -1510,9 +1515,10 @@ void Vop3SdstEnc::build_modifiers(std::string &out) const {
 }
 
 void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
-                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
-                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  bool dpp_partial =
+      inst_.src0 == amdgpu::SRC_DPP &&
+      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+       (dpp_bound_ctrl_ == 0 && (amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_) || dpp_fi_ == 0)));
   if (dpp_partial)
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))

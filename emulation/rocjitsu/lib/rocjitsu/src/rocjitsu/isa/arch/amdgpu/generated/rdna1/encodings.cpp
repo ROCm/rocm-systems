@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "util/except.h"
 #include <cstring>
 #include <string>
 

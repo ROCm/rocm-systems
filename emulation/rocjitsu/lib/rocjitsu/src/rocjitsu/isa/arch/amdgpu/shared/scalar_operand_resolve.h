@@ -36,8 +36,13 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
     return static_cast<uint32_t>(wf.vcc());
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
+  // TTMP0-15 are the trap handler's private scratch registers. They are NOT
+  // part of the wave's SGPR allocation: hardware banks them separately, the CP
+  // seeds them with the dispatch/queue identity that rocm-dbgapi reads back out
+  // of the CWSR area, and a shader that never enters a trap must not be able to
+  // clobber them through an SGPR write.
   if (ev >= 108 && ev <= 123)
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return wf.ttmp(static_cast<uint32_t>(ev - 108));
   if (m0_ev == 125 && ev == 124)
     return 0u; // NULL
   if (ev == m0_ev)
@@ -145,10 +150,9 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   }
   if (ev == 106)
     return wf.vcc();
-  if (ev >= 108 && ev <= 122) {
-    uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+  if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
+    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));
+    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (m0_ev == 125 && ev == 124)
@@ -208,15 +212,15 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev == 106) {
-    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
+    wf.set_vcc_raw((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (ev == 107) {
-    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    wf.set_vcc_raw((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
-  if (ev >= 108 && ev <= 123) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+  if (ev >= 108 && ev <= 123) { // see resolve_src_scalar()
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), val);
     return;
   }
   if (m0_ev == 125 && ev == 124)
@@ -249,14 +253,12 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev == 106) {
-    wf.set_vcc(val);
+    wf.set_vcc_raw(val);
     return;
   }
-  if (ev >= 108 && ev <= 122) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                  static_cast<uint32_t>(val));
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                  static_cast<uint32_t>(val >> 32));
+  if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), static_cast<uint32_t>(val));
+    wf.set_ttmp(static_cast<uint32_t>(ev - 107), static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)
