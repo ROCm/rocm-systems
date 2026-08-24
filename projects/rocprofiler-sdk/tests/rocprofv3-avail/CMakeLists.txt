@@ -123,7 +123,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     BUNDLE_TESTS
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
-    TIMEOUT 300
+    TIMEOUT 120
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     TARGET_DEPENDS "rocprofiler-sdk::rocprofv3;rocprofiler-sdk::rocprofv3-avail"
