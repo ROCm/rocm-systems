@@ -22,156 +22,230 @@ THE SOFTWARE.
 
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
-#include <catch2/catch_test_case_info.hpp>
+#include <catch2/interfaces/catch_interfaces_config.hpp>
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <regex>
+#include <set>
+#include <sstream>
+#include <string>
 #include <cstdlib>
-#include <fstream>
+#include <cstdio>
 
 /**
  * @brief Event listener for HIP test parameter initialization
- * 
- * This listener hooks into Catch2 v3 events to:
- * - Initialize test parameters before test execution
- * - Detect level filter from command-line args
- * - Load level-specific configs based on filter
- * - Clean up resources after testing
- * 
- * Usage:
- *   ./test "[level_0]"  -> Quick smoke tests (3 memory sizes)
- *   ./test "[level_1]"  -> Standard regression (7 memory sizes)
- *   ./test "[level_2]"  -> Comprehensive (14 memory sizes)
- * 
- * Or override via environment:
- *   HIP_TEST_LEVEL=level_1 ./test "[device]"
+ *
+ * This listener hooks into Catch2 v3 events to select a single test level for
+ * the whole run and load its parameters (memory sizes, block sizes,
+ * iterations, ...) into the TestParameterStore.
+ *
+ * The active level is resolved once, at the start of the run, using a strict
+ * priority order:
+ *   1. Catch2 command-line tag filter, e.g. ./test "[level_2]"
+ *   2. HIP_TEST_LEVEL environment variable, e.g. HIP_TEST_LEVEL=level_2
+ *   3. Hardcoded default (kDefaultLevel)
+ *
+ * A higher-priority source is used whenever it yields a level; the lower ones
+ * are then ignored (strict precedence, no merging across sources). Note that
+ * under ctest each test is launched by name (not by a "[level_X]" filter), so
+ * the command-line source is empty there and HIP_TEST_LEVEL is the effective
+ * control knob.
+ *
+ * The resolved level is validated against the supported set (kSupportedLevels).
+ * An unsupported level (e.g. HIP_TEST_LEVEL=level_9) is treated as a fatal
+ * misconfiguration and aborts the run rather than silently testing with the
+ * wrong parameters.
+ *
+ * Both sources are parsed with the same rules, following the Catch2 test spec
+ * grammar: a comma separated list of filters that are OR'd, each filter a
+ * sequence of AND'd patterns that may be negated with '~'. A pattern counts
+ * only if it reads exactly "level_N", so a malformed tag ("[level_2x]") is
+ * ignored, while an exclusion ("~[level_2]") removes that level from the set
+ * that can still run. Of the levels that remain, the highest wins:
+ *   "[level_1],[level_2]"    -> level_2
+ *   "~[level_3]~[level_4]"   -> level_2 (highest functional level left)
+ *   "[level_0]~[level_0]"    -> no level (nothing left to run)
+ * The single exception between the two sources is that HIP_TEST_LEVEL also
+ * accepts the bare form without brackets ("level_2", "level_1,level_2",
+ * "~level_4").
  */
 class HipTestParameterListener : public Catch::EventListenerBase {
 public:
     using Catch::EventListenerBase::EventListenerBase;
-    
+
 private:
+    /// Levels understood by the test suite (must match definitions.yaml).
+    static constexpr const char* kSupportedLevels[] = {"level_0", "level_1", "level_2",
+                                                       "level_3", "level_4"};
+
+    /// Level used when neither the command line nor HIP_TEST_LEVEL specify one.
+    static constexpr const char* kDefaultLevel = "level_2";
+
     std::string filterLevel;
-    
-    /**
-     * @brief Extract level from a filter string like "[level_1]"
-     */
-    std::string extractLevelFromFilter(const std::string& filter) {
-        std::regex levelRegex("\\[level_(\\d+)\\]");
-        std::smatch match;
-        if (std::regex_search(filter, match, levelRegex)) {
-            return "level_" + match[1].str();
+
+    /// @brief Whether @p level is one of kSupportedLevels.
+    static bool isSupportedLevel(const std::string& level) {
+        for (const char* supported : kSupportedLevels) {
+            if (level == supported) {
+                return true;
+            }
         }
-        return "";
+        return false;
     }
-    
+
     /**
-     * @brief Detect level filter from environment or command line
-     * 
-     * Priority:
-     * 1. HIP_TEST_LEVEL environment variable
-     * 2. Command line argument (parsed from /proc/self/cmdline on Linux)
+     * @brief Collect every level a tag expression can select.
+     *
+     * The expression is read the way Catch2 reads a test spec: a comma
+     * separated list of filters OR'd together, each filter a sequence of
+     * patterns AND'd together, each pattern optionally negated with '~'.
+     * Patterns that do not read exactly "level_N" (test names, other tags, and
+     * malformed tags such as "[level_2x]") place no constraint on the level and
+     * are ignored.
+     *
+     * A filter naming levels contributes those levels, minus the ones it
+     * excludes; a filter that only excludes levels contributes every supported
+     * level except the excluded ones; a filter mentioning no level at all
+     * contributes nothing. Note that filters are OR'd, so "[level_1],~[level_2]"
+     * also runs level_3 and level_4 tests, exactly as Catch2 would select them.
+     *
+     * @param allowBareTags when true, a pattern may also be written without the
+     *        surrounding brackets ("level_2", "~level_2"), which HIP_TEST_LEVEL
+     *        accepts. Brackets, when present, must still be balanced.
+     * @return Distinct level numbers selectable, sorted ascending (empty if the
+     *         expression places no constraint on the level).
      */
-    std::string detectLevelFilter() {
-        // Priority 1: Check environment variable
-        if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
-            std::string level = envLevel;
-            LogPrintf("[Level Filter] Detected from HIP_TEST_LEVEL: %s\n", level.c_str());
-            return level;
-        }
-        
-        // Priority 2: Read from /proc/self/cmdline on Linux
-        #ifdef __linux__
-        std::ifstream cmdline("/proc/self/cmdline");
-        if (cmdline) {
-            std::string arg;
-            while (std::getline(cmdline, arg, '\0')) {
-                std::string level = extractLevelFromFilter(arg);
-                if (!level.empty()) {
-                    LogPrintf("[Level Filter] Detected from command line: %s\n", level.c_str());
-                    return level;
+    static std::set<int> collectLevels(const std::string& text, bool allowBareTags) {
+        static const std::regex bracketedPattern("(~?)\\[([^\\[\\]]*)\\]");
+        static const std::regex barePattern("\\s*(~?)\\s*([^\\s]+)\\s*");
+
+        // Level named by a pattern, or -1 when it does not name one. Anything
+        // but an exact "level_N" is rejected; the digit count is bounded so
+        // that the conversion cannot overflow.
+        const auto parseLevel = [](const std::string& tag) {
+            static const std::regex levelRegex("level_([0-9]{1,9})");
+            std::smatch match;
+            return std::regex_match(tag, match, levelRegex) ? std::stoi(match[1].str()) : -1;
+        };
+
+        std::set<int> levels;
+        std::stringstream stream(text);
+        std::string filter;
+        while (std::getline(stream, filter, ',')) {
+            std::set<int> included, excluded;
+
+            // Sort this filter's level patterns into included and excluded.
+            const auto sortPattern = [&](const std::string& negation, const std::string& tag) {
+                const int level = parseLevel(tag);
+                if (level >= 0) {
+                    (negation.empty() ? included : excluded).insert(level);
+                }
+            };
+
+            bool bracketed = false;
+            for (auto it = std::sregex_iterator(filter.begin(), filter.end(), bracketedPattern);
+                 it != std::sregex_iterator(); ++it) {
+                bracketed = true;
+                sortPattern((*it)[1].str(), (*it)[2].str());
+            }
+            if (!bracketed && allowBareTags) {
+                std::smatch match;
+                if (std::regex_match(filter, match, barePattern)) {
+                    sortPattern(match[1].str(), match[2].str());
+                }
+            }
+
+            if (included.empty()) {
+                if (excluded.empty()) {
+                    continue;  // filter says nothing about the level
+                }
+                // Exclusion only: everything the suite supports is still in play.
+                for (const char* supported : kSupportedLevels) {
+                    const int level = parseLevel(supported);
+                    if (level >= 0) {
+                        included.insert(level);
+                    }
+                }
+            }
+            for (const int level : included) {
+                if (excluded.count(level) == 0) {
+                    levels.insert(level);
                 }
             }
         }
-        #endif
-        
-        return "";
+        return levels;
+    }
+
+    /**
+     * @brief Reduce a set of levels to a single level string ("level_N").
+     * Picks the highest level and warns when more than one can be selected.
+     * @return "level_N" for the highest level, or "" if the set is empty.
+     */
+    std::string highestLevel(const std::set<int>& levels, const char* source) {
+        if (levels.empty()) {
+            return "";
+        }
+        if (levels.size() > 1) {
+            LogPrintf("[Level Filter] Multiple levels selected via %s; using highest (level_%d)\n",
+                      source, *levels.rbegin());
+        }
+        return "level_" + std::to_string(*levels.rbegin());
+    }
+
+    /**
+     * @brief Resolve the active level using the strict priority order.
+     */
+    std::string detectLevelFilter() {
+        // Priority 1: Catch2 command-line tag filter (e.g. ./test "[level_2]").
+        if (m_config != nullptr) {
+            std::set<int> cliLevels;
+            for (const auto& arg : m_config->getTestsOrTags()) {
+                const auto found = collectLevels(arg, false);
+                cliLevels.insert(found.begin(), found.end());
+            }
+            std::string level = highestLevel(cliLevels, "command line");
+            if (!level.empty()) {
+                LogPrintf("[Level Filter] Detected from command line: %s\n", level.c_str());
+                return level;
+            }
+        }
+
+        // Priority 2: HIP_TEST_LEVEL environment variable.
+        if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
+            std::string level = highestLevel(collectLevels(envLevel, true),
+                                             "HIP_TEST_LEVEL");
+            if (!level.empty()) {
+                LogPrintf("[Level Filter] Detected from HIP_TEST_LEVEL: %s\n", level.c_str());
+                return level;
+            }
+            LogPrintf("[Level Filter] HIP_TEST_LEVEL='%s' has no valid level, ignoring\n", envLevel);
+        }
+
+        // Priority 3: Hardcoded default.
+        LogPrintf("[Level Filter] Using default level: %s\n", kDefaultLevel);
+        return kDefaultLevel;
     }
 
 public:
 
     /**
      * @brief Called once when the test run begins
-     * Initializes TestParameterStore and detects level filter
+     * Initializes TestParameterStore and loads the resolved level's parameters.
      */
     void testRunStarting(Catch::TestRunInfo const& testRunInfo) override {
-        TestParameterStore::instance().initialize();
-        
-        // Detect level filter from environment or command-line
-        filterLevel = detectLevelFilter();
-        
-        // If level was specified, load it immediately
-        if (!filterLevel.empty()) {
-            LogPrintf("[Level Filter] Applying global level: %s\n", filterLevel.c_str());
-            TestParameterStore::instance().loadLevelConfig(filterLevel);
-        }
-    }
-
-    /**
-     * @brief Called before each test case starts
-     * Uses filter level if specified, otherwise detects from test tags
-     */
-    void testCaseStarting(Catch::TestCaseInfo const& testInfo) override {
         auto& params = TestParameterStore::instance();
-        
-        // Priority 1: Use filter level if explicitly set (from env or detected)
-        if (!filterLevel.empty()) {
-            // Filter level takes precedence - all tests use same parameters
-            if (params.currentTestLevel != filterLevel) {
-                LogPrintf("[Level Filter] Test: %s -> Using filter level: %s\n", 
-                          testInfo.name.c_str(), filterLevel.c_str());
-                params.loadLevelConfig(filterLevel);
-            }
-            return;
+        params.initialize();
+
+        filterLevel = detectLevelFilter();
+
+        if (!isSupportedLevel(filterLevel)) {
+            LogPrintf("[Level Filter] ERROR: '%s' is not a supported level. Aborting.\n",
+                      filterLevel.c_str());
+            std::exit(EXIT_FAILURE);
         }
-        
-        // Priority 2: Auto-detect from first test's level tag (filter inference)
-        std::string detectedLevel = "";
-        for (const auto& tag : testInfo.tags) {
-            std::string tagStr = std::string(tag.original);
-            
-            // Remove brackets: "[level_0]" -> "level_0"
-            if (tagStr.size() > 2 && tagStr.front() == '[' && tagStr.back() == ']') {
-                tagStr = tagStr.substr(1, tagStr.size() - 2);
-            }
-            
-            // Check if it's a level tag
-            if (tagStr.find("level_") == 0) {
-                detectedLevel = tagStr;
-                break;
-            }
-        }
-        
-        // If this is the first test with a level tag, set it as filter level
-        if (!detectedLevel.empty() && filterLevel.empty()) {
-            filterLevel = detectedLevel;
-            LogPrintf("[Level Auto-Detection] Inferred filter level: %s from test: %s\n", 
-                      filterLevel.c_str(), testInfo.name.c_str());
-        }
-        
-        // Load level-specific config if detected
-        if (!detectedLevel.empty()) {
-            if (params.currentTestLevel != detectedLevel) {
-                LogPrintf("[Level Detection] Test: %s -> Level: %s\n", 
-                          testInfo.name.c_str(), detectedLevel.c_str());
-                params.loadLevelConfig(detectedLevel);
-            }
-        } else {
-            // Reset to defaults if no level tag
-            if (!params.currentTestLevel.empty()) {
-                params.currentTestLevel = "";
-            }
-        }
+
+        LogPrintf("[Level Filter] Applying global level: %s\n", filterLevel.c_str());
+        params.loadLevelConfig(filterLevel);
     }
 
     /**
