@@ -180,14 +180,16 @@ compiled from beside it:
        per_kernel_pc_sampling/
            <workload_name>/<workload_sub_name>/
                source/<source path with the leading separator dropped>
-               kernel_<kernel_uuid>/
+               <short_name>_<kernel_uuid>/
                    isa_code_object_id_<code_object_id>_pid_<pid>.csv
 
-A folder is named by ``kernel_uuid`` because a kernel name is a C++ signature,
-which cannot be a path. ``kernel.csv`` carries ``kernel_uuid`` alongside
-``kernel_name``, so it maps a folder back to the kernel it holds. One kernel has
-more than one file when it was compiled into several code objects, or when
-several processes ran it.
+A folder leads with the kernel's short name, the identifier its C++ signature
+demangles down to, so ``vecCopy_2(double*, double*, double*, int, int)`` is
+filed under ``vecCopy_2_7``. Overloads and template instantiations share a short
+name, so the ``kernel_uuid`` suffix keeps each folder unique. ``kernel.csv``
+carries ``kernel_uuid`` alongside ``short_name`` and ``kernel_name``, so it maps
+a folder back to the kernel it holds. One kernel has more than one file when it
+was compiled into several code objects, or when several processes ran it.
 
 Each file holds one row per instruction line, ordered by code object offset:
 

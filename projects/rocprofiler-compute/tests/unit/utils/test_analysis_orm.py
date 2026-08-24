@@ -73,10 +73,14 @@ def test_json_sanitize(value, expected):
 
 
 def add_kernel_with_durations(
-    session, workload: Workload, name: str, durations: list[int]
+    session,
+    workload: Workload,
+    name: str,
+    durations: list[int],
+    short_name: str | None = None,
 ) -> Kernel:
     """Add a kernel to *workload* with one dispatch per entry in *durations*."""
-    kernel = Kernel(kernel_name=name, workload=workload)
+    kernel = Kernel(kernel_name=name, short_name=short_name, workload=workload)
     session.add(kernel)
     for dispatch_id, duration in enumerate(durations):
         session.add(
@@ -244,6 +248,42 @@ def test_kernel_view_aggregates(db_session):
         )
     ).fetchone()
     assert row == (3, 60, 10, 30, 20.0)
+
+
+def test_kernel_view_exposes_short_name(db_session):
+    """The kernel view carries the short name naming the export folder."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    add_kernel_with_durations(
+        db_session,
+        workload,
+        "vecCopy_2(double*, double*, double*, int, int)",
+        [10],
+        short_name="vecCopy_2",
+    )
+    Database.create_views()
+    db_session.commit()
+
+    row = db_session.execute(
+        text("SELECT kernel_name, short_name FROM compute_kernel_view")
+    ).fetchone()
+    assert row == ("vecCopy_2(double*, double*, double*, int, int)", "vecCopy_2")
+
+
+def test_kernels_sharing_a_short_name_are_separate_rows(db_session):
+    """Overloads truncate to one short name, which is deliberately not unique."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    add_kernel_with_durations(db_session, workload, "gemm(half*)", [10], "gemm")
+    add_kernel_with_durations(db_session, workload, "gemm(float*)", [20], "gemm")
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text("SELECT kernel_uuid, short_name FROM compute_kernel_view")
+    ).fetchall()
+    assert len(rows) == 2
+    assert {row[1] for row in rows} == {"gemm"}
 
 
 # =============================================================================

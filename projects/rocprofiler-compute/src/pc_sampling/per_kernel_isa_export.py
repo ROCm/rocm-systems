@@ -12,6 +12,7 @@ counts collected on them.
 """
 
 import csv
+import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -22,7 +23,14 @@ PER_KERNEL_DIRECTORY_NAME = "per_kernel_pc_sampling"
 STALL_COLUMN_PREFIX = "Stall "
 
 # The row columns naming the file, ahead of the columns written into it.
-FILE_KEY_COLUMN_COUNT = 5
+FILE_KEY_COLUMN_COUNT = 6
+
+# Characters a short name can hold that a path component should not. `_` is
+# left out of the safe set so a run of them collapses to the one replacing it.
+UNSAFE_PATH_CHARACTERS = re.compile(r"[^A-Za-z0-9.-]+")
+KERNEL_DESCRIPTOR_SUFFIX = ".kd"
+# Generous for a truncated name, and keeps the whole path inside PATH_MAX.
+MAX_SHORT_NAME_LENGTH = 64
 
 BASE_COLUMNS = (
     "Instruction line number",
@@ -40,8 +48,8 @@ TRAILING_COLUMNS = (
     "Pid",
 )
 
-# (workload name, workload sub-name, kernel uuid, code object id, pid)
-FileKey = tuple[str, str, int, int, int]
+# (workload name, workload sub-name, kernel uuid, short name, code object id, pid)
+FileKey = tuple[str, str, int, str, int, int]
 
 
 class WorkloadIsaExport(NamedTuple):
@@ -100,17 +108,39 @@ def _build_isa_header(stall_reasons: Iterable[str]) -> list[str]:
 def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> Path:
     """Return the file one kernel's ISA is written to.
 
-    The folder is named by kernel uuid because a kernel name is a C++
-    signature, which cannot be a path. ``kernel.csv`` maps the uuid back.
+    The folder leads with the kernel's short name so it reads as the kernel it
+    holds. Overloads and template instantiations share a short name, so the
+    kernel uuid follows it to keep the folder unique and to map back to the
+    row ``kernel.csv`` carries for it.
     """
-    workload_name, workload_sub_name, kernel_uuid, code_object_id, pid = file_key
+    (
+        workload_name,
+        workload_sub_name,
+        kernel_uuid,
+        short_name,
+        code_object_id,
+        pid,
+    ) = file_key
     return (
         per_kernel_directory
         / workload_name
         / workload_sub_name
-        / f"kernel_{kernel_uuid}"
+        / f"{_sanitize_short_name(short_name)}_{kernel_uuid}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
+
+
+def _sanitize_short_name(short_name: str) -> str:
+    """Reduce a kernel's short name to a path component.
+
+    ``truncate_name`` strips a signature down to its identifier, which still
+    leaves spellings a path cannot hold, such as ``operator/`` or a lambda.
+    """
+    identifier = short_name
+    if identifier.endswith(KERNEL_DESCRIPTOR_SUFFIX):
+        identifier = identifier[: -len(KERNEL_DESCRIPTOR_SUFFIX)]
+    identifier = UNSAFE_PATH_CHARACTERS.sub("_", identifier)
+    return identifier.strip("_.")[:MAX_SHORT_NAME_LENGTH].strip("_.")
 
 
 def _write_per_kernel_isa_files(

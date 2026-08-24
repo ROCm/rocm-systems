@@ -305,10 +305,16 @@ def run_prof(
     marker_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_marker_api_trace.csv"
     )
+    # Written straight to the workload dir: analyze reads it, and out/ is
+    # removed once the counter CSV has been relabeled.
+    kernel_symbols_csv = csv_compression.compressed_name(
+        Path(workload_dir) / f"kernel_symbols_{fbase}.csv"
+    )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
         str(counter_csv),
         str(marker_csv),
+        str(kernel_symbols_csv),
     )
 
     # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size, Workgroup_Size,
@@ -350,6 +356,7 @@ def run_prof(
         rows_written = 0
     if not rows_written:
         results_csv.unlink(missing_ok=True)
+        kernel_symbols_csv.unlink(missing_ok=True)
         console_warning(
             "No GPU kernel data collected. "
             "The workload may not have dispatched any GPU kernels."

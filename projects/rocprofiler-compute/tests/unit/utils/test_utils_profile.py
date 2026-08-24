@@ -168,7 +168,7 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     )
     monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
 
-    def fake_convert(db_paths, counter_csv, marker_csv):
+    def fake_convert(db_paths, counter_csv, marker_csv, kernel_symbols_csv):
         assert counter_csv.endswith(".csv.gz"), counter_csv
         if counter_csv_body is not None:
             with gzip.open(counter_csv, "wt", encoding="utf-8") as f:

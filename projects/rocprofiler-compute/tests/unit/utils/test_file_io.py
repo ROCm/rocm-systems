@@ -12,6 +12,7 @@ from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
+    load_kernel_short_names,
 )
 
 
@@ -198,6 +199,66 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0).empty
+
+
+def write_kernel_symbols_csv(workload_dir, fbase, name_pairs) -> None:
+    """Write one profiling run's kernel symbol CSV into a workload dir."""
+    pd.DataFrame(name_pairs, columns=["Kernel_Name", "Kernel_Short_Name"]).to_csv(
+        workload_dir / f"kernel_symbols_{fbase}.csv.gz", index=False
+    )
+
+
+def make_tool_data(name_pairs):
+    """Build one PC sampling results record carrying *name_pairs*."""
+    return {
+        "kernel_symbols": [
+            {
+                "formatted_kernel_name": kernel_name,
+                "truncated_kernel_name": short_name,
+            }
+            for kernel_name, short_name in name_pairs
+        ]
+    }
+
+
+def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):
+    """A symbol repeats per process and per run, and folds to one entry."""
+    write_kernel_symbols_csv(
+        tmp_path,
+        "run0",
+        [("vecCopy(double*)", "vecCopy"), ("vecCopy(double*)", "vecCopy")],
+    )
+    write_kernel_symbols_csv(
+        tmp_path, "run1", [("vecCopy(double*)", "vecCopy"), ("vecAdd()", "vecAdd")]
+    )
+
+    assert load_kernel_short_names(str(tmp_path), []) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_falls_back_to_the_sampling_results(tmp_path):
+    """A PC-sampling-only workload has no rocpd db, so its JSON carries them."""
+    tool_data_records = [
+        make_tool_data([("vecCopy(double*)", "vecCopy")]),
+        make_tool_data([("vecAdd()", "vecAdd")]),
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_prefers_the_profiled_csv(tmp_path):
+    """A counter run that also sampled takes the CSV, which covers every kernel."""
+    write_kernel_symbols_csv(tmp_path, "run0", [("vecCopy(double*)", "vecCopy")])
+    tool_data_records = [make_tool_data([("vecAdd()", "vecAdd")])]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy"
+    }
 
 
 @pytest.mark.misc
