@@ -875,3 +875,167 @@ amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray
 
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
+
+namespace {
+
+// Convert POSIX timespec to BCD-encoded CPER timestamp
+static void timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
+  struct tm utc;
+  gmtime_r(&ts->tv_sec, &utc);
+
+  // Encode each field as BCD (Binary-Coded Decimal)
+  out->seconds = static_cast<uint8_t>((utc.tm_sec % 10) | ((utc.tm_sec / 10) << 4));
+  out->minutes = static_cast<uint8_t>((utc.tm_min % 10) | ((utc.tm_min / 10) << 4));
+  out->hours = static_cast<uint8_t>((utc.tm_hour % 10) | ((utc.tm_hour / 10) << 4));
+  out->day = static_cast<uint8_t>((utc.tm_mday % 10) | ((utc.tm_mday / 10) << 4));
+  out->month = static_cast<uint8_t>(((utc.tm_mon + 1) % 10) | (((utc.tm_mon + 1) / 10) << 4));
+
+  int year = utc.tm_year + 1900;
+  out->year = static_cast<uint8_t>((year % 100 % 10) | (((year % 100) / 10) << 4));
+  out->century = static_cast<uint8_t>((year / 100 % 10) | (((year / 100) / 10) << 4));
+  out->flag = 0;
+}
+
+// Synthesize a full amdsmi_cper_hdr_t from a UALoE ualoe_cper_hdr_t
+static void synthesize_amdsmi_cper_header(const ualoe_cper_hdr_t* ualoe_hdr, uint32_t payload_size,
+                                          amdsmi_cper_hdr_t* amdsmi_hdr) {
+  memset(amdsmi_hdr, 0, sizeof(*amdsmi_hdr));
+
+  // Fixed CPER header fields
+  memcpy(amdsmi_hdr->signature, "CPER", 4);
+  amdsmi_hdr->revision = 0x0100;  // CPER v1.0
+  amdsmi_hdr->signature_end = 0xFFFFFFFF;
+  amdsmi_hdr->sec_cnt = 1;
+
+  // Severity: direct copy (enums match)
+  amdsmi_hdr->error_severity = static_cast<amdsmi_cper_sev_t>(ualoe_hdr->severity);
+
+  // Valid bits: only timestamp is valid
+  amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
+  amdsmi_hdr->cper_valid_bits.valid_bits.platform_id = 0;
+  amdsmi_hdr->cper_valid_bits.valid_bits.partition_id = 0;
+
+  // Record length: full amdsmi header + payload
+  amdsmi_hdr->record_length = sizeof(amdsmi_cper_hdr_t) + payload_size;
+
+  // Timestamp: convert timespec → BCD
+  timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp);
+
+  // Creator ID: "IFoE" (4 bytes, zero-padded to 16)
+  memcpy(amdsmi_hdr->creator_id, "IFoE", 4);
+
+  // Notify type: IFoE GUID (placeholder all-zeros)
+  static const unsigned char ifoe_guid[16] = AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID;
+  memcpy(amdsmi_hdr->notify_type.b, ifoe_guid, 16);
+
+  // Remaining fields: zero (platform_id, partition_id, record_id, flags,
+  // persistence_info, reserved already zeroed by memset)
+}
+
+}  // namespace
+
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor) {
+  if (processor_handle == nullptr || cper_data == nullptr || buf_size == nullptr ||
+      cper_hdrs == nullptr || entry_count == nullptr || cursor == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &device);
+  if (status != AMDSMI_STATUS_SUCCESS || device == nullptr) {
+    return status;
+  }
+
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  // Allocate temporary buffer for UALoE records
+  const size_t ualoe_buf_size = 1048576;  // 1 MB
+  char* ualoe_buf = static_cast<char*>(malloc(ualoe_buf_size));
+  if (ualoe_buf == nullptr) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  // Allocate array for UALoE header pointers
+  const size_t max_ualoe_entries = *entry_count;
+  ualoe_cper_hdr_t** ualoe_hdrs =
+      static_cast<ualoe_cper_hdr_t**>(malloc(max_ualoe_entries * sizeof(ualoe_cper_hdr_t*)));
+  if (ualoe_hdrs == nullptr) {
+    free(ualoe_buf);
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  // Call UALoE library
+  uint64_t ualoe_buf_size_var = ualoe_buf_size;
+  uint64_t ualoe_entry_count = max_ualoe_entries;
+  int ret = ualoe_get_ifoe_cper_entries(ualoe_handle, severity_mask, ualoe_buf, &ualoe_buf_size_var,
+                                        ualoe_hdrs, &ualoe_entry_count, cursor);
+
+  if (ret != 0 && ret != ENOBUFS) {
+    free(ualoe_buf);
+    free(ualoe_hdrs);
+    if (ret == ENOSPC) {
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    }
+    return AMDSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  // Transform UALoE records into amdsmi CPER format
+  uint64_t amdsmi_offset = 0;
+  uint64_t transformed_entries = 0;
+
+  for (uint64_t i = 0; i < ualoe_entry_count; i++) {
+    const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
+    const uint32_t ualoe_payload_size =
+        static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
+    const uint32_t amdsmi_record_length = sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size;
+
+    // Validate UALoE record doesn't extend past input buffer
+    const size_t ualoe_offset = reinterpret_cast<const char*>(ualoe_hdr) - ualoe_buf;
+    if (ualoe_offset + ualoe_hdr->record_length > ualoe_buf_size_var) {
+      break;  // UALoE record claims to extend past buffer end
+    }
+
+    // Check if we have space in the output buffer
+    if (amdsmi_offset + amdsmi_record_length > *buf_size) {
+      break;  // Buffer full
+    }
+
+    // Check if we have space in the cper_hdrs array
+    if (transformed_entries >= max_ualoe_entries) {
+      break;
+    }
+
+    // Write synthesized amdsmi header
+    amdsmi_cper_hdr_t* amdsmi_hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(cper_data + amdsmi_offset);
+    synthesize_amdsmi_cper_header(ualoe_hdr, ualoe_payload_size, amdsmi_hdr);
+
+    // Copy payload (data after UALoE header)
+    const char* ualoe_payload = reinterpret_cast<const char*>(ualoe_hdr) + sizeof(ualoe_cper_hdr_t);
+    memcpy(cper_data + amdsmi_offset + sizeof(amdsmi_cper_hdr_t), ualoe_payload,
+           ualoe_payload_size);
+
+    // Store pointer in cper_hdrs array
+    cper_hdrs[transformed_entries] = amdsmi_hdr;
+    transformed_entries++;
+    amdsmi_offset += amdsmi_record_length;
+  }
+
+  free(ualoe_buf);
+  free(ualoe_hdrs);
+
+  *buf_size = amdsmi_offset;
+  *entry_count = transformed_entries;
+
+  // Return MORE_DATA if UALoE indicated more records available
+  if (ret == ENOBUFS) {
+    return AMDSMI_STATUS_MORE_DATA;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
