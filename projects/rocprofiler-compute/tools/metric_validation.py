@@ -93,7 +93,6 @@ class Analyzer(OmniAnalyze_Base):
             # create 'mega dataframe'
             raw_pmc = file_io.create_df_pmc(
                 path_info[0],
-                args.kernel_verbose,
                 args.verbose,
             )
 

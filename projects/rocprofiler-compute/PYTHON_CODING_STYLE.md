@@ -429,7 +429,6 @@ Each function should do **ONE** thing well. If you use "and" to describe what it
 ```python
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
@@ -437,7 +436,7 @@ def create_df_pmc(
     df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
     if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
-    kernel_name_shortener(df, kernel_verbose)
+    utils_analysis.add_unit_counter(df)
     return df
 ```
 
@@ -485,7 +484,6 @@ def pre_processing(self) -> None:
             )
 
         file_io.create_df_kernel_top_stats(...)
-        kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
         parser.load_table_data(...)
 ```
 
