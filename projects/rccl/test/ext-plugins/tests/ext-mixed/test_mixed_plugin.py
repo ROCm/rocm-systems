@@ -7,7 +7,7 @@
 Tests for the RCCL "mixed" plugin, which demonstrates the NCCL feature
 "plugin system supports multiple plugin types from a single shared object".
 
-A single libnccl-mixed.so exports both a net plugin (ncclNetPlugin_vXX) and a
+A single librccl-mixed.so exports both a net plugin (ncclNetPlugin_vXX) and a
 tuner plugin (ncclTunerPlugin_vXX). When RCCL is pointed at this object via
 NCCL_NET_PLUGIN and no dedicated tuner plugin is configured, RCCL must:
   1. load the net plugin from the object, and
@@ -35,7 +35,7 @@ MIXED_EXAMPLE_DIR = os.path.abspath(
         os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "mixed", "example"
     )
 )
-MIXED_SO = os.path.join(MIXED_EXAMPLE_DIR, "libnccl-mixed.so")
+MIXED_SO = os.path.join(MIXED_EXAMPLE_DIR, "librccl-mixed.so")
 INCLUDE_DIR = os.path.abspath(
     os.path.join(MIXED_EXAMPLE_DIR, "..", "..", "..", "src", "include", "plugin")
 )
@@ -57,7 +57,7 @@ def _expected_symbol(header, macro):
 
 
 def _build_mixed_plugin():
-    """Build libnccl-mixed.so from source once. Returns the .so path or skips."""
+    """Build librccl-mixed.so from source once. Returns the .so path or skips."""
     global _built_so
     if _built_so is not None:
         return _built_so
@@ -195,7 +195,7 @@ def test_mixed_runtime_load(paths):
     # 1) net plugin came from the mixed object specifically: require the object
     #    path on the "Successfully loaded external network plugin" line.
     assert re.search(
-        r"Successfully loaded external network plugin\b.*libnccl-mixed\.so", log
+        r"Successfully loaded external network plugin\b.*librccl-mixed\.so", log
     ), f"Net plugin was not loaded from the mixed object, see {log_file}"
 
     # 2) tuner was served from the SAME object (reuse via ncclGetNetPluginLib):
