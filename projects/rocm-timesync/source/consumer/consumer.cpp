@@ -41,6 +41,8 @@ static std::string precision_to_name(ts_precision_t precision)
 
 } // namespace
 
+static std::atomic<bool> deinitialized = false;
+static std::atomic<bool> initialized = false;
 static std::thread streamer;
 static ts_config_t cfg = {};
 static ipc::channel_t* channel = nullptr;
@@ -108,6 +110,10 @@ int timesync_client_init(const ts_client_config_t& ccfg)
 {
     int status;
 
+    // already initialized
+    if (initialized.exchange(true, std::memory_order_acq_rel))
+        return 0;
+
 #ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
     curl_global_init(CURL_GLOBAL_DEFAULT);
 #endif
@@ -124,13 +130,17 @@ int timesync_client_init(const ts_client_config_t& ccfg)
 
     // create db connection
     status = _db_init();
-    if (status != 0)
+    if (status != 0) {
+        initialized.store(false, std::memory_order_release);
         return status;
+    }
 
     // attach to ringbuffer using client's required precision
     channel = ipc::attach(precision_to_name(ccfg.precision));
-    if (channel == nullptr)
+    if (channel == nullptr) {
+        initialized.store(false, std::memory_order_release);
         return -ENODEV;
+    }
 
     // spawn thread to stream ringbuffer into database
     streamer = std::thread([]() {
@@ -161,14 +171,21 @@ int timesync_client_init(const ts_client_config_t& ccfg)
         }
     });
 
+    std::atexit([]() { timesync_client_deinit(); });
+
     return 0;
 }
 
 int timesync_client_deinit()
 {
+    if (deinitialized.exchange(true))
+        return 0;
+
     stop_requested.store(true, std::memory_order_release);
     ipc::stop(channel);
-    streamer.join();
+
+    if (streamer.joinable())
+        streamer.join();
 
     ipc::detach(channel);
 
@@ -191,6 +208,10 @@ int timesync_client_deinit()
 int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestamp, uint64_t& system_timestamp)
 {
     system_timestamp = 0;
+
+    if (!initialized.load(std::memory_order_acquire) ||
+        deinitialized.load(std::memory_order_acquire))
+        return -1;
 
     auto start = std::chrono::steady_clock::now();
     auto ret = db_client->lookup_or_extrapolate(agent_kfd_gpu_id, agent_timestamp, system_timestamp);
