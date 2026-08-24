@@ -1587,17 +1587,63 @@ class ConSanValidationTest(unittest.TestCase):
                 self.assertIn("barrier-drop", workload["fault_families"])
                 self.assertIsNotNone(workload["overhead_filter"])
 
-    def test_gfx1201_status_matrix_count_matches_manifest(self) -> None:
-        status_path = (
-            Path(validation.__file__).resolve().parents[3]
-            / "docs/consan/STATUS_RDNA4.md"
+    def test_status_ledgers_are_single_tables_matching_manifests(self) -> None:
+        status_root = Path(validation.__file__).resolve().parents[3] / "docs/consan"
+        status_files = {
+            "gfx942": "STATUS_CDNA3.md",
+            "gfx950": "STATUS_CDNA4.md",
+            "gfx1100": "STATUS_RDNA3.md",
+            "gfx1201": "STATUS_RDNA4.md",
+            "gfx1250": "STATUS_GFX1250.md",
+        }
+        status_colors = ("🩶", "🟥", "🟧", "🟨", "🟩")
+        yellow_rule = (
+            "🟨 timeout-only blocker or at least 80% aggregate applicable-site "
+            "support"
         )
-        status = status_path.read_text()
-        matrix = status.split("## Current matrix", 1)[1].split("\n## ", 1)[0]
-        rows = [
-            line for line in matrix.splitlines() if re.match(r"^\| \*\*P[0-9]", line)
-        ]
-        self.assertEqual(len(rows), len(validation._manifest("gfx1201")["workloads"]))
+
+        for target, filename in status_files.items():
+            with self.subTest(target=target):
+                status = (status_root / filename).read_text()
+                self.assertEqual(status.count("| Set | Priority |"), 1)
+                self.assertEqual(
+                    status.count("|---|---:|---|---|---|---|---|"), 1
+                )
+                self.assertIn(yellow_rule, status)
+                rows = [
+                    line
+                    for line in status.splitlines()
+                    if line.startswith("| ")
+                    and not line.startswith("| Set |")
+                    and not line.startswith("|---")
+                ]
+                for row in rows:
+                    fields = [field.strip() for field in row.strip("|").split("|")]
+                    self.assertEqual(len(fields), 7, row)
+                    for cell in fields[3:]:
+                        self.assertEqual(
+                            sum(cell.count(color) for color in status_colors), 1, cell
+                        )
+                        if "timeout-only" in cell:
+                            self.assertTrue(cell.startswith("🟨"), cell)
+                        match = re.search(
+                            r"([0-9,]+)/([0-9,]+) aggregate sites supported", cell
+                        )
+                        if match is not None:
+                            supported = int(match.group(1).replace(",", ""))
+                            applicable = int(match.group(2).replace(",", ""))
+                            if supported * 5 >= applicable * 4:
+                                self.assertTrue(
+                                    cell.startswith(("🟨", "🟩")), cell
+                                )
+
+                for workload in validation._manifest(target)["workloads"]:
+                    marker = f"`{workload['id']}`"
+                    self.assertEqual(
+                        sum(marker in row for row in rows),
+                        1,
+                        f"{filename} must contain {marker} exactly once",
+                    )
 
     def test_pytorch_manifest_workloads_have_client_runners(self) -> None:
         client_path = Path(validation.__file__).with_name(
