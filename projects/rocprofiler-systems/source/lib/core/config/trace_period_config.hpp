@@ -25,14 +25,13 @@
 /// trace_periods can be exercised without the global config singleton;
 /// default_trace_config_externals below is the production policy.
 
-#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
 
 #include <algorithm>
 #include <concepts>
@@ -57,9 +56,9 @@ struct trace_period
 /// ROCPROFSYS_TRACE_PERIODS into trace_period entries.
 struct trace_period_settings
 {
-    double      delay        = 0.0;
-    double      duration     = 0.0;
-    std::string periods      = {};
+    double      delay    = 0.0;
+    double      duration = 0.0;
+    std::string periods;
     std::string period_clock = "realtime";
 };
 
@@ -76,13 +75,16 @@ struct default_trace_config_externals
     static trace_period_settings get_trace_period_settings()
     {
         return trace_period_settings{
-            get_setting_value<double>(std::string{ env_vars::TRACE_DELAY }).value_or(0.0),
-            get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
-                .value_or(0.0),
-            get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
-                .value_or(std::string{}),
-            get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
-                .value_or(std::string{ "realtime" })
+            .delay = get_setting_value<double>(std::string{ env_vars::TRACE_DELAY })
+                         .value_or(0.0),
+            .duration = get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+                            .value_or(0.0),
+            .periods =
+                get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
+                    .value_or(std::string{}),
+            .period_clock = get_setting_value<std::string>(
+                                std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+                                .value_or(std::string{ "realtime" })
         };
     }
 };
@@ -96,6 +98,7 @@ class trace_config
 public:
     [[nodiscard]] static std::vector<trace_period> get_trace_specs();
 
+    // NOLINTNEXTLINE(misc-include-cleaner)
     [[nodiscard]] static clockid_t get_trace_period_clock_id();
 
 private:
@@ -130,7 +133,8 @@ trace_config<Externals>::parse_period_entry(std::string_view entry)
 
         case 1: period.delay = utility::convert<double>(fields[0]); [[fallthrough]];
 
-        case 0: break;
+        case 0:
+        default: break;
     }
     return period;
 }
@@ -170,6 +174,7 @@ trace_config<Externals>::get_trace_specs()
 
     if(has_delay_duration && has_periods)
     {
+        // NOLINTNEXTLINE(misc-include-cleaner)
         throw std::runtime_error(fmt::format(
             "{}/{} and {} are mutually exclusive; configure one or the other, not both",
             env_vars::TRACE_DELAY, env_vars::TRACE_DURATION, env_vars::TRACE_PERIODS));
@@ -197,11 +202,11 @@ trace_config<Externals>::get_trace_period_clock_id()
     clockid_t result;
     if(clock_id_str == "cputime")
     {
-        result = CLOCK_PROCESS_CPUTIME_ID;
+        result = CLOCK_PROCESS_CPUTIME_ID;  // NOLINT(misc-include-cleaner)
     }
     else if(clock_id_str == "realtime")
     {
-        result = CLOCK_REALTIME;
+        result = CLOCK_REALTIME;  // NOLINT(misc-include-cleaner)
     }
     else
     {
