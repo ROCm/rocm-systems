@@ -4,9 +4,9 @@
 """Internal entry point used by rocprof-compute to launch a workload under
 ROCTX injection.
 
-Invoked by absolute path as ``python <path>/launch.py --frameworks <names> --
-<target.py> [args...]``. Backends are given as a comma-separated list; when
-omitted the workload runs uninstrumented.
+Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
+[<name> ...] -- <target.py> [args...]``. When ``--frameworks`` is omitted the
+workload runs uninstrumented.
 """
 
 import runpy
@@ -41,18 +41,21 @@ def _report_torch_trace_callback_errors() -> None:
     )
 
 
-# Consume a leading "--frameworks <names>" option and an optional "--" separator.
+# Consume a leading "--frameworks <name> [<name> ...]" option and an optional
+# "--" separator. Framework names are all tokens until "--".
 args = sys.argv[1:]
-frameworks = ""
+frameworks: list[str] = []
 if args and args[0] == "--frameworks":
-    frameworks = args[1] if len(args) > 1 else ""
-    args = args[2:]
+    args = args[1:]
+    while args and args[0] != "--":
+        frameworks.append(args[0])
+        args = args[1:]
 if args and args[0] == "--":
     args = args[1:]
 
 if not args:
     print(
-        "usage: python <path>/launch.py [--frameworks <names>] -- "
+        "usage: python <path>/launch.py [--frameworks <name> ...] -- "
         "<target.py> [args...]",
         file=sys.stderr,
     )
