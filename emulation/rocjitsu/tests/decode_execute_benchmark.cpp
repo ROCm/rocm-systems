@@ -11,6 +11,7 @@
 /// This benchmark is NOT a pass/fail gate — it reports numbers for tracking
 /// performance regressions across changesets.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -18,10 +19,11 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "test_encodings_util.h"
 #include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
@@ -37,12 +39,6 @@ namespace {
 
 using namespace rocjitsu;
 using Clock = std::chrono::steady_clock;
-
-/// @brief Common test encoding entry (matches all ISA test_encodings.h).
-struct TestEncEntry {
-  std::string_view mnemonic;
-  std::array<uint32_t, 2> words;
-};
 
 enum class InstCategory : uint8_t { SCALAR_ALU, VECTOR_ALU, MEMORY };
 
@@ -74,15 +70,13 @@ inline bool should_skip(std::string_view mn) {
       "s_icache_inv", "s_sendmsghalt", "v_readlane", "v_writelane", "v_readfirstlane", "v_mfma_",
       "v_permlane",   "v_smfma_",      "v_wmma_",    "v_swmmac_",
   };
-  for (auto p : SKIP)
-    if (mn.substr(0, p.size()) == p)
-      return true;
-  return false;
+  return mnemonic_has_any_prefix(mn, SKIP);
 }
 
 /// @brief Build a corpus of decodable instructions from test data.
 /// Only filters by skip list and decodability — does not try execute.
-std::vector<CorpusEntry> build_corpus(const TestEncEntry *encodings, size_t num_encodings,
+template <typename Encoding>
+std::vector<CorpusEntry> build_corpus(const Encoding *encodings, size_t num_encodings,
                                       Decoder &decoder) {
   std::vector<CorpusEntry> corpus;
 
@@ -95,7 +89,7 @@ std::vector<CorpusEntry> build_corpus(const TestEncEntry *encodings, size_t num_
 
     // Try decode — skip if the synthesized encoding doesn't decode.
     try {
-      auto *inst = decoder.decode(te.words.data());
+      auto *inst = decode_valid(decoder, te.words.data());
       if (inst) {
         corpus.push_back({te.mnemonic, te.words, cat});
         delete inst;
@@ -115,7 +109,8 @@ struct TimingResult {
 };
 
 /// @brief Run the benchmark for a given ISA.
-void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEncEntry *encodings,
+template <typename Encoding>
+void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const Encoding *encodings,
                    size_t num_encodings) {
   // Set up CU + wavefront.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_bench_mem");
@@ -177,7 +172,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
   auto decode_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto &entry : corpus) {
-      auto *inst = decoder->decode(entry.words.data());
+      auto *inst = decode_valid(*decoder, entry.words.data());
       delete inst;
     }
   }
@@ -194,7 +189,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
   auto full_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto *entry : executable) {
-      auto *inst = decoder->decode(entry->words.data());
+      auto *inst = decode_valid(*decoder, entry->words.data());
       if (inst) {
         try {
           cu->execute_instruction(inst, *wf);
@@ -241,22 +236,13 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
 
 // --- Benchmark tests ---
 
-TEST(DecodeExecuteBenchmark, Cdna4) {
-  run_benchmark(ROCJITSU_CODE_ARCH_CDNA4, "cdna4",
-                reinterpret_cast<const TestEncEntry *>(cdna4::test_data::ENCODINGS),
-                cdna4::test_data::NUM_ENCODINGS);
-}
+#define RUN_BENCHMARK(ISA_NS, ARCH_ENUM, ARCH_STR)                                                 \
+  run_benchmark(ARCH_ENUM, ARCH_STR, ISA_NS::test_data::ENCODINGS, ISA_NS::test_data::NUM_ENCODINGS)
 
-TEST(DecodeExecuteBenchmark, Rdna4) {
-  run_benchmark(ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
-                reinterpret_cast<const TestEncEntry *>(rdna4::test_data::ENCODINGS),
-                rdna4::test_data::NUM_ENCODINGS);
-}
+TEST(DecodeExecuteBenchmark, Cdna4) { RUN_BENCHMARK(cdna4, ROCJITSU_CODE_ARCH_CDNA4, "cdna4"); }
 
-TEST(DecodeExecuteBenchmark, Gfx1250) {
-  run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
-                reinterpret_cast<const TestEncEntry *>(gfx1250::test_data::ENCODINGS),
-                gfx1250::test_data::NUM_ENCODINGS);
-}
+TEST(DecodeExecuteBenchmark, Rdna4) { RUN_BENCHMARK(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
+
+TEST(DecodeExecuteBenchmark, Gfx1250) { RUN_BENCHMARK(cdna5, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"); }
 
 } // namespace

@@ -7,6 +7,7 @@
 /// @details Implements the EventState methods that model KFD's event
 /// lifecycle and the SimulatedKfd ioctl wrappers that delegate to them.
 
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "util/log.h"
 
@@ -32,7 +33,7 @@ void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t 
 
 EventState::~EventState() {
   if (memfd >= 0)
-    ::close(memfd);
+    libc_passthrough().close(memfd);
 }
 
 void EventState::adopt_page(void *ptr, size_t size) {

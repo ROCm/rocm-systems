@@ -17,31 +17,30 @@
 #include <cmath>
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
+NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
 
-ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
-  if (comm == nullptr || ginType == nullptr) {
-    return ncclInternalError;
-  }
+// Backend version compatibility. Index: backend version. Value: min compatible NCCL version
+const int proxyBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 3), NCCL_VERSION(2, 30, 5)};
+const int gdakiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 3), NCCL_VERSION(2, 30, 5)};
+const int gpiBackendMinVersions[] = {0, NCCL_VERSION(2, 30, 5)};
+// AMD device-initiated backends do not use the host-provided backendVersion
+// (their createContext ignores it); expose a single version so backendVersion=0.
+const int rocshmemGdaBackendMinVersions[] = {0};
+const int anvilSdmaBackendMinVersions[] = {0};
 
-  if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) {
-    *ginType = NCCL_GIN_TYPE_NONE;
-    return ncclSuccess;
-  }
+ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  if (comm == nullptr || ginType == nullptr) return ncclInternalError;
 
-  *ginType = comm->sharedRes->ginState.ginType;
+  *ginType =
+    comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL ? NCCL_GIN_TYPE_NONE : comm->sharedRes->ginState.ginType;
   return ncclSuccess;
 }
 
-ncclResult_t getGlobalRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
-  if (comm == nullptr || ginType == nullptr) {
-    return ncclInternalError;
-  }
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  if (comm == nullptr || ginType == nullptr) return ncclInternalError;
 
-  if (comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
-    *ginType = NCCL_GIN_TYPE_NONE;
-    return ncclSuccess;
-  }
-  *ginType = comm->sharedRes->ginState.ginType;
+  *ginType =
+    comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE ? NCCL_GIN_TYPE_NONE : comm->sharedRes->ginState.ginType;
   return ncclSuccess;
 }
 
@@ -74,7 +73,8 @@ ncclResult_t setLocalGinType(struct ncclComm* comm) {
 
     if (ginState.ginType == NCCL_GIN_TYPE_PROXY) {
       // Replace ginState->ncclGin by a layer adding host queues
-      NCCLCHECK(ncclGinProxyInit(&ginState.ncclGin));
+      NCCLCHECK(ncclGinProxyInit(comm));
+      ginState.ncclGin = &ncclGinProxy;
     }
     return ncclSuccess;
   }
@@ -84,6 +84,9 @@ ncclResult_t setLocalGinType(struct ncclComm* comm) {
 
 void* ncclGinProgress(struct ncclGinState* ginState_) {
   struct ncclGinState* ginState = (struct ncclGinState*)ginState_;
+  if (ncclOsCpuCount(ginState->cpuAffinity)) {
+    ncclOsSetAffinity(ginState->cpuAffinity);
+  }
   while (1) {
     std::unique_lock<std::mutex> lock(ginState->mutex);
     if (ginState->ginProgress == 1) {
@@ -93,7 +96,7 @@ void* ncclGinProgress(struct ncclGinState* ginState_) {
           ncclResult_t ret = ginState->ncclGin->ginProgress(dc->ginCtx[n]);
           if (ret != ncclSuccess) {
             COMPILER_ATOMIC_STORE(&ginState->asyncResult, ret, std::memory_order_release);
-            INFO(NCCL_ALL, "%s:%d -> %d [GIN Progress Thread]", __FILE__, __LINE__, ret);
+            INFO_LOC(NCCL_ALL, "-> %d [GIN Progress Thread]", ret);
             ginState->ginProgress = -2;
             return NULL;
           }
@@ -107,7 +110,7 @@ void* ncclGinProgress(struct ncclGinState* ginState_) {
     } else if (ginState->ginProgress == 0) {
       ginState->cond.wait(lock);
     } else {
-      INFO(NCCL_ALL, "%s:%d -> [GIN Progress Thread] state unknown %d", __FILE__, __LINE__, ginState->ginProgress);
+      INFO_LOC(NCCL_ALL, "[GIN Progress Thread] state unknown %d", ginState->ginProgress);
       ginState->ginProgress = -2;
       return NULL;
     }
@@ -230,8 +233,20 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
                                  struct ncclDevComm* devComm) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
 
+  if (reqs->ginStrongSignalsRequired && !ginState->supportsStrongSignals) {
+    WARN("GIN strong signals are required, but the GIN plugin does not support them.");
+    return ncclInvalidUsage;
+  }
+
+  if (reqs->ginVaSignalsRequired && !ginState->supportsVASignals) {
+    WARN("GIN VA signals are required, but the GIN plugin does not support them.");
+    return ncclInvalidUsage;
+  }
+
   devComm->ginSignalCount = reqs->ginSignalCount;
   devComm->ginCounterCount = reqs->ginCounterCount;
+  // Legacy signals default to what is specified in DevCommRequirements
+  devComm->ginStrongLegacySignals = reqs->ginStrongSignalsRequired;
 
   // Allocate contexts
   int nContextsTotal = reqs->ginContextCount;
@@ -254,22 +269,80 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   struct ncclGinStateDevComm* ginStateDevComm = NULL;
   NCCLCHECK(ncclCalloc(&ginStateDevComm, 1));
   ginStateDevComm->contextCount = nContextsTotal;
+
+  const int* backendVersionArray;
+  int nVersions;
+  switch (ginState->ginType) {
+  case NCCL_GIN_TYPE_PROXY:
+    backendVersionArray = proxyBackendMinVersions;
+    nVersions = sizeof(proxyBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_GDAKI:
+    backendVersionArray = gdakiBackendMinVersions;
+    nVersions = sizeof(gdakiBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_GPI:
+    backendVersionArray = gpiBackendMinVersions;
+    nVersions = sizeof(gpiBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_ROCSHMEM_GDA:
+    backendVersionArray = rocshmemGdaBackendMinVersions;
+    nVersions = sizeof(rocshmemGdaBackendMinVersions) / sizeof(int);
+    break;
+  case NCCL_GIN_TYPE_ANVIL_SDMA:
+    backendVersionArray = anvilSdmaBackendMinVersions;
+    nVersions = sizeof(anvilSdmaBackendMinVersions) / sizeof(int);
+    break;
+  default:
+    WARN("Cannot get backend version for invalid GIN type %d", ginState->ginType);
+    return ncclInternalError;
+  }
+
+  int backendVersion = 0;
+  if (ncclParamDevApiJit() == 1) {
+    // JIT: device code version is the latest version.
+    backendVersion = nVersions - 1;
+  } else {
+    // Non-JIT: device code version matches reqs->version.
+    for (int i = 0; i < nVersions; i++) {
+      if (reqs->version >= backendVersionArray[i]) backendVersion = i;
+      else break;
+    }
+  }
+
   ncclResult_t ret = ncclSuccess;
 
-  ncclGinConfig_t ginConfig = {reqs->ginSignalCount, reqs->ginCounterCount, nContextsPerComm, reqs->ginQueueDepth,
-                               reqs->ginTrafficClass != NCCL_CONFIG_UNDEF_INT ? reqs->ginTrafficClass :
-                                                                                comm->config.trafficClass};
+  ncclGinConfig_t ginConfig = {
+    reqs->ginSignalCount,
+    reqs->ginCounterCount,
+    nContextsPerComm,
+    reqs->ginQueueDepth,
+    reqs->ginTrafficClass != NCCL_CONFIG_UNDEF_INT ? reqs->ginTrafficClass : comm->config.trafficClass,
+    backendVersion,
+    reqs->ginConnectionType == NCCL_GIN_CONNECTION_RAIL && ginState->ginConnectionType == NCCL_GIN_CONNECTION_FULL ?
+      comm->devrState.lsaSize :
+      1
+  };
 
   for (int n = 0; n < ginState->ginCommCount; n++) {
     NCCLCHECKGOTO(ginState->ncclGin->createContext(ginState->ginComms[n], &ginConfig, &ginStateDevComm->ginCtx[n],
                                                    &ginStateDevComm->devHandles[n]),
                   ret, end);
+    if (ginStateDevComm->ginCtx[n] == NULL || ginStateDevComm->devHandles[n] == NULL ||
+        ginStateDevComm->devHandles[n]->handle == NULL) {
+      WARN("GIN plugin %s returned invalid context for connection %d: ginCtx=%p devHandle=%p handle=%p",
+           ginState->ncclGin->name, n, ginStateDevComm->ginCtx[n], ginStateDevComm->devHandles[n],
+           ginStateDevComm->devHandles[n] ? ginStateDevComm->devHandles[n]->handle : NULL);
+      ret = ncclInternalError;
+      goto end;
+    }
     devComm->ginNetDeviceTypes[n] = ginStateDevComm->devHandles[n]->netDeviceType;
     devComm->ginHandles[n] = ginStateDevComm->devHandles[n]->handle;
     if (ginStateDevComm->devHandles[n]->needsProxyProgress) ginState->needsProxyProgress = 1;
   }
 
   if (ginState->needsProxyProgress && ginState->ginProgress == 0) {
+    ginState->cpuAffinity = comm->cpuAffinity;
     ginState->ginProgress = 1;
     ginState->thread = std::thread(ncclGinProgress, ginState);
     ncclSetThreadName(ginState->thread, "NCCL GIN Progress%2d", comm->cudaDev);

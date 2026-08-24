@@ -161,6 +161,30 @@ static ncclResult_t ncclIbGetRealPort(char* pciPath, int* realPort, int devIdx) 
   return ncclSuccess;
 }
 
+// NCCL_IB_PLANE_MAX_INDEX must be < 15 as we use int16_t for plane IDs
+// Typically 12 user-defined planes + 1 plane for undefined plane IDs
+#define NCCL_IB_PLANE_MAX_INDEX 14
+#define NCCL_IB_PLANE_VIRT_BIT (0x1 << NCCL_IB_PLANE_MAX_INDEX)
+static_assert(NCCL_IB_PLANE_MAX_INDEX < 15, "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
+
+static ncclResult_t ncclIbGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
+  int16_t p = 0;
+  while (p < *count && planes[p] != devPlane) p++;
+  if (p == *count) {
+    if (p == (NCCL_IB_PLANE_MAX_INDEX - 1)) {
+      WARN("NCCL cannot use more than %d plane IDs.", NCCL_IB_PLANE_MAX_INDEX);
+      return ncclInvalidUsage;
+    }
+    if (devPlane != NCCL_NET_ID_UNDEF && (devPlane & NCCL_IB_PLANE_VIRT_BIT)) {
+      WARN("NCCL cannot use a plane ID that is %d.", devPlane);
+      return ncclInvalidUsage;
+    }
+    planes[(*count)++] = devPlane;
+  }
+  *idx = p;
+  return ncclSuccess;
+}
+
 static int ibvWidths[] = {1, 4, 8, 12, 2};
 static int ibvSpeeds[] = {
   2500,  /* SDR */
@@ -271,6 +295,9 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   ncclIbMergedDev tmp;
   memset(&tmp, 0, sizeof(tmp));
   bool used[MAX_IB_DEVS] = {0};
+  tmp.railId = ncclIbDevs[props->devs[0]].railId;
+  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
+  tmp.planeId = (props->ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : ncclIbDevs[props->devs[0]].planeId;
 
   for (int i = 0; i < props->ndevs; i++) {
     if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) {
@@ -282,6 +309,10 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
+    // rail ID of a fused device with different rails is undefined.
+    if (dev->railId == NCCL_NET_ID_UNDEF || tmp.railId != dev->railId) tmp.railId = NCCL_NET_ID_UNDEF;
+    // Only set the bit if multiple devs are merged, otherwise keep the initial value
+    if (props->ndevs > 1) tmp.planeId |= (0x1 << dev->planeIdx);
     // Each successive time, copy the name '+' new name
     if (tmp.vProps.ndevs > 1) {
       size_t off = strlen(tmp.devName);
@@ -333,8 +364,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
   ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed,
-       tmp.vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d rail=%d plane=%d", *d, tmp.devName,
+       tmp.speed, tmp.vProps.ndevs, tmp.railId, tmp.planeId);
   return ncclSuccess;
 }
 
@@ -440,15 +471,17 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             continue;
           }
           if (portAttr.state != IBV_PORT_ACTIVE) continue;
-          if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET)
-            continue;
-
-            // check against user specified HCAs/ports
-          if (!(matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact) ^ searchNot)) {
+          if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) {
             continue;
           }
 
-            // check for mlx5 data direct support only once for a each device
+          // check against user specified HCAs/ports
+          int userIfId = -1;
+          if (!(matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact, &userIfId) ^ searchNot)) {
+            continue;
+          }
+
+          // check for mlx5 data direct support only once for a each device
           if (devCount == -1) {
             devCount = 1;
             devOffset = 0;
@@ -478,12 +511,14 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
             ncclIbDevs[ncclNIbDevs].portNum = port_num;
             ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex) {
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              ncclIbDevs[ncclNIbDevs].speed =
-                ncclIbSpeed(portAttr.active_speed_ex) * ncclIbWidth(portAttr.active_width);
+            // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+            uint64_t querySpeed = 0;
+            if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess) {
+              // ibv_query_port_speed returns speed in granularity of 100 Mbps
+              ncclIbDevs[ncclNIbDevs].speed = querySpeed * 100;
             } else {
-              ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
+              int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portSpeed) * ncclIbWidth(portAttr.active_width);
             }
             ncclIbDevs[ncclNIbDevs].context = context;
             ncclIbDevs[ncclNIbDevs].pdRefs = 0;
@@ -507,6 +542,9 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
             ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
             NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
+
+            ncclIbDevs[ncclNIbDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
+            ncclIbDevs[ncclNIbDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
 
             // Enable ADAPTIVE_ROUTING by default on IB networks
             // But allow it to be overloaded by an env parameter
@@ -554,14 +592,26 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     // sort devices to ensure a consistent order across nodes
     if (ncclParamIbDevicePciOrder()) qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), ncclIbCompareDevs);
-    // Once sorted, get the realPort ID and create the virtual devices.
-    // Doing it after sorting ensures that devices will have consistent realPort ids across nodes.
+    // Once sorted, get the realPort ID, the plane index, and create the virtual devices.
+    // Doing it after sorting ensures that devices will have consistent realPort IDs and plane indexes accross ranks.
     char line[2048] = "";
+    int16_t uniquePlaneCount = 1, uniquePlaneIds[NCCL_IB_PLANE_MAX_INDEX] = {NCCL_NET_ID_UNDEF};
     for (int d = 0; d < ncclNIbDevs; d++) {
+      NCCLCHECKGOTO(ncclIbGetPlaneIndex(ncclIbDevs[d].planeId, &uniquePlaneCount, uniquePlaneIds,
+                                        &ncclIbDevs[d].planeIdx),
+                    ret, fail);
       NCCLCHECKGOTO(ncclIbGetRealPort(ncclIbDevs[d].pciPath, &ncclIbDevs[d].realPort, d), ret, fail);
-      snprintf(line + strlen(line), sizeof(line) - strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-               ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
-
+      snprintf(line + strlen(line), sizeof(line) - strlen(line), " [%d]%s:%d", d, ncclIbDevs[d].devName,
+               ncclIbDevs[d].portNum);
+      if (ncclIbDevs[d].railId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":%d", ncclIbDevs[d].railId);
+      } else if (ncclIbDevs[d].planeId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":");
+      }
+      if (ncclIbDevs[d].planeId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":%d", ncclIbDevs[d].planeId);
+      }
+      snprintf(line + strlen(line), sizeof(line) - strlen(line), "/%s", NCCL_IB_LLSTR(ncclIbDevs[d].link));
       // Add this plain physical device to the list of virtual devices (after sorting)
       int vDev;
       ncclNetVDeviceProps_t vProps = {0};
@@ -627,8 +677,8 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   props->maxCollBytes = MAX_COLLNET_SIZE;
   props->maxMultiRequestSize = 1;
-  props->railId = NCCL_NET_ID_UNDEF;
-  props->planeId = NCCL_NET_ID_UNDEF;
+  props->railId = ibDev->railId;
+  props->planeId = ibDev->planeId;
   return ncclSuccess;
 }
 
@@ -642,6 +692,8 @@ ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props) {
   NCCLCHECK(ncclIbGetPhysProperties(mergedDev->vProps.devs[0], props));
   props->name = mergedDev->devName;
   props->speed = mergedDev->speed;
+  props->railId = mergedDev->railId;
+  props->planeId = mergedDev->planeId;
   memcpy(&props->vProps, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
   return ncclSuccess;
 }

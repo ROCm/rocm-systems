@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
@@ -53,6 +53,25 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpFF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_f16_dpp"
+          : "v_cmp_f_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_f_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpFF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_f16_dpp"
@@ -93,6 +112,25 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_f16_dpp"
+          : "v_cmp_lt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -135,6 +173,25 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpEqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_f16_dpp"
+          : "v_cmp_eq_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_f16_dpp"
@@ -175,6 +232,25 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_f16_dpp"
+          : "v_cmp_le_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -217,6 +293,25 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpGtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_f16_dpp"
+          : "v_cmp_gt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lg_f16_dpp"
@@ -257,6 +352,25 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lg_f16_dpp"
+          : "v_cmp_lg_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lg_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLgF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -299,6 +413,25 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_f16_dpp"
+          : "v_cmp_ge_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_o_f16_dpp"
@@ -339,6 +472,25 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpOF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_o_f16_dpp"
+          : "v_cmp_o_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_o_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpOF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -381,6 +533,25 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpUF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_u_f16_dpp"
+          : "v_cmp_u_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_u_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpUF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nge_f16_dpp"
@@ -421,6 +592,25 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nge_f16_dpp"
+          : "v_cmp_nge_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nge_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNgeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -463,6 +653,25 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNlgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlg_f16_dpp"
+          : "v_cmp_nlg_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nlg_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNlgF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ngt_f16_dpp"
@@ -503,6 +712,25 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ngt_f16_dpp"
+          : "v_cmp_ngt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ngt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNgtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -545,6 +773,25 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNleF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nle_f16_dpp"
+          : "v_cmp_nle_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nle_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNleF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_neq_f16_dpp"
@@ -585,6 +832,25 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNeqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_neq_f16_dpp"
+          : "v_cmp_neq_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_neq_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeqF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -627,6 +893,25 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNltF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlt_f16_dpp"
+          : "v_cmp_nlt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nlt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNltF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpTF16Vopc::VCmpTF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_t_f16_dpp"
@@ -668,6 +953,25 @@ VCmpTF16Vopc::VCmpTF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_f16_dpp"
+          : "v_cmp_t_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_t_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpTF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_f_f32_dpp"
@@ -705,6 +1009,25 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_f32_dpp"
+          : "v_cmp_f_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_f_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpFF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -744,6 +1067,25 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_f32_dpp"
+          : "v_cmp_lt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_f32_dpp"
@@ -781,6 +1123,25 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_f32_dpp"
+          : "v_cmp_eq_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -820,6 +1181,25 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_f32_dpp"
+          : "v_cmp_le_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_f32_dpp"
@@ -857,6 +1237,25 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_f32_dpp"
+          : "v_cmp_gt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -896,6 +1295,25 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lg_f32_dpp"
+          : "v_cmp_lg_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lg_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLgF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_f32_dpp"
@@ -933,6 +1351,25 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_f32_dpp"
+          : "v_cmp_ge_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -972,6 +1409,25 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpOF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_o_f32_dpp"
+          : "v_cmp_o_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_o_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpOF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_u_f32_dpp"
@@ -1009,6 +1465,25 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpUF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_u_f32_dpp"
+          : "v_cmp_u_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_u_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpUF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1048,6 +1523,25 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nge_f32_dpp"
+          : "v_cmp_nge_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nge_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNgeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlg_f32_dpp"
@@ -1085,6 +1579,25 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNlgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlg_f32_dpp"
+          : "v_cmp_nlg_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nlg_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNlgF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1124,6 +1637,25 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ngt_f32_dpp"
+          : "v_cmp_ngt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ngt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNgtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nle_f32_dpp"
@@ -1161,6 +1693,25 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNleF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nle_f32_dpp"
+          : "v_cmp_nle_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nle_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNleF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1200,6 +1751,25 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_neq_f32_dpp"
+          : "v_cmp_neq_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_neq_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeqF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlt_f32_dpp"
@@ -1237,6 +1807,25 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNltF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlt_f32_dpp"
+          : "v_cmp_nlt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_nlt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNltF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTF32Vopc::VCmpTF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1276,6 +1865,25 @@ VCmpTF32Vopc::VCmpTF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_f32_dpp"
+          : "v_cmp_t_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_t_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpTF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_f_f64_dpp"
@@ -1295,11 +1903,25 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_F_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_f64_dpp"
+          : "v_cmp_f_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_F_F64 does not support DPP";
+  return std::make_unique<VCmpFF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1320,11 +1942,25 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_f64_dpp"
+          : "v_cmp_lt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LT_F64 does not support DPP";
+  return std::make_unique<VCmpLtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1345,11 +1981,25 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_EQ_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_f64_dpp"
+          : "v_cmp_eq_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_EQ_F64 does not support DPP";
+  return std::make_unique<VCmpEqF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1370,11 +2020,25 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_f64_dpp"
+          : "v_cmp_le_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LE_F64 does not support DPP";
+  return std::make_unique<VCmpLeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1395,11 +2059,25 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_f64_dpp"
+          : "v_cmp_gt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GT_F64 does not support DPP";
+  return std::make_unique<VCmpGtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1420,11 +2098,25 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LG_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lg_f64_dpp"
+          : "v_cmp_lg_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LG_F64 does not support DPP";
+  return std::make_unique<VCmpLgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1445,11 +2137,25 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_f64_dpp"
+          : "v_cmp_ge_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GE_F64 does not support DPP";
+  return std::make_unique<VCmpGeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1470,11 +2176,25 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_O_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpOF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_o_f64_dpp"
+          : "v_cmp_o_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_O_F64 does not support DPP";
+  return std::make_unique<VCmpOF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1495,11 +2215,25 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_U_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpUF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_u_f64_dpp"
+          : "v_cmp_u_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_U_F64 does not support DPP";
+  return std::make_unique<VCmpUF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1520,11 +2254,25 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NGE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nge_f64_dpp"
+          : "v_cmp_nge_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NGE_F64 does not support DPP";
+  return std::make_unique<VCmpNgeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1545,11 +2293,25 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NLG_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNlgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlg_f64_dpp"
+          : "v_cmp_nlg_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NLG_F64 does not support DPP";
+  return std::make_unique<VCmpNlgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1570,11 +2332,25 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NGT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ngt_f64_dpp"
+          : "v_cmp_ngt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NGT_F64 does not support DPP";
+  return std::make_unique<VCmpNgtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1595,11 +2371,25 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NLE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNleF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nle_f64_dpp"
+          : "v_cmp_nle_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NLE_F64 does not support DPP";
+  return std::make_unique<VCmpNleF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1620,11 +2410,25 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NEQ_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNeqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_neq_f64_dpp"
+          : "v_cmp_neq_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NEQ_F64 does not support DPP";
+  return std::make_unique<VCmpNeqF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1645,11 +2449,25 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NLT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNltF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_nlt_f64_dpp"
+          : "v_cmp_nlt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NLT_F64 does not support DPP";
+  return std::make_unique<VCmpNltF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTF64Vopc::VCmpTF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1670,11 +2488,25 @@ VCmpTF64Vopc::VCmpTF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_T_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpTF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_f64_dpp"
+          : "v_cmp_t_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_T_F64 does not support DPP";
+  return std::make_unique<VCmpTF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1717,6 +2549,25 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_i16_dpp"
+          : "v_cmp_lt_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_i16_dpp"
@@ -1757,6 +2608,25 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_i16_dpp"
+          : "v_cmp_eq_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1799,6 +2669,25 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_i16_dpp"
+          : "v_cmp_le_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_i16_dpp"
@@ -1839,6 +2728,25 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_i16_dpp"
+          : "v_cmp_gt_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1881,6 +2789,25 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_i16_dpp"
+          : "v_cmp_ne_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ne_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_i16_dpp"
@@ -1921,6 +2848,25 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_i16_dpp"
+          : "v_cmp_ge_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1963,6 +2909,25 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_u16_dpp"
+          : "v_cmp_lt_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_u16_dpp"
@@ -2003,6 +2968,25 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_u16_dpp"
+          : "v_cmp_eq_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2045,6 +3029,25 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_u16_dpp"
+          : "v_cmp_le_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_u16_dpp"
@@ -2085,6 +3088,25 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_u16_dpp"
+          : "v_cmp_gt_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2127,6 +3149,25 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_u16_dpp"
+          : "v_cmp_ne_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ne_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u16_dpp"
@@ -2168,6 +3209,25 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_u16_dpp"
+          : "v_cmp_ge_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_f_i32_dpp"
@@ -2205,6 +3265,25 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_i32_dpp"
+          : "v_cmp_f_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_f_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpFI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2244,6 +3323,25 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_i32_dpp"
+          : "v_cmp_lt_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_i32_dpp"
@@ -2281,6 +3379,25 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_i32_dpp"
+          : "v_cmp_eq_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2320,6 +3437,25 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_i32_dpp"
+          : "v_cmp_le_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_i32_dpp"
@@ -2357,6 +3493,25 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_i32_dpp"
+          : "v_cmp_gt_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2396,6 +3551,25 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_i32_dpp"
+          : "v_cmp_ne_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ne_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_i32_dpp"
@@ -2433,6 +3607,25 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_i32_dpp"
+          : "v_cmp_ge_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2472,6 +3665,25 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_i32_dpp"
+          : "v_cmp_t_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_t_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpTI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_f_u32_dpp"
@@ -2509,6 +3721,25 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_u32_dpp"
+          : "v_cmp_f_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_f_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpFU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2548,6 +3779,25 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_u32_dpp"
+          : "v_cmp_lt_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_lt_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLtU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_u32_dpp"
@@ -2585,6 +3835,25 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_u32_dpp"
+          : "v_cmp_eq_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_eq_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpEqU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2624,6 +3893,25 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_u32_dpp"
+          : "v_cmp_le_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_le_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpLeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_u32_dpp"
@@ -2661,6 +3949,25 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_u32_dpp"
+          : "v_cmp_gt_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_gt_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGtU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2700,6 +4007,25 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_u32_dpp"
+          : "v_cmp_ne_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ne_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpNeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u32_dpp"
@@ -2737,6 +4063,25 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_u32_dpp"
+          : "v_cmp_ge_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_ge_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpGeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2776,6 +4121,25 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_u32_dpp"
+          : "v_cmp_t_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_t_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpTU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_f_i64_dpp"
@@ -2795,11 +4159,25 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_F_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_i64_dpp"
+          : "v_cmp_f_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_F_I64 does not support DPP";
+  return std::make_unique<VCmpFI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2820,11 +4198,25 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LT_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_i64_dpp"
+          : "v_cmp_lt_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LT_I64 does not support DPP";
+  return std::make_unique<VCmpLtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2845,11 +4237,25 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_EQ_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_i64_dpp"
+          : "v_cmp_eq_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_EQ_I64 does not support DPP";
+  return std::make_unique<VCmpEqI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2870,11 +4276,25 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LE_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_i64_dpp"
+          : "v_cmp_le_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LE_I64 does not support DPP";
+  return std::make_unique<VCmpLeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2895,11 +4315,25 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GT_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_i64_dpp"
+          : "v_cmp_gt_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GT_I64 does not support DPP";
+  return std::make_unique<VCmpGtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2920,11 +4354,25 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NE_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_i64_dpp"
+          : "v_cmp_ne_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NE_I64 does not support DPP";
+  return std::make_unique<VCmpNeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2945,11 +4393,25 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GE_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_i64_dpp"
+          : "v_cmp_ge_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GE_I64 does not support DPP";
+  return std::make_unique<VCmpGeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2970,11 +4432,25 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_T_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpTI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_i64_dpp"
+          : "v_cmp_t_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_T_I64 does not support DPP";
+  return std::make_unique<VCmpTI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2995,11 +4471,25 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_F_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_f_u64_dpp"
+          : "v_cmp_f_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_F_U64 does not support DPP";
+  return std::make_unique<VCmpFU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3020,11 +4510,25 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LT_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_lt_u64_dpp"
+          : "v_cmp_lt_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LT_U64 does not support DPP";
+  return std::make_unique<VCmpLtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3045,11 +4549,25 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_EQ_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_eq_u64_dpp"
+          : "v_cmp_eq_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_EQ_U64 does not support DPP";
+  return std::make_unique<VCmpEqU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3070,11 +4588,25 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_LE_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_le_u64_dpp"
+          : "v_cmp_le_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_LE_U64 does not support DPP";
+  return std::make_unique<VCmpLeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3095,11 +4627,25 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GT_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_gt_u64_dpp"
+          : "v_cmp_gt_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GT_U64 does not support DPP";
+  return std::make_unique<VCmpGtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3120,11 +4666,25 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_NE_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ne_u64_dpp"
+          : "v_cmp_ne_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_NE_U64 does not support DPP";
+  return std::make_unique<VCmpNeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3145,11 +4705,25 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_GE_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_ge_u64_dpp"
+          : "v_cmp_ge_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_GE_U64 does not support DPP";
+  return std::make_unique<VCmpGeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3170,11 +4744,25 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_T_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpTU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_t_u64_dpp"
+          : "v_cmp_t_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_T_U64 does not support DPP";
+  return std::make_unique<VCmpTU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3217,6 +4805,26 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpClassF16Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_class_f16_dpp"
+          : "v_cmp_class_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_class_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpClassF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f32_dpp"
@@ -3255,6 +4863,26 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeVCmpClassF32Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_class_f32_dpp"
+          : "v_cmp_class_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmp_class_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpClassF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f64_dpp"
@@ -3274,11 +4902,26 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMP_CLASS_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeVCmpClassF64Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmp_class_f64_dpp"
+          : "v_cmp_class_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMP_CLASS_F64 does not support DPP";
+  return std::make_unique<VCmpClassF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3325,6 +4968,25 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_f16_dpp"
+          : "v_cmpx_f_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_f_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxFF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_f16_dpp"
@@ -3369,6 +5031,25 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_f16_dpp"
+          : "v_cmpx_lt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3415,6 +5096,25 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_f16_dpp"
+          : "v_cmpx_eq_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_f16_dpp"
@@ -3459,6 +5159,25 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_f16_dpp"
+          : "v_cmpx_le_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3505,6 +5224,25 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_f16_dpp"
+          : "v_cmpx_gt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lg_f16_dpp"
@@ -3549,6 +5287,25 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lg_f16_dpp"
+          : "v_cmpx_lg_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lg_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLgF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3595,6 +5352,25 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_f16_dpp"
+          : "v_cmpx_ge_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_o_f16_dpp"
@@ -3639,6 +5415,25 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxOF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_o_f16_dpp"
+          : "v_cmpx_o_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_o_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxOF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3685,6 +5480,25 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxUF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_u_f16_dpp"
+          : "v_cmpx_u_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_u_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxUF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nge_f16_dpp"
@@ -3729,6 +5543,26 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgeF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nge_f16_dpp"
+          : "v_cmpx_nge_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nge_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNgeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3775,6 +5609,26 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNlgF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlg_f16_dpp"
+          : "v_cmpx_nlg_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nlg_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNlgF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ngt_f16_dpp"
@@ -3819,6 +5673,26 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgtF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ngt_f16_dpp"
+          : "v_cmpx_ngt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ngt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNgtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3865,6 +5739,26 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNleF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nle_f16_dpp"
+          : "v_cmpx_nle_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nle_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNleF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_neq_f16_dpp"
@@ -3909,6 +5803,26 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeqF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_neq_f16_dpp"
+          : "v_cmpx_neq_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_neq_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeqF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3955,6 +5869,26 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNltF16Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlt_f16_dpp"
+          : "v_cmpx_nlt_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nlt_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNltF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxTF16Vopc::VCmpxTF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_t_f16_dpp"
@@ -4000,6 +5934,25 @@ VCmpxTF16Vopc::VCmpxTF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_f16_dpp"
+          : "v_cmpx_t_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_t_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxTF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_f_f32_dpp"
@@ -4041,6 +5994,25 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_f32_dpp"
+          : "v_cmpx_f_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_f_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxFF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4084,6 +6056,25 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_f32_dpp"
+          : "v_cmpx_lt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_f32_dpp"
@@ -4125,6 +6116,25 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_f32_dpp"
+          : "v_cmpx_eq_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4168,6 +6178,25 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_f32_dpp"
+          : "v_cmpx_le_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_f32_dpp"
@@ -4209,6 +6238,25 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_f32_dpp"
+          : "v_cmpx_gt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4252,6 +6300,25 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lg_f32_dpp"
+          : "v_cmpx_lg_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lg_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLgF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_f32_dpp"
@@ -4293,6 +6360,25 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_f32_dpp"
+          : "v_cmpx_ge_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4336,6 +6422,25 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxOF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_o_f32_dpp"
+          : "v_cmpx_o_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_o_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxOF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_u_f32_dpp"
@@ -4377,6 +6482,25 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxUF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_u_f32_dpp"
+          : "v_cmpx_u_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_u_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxUF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4420,6 +6544,26 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNgeF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nge_f32_dpp"
+          : "v_cmpx_nge_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nge_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNgeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlg_f32_dpp"
@@ -4461,6 +6605,26 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNlgF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlg_f32_dpp"
+          : "v_cmpx_nlg_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nlg_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNlgF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4504,6 +6668,26 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNgtF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ngt_f32_dpp"
+          : "v_cmpx_ngt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ngt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNgtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nle_f32_dpp"
@@ -4545,6 +6729,26 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNleF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nle_f32_dpp"
+          : "v_cmpx_nle_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nle_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNleF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4588,6 +6792,26 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeqF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_neq_f32_dpp"
+          : "v_cmpx_neq_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_neq_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeqF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlt_f32_dpp"
@@ -4629,6 +6853,26 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNltF32Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlt_f32_dpp"
+          : "v_cmpx_nlt_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_nlt_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNltF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTF32Vopc::VCmpxTF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4672,6 +6916,25 @@ VCmpxTF32Vopc::VCmpxTF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_f32_dpp"
+          : "v_cmpx_t_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_t_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxTF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_f_f64_dpp"
@@ -4693,13 +6956,27 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_F_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_f64_dpp"
+          : "v_cmpx_f_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_F_F64 does not support DPP";
+  return std::make_unique<VCmpxFF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4722,13 +6999,27 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LT_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_f64_dpp"
+          : "v_cmpx_lt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LT_F64 does not support DPP";
+  return std::make_unique<VCmpxLtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4751,13 +7042,27 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_EQ_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_f64_dpp"
+          : "v_cmpx_eq_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_EQ_F64 does not support DPP";
+  return std::make_unique<VCmpxEqF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4780,13 +7085,27 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LE_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_f64_dpp"
+          : "v_cmpx_le_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LE_F64 does not support DPP";
+  return std::make_unique<VCmpxLeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4809,13 +7128,27 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GT_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_f64_dpp"
+          : "v_cmpx_gt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GT_F64 does not support DPP";
+  return std::make_unique<VCmpxGtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4838,13 +7171,27 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LG_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lg_f64_dpp"
+          : "v_cmpx_lg_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LG_F64 does not support DPP";
+  return std::make_unique<VCmpxLgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4867,13 +7214,27 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GE_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_f64_dpp"
+          : "v_cmpx_ge_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GE_F64 does not support DPP";
+  return std::make_unique<VCmpxGeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4896,13 +7257,27 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_O_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_o_f64_dpp"
+          : "v_cmpx_o_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_O_F64 does not support DPP";
+  return std::make_unique<VCmpxOF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4925,13 +7300,27 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_U_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_u_f64_dpp"
+          : "v_cmpx_u_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_U_F64 does not support DPP";
+  return std::make_unique<VCmpxUF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4954,13 +7343,28 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NGE_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nge_f64_dpp"
+          : "v_cmpx_nge_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NGE_F64 does not support DPP";
+  return std::make_unique<VCmpxNgeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4983,13 +7387,28 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NLG_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlg_f64_dpp"
+          : "v_cmpx_nlg_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NLG_F64 does not support DPP";
+  return std::make_unique<VCmpxNlgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5012,13 +7431,28 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NGT_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ngt_f64_dpp"
+          : "v_cmpx_ngt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NGT_F64 does not support DPP";
+  return std::make_unique<VCmpxNgtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5041,13 +7475,28 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NLE_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nle_f64_dpp"
+          : "v_cmpx_nle_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NLE_F64 does not support DPP";
+  return std::make_unique<VCmpxNleF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5070,13 +7519,28 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NEQ_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_neq_f64_dpp"
+          : "v_cmpx_neq_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NEQ_F64 does not support DPP";
+  return std::make_unique<VCmpxNeqF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5099,13 +7563,28 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NLT_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_nlt_f64_dpp"
+          : "v_cmpx_nlt_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NLT_F64 does not support DPP";
+  return std::make_unique<VCmpxNltF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTF64Vopc::VCmpxTF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5128,13 +7607,27 @@ VCmpxTF64Vopc::VCmpxTF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_T_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxTF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_f64_dpp"
+          : "v_cmpx_t_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_T_F64 does not support DPP";
+  return std::make_unique<VCmpxTF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5181,6 +7674,25 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_i16_dpp"
+          : "v_cmpx_lt_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_i16_dpp"
@@ -5225,6 +7737,25 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_i16_dpp"
+          : "v_cmpx_eq_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5271,6 +7802,25 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_i16_dpp"
+          : "v_cmpx_le_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_i16_dpp"
@@ -5315,6 +7865,25 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_i16_dpp"
+          : "v_cmpx_gt_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5361,6 +7930,25 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_i16_dpp"
+          : "v_cmpx_ne_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ne_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_i16_dpp"
@@ -5405,6 +7993,25 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_i16_dpp"
+          : "v_cmpx_ge_i16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_i16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5451,6 +8058,25 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_u16_dpp"
+          : "v_cmpx_lt_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_u16_dpp"
@@ -5495,6 +8121,25 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_u16_dpp"
+          : "v_cmpx_eq_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5541,6 +8186,25 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_u16_dpp"
+          : "v_cmpx_le_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_u16_dpp"
@@ -5585,6 +8249,25 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_u16_dpp"
+          : "v_cmpx_gt_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5631,6 +8314,25 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_u16_dpp"
+          : "v_cmpx_ne_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ne_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u16_dpp"
@@ -5676,6 +8378,25 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_u16_dpp"
+          : "v_cmpx_ge_u16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_u16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_f_i32_dpp"
@@ -5717,6 +8438,25 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_i32_dpp"
+          : "v_cmpx_f_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_f_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxFI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5760,6 +8500,25 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_i32_dpp"
+          : "v_cmpx_lt_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_i32_dpp"
@@ -5801,6 +8560,25 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_i32_dpp"
+          : "v_cmpx_eq_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5844,6 +8622,25 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_i32_dpp"
+          : "v_cmpx_le_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_i32_dpp"
@@ -5885,6 +8682,25 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_i32_dpp"
+          : "v_cmpx_gt_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5928,6 +8744,25 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_i32_dpp"
+          : "v_cmpx_ne_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ne_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_i32_dpp"
@@ -5969,6 +8804,25 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_i32_dpp"
+          : "v_cmpx_ge_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6012,6 +8866,25 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_i32_dpp"
+          : "v_cmpx_t_i32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_t_i32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxTI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_f_u32_dpp"
@@ -6053,6 +8926,25 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_u32_dpp"
+          : "v_cmpx_f_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_f_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxFU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6096,6 +8988,25 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_u32_dpp"
+          : "v_cmpx_lt_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_lt_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLtU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_u32_dpp"
@@ -6137,6 +9048,25 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_u32_dpp"
+          : "v_cmpx_eq_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_eq_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxEqU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6180,6 +9110,25 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_u32_dpp"
+          : "v_cmpx_le_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_le_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxLeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_u32_dpp"
@@ -6221,6 +9170,25 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_u32_dpp"
+          : "v_cmpx_gt_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_gt_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGtU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6264,6 +9232,25 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_u32_dpp"
+          : "v_cmpx_ne_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ne_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxNeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u32_dpp"
@@ -6305,6 +9292,25 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_u32_dpp"
+          : "v_cmpx_ge_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_ge_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxGeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6348,6 +9354,25 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_u32_dpp"
+          : "v_cmpx_t_u32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_t_u32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxTU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_f_i64_dpp"
@@ -6369,13 +9394,27 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_F_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_i64_dpp"
+          : "v_cmpx_f_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_F_I64 does not support DPP";
+  return std::make_unique<VCmpxFI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6398,13 +9437,27 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LT_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_i64_dpp"
+          : "v_cmpx_lt_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LT_I64 does not support DPP";
+  return std::make_unique<VCmpxLtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6427,13 +9480,27 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_EQ_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_i64_dpp"
+          : "v_cmpx_eq_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_EQ_I64 does not support DPP";
+  return std::make_unique<VCmpxEqI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6456,13 +9523,27 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LE_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_i64_dpp"
+          : "v_cmpx_le_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LE_I64 does not support DPP";
+  return std::make_unique<VCmpxLeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6485,13 +9566,27 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GT_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_i64_dpp"
+          : "v_cmpx_gt_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GT_I64 does not support DPP";
+  return std::make_unique<VCmpxGtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6514,13 +9609,27 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NE_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_i64_dpp"
+          : "v_cmpx_ne_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NE_I64 does not support DPP";
+  return std::make_unique<VCmpxNeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6543,13 +9652,27 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GE_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_i64_dpp"
+          : "v_cmpx_ge_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GE_I64 does not support DPP";
+  return std::make_unique<VCmpxGeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6572,13 +9695,27 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_T_I64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxTI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_i64_dpp"
+          : "v_cmpx_t_i64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_T_I64 does not support DPP";
+  return std::make_unique<VCmpxTI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6601,13 +9738,27 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_F_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxFU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_f_u64_dpp"
+          : "v_cmpx_f_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_F_U64 does not support DPP";
+  return std::make_unique<VCmpxFU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6630,13 +9781,27 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LT_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_lt_u64_dpp"
+          : "v_cmpx_lt_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LT_U64 does not support DPP";
+  return std::make_unique<VCmpxLtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6659,13 +9824,27 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_EQ_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_eq_u64_dpp"
+          : "v_cmpx_eq_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_EQ_U64 does not support DPP";
+  return std::make_unique<VCmpxEqU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6688,13 +9867,27 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_LE_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_le_u64_dpp"
+          : "v_cmpx_le_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_LE_U64 does not support DPP";
+  return std::make_unique<VCmpxLeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6717,13 +9910,27 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GT_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_gt_u64_dpp"
+          : "v_cmpx_gt_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GT_U64 does not support DPP";
+  return std::make_unique<VCmpxGtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6746,13 +9953,27 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_NE_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ne_u64_dpp"
+          : "v_cmpx_ne_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_NE_U64 does not support DPP";
+  return std::make_unique<VCmpxNeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6775,13 +9996,27 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_GE_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_ge_u64_dpp"
+          : "v_cmpx_ge_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_GE_U64 does not support DPP";
+  return std::make_unique<VCmpxGeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6804,13 +10039,27 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_T_U64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxTU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_t_u64_dpp"
+          : "v_cmpx_t_u64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_T_U64 does not support DPP";
+  return std::make_unique<VCmpxTU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6857,6 +10106,26 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxClassF16Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_class_f16_dpp"
+          : "v_cmpx_class_f16_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_class_f16: reserved DPP control";
+  }
+  return std::make_unique<VCmpxClassF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f32_dpp"
@@ -6899,6 +10168,26 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxClassF32Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_class_f32_dpp"
+          : "v_cmpx_class_f32_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_cmpx_class_f32: reserved DPP control";
+  }
+  return std::make_unique<VCmpxClassF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f64_dpp"
@@ -6920,13 +10209,28 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CMPX_CLASS_F64 does not support DPP", "");
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxClassF64Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vopc::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
+          ? "v_cmpx_class_f64_dpp"
+          : "v_cmpx_class_f64_e32",
+      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CMPX_CLASS_F64 does not support DPP";
+  return std::make_unique<VCmpxClassF64Vopc>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3_5
 } // namespace rocjitsu

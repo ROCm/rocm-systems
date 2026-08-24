@@ -12,7 +12,37 @@ Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
-void Wavefront::halt() {
+bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
+
+void Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
+  assert(has_gpu_memory());
+  cu_.memory()->read_block(addr, dst, process_id_);
+}
+
+void Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
+  assert(has_gpu_memory());
+  cu_.memory()->write_block(addr, src, process_id_);
+}
+
+void Wavefront::barrier_init(int32_t barrier_id, uint32_t member_count) {
+  cu_.named_barrier_init(*this, barrier_id, member_count);
+}
+
+void Wavefront::barrier_join(int32_t barrier_id) { cu_.named_barrier_join(*this, barrier_id); }
+
+bool Wavefront::barrier_signal(int32_t barrier_id, uint32_t member_count) {
+  return cu_.barrier_signal(*this, barrier_id, member_count);
+}
+
+uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
+  return cu_.barrier_state(*this, barrier_id);
+}
+
+void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
+
+bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
+
+void Wavefront::halt(CpCompletionNotice notice) {
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot
@@ -25,7 +55,7 @@ void Wavefront::halt() {
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;
   cu_.free_wavefront_resources(*this);
-  cu_.release_wf(dispatch_id, wg_id);
+  cu_.release_wf(dispatch_id, wg_id, notice);
 }
 
 void Wavefront::release_wait_counter(WaitCounterType type) {

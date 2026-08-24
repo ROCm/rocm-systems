@@ -63,7 +63,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             util
             Threads::Threads
