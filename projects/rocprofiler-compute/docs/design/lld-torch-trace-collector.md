@@ -406,21 +406,16 @@ must tolerate the missing field: `_parse_function_backend` in
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
   are resolved under `${TORCH_INSTALL_PREFIX}/lib`.
-- The artifact tag is `py{major}.{minor}_torch{version}_src{fingerprint}`, and it
-  has one implementation:
-  `utils/inject_roctx/_backends/torch_trace_fingerprint.py`. The loader passes the
-  tag it already computed as `TORCH_TRACE_ARTIFACT_TAG`; a build-time configure
-  runs that module to get the same string. A second derivation in CMake would name
-  a target the loader does not look for as soon as the two disagree on any
-  component, so CMake neither hashes the sources nor reads `Torch_VERSION`. A tag
-  ending in `_srcmissing` means an input could not be read, and the extension is
-  not built.
+- The artifact is named `torch_trace_collector-<torch-version>.so`. The version
+  is `torch.__version__` with any local `+...` suffix removed. The loader passes
+  it as `TORCH_TRACE_TORCH_VERSION`; a project configure uses `Torch_VERSION`
+  from `find_package(Torch)`. Set `ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1` to
+  discard a cached build and compile again.
 - A static core library carries the shared source and its usage requirements, the
   torch and roctx includes and libraries, `synchronized`, `gsl_assert`, and the
   debug-info flag, and both the pybind11 `MODULE` and the gtest binary link it and
   inherit them. The C++ ABI is left to the toolchain default, which already
-  matches what ROCm libtorch is built with; the tag carries no ABI field, so
-  pinning one would only misdescribe a build that differs.
+  matches what ROCm libtorch is built with. The filename does not encode an ABI.
 - `torch_python` is resolved separately and linked only into the pybind module. It
   leaves Python symbols undefined and names no `libpython` of its own, so only a
   consumer already loaded by an interpreter can resolve them.
@@ -428,9 +423,9 @@ must tolerate the missing field: `_parse_function_backend` in
 - One build path serves both entry points. The directory is registered
   unconditionally from `src/lib/CMakeLists.txt`, so the project build and the
   runtime build configure the same targets; the runtime build differs only in the
-  options it passes. The module omits the `lib` prefix, is named by tag so the
-  loader resolves it, and lands in the build tree's `lib/`. The directory
-  publishes the tagged target name as `TORCH_TRACE_COLLECTOR_TARGET`, and the root
+  options it passes. The module omits the `lib` prefix, is named by PyTorch
+  version, and lands in the build tree's `lib/`. The directory publishes the
+  target name as `TORCH_TRACE_COLLECTOR_TARGET`, and the root
   `CMakeLists.txt` installs it to `<libdir>/rocprofiler-compute/` alongside the
   other native libraries, where the loader globs for it. `SKIP_NATIVE_TOOL_BUILD`
   installs the `src/lib/` sources instead, for the runtime build to compile. The

@@ -955,9 +955,9 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-Torch trace is collected by ``torch_trace_collector``, a C++ extension built for one
-combination of Python and PyTorch versions. The copy installed with ROCm Compute
-Profiler is used when it matches the interpreter that runs the workload.
+Torch trace is collected by ``torch_trace_collector``, a C++ extension built for a
+specific PyTorch version. The copy installed with ROCm Compute Profiler is used when
+it matches the PyTorch version of the workload interpreter.
 
 Otherwise the extension is built on first use, which requires an installation that
 ships the collector sources, that is one built with ``SKIP_NATIVE_TOOL_BUILD=ON``.

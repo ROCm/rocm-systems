@@ -1,8 +1,8 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds the torch-trace-collector library and the torch_trace_collector-<tag>.so pybind
-## module for --torch-trace.
+## Builds the torch-trace-collector library and the
+## torch_trace_collector-<torch-version>.so pybind module for --torch-trace.
 set(BUILD_TORCH_TRACE_COLLECTOR
     "AUTO"
     CACHE STRING
@@ -67,46 +67,31 @@ if(NOT TORCH_FOUND)
 endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 
-# The tag names one build of the extension and has to be byte-identical to what
-# the loader looks for at runtime, so it has exactly one implementation:
-# utils/inject_roctx/_backends/torch_trace_fingerprint.py. The loader passes the
-# tag it already computed; a build-time configure asks that module directly.
-if(TORCH_TRACE_ARTIFACT_TAG)
-    set(_tag "${TORCH_TRACE_ARTIFACT_TAG}")
+# Artifact name: torch_trace_collector-<torch-version>.so.
+# Prefer TORCH_TRACE_TORCH_VERSION from the loader; otherwise use Torch_VERSION.
+if(TORCH_TRACE_TORCH_VERSION)
+    set(_torch_version "${TORCH_TRACE_TORCH_VERSION}")
 else()
-    execute_process(
-        COMMAND
-            "${_ttc_python}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/inject_roctx/_backends/torch_trace_fingerprint.py"
-        OUTPUT_VARIABLE _tag
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_VARIABLE _ttc_tag_error
-        RESULT_VARIABLE _ttc_tag_result
-    )
-    if(NOT _ttc_tag_result EQUAL 0 OR NOT _tag)
-        message(
-            ${_ttc_unavailable_severity}
-            "torch_trace_collector: could not resolve the artifact tag "
-            "(${_ttc_tag_error}); the extension is not built."
-        )
-        return()
-    endif()
+    set(_torch_version "${Torch_VERSION}")
 endif()
-
-if(_tag MATCHES "_srcmissing$")
+if(NOT _torch_version)
     message(
         ${_ttc_unavailable_severity}
-        "torch_trace_collector: the collector sources could not be read; the "
-        "extension is not built."
+        "torch_trace_collector: Torch version is empty; the extension is not "
+        "built."
     )
     return()
 endif()
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
-set(_so_name "torch_trace_collector-${_tag}")
+set(_so_name "torch_trace_collector-${_torch_version}")
 
-message(STATUS "torch_trace_collector: building against ${_ttc_python} (tag ${_tag})")
+message(
+    STATUS
+    "torch_trace_collector: building against ${_ttc_python} "
+    "(torch ${_torch_version})"
+)
 
 # Pin Python3 to this interpreter for this directory only. FindPython3
 # records its result in private _Python3_* cache entries that outlive this
@@ -173,7 +158,7 @@ set(_torch_lib_search_dirs "${TORCH_INSTALL_PREFIX}/lib")
 
 set(_torch_resolved_libs "")
 foreach(_libname IN ITEMS torch torch_cpu c10)
-    set(_cachevar "_TORCH_RESOLVED_${_libname}_${_tag}")
+    set(_cachevar "_TORCH_RESOLVED_${_libname}_${_torch_version}")
     find_library(
         ${_cachevar}
         NAMES ${_libname}
@@ -193,7 +178,7 @@ endforeach()
 # torch_python is resolved separately and linked only into the pybind module:
 # it leaves Python symbols undefined and names no libpython of its own, so only
 # a consumer loaded by an interpreter can resolve them.
-set(_torch_python_cachevar "_TORCH_RESOLVED_torch_python_${_tag}")
+set(_torch_python_cachevar "_TORCH_RESOLVED_torch_python_${_torch_version}")
 find_library(
     ${_torch_python_cachevar}
     NAMES torch_python
@@ -280,7 +265,7 @@ else()
 endif()
 
 # --- pybind module ----------------------------------------------------------
-# The "lib" prefix is omitted; the loader resolves the module by tag.
+# Omit the "lib" prefix. The loader resolves the module by PyTorch version.
 add_library(${_so_name} MODULE torch_trace_collector_module.cpp)
 target_link_libraries(
     ${_so_name}
@@ -292,8 +277,7 @@ target_compile_options(
 )
 set_target_properties(${_so_name} PROPERTIES PREFIX "")
 
-# The root CMakeLists.txt installs this target alongside the other native
-# libraries; publish the tagged name it cannot derive on its own.
+# Publish the module target name for the root install rule.
 set(TORCH_TRACE_COLLECTOR_TARGET "${_so_name}" CACHE INTERNAL "")
 
 if(ENABLE_TESTS AND TARGET gtest_main)
