@@ -921,6 +921,30 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
   }
 }
 
+TEST(MfmaExecTest, Cdna5BlockScaledWmmaUsesContiguousKBlocks) {
+  for (uint32_t data_bits : {4u, 6u, 8u}) {
+    const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+    for (uint32_t index = 0; index < 16; ++index) {
+      for (uint32_t k = 0; k < 128; ++k) {
+        SCOPED_TRACE(::testing::Message()
+                     << "data_bits=" << data_bits << " index=" << index << " k=" << k);
+        const uint32_t expected_lane = index + 16u * ((k / block_elems) & 1u);
+        const uint32_t expected_slot = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+        const uint32_t expected_bit = expected_slot * data_bits;
+        const auto actual = amdgpu::wmma_block_scaled_input_loc(16, 128, index, k, data_bits);
+        EXPECT_EQ(actual.lane, expected_lane);
+        EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
+        EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
+      }
+    }
+  }
+
+  for (uint32_t k = 0; k < 128; ++k) {
+    EXPECT_EQ(amdgpu::wmma_block_scale_byte(k, /*scale16=*/false), k / 32u);
+    EXPECT_EQ(amdgpu::wmma_block_scale_byte(k, /*scale16=*/true), k / 16u);
+  }
+}
+
 TEST(MfmaExecTest, Cdna4ScaledMfmaInputLocMatchesSiliconQualifiedLayouts) {
   constexpr std::array<uint32_t, 3> widths = {8, 6, 4};
   for (const auto &[dim, k_size] :
