@@ -22,6 +22,7 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -61,8 +62,39 @@ static bool verifyAllReduceResult(float* buf, size_t count, int nRanks) {
   return true;
 }
 
+// enqueue.cc emits NCCL_TUNING lines like:
+//   AllReduce: 16384 Bytes -> Algo RING proto LL128 channel{Lo..Hi}={0..0}
+static bool logsContainForcedProto(const std::string& log, const char* proto) {
+  if (log.find("AllReduce:") == std::string::npos) return false;
+  const std::string protoTag = std::string("proto ") + proto + " ";
+  return log.find(protoTag) != std::string::npos;
+}
+
 class LL128VectorMPITest : public MPITestBase
 {
+protected:
+  std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
+  std::unique_ptr<MPIHelpers::MpiEnvGuard>             tuningGuard_;
+  std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
+
+  void SetUp() override {
+    MPITestBase::SetUp();
+    debugGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
+    tuningGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "TUNING");
+    logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+  }
+
+  void TearDown() override {
+    MPITestBase::TearDown();
+    logCtx_.reset();
+    tuningGuard_.reset();
+    debugGuard_.reset();
+  }
+
+  std::string readAllLogs() const {
+    return logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
+  }
 };
 
 } // namespace
@@ -112,6 +144,8 @@ TEST_F(LL128VectorMPITest, RegisteredAllReduce_LL128_IntraNode) {
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
   ASSERT_TRUE(verifyAllReduceResult(static_cast<float*>(recvBuf), count, nRanks));
+  ASSERT_TRUE(logsContainForcedProto(readAllLogs(), "LL128"))
+      << "Expected NCCL_TUNING AllReduce line with forced LL128 protocol";
 }
 
 TEST_F(LL128VectorMPITest, AllReduce_LL_IntraNode) {
@@ -147,6 +181,8 @@ TEST_F(LL128VectorMPITest, AllReduce_LL_IntraNode) {
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
   ASSERT_TRUE(verifyAllReduceResult(static_cast<float*>(recvBuf), count, nRanks));
+  ASSERT_TRUE(logsContainForcedProto(readAllLogs(), "LL"))
+      << "Expected NCCL_TUNING AllReduce line with forced LL protocol";
 }
 
 TEST_F(LL128VectorMPITest, RegisteredAllReduce_LL128_Gfx1250Only) {
@@ -200,6 +236,8 @@ TEST_F(LL128VectorMPITest, RegisteredAllReduce_LL128_Gfx1250Only) {
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
   ASSERT_TRUE(verifyAllReduceResult(static_cast<float*>(recvBuf), count, nRanks));
+  ASSERT_TRUE(logsContainForcedProto(readAllLogs(), "LL128"))
+      << "Expected NCCL_TUNING AllReduce line with forced LL128 protocol on gfx1250";
 }
 
 } // namespace RcclUnitTesting

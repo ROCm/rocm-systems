@@ -16,46 +16,6 @@
 #endif
 #endif
 
-// Non-temporal 128-bit load/store for LL128 communication (FIFO) buffers.
-// Comm buffers are already allocated uncached, so there is no cache to bypass;
-// using the plain non-temporal path here (the pre-cache-bypass behavior) avoids
-// the extra register pressure that the system-scope global_load/store_b128
-// builtins introduce in the LL128 reduce kernels. The cache-bypassing load128/
-// store128 remain in use for user buffers (loadRegsBegin/storeRegs).
-inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
-  v0 = u.u64[0];
-  v1 = u.u64[1];
-}
-
-// Plain (cacheable) 128-bit store. This is the pre-cache-bypass February store
-// behavior: comm-FIFO writes and non-registered user-buffer writes go through
-// the normal cache with ordinary global_store_dwordx4, which delivers higher
-// store throughput and lower register pressure than the non-temporal or
-// system-scope variants. Reads remain non-temporal (load128NT) so the LL128
-// flag poll never observes a stale cache line.
-//
-// The width is correctness-load-bearing, not just a throughput choice: the LL128
-// reader re-checks only the flag word, so the data words must become visible no
-// later than their flag. A single 128-bit vector store keeps data+flag in one
-// instruction and one memory transaction, guaranteeing that ordering rather than
-// leaving it to backend coalescing of two scalar stores (which two separate
-// `*u64` writes rely on, and which is especially fragile with gfx1250 ordering
-// still to be revisited). Emit the b128 vector store explicitly here.
-inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = v0;
-  u.u64[1] = v1;
-  *((v4u_gptr)ptr) = u.v;
-}
-
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
           int useAcc, int UserRegMode>
 class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>

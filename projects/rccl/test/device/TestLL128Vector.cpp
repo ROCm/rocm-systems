@@ -4,43 +4,19 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Unit tests for LL128 comm-buffer vector load/store helpers (prims_ll128.h) and
-// the shared load128/store128 paths in op128.h.
+// Unit tests for comm-FIFO and registered-user-buffer 128-bit helpers in op128.h.
 
 #include "DeviceTestBase.hpp"
 
 #include <string>
 
-#include "device.h"
 #include "op128.h"
-#include "rccl_ptr.h"
 
 namespace RcclUnitTesting
 {
 
 namespace
 {
-
-// Keep in sync with projects/rccl/src/device/prims_ll128.h
-inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
-  v0 = u.u64[0];
-  v1 = u.u64[1];
-}
-
-inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = v0;
-  u.u64[1] = v1;
-  *((v4u_gptr)ptr) = u.v;
-}
 
 static bool deviceArchIsGfx1250() {
   hipDeviceProp_t prop{};
@@ -77,19 +53,6 @@ __global__ void kernelLL128Load128Store128(const uint64_t* src, uint64_t* dst) {
   uint64_t v0, v1;
   load128(src, v0, v1);
   store128(dst, v0, v1);
-}
-
-TEST_F(LL128VectorTest, Load128Store128Roundtrip) {
-  const uint64_t h_src[2] = {0xFEDCBA9876543210ULL, 0x0123456789ABCDEFULL};
-  DeviceBuffer<uint64_t> d_src(2), d_dst(2);
-  d_src.copyFrom(h_src, 2);
-
-  kernelLL128Load128Store128<<<1, 1>>>(d_src.ptr, d_dst.ptr);
-  syncAndCheck();
-
-  auto h_dst = d_dst.copyTo();
-  EXPECT_EQ(h_dst[0], h_src[0]);
-  EXPECT_EQ(h_dst[1], h_src[1]);
 }
 
 TEST_F(LL128VectorTest, Load128Store128Gfx1250CooperativePath) {

@@ -4,46 +4,19 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Unit tests for LL protocol FIFO 128-bit vector load/store helpers (prims_ll.h).
-// Mirrors loadLLLine/storeLLLine so we can exercise them without pulling in the
-// full Primitives<> template.
+// Unit tests for LL FIFO comm-buffer vector load/store helpers in op128.h
+// (load128NT / store128LLFifo), using the same ncclLLFifoLine layout as prims_ll.h.
 
 #include "DeviceTestBase.hpp"
 
 #include "device.h"
-#include "rccl_ptr.h"
+#include "op128.h"
 
 namespace RcclUnitTesting
 {
 
 namespace
 {
-
-// Keep in sync with projects/rccl/src/device/prims_ll.h
-inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLFifoLine& dst) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.v = __builtin_nontemporal_load((v4u_gptr)src->v);
-  dst.v[0] = u.u64[0];
-  dst.v[1] = u.u64[1];
-}
-
-inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLLFifoLine& src) {
-#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
-  __hip_atomic_store((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  __hip_atomic_store((u64_gptr)dst->v + 1, src.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-#else
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = src.v[0];
-  u.u64[1] = src.v[1];
-  *((v4u_gptr)dst->v) = u.v;
-#endif
-}
 
 inline __host__ __device__ void makeFifoLine(union ncclLLFifoLine& line, uint64_t payload, uint32_t flag) {
   line.data1 = static_cast<uint32_t>(payload);
@@ -60,8 +33,8 @@ class LLFifoVectorTest : public DeviceTestBase
 
 __global__ void kernelFifoLayoutRoundtrip(const union ncclLLFifoLine* src, union ncclLLFifoLine* dst) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    storeLLLine(dst, *src);
-    loadLLLine(dst, *dst);
+    store128LLFifo(dst->v, src->v[0], src->v[1]);
+    load128NT(dst->v, dst->v[0], dst->v[1]);
   }
 }
 
@@ -89,11 +62,11 @@ __global__ void kernelFifoFlagPoll(union ncclLLFifoLine* fifo, uint32_t expectFl
 
   union ncclLLFifoLine published {};
   makeFifoLine(published, 0xDEADBEEFCAFEBABEULL, expectFlag);
-  storeLLLine(fifo, published);
+  store128LLFifo(fifo->v, published.v[0], published.v[1]);
 
   union ncclLLFifoLine observed {};
   for (int spins = 0; spins < 32; ++spins) {
-    loadLLLine(fifo, observed);
+    load128NT(fifo->v, observed.v[0], observed.v[1]);
     if (observed.flag1 == expectFlag && observed.flag2 == expectFlag) {
       *ready = 1;
       return;
@@ -124,7 +97,7 @@ __global__ void kernelFifoZeroCleanup(union ncclLLFifoLine* fifo) {
   if (threadIdx.x != 0 || blockIdx.x != 0) return;
   union ncclLLFifoLine zero {};
   makeFifoLine(zero, 0, 0x2u);
-  storeLLLine(fifo, zero);
+  store128LLFifo(fifo->v, zero.v[0], zero.v[1]);
 }
 
 TEST_F(LLFifoVectorTest, FifoLineZeroCleanup) {
