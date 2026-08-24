@@ -73,6 +73,8 @@ hip_add_exe_to_target(NAME HrrTest
 # linked. Add it explicitly so that std::filesystem, std::ostream etc. resolve.
 # Use plain (non-keyword) signature to match hip_add_exe_to_target's usage.
 if(NOT WIN32)
+  find_package(hsa-runtime64 REQUIRED)
+  target_link_libraries(HrrTest hsa-runtime64::hsa-runtime64)
   target_link_libraries(HrrTest stdc++ stdc++fs)
 endif()
 

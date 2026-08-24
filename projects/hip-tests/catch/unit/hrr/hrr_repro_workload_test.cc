@@ -29,6 +29,10 @@
 
 #include <hip_test_common.hh>
 
+#ifndef _WIN32
+#include <hsa/hsa_ext_amd.h>
+#endif
+
 #include <cstdint>
 
 // ---------------------------------------------------------------------------
@@ -277,9 +281,9 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 // ===========================================================================
 // A5. Zero-init read of an allocation initialized by an unrecorded host write
 //
-// hipMallocManaged a buffer and zero it through the host pointer. HRR records
-// the allocation but cannot observe the CPU stores, so replay must reproduce
-// the zeros through HIP_HRR_REPLAY_ZERO_INIT. Using managed memory makes the
+// hipMalloc a buffer and zero it through the lower-level HSA runtime. HRR
+// records HIP calls only, so replay sees the allocation but not the HSA fill and
+// must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT. This makes the
 // capture oracle deterministic without recording a hipMemset that playback
 // would execute independently of the zero-init knob.
 // ===========================================================================
@@ -287,8 +291,15 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
 
   float* dsrc = nullptr;
+#ifndef _WIN32
+  HIP_CHECK(hipMalloc(&dsrc, kSZ));
+  REQUIRE(hsa_amd_memory_fill(dsrc, 0, kN) == HSA_STATUS_SUCCESS);
+#else
+  // Native Windows has no ROCr/HSA runtime. Keep its deterministic oracle via
+  // host stores; Linux retains coverage of the ordinary hipMalloc replay path.
   HIP_CHECK(hipMallocManaged(&dsrc, kSZ));
-  for (int i = 0; i < kN; ++i) dsrc[i] = 0.0f;  // CPU stores are not captured
+  for (int i = 0; i < kN; ++i) dsrc[i] = 0.0f;
+#endif
   float* dout = nullptr;
   HIP_CHECK(hipMalloc(&dout, kSZ));
 

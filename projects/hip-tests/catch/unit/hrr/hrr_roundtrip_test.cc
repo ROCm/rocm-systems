@@ -696,8 +696,9 @@ HIP_TEST_CASE(Unit_HRR_EmbeddedPtrRoundtrip) {
 /**
  * Test Description
  * ----------------
- *   - Capture Unit_HRR_ZeroInitRead_Direct (managed allocation zeroed through
- *     unrecorded CPU stores, copied to out, then D2H).
+ *   - Capture Unit_HRR_ZeroInitRead_Direct (hipMalloc allocation zeroed through
+ *     an unrecorded HSA fill on ROCr, copied to out, then D2H; native Windows
+ *     uses managed memory and unrecorded CPU stores because HSA is unavailable).
  *   - Replay with HIP_HRR_REPLAY_ZERO_INIT=1: the replayed source is zeroed
  *     deterministically, so the D2H validates (exit 0, pass >= 1).  Verifies the
  *     zero-init replay knob.  Note: with the knob off the replay may reuse stale
