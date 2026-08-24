@@ -148,6 +148,20 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+rocprofiler_add_integration_execute_test(
+    rocattach-stale-register-library-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool> --stale-register-library
+    DEPENDS rocattach-parallel-attach-test
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
 # them from the target mount namespace.
 rocprofiler_add_integration_execute_test(

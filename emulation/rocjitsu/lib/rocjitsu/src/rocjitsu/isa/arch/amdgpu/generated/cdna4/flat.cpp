@@ -795,13 +795,6 @@ DecodeResult decodeFlatLoadUbyteD16Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadUbyteD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
-
 FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::FlatLoadUbyteD16HiFlat)),
@@ -847,13 +840,6 @@ DecodeResult decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode,
   return std::make_unique<FlatLoadUbyteD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadUbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
     : Flat("flat_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -901,13 +887,6 @@ DecodeResult decodeFlatLoadSbyteD16Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadSbyteD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
-
 FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::FlatLoadSbyteD16HiFlat)),
@@ -953,13 +932,6 @@ DecodeResult decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode,
   return std::make_unique<FlatLoadSbyteD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadSbyteD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
     : Flat("flat_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1007,13 +979,6 @@ DecodeResult decodeFlatLoadShortD16Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadShortD16Flat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
-
 FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
     : Flat("flat_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::FlatLoadShortD16HiFlat)),
@@ -1059,13 +1024,6 @@ DecodeResult decodeFlatLoadShortD16HiFlat(const MachineInst *opcode,
   return std::make_unique<FlatLoadShortD16HiFlat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadShortD16HiFlat::implicit_uses(RegisterSet &uses) const {
-  Flat::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdst.to_register_ref())
-      uses.expand(*r);
-}
 
 FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
     : Flat("flat_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),

@@ -1629,29 +1629,29 @@ std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) 
   return callback ? (this->*callback)(wf) : std::nullopt;
 }
 
-const amdgpu::VgprStorage *Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
+amdgpu::ConstVgprStorage Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStorage{};
 }
 
-amdgpu::VgprStorage *Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
+amdgpu::VgprStorage Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStorage{};
 }
 
 amdgpu::ConstVgprStoragePair64
 Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{};
 }
 
 amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{};
 }
 
 void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,

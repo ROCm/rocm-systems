@@ -321,9 +321,10 @@ TEST(MfmaSimdExact, F32Scaled) {
     run_case(label, fmt, Fmt::F32, [=](MfmaFixture &fx, uint32_t const_acc) {
       fx.seed_words(SCALE_A, 4, 0xA5);
       fx.seed_words(SCALE_B, 4, 0x5A);
-      amdgpu::exec_f32_scaled(*fx.cu, m, n, k, 1, 8, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
-                              fx.vbase + ACC, ex, ex, const_acc, 0, 0, 0, fx.vbase + SCALE_A,
-                              fx.vbase + SCALE_B);
+      amdgpu::exec_f32_scaled_mixed(*fx.cu, m, n, k, 1, 8, 8, fx.vbase + DST, fx.vbase + S0,
+                                    fx.vbase + S1, fx.vbase + ACC, ex, ex, const_acc, fx.vbase,
+                                    256u + SCALE_A, 256u + SCALE_B,
+                                    /*scale_a_byte=*/0, /*scale_b_byte=*/0);
     });
   };
   scaled("scaled_fp8_16x16x128", Fmt::FP8, 16, 16, 128, amdgpu::extract_fp8);
