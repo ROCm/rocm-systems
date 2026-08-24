@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal (Phases A and B implemented)
+Status: proposal (Phases A, B, and C implemented)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -77,11 +77,11 @@ Gzip is short-term storage-size reduction for CSV artifacts that still exist
 after CSV profile backend removal.
 
 We introduce gzip streaming for five csv artifacts, written through its own compression interface used by both python and backend:
- - the results_*.csv(s), written by compute's Python side (utils_profile.stream_csv_to_file) at the end of a pass, and the artifact analyze reads today.
+ - the results_*.csv(s), written by compute's Python side at the end of a pass before Phase C removed them.
  - the per-pass out/pmc_1/*_counter_collection.csv
  - the per-pass out/pmc_1/*_marker_api_trace.csv and its ml_api_trace_* copy in the workload dir, written alongside the counter CSV from the same rocpd databases.
  - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
- - the merged pmc_perf.csv analyze intermediate, written by analyze from the results_*.csv(s) and read back on the next run.
+ - the merged pmc_perf.csv.gz analyze intermediate, written by analyze from the per-pass out/ artifacts and read back on the next run.
 
 Compression belongs at CSV read/write, where profile writes compressed CSV
 and analyze reads compressed CSV. Other profile and analyze code should not take
@@ -309,7 +309,7 @@ Removed in this phase:
 - related csv-only test functions
 - analyze no longer supports csv-shaped workload directories.
 
-Intentionally **kept** in this phase:
+Intentionally **kept** in this phase (removed in Phase C):
 
 - Rocpd path still converts each `.db` into `results_*.csv`,
   and analyze still reads `results_*.csv` through the rocpd concat path. Removing
@@ -426,6 +426,8 @@ sequenceDiagram
 
 ## Phase C: Native Tool Counter Storage
 
+Status: implemented.
+
 This phase untangles the two data types on the profile side (AD-3), and profile
 stops consolidating per-process artifacts:
 
@@ -436,6 +438,12 @@ There is no per-process -> per-pass merge in profile; each process keeps its own
 artifact, so profile needs no writer. Analyze reads all per-process artifacts
 across both lanes, merges them, and still materializes `pmc_perf.csv.gz`; the reader
 interface and dropping `pmc_perf.csv` come in Phase D.
+
+Profile compacts each retained database at the end of a pass. The counter catalog
+is preserved, so nothing a later phase needs to resolve counter identity is lost.
+
+Analyze reads only `out/{pass}/` profile artifacts (or an existing `pmc_perf.csv.gz`
+from a prior analyze). Legacy `results_*.csv.gz` workloads must be re-profiled.
 
 ```mermaid
 sequenceDiagram

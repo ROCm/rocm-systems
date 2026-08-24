@@ -20,17 +20,26 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx908–gfx942: added HBM and remote traffic percentages.
   * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
 
+* Profile keeps each process's rocpd database and counter CSV under `out/{pass}/`, and analyze merges them.
+
 ### Removed
 
 * Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
+* Removed the `--retain-rocpd-output` profile option. Per-process `.db` files are now always kept under `out/`.
+* Profile no longer writes intermediate `results_*.csv.gz` files.
+* Analyze no longer reads `results_*.csv.gz`. Workloads profiled before 3.10.0 must be re-profiled.
 
 ### Optimized
+
+* Profile no longer processes counter data during collection.
+* Profile shrinks the retained rocpd databases at the end of each pass.
 
 ### Resolved issues
 
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
 * Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
+
 
 ### Upcoming changes
 

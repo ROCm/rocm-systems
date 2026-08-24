@@ -20,16 +20,9 @@ choose.
 
 .. note::
 
-   Analyze mode concatenates the per-pass ``results_*.csv.gz`` files written by
-   ``rocpd`` profiling into a unified ``pmc_perf.csv.gz`` for analysis. If the
-   workload directory already contains a ``pmc_perf.csv.gz``, that file is used
-   as-is.
-
-.. note::
-
-   Reading intermediate ``results_*.csv`` files produced by ``rocpd`` profiling is
-   deprecated and will be removed in a future release. The analyze step will read ``.db``
-   files directly.
+   Analyze mode merges per-pass profile artifacts from ``out/`` into a unified
+   ``pmc_perf.csv.gz`` for analysis. If the workload directory already contains a
+   ``pmc_perf.csv.gz``, that file is used as-is.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
