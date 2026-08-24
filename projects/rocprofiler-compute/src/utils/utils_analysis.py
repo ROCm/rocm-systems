@@ -592,46 +592,43 @@ def validate_workload(path: str) -> None:
         workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
     )
 
-    # Find PMC data files (merged or separate)
-    if pmc_perf_path.is_file():
-        files_to_check = [pmc_perf_path]
-    elif rocpd_data.pass_dirs(workload_dir):
+    if rocpd_data.pass_dirs(workload_dir):
         return
-    else:
-        files_to_check = sorted(
-            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
-        )
 
-    if not files_to_check:
+    if sorted(workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")):
+        console_error(
+            "analysis",
+            "Legacy results_*.csv.gz workloads are no longer supported.\n"
+            "Re-run 'rocprof-compute profile' to regenerate the workload.",
+        )
+        return
+
+    if not pmc_perf_path.is_file():
         console_error("analysis", "No profiling data found.")
         return
 
-    # Validate files are not empty
-    for file_path in files_to_check:
-        try:
-            # read_csv infers gzip from the .gz suffix.
-            temp_df = pd.read_csv(file_path)
-        except pd.errors.EmptyDataError:
-            console_error(
-                "profiling",
-                f"No counter data in {file_path}.\nProfiling data could be corrupt.",
-            )
-            return
-        except csv_compression.CORRUPT_CSV_ERRORS as e:
-            console_error(
-                "profiling",
-                f"Could not read {file_path}: {e}\n"
-                "The file is truncated or corrupt, which a profile run that was "
-                "killed mid-write leaves behind.\n"
-                "Please re-run 'rocprof-compute profile'.",
-            )
-            return
-        if temp_df.dropna().empty:
-            console_error(
-                "profiling",
-                f"Found empty cells in {file_path}.\nProfiling data could be corrupt.",
-            )
-            break
+    try:
+        temp_df = pd.read_csv(pmc_perf_path)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {pmc_perf_path}.\nProfiling data could be corrupt.",
+        )
+        return
+    except csv_compression.CORRUPT_CSV_ERRORS as e:
+        console_error(
+            "profiling",
+            f"Could not read {pmc_perf_path}: {e}\n"
+            "The file is truncated or corrupt, which a profile run that was "
+            "killed mid-write leaves behind.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+        return
+    if temp_df.dropna().empty:
+        console_error(
+            "profiling",
+            f"Found empty cells in {pmc_perf_path}.\nProfiling data could be corrupt.",
+        )
 
 
 def add_unit_counter(df: pd.DataFrame) -> None:

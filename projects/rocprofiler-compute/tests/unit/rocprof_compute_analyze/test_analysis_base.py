@@ -16,104 +16,27 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 MODULE = "rocprof_compute_analyze.analysis_base"
 
 
-def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
-    """Concatenates rocpd long-form results_*.csv.gz into one pmc_perf.csv.gz."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n0,kernel_a,SQ_WAVES,20\n",
-    )
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_1.csv.gz",
-        header + "0,kernel_a,SQ_BUSY_CYCLES,30\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), common.pmc_perf_path(tmp_path)
-    )
-    merged = pd.read_csv(common.pmc_perf_path(tmp_path))
-
-    assert list(merged.columns) == [
-        "GPU_ID",
-        "Kernel_Name",
-        "Counter_Name",
-        "Counter_Value",
-    ]
-    assert len(merged) == 3
-    assert set(merged["Counter_Name"]) == {"SQ_WAVES", "SQ_BUSY_CYCLES"}
-    assert sorted(merged["Counter_Value"].tolist()) == [10, 20, 30]
-
-
-def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
-    tmp_path, monkeypatch
-) -> None:
-    mocks = common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(b"")
-    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-    skipped = [
-        call.args[0]
-        for call in mocks["warning"].call_args_list
-        if "Skipping empty" in str(call.args[0])
-    ]
-    assert len(skipped) == 2
-
-
-def test_concat_result_csvs_skips_zero_byte_compressed_pass(
-    tmp_path, monkeypatch
-) -> None:
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n",
-    )
-    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), common.pmc_perf_path(tmp_path)
-    )
-
-    assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
-
-
-def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> None:
-    """join_workload_csvs picks up compressed results_*.csv.gz artifacts."""
+def test_join_workload_csvs_merges_out_artifacts(tmp_path, monkeypatch) -> None:
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n",
-    )
+    pass_path = tmp_path / "out" / "pmc_perf_0"
+    common.write_rocpd_pass_db(pass_path, "100")
+    common.write_native_counter_csv(pass_path, "100")
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.join_workload_csvs(tmp_path)
 
-    assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
+    merged = pd.read_csv(common.pmc_perf_path(tmp_path))
+    assert len(merged) == 2
+    assert set(merged["Counter_Name"]) == {"SQ_WAVES"}
 
 
 def test_join_workload_csvs_reuses_existing_merge(tmp_path, monkeypatch) -> None:
-    """Reuse pmc_perf.csv.gz when no out/ artifacts are present."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_pmc_perf(tmp_path, header + "0,kernel_a,SQ_WAVES,10\n")
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,99\n",
+    common.write_pmc_perf(
+        tmp_path,
+        "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,10\n",
     )
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
@@ -125,10 +48,12 @@ def test_join_workload_csvs_reuses_existing_merge(tmp_path, monkeypatch) -> None
 def test_join_workload_csvs_rebuilds_from_out_when_merge_exists(
     tmp_path, monkeypatch
 ) -> None:
-    """out/ artifacts win over an existing pmc_perf.csv.gz."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
-    common.write_pmc_perf(tmp_path, "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,99\n")
+    common.write_pmc_perf(
+        tmp_path,
+        "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,99\n",
+    )
     pass_path = tmp_path / "out" / "pmc_perf_0"
     common.write_rocpd_pass_db(pass_path, "100")
     common.write_native_counter_csv(pass_path, "100")
@@ -141,10 +66,24 @@ def test_join_workload_csvs_rebuilds_from_out_when_merge_exists(
     assert 99 not in merged["Counter_Value"].tolist()
 
 
+def test_join_workload_csvs_rejects_legacy_results(tmp_path, monkeypatch) -> None:
+    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
+
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n0,k,SQ_WAVES,1\n",
+    )
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    with pytest.raises(SystemExit):
+        inst.join_workload_csvs(tmp_path)
+
+    assert not common.pmc_perf_path(tmp_path).exists()
+
+
 def test_merge_profile_artifacts_errors_on_truncated_counter_csv(
     tmp_path, monkeypatch
 ) -> None:
-    """A truncated native counter CSV must fail without leaving output behind."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
     pass_path = tmp_path / "out" / "pmc_perf_0"
@@ -163,72 +102,15 @@ def test_merge_profile_artifacts_errors_on_truncated_counter_csv(
     with pytest.raises(SystemExit):
         inst.merge_profile_artifacts(tmp_path, output)
 
-    assert not output.exists(), "a failed merge must not leave a partial intermediate"
-
-
-def test_concat_result_csvs_errors_on_truncated_compressed_results(
-    tmp_path, monkeypatch
-) -> None:
-    """Partial .csv.gz from a killed profile run must not leave output behind."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    rows = "".join(f"0,kernel_a,SQ_WAVES,{i}\n" for i in range(2000))
-    whole = gzip.compress((header + rows).encode("utf-8"))
-    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(whole[: len(whole) // 2])
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-
-
-def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> None:
-    """Header-only results files must not leave a reusable output behind."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", header)
-    common.write_gzip_csv(tmp_path / "results_pmc_perf_1.csv.gz", header)
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-
-
-def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -> None:
-    """Wide legacy results_*.csv without Counter_Name are rejected."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        "GPU_ID,Kernel_Name,Dispatch_ID,SQ_WAVES\n0,kernel_a,0,10\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
+    assert not output.exists()
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
-    """Reject two paths whose last two components match."""
     mock_error = common.patch_console(monkeypatch, MODULE, "error")["error"]
     paths = [[str(tmp_path / parent / "vcopy" / "MI300")] for parent in ("a", "b")]
     for path in paths:
         Path(path[0]).mkdir(parents=True)
 
-    # The mock records instead of exiting, so sanitize runs on to a later error.
     with pytest.raises(SystemExit):
         OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
 

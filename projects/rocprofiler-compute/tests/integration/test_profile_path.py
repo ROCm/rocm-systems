@@ -80,7 +80,7 @@ def test_path_rocpd(
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir)
 
-    # Validate profile outputs (results_*.csv for rocpd format)
+    # Validate profile outputs (out/{pass}/ artifacts)
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
 
     # Run analyze to create merged pmc_perf.csv.gz
