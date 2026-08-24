@@ -424,7 +424,7 @@ reader_t::impl::get_tracks()
                     track_info_ptr->thread_info = thread_it->second;
                 }
             }
-            // Q10: v3 rocpd_track has no agent_id, so counter tracks get no agent_info.
+            // v3 rocpd_track has no agent_id, so counter tracks get no agent_info.
 
             m_track_info_list.push_back(track_info_ptr);
             m_track_info_utility.emplace(track_info.id, track_info_ptr);
@@ -2455,10 +2455,10 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         // rocpd_string, v4 via rocpd_info_category), so just carry it through.
         if(r.category.has_value()) ev.category = r.category.value();
 
-        // Stream tracks are heterogeneous: the per-row op_kind (kernel_dispatch=1,
-        // memory_copy=2, memory_allocate=3) both picks the event type encoded in the
-        // handle -- so the reader routes the right get_*_details() -- and selects the
-        // name table for this row. Homogeneous tracks take their type from the track.
+        // Stream tracks are heterogeneous: per-row op_kind (kernel_dispatch=1,
+        // memory_copy=2, memory_allocate=3) picks both the event type encoded in the
+        // handle (routing to the right get_*_details()) and the name table for this row.
+        // Homogeneous tracks take their type from the track.
         const reader_types::event_type_t etype =
             (is_stream && r.op_kind.has_value())
                 ? static_cast<reader_types::event_type_t>(r.op_kind.value())
@@ -2541,7 +2541,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
         // for (nid, pid), ordered by start. Mirrors Optiq's C++ synthesis (rocprof.cpp
         // CallbackCaptureMemoryActivity + CreateMemoryActivityTable). FREE agent_id and
         // size are recovered via address self-join to the most recent prior ALLOC at the
-        // same address (rocprof.cpp:962-968). REALLOC/RECLAIM are no-ops (1098-1106).
+        // same address. REALLOC/RECLAIM are no-ops.
         auto raw_rows =
             m_read_statements->mem_activity_raw_track()(qi.nid, qi.pid).to_vector();
 

@@ -153,9 +153,8 @@ TEST_F(reader_v3_mem_activity_test, v3_get_interval_track_returns_empty_for_mem_
 // ============================================================================
 // memory_activity time-window straddle.
 // The window filter in get_scalar_track's memory_activity branch is inclusive
-// on both ends (window.start <= r.start <= window.end) and is applied after
-// accumulation, not before — so kept rows still reflect prior out-of-window
-// activity.
+// on both ends (window.start <= r.start <= window.end) and applies after
+// accumulation, so kept rows still reflect prior out-of-window activity.
 // ============================================================================
 
 class reader_v3_mem_activity_window_test : public ::testing::Test
@@ -238,8 +237,7 @@ TEST_F(reader_v3_mem_activity_window_test, time_window_start_only_drops_earlier_
     auto track = mem_activity_track();
     ASSERT_NE(track, nullptr);
 
-    // end is left unset here specifically to exercise the has_value() guard on
-    // the end-filter branch.
+    // end is unset to exercise the has_value() guard on the end-filter branch.
     profiler_hub::reader_types::event_filter_t f;
     f.time_window.start = 6000;
     auto scalars        = m_reader->get_scalar_track(track->id, f);

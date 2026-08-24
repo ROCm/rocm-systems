@@ -83,7 +83,7 @@ TEST_F(reader_test, DISABLED_get_events_for_track_returns_events_for_registered_
 
 // DISABLED: get_region_details, get_kernel_dispatch_details, get_memory_copy_details,
 // get_memory_alloc_details, get_sample_details, and get_pmc_event_details were
-// consolidated into get_event_info(event_id_t) and no longer exist. Left commented
+// consolidated into get_event_info(event_id_t); they do not exist. Left commented
 // out (not DISABLED_-prefixed) because the calls below would not compile.
 /*
 TEST_F(reader_test, get_region_details_returns_matching_data)
@@ -367,8 +367,7 @@ TEST_F(reader_v4_test, v4_get_interval_track_cpu_thread_regions)
 
 TEST_F(reader_v4_test, v4_get_interval_track_cpu_thread_carries_category)
 {
-    // v4 resolves category through rocpd_info_category, unlike v3's rocpd_string;
-    // this exercises the v4 branch of the per-backend resolution.
+    // v4 resolves category through rocpd_info_category, unlike v3's rocpd_string.
     auto tracks = m_reader->get_tracks();
     auto cpu =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::cpu_thread);
@@ -420,7 +419,7 @@ TEST_F(reader_v4_test, v4_gpu_queue_track_carries_agent_id)
 TEST_F(reader_v4_test, v4_get_interval_track_gpu_queue_carries_category)
 {
     // v4 resolves kernel-dispatch category through rocpd_info_category, unlike v3's
-    // rocpd_string, exercising the v4 branch.
+    // rocpd_string.
     auto tracks = m_reader->get_tracks();
     auto gpu =
         find_first_track(tracks, profiler_hub::reader_types::track_type_t::gpu_queue);
@@ -459,7 +458,7 @@ TEST_F(reader_v4_test, v4_get_interval_track_dma_memory_copies)
 TEST_F(reader_v4_test, v4_get_interval_track_dma_carries_category)
 {
     // v4 resolves memory-copy category through rocpd_info_category, unlike v3's
-    // rocpd_string, exercising the v4 branch.
+    // rocpd_string.
     auto tracks = m_reader->get_tracks();
     auto dma    = find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma);
     ASSERT_EQ(dma.size(), 2);

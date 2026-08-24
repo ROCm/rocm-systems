@@ -23,8 +23,7 @@ using namespace profiler_hub::test;
 // v3 track-type x schema switch-arm coverage: rocpd_v3_track_shapes.db carries one
 // track of each v3 dma/memory/cpu_thread shape that other v3 fixtures leave untested
 // in get_track_stats/get_interval_track -- dma queue-only/agent-only/queue+agent,
-// memory queue+agent/queue-only/neither, and a cpu_thread SAMPLE track. Each test
-// asserts exact min_ts/max_ts/count and interval start order.
+// memory queue+agent/queue-only/neither, and a cpu_thread SAMPLE track.
 // =============================================================================
 class reader_v3_track_shapes_test : public ::testing::Test
 {
@@ -167,10 +166,9 @@ TEST_F(reader_v3_dma_agent_test, dma_tracks_partition_by_destination_agent)
     // streams (12 events per agent/stream cell), all on one queue. Keyed by
     // (nid,pid,queue_id,dst_agent_id) this MUST yield exactly 2 dma tracks -- one per
     // destination agent, 24 events each -- matching Optiq's
-    // GetRocprofMemoryCopyTrackQuery by-agent swimlane grouping. The old stream-keyed
-    // identity would instead have given 2 tracks of 24 split BY STREAM, each spanning
-    // both agents: the exact inverse. This test pins the by-agent partition and guards
-    // against a regression back to by-stream.
+    // GetRocprofMemoryCopyTrackQuery by-agent swimlane grouping. Guards against a
+    // regression to by-stream keying, which would yield 2 tracks of 24 each spanning
+    // both agents (the exact inverse).
     auto tracks = m_reader->get_tracks();
     auto dma    = find_tracks(tracks, profiler_hub::reader_types::track_type_t::dma);
     ASSERT_EQ(dma.size(), 2U);

@@ -20,11 +20,10 @@ namespace profiler_hub::detail
 // `lane` is greedy interval packing so overlapping bars never collide. `parent_id`
 // carries the opaque event_id_t (never a raw row id) and is set only when
 // nesting == stack; the containment walk searches down the ancestor stack for the
-// nearest true container instead of testing only the immediate top (A=[0,100],
-// B=[10,60], C=[50,90]: C is a child of A, not top-level). `level` mirrors
-// containment depth on stack tracks and the packing lane on lane tracks; Optiq
-// reads it for height, so height consumers migrating away from it should use
-// track_info_t::max_lane instead.
+// nearest true container, not just the top (A=[0,100], B=[10,60], C=[50,90]: C is
+// a child of A, not top-level). `level` mirrors containment depth on stack tracks
+// and the packing lane on lane tracks; Optiq reads it for height — new height
+// consumers should use track_info_t::max_lane.
 inline uint32_t
 compute_interval_layout(reader_types::interval_entry_list_t& events,
                         reader_types::nesting_model_t        nesting)

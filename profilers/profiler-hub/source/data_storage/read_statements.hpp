@@ -1903,7 +1903,7 @@ private:
             &scalar_detail_result::event_id);
 
         // Keyed on rocpd_pmc_event.id. resolved_pmc_join pairs the pmc row with the one
-        // sample whose track resolves to that pmc; without it it joins to every sample
+        // sample whose track resolves to that pmc; without it, it joins to every sample
         // sharing the event_id (six co-sampled metric tracks) and could return a
         // different track's sample.
         m_pmc_event_detail =

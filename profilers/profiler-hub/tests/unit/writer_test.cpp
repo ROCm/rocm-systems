@@ -381,10 +381,8 @@ TEST_F(writer_test, register_kernel_symbol_info_is_readable_after_flush)
     EXPECT_EQ(kernel_symbols[0]->code_object_info->id, code_object_info.id);
 }
 
-// DISABLED: renamed get_all_tracks->get_tracks compiles, but the semantics
-// differ — our get_tracks() synthesizes tracks from actual event/sample data, so a track
-// registered with no events is not surfaced (returns 0), whereas develop's
-// get_all_tracks() returned raw registered rocpd_track rows.
+// DISABLED: get_tracks() synthesizes tracks from event/sample data, so a
+// track registered with no events is not surfaced (returns 0).
 TEST_F(writer_test, DISABLED_register_track_info_is_readable_after_flush)
 {
     auto writer = make_writer();

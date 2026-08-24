@@ -42,8 +42,7 @@ protected:
         return std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
     }
 
-    // Seeds data so the detail/property getters exercised by callers have real
-    // data to resolve against.
+    // Seeds data so callers' detail/property getters have real data to resolve.
     void seed_region_with_full_event(writer_t& writer) const
     {
         const writer_types::node_info_t node_info{ 1, 42, "machine-1" };

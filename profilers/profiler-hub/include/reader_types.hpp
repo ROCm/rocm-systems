@@ -23,13 +23,13 @@ namespace profiler_hub::reader_types
 using timestamp_t = size_t;
 
 /// Opaque track identifier. Treat as opaque: the only portable operations are equality,
-/// ordering, hashing (so it can key a map), and reading value() — i.e. the public `value`
-/// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB
-/// identity; do not synthesize or do arithmetic on it. The underlying integer is size_t,
-/// not uint32_t, so real DB ids cannot truncate and the consumer's SIZE_MAX invalid
-/// sentinel survives round-trips. Unlike event_id_t/flow_id_t (which fully hide their
-/// value), a track id is a stable DB identity the consumer must serialize, so the integer
-/// stays publicly reachable.
+/// ordering, hashing (so it can key a map), and reading the public `value` field to
+/// serialize/reconstruct it. The integer is a ProfilerHub-private DB identity; do not
+/// synthesize or do arithmetic on it. The underlying integer is size_t, not uint32_t,
+/// so real DB ids cannot truncate and the consumer's SIZE_MAX invalid sentinel survives
+/// round-trips. Unlike event_id_t/flow_id_t (which fully hide their value), a track id
+/// is a stable DB identity the consumer must serialize, so the integer stays publicly
+/// reachable.
 struct track_id_t
 {
     size_t value{};

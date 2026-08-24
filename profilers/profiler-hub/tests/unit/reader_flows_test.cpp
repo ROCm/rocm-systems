@@ -638,9 +638,9 @@ TEST_F(reader_v3_flow_order_test, full_flow_set_matches_oracle)
 }
 
 // ---------------------------------------------------------------------------
-// Flat-clique edge fixture: the single flow test carried over from the edge
-// fixture. Each non-zero stack is one region + one GPU event (region source,
-// one GPU-type dest, no siblings); stack 0 is a lone excluded region.
+// Flat-clique edge fixture: the single flow test in the edge fixture family. Each
+// non-zero stack is one region + one GPU event (region source, one GPU-type dest,
+// no siblings); stack 0 is a lone excluded region.
 // ---------------------------------------------------------------------------
 class reader_v3_edge_flow_test : public reader_test
 {
