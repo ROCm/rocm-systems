@@ -7,6 +7,38 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
+
+// Non-temporal 128-bit load for LL communication (FIFO) buffers. Comm buffers
+// are uncached; a single explicit vector load avoids relying on the backend to
+// fuse two independent 64-bit nontemporal loads into one 16-byte op.
+inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLFifoLine& dst) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.v = __builtin_nontemporal_load((v4u_gptr)src->v);
+  dst.v[0] = u.u64[0];
+  dst.v[1] = u.u64[1];
+}
+
+// Plain 128-bit vector store for LL FIFO lines. Like LL128 store128Plain, a
+// single 128-bit store keeps data and flag words in one memory transaction so
+// the reader's flag poll cannot observe flags before their paired data.
+inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLLFifoLine& src) {
+#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
+  __scoped_atomic_store_n((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((u64_gptr)dst->v + 1, src.v[1], __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+#else
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = src.v[0];
+  u.u64[1] = src.v[1];
+  *((v4u_gptr)dst->v) = u.v;
+#endif
+}
+
 // UserRegMode is accepted only to match the Primitives primary template (which
 // carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
 // unchanged from the baseline and ignores it.
@@ -175,15 +207,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(i4.i4)
                    : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#else
       // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
       // never observes a stale cache line (no system-scope cache-bypass needed).
       // Holds for the legacy IPC allocator only. See loadLLLineB128.
-      *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
-      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
-#else
-      *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
-      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+      loadLLLine(src, i4);
 #endif
       if (checkAbort(abort, 1, spins)) break;
     } while ((i4.flag1 != flag) || (i4.flag2 != flag));
@@ -218,14 +246,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                      "s_waitcnt vmcnt(0)\n"
                      : "=v"(line[i].i4)
                      : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#else
         // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
         // Holds for the legacy IPC allocator only. See loadLLLineB128.
-        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
-#else
-        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+        loadLLLine(src, line[i]);
 #endif
 #else
         asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -250,14 +274,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(line[i].i4)
                    : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#else
       // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
       // Holds for the legacy IPC allocator only. See loadLLLineB128.
-      line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
-#else
-      line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+      loadLLLine(src, line[i]);
 #endif
 #else
       asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -284,17 +304,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     // writer's cache and never reach the peer's poll. One b128 keeps data+flag
     // in a single transaction. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
     __builtin_amdgcn_global_store_b128((v4u_gptr)dst, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
-    *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
 #else
-#if defined(__gfx1200__) || defined(__gfx1201__)
-    __scoped_atomic_store_n((u64_gptr)dst->v, i4.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
-    __scoped_atomic_store_n((u64_gptr)dst->v + 1, i4.v[1], __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
-#else
-    *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
-    *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
-#endif
+    // Comm FIFO buffers are uncached; use plain vector stores (no system-scope
+    // cache bypass) for higher store throughput and lower register pressure.
+    storeLLLine(dst, i4);
 #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(
