@@ -27,7 +27,7 @@ inline constexpr IsaGpuTargetDescription kGfx1251Target{
     120501,
     {.instruction_features = kGfx1251IsaFeatures,
      .setreg_vgpr_msb_fixup = false,
-     .execution_implemented = false}};
+     .execution_implemented = true}};
 inline constexpr std::array<IsaGpuTargetDescription, 2> kGpuTargets{
     {kGfx1250Target, kGfx1251Target}};
 

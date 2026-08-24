@@ -343,7 +343,7 @@ TEST(Gfx1250DecodeTest, RejectsGfx1251VMovB64Dpp) {
   std::unique_ptr<Instruction> inst(decode_valid(*gfx1251, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mov_b64_e32");
-  EXPECT_EQ(inst->execute, nullptr);
+  EXPECT_NE(inst->execute, nullptr);
 }
 
 TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
@@ -379,7 +379,7 @@ TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
     std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -411,7 +411,7 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
     EXPECT_EQ(decoded->size(), 12) << mnemonic;
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -550,14 +550,14 @@ TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
       expected_mnemonic += "_e32";
     }
     EXPECT_EQ(decoded->mnemonic(), expected_mnemonic) << name;
-    EXPECT_EQ(decoded->execute, nullptr) << name;
+    EXPECT_NE(decoded->execute, nullptr) << name;
   }
 }
 
 TEST(Gfx1250DecodeTest, CommonInstructionDecodesForBothVariants) {
   constexpr uint32_t kSEndpgm[] = {0xBFB00000u};
   for (const auto &[target, expects_execution] :
-       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", false}}}) {
+       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", true}}}) {
     auto decoder = Decoder::create(default_isa_target_registry(), target);
     ASSERT_NE(decoder, nullptr) << target;
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, kSEndpgm));
