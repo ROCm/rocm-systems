@@ -68,7 +68,7 @@ endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 
 # Artifact name: torch_trace_collector-<torch-version>.so.
-# Prefer TORCH_TRACE_TORCH_VERSION from the loader; otherwise use Torch_VERSION.
+# Prefer TORCH_TRACE_TORCH_VERSION when set; otherwise use Torch_VERSION.
 if(TORCH_TRACE_TORCH_VERSION)
     set(_torch_version "${TORCH_TRACE_TORCH_VERSION}")
 else()

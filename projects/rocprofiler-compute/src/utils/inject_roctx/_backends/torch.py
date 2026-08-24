@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
+from utils.inject_roctx._backends.torch_cpp_loader import UnsupportedTorchVersionError
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
@@ -271,6 +272,8 @@ def _initialize_c_tier() -> bool:
 
     try:
         result = _STATE.load_torch_trace_collector()
+    except UnsupportedTorchVersionError:
+        raise
     except Exception as exc:
         console_warning(
             "ml api trace",
