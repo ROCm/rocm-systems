@@ -2250,25 +2250,55 @@ class AMDSMIHelpers:
         return True
 
     def _severity_as_string(self, error_severity, notify_type, for_filename):
-        if error_severity == "non_fatal_uncorrected":
-            if for_filename:
-                return "uncorrected"
-            return "NONFATAL-UNCORRECTED"
-        elif error_severity == "non_fatal_corrected":
-            if for_filename:
-                return "corrected"
-            return "NONFATAL-CORRECTED"
-        elif error_severity == "fatal":
-            if notify_type == "BOOT":
+        # Check if this is an IFoE CPER (all-zeros GUID placeholder)
+        is_ifoe = False
+        if isinstance(notify_type, str):
+            # notify_type is formatted as hex string, check if all zeros
+            try:
+                notify_hex = notify_type.replace(":", "").replace(" ", "")
+                is_ifoe = all(c == "0" for c in notify_hex)
+            except Exception:
+                pass
+
+        if is_ifoe:
+            # IFoE fabric event naming
+            if error_severity == "non_fatal_uncorrected":
                 if for_filename:
-                    return "boot"
-                return "BOOT"
+                    return "fabric-linkdown"
+                return "FABRIC-LINKDOWN"
+            elif error_severity == "fatal":
+                if for_filename:
+                    return "fabric-fatal"
+                return "FABRIC-FATAL"
+            elif error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "fabric-linkup"
+                return "FABRIC-LINKUP"
+            else:
+                if for_filename:
+                    return "fabric-unknown"
+                return "FABRIC-UNKNOWN"
+        else:
+            # Existing GPU CPER naming
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "uncorrected"
+                return "NONFATAL-UNCORRECTED"
+            elif error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "corrected"
+                return "NONFATAL-CORRECTED"
+            elif error_severity == "fatal":
+                if notify_type == "BOOT":
+                    if for_filename:
+                        return "boot"
+                    return "BOOT"
+                if for_filename:
+                    return "fatal"
+                return "FATAL"
             if for_filename:
-                return "fatal"
-            return "FATAL"
-        if for_filename:
-            return "unknown"
-        return "UNKNOWN"
+                return "unknown"
+            return "UNKNOWN"
 
     def display_cper_files_generated(
         self, entries, device_handle, logger: Optional["AMDSMILogger"] = None
@@ -2757,6 +2787,51 @@ class AMDSMIHelpers:
             self._emit_cper_output(
                 entries,
                 cper_data,
+                device_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
+
+        # Fetch fabric CPER entries (IFoE RAS events)
+        fabric_cursor_idx = gpu_idx  # Reuse same cursor index
+        if len(args.cursor) <= fabric_cursor_idx:
+            args.cursor.append(0)
+
+        fabric_entries = {}
+        fabric_cper_data = []
+        while True:
+            try:
+                fabric_entries, new_fabric_cursor, fabric_cper_data, _fabric_status_code = (
+                    amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                        device_handle, severity_mask, buffer_size, args.cursor[fabric_cursor_idx]
+                    )
+                )
+                logging.debug(f"fabric_cper_entries | entries: {fabric_entries}")
+                num_entries = num_entries + len(fabric_entries)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug("Fabric CPER not supported on this device")
+                    break
+                elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                    logging.debug(f"Invalid arguments to fabric CPER: {e}")
+                    break
+                else:
+                    logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
+                    break
+
+            args.cursor[fabric_cursor_idx] = new_fabric_cursor
+            if len(fabric_entries) == 0:
+                break
+
+            self._emit_cper_output(
+                fabric_entries,
+                fabric_cper_data,
                 device_handle,
                 args,
                 logger,
