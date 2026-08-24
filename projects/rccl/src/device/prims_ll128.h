@@ -23,8 +23,13 @@
 // builtins introduce in the LL128 reduce kernels. The cache-bypassing load128/
 // store128 remain in use for user buffers (loadRegsBegin/storeRegs).
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-  v0 = __builtin_nontemporal_load((u64_gptr)ptr);
-  v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
 }
 
 // Plain (cacheable) 128-bit store. This is the pre-cache-bypass February store

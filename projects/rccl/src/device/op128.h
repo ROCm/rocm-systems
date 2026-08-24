@@ -13,32 +13,36 @@
 #include "rccl_ptr.h"
 
 inline __device__ void load128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union {
     v4u v;
+    v4i vi;
     uint64_t u64[2];
   } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+#if __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && defined(__gfx1250__)
+  u.vi = __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)ptr, __ATOMIC_RELAXED, RCCL_DEVICE_SYNCSCOPE);
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_DEVICE_SYNCSCOPE);
+#else
+  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
+#endif
   v0 = u.u64[0];
   v1 = u.u64[1];
-#else
-  v0 = __builtin_nontemporal_load((u64_gptr)ptr);
-  v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
-#endif
 }
 
 inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union {
     v4u v;
+    v4i vi;
     uint64_t u64[2];
   } u;
   u.u64[0] = v0;
   u.u64[1] = v1;
+#if __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && defined(__gfx1250__)
+  __builtin_amdgcn_cooperative_atomic_store_8x16B((v4i_gptr)ptr, u.vi, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *((u64_gptr)ptr) = v0;
-  *((u64_gptr)ptr + 1) = v1;
+  *((v4u_gptr)ptr) = u.v;
 #endif
 }
 
@@ -370,8 +374,7 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #elif defined(__gfx950__)
   *(v4u_gptr)addr = value.v4u;
 #else
-  __builtin_nontemporal_store(value.u64[0], (u64_gptr)addr);
-  __builtin_nontemporal_store(value.u64[1], (u64_gptr)addr + 1);
+  __builtin_nontemporal_store(value.v4u, (v4u_gptr)addr);
 #endif
 }
 
@@ -381,8 +384,7 @@ __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
   ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)addr, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *(u64_gptr)ans.u64 = __builtin_nontemporal_load((u64_gptr)addr);
-  *((u64_gptr)ans.u64 + 1) = __builtin_nontemporal_load((u64_gptr)addr + 1);
+  (*(v4u_gptr)ans.u64) = __builtin_nontemporal_load((v4u_gptr)addr);
 #endif
   return ans;
 }
@@ -391,8 +393,7 @@ __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   template <> \
   __device__ __forceinline__ BytePack<16> ld_##space<16>(addr_cxx_ty addr) { \
     BytePack<16> ans; \
-    ans.u64[0] = *((uint64_t*)addr); \
-    ans.u64[1] = *((uint64_t*)addr + 1); \
+    ans.v4u = *((v4u_gptr)addr); \
     return ans; \
   } \
   template <> \
