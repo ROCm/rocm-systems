@@ -1284,6 +1284,7 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VPkMaxNumF64Vop3p>,
     &execute_with_backend<VPkMinNumF64Vop3p>,
     &execute_with_backend<VPkLshlAddU64Vop3p>,
+    &execute_with_backend<VWmmaF6416x16x4F64Vop3p>,
     &execute_with_backend<VWmmaScaleF32Vop3px2>,
     &execute_with_backend<DsAddU32Vds>,
     &execute_with_backend<DsSubU32Vds>,

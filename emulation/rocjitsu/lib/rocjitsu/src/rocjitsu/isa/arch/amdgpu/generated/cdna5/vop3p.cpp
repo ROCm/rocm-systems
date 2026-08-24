@@ -5085,7 +5085,8 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
 } // namespace detail
 
 VWmmaF6416x16x4F64Vop3p::VWmmaF6416x16x4F64Vop3p(const MachineInst *inst)
-    : Vop3p("v_wmma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst), nullptr),
+    : Vop3p("v_wmma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaF6416x16x4F64Vop3p)),
       vdst(512, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5113,6 +5114,39 @@ DecodeResult decodeVWmmaF6416x16x4F64Vop3p(const MachineInst *opcode,
                                                emit_error, LiteralSupport::None);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel & 0x3u) != 0u ||
+      reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 has an invalid F64 WMMA element layout";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->clamp != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 0x3u) != 0u) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 has unsupported modifier bits";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 240u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a vdst register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid vdst register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a src0 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src0 register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has a src1 register tuple that exceeds the selector range";
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src1 register tuple alignment";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 242u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 496u)) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 requires a 16-register VGPR accumulator tuple or inline 1.0";
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 242u &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) != 0u) [[unlikely]]
+    return emit_error.emit()
+           << "V_WMMA_F64_16X16X4_F64 has an invalid src2 register tuple alignment";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
