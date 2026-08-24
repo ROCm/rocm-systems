@@ -292,8 +292,12 @@ def test_pc_sampling_analyze_csv_output(
         assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
         assert set(csv_pc_sampling["pid"]) == {698961}
-        assert csv_pc_sampling["wave_occupancy_percent"].notna().all()
-        assert csv_pc_sampling["active_thread_percent"].notna().all()
+        # Exported values must match the summary view the db test pins: every
+        # line is exactly 100% active, and two lines reach full wave occupancy.
+        assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
+        assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
+        assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
+        assert csv_pc_sampling["wave_occupancy_percent"].eq(100.0).sum() == 2
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {
