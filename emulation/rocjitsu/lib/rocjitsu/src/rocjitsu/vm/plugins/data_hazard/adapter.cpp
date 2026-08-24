@@ -96,8 +96,11 @@ WaitAction make_wait_action(const WaitInfo &wait) {
   case WaitKind::Waitcnt: {
     const auto fields = data_hazard_waitcnt::decode_legacy_waitcnt(
         wait.immediate, data_hazard_waitcnt::LEGACY_LGKMCNT_4BIT_MASK);
+    // Drains the stores as well on gfx9 and CDNA, where they are outstanding
+    // on this same counter. gfx10 and gfx11 kept the s_waitcnt mnemonic but
+    // count stores on vscnt, drained by the separate s_waitcnt_vscnt, and
+    // their stores are tracked against that counter instead.
     add_counter(action, WaitCntType::VMEM, fields.vmcnt);
-    add_counter(action, WaitCntType::STORE, fields.vmcnt);
     add_counter(action, WaitCntType::LDS, fields.lgkmcnt);
     add_counter(action, WaitCntType::SMEM, fields.lgkmcnt);
     break;
@@ -293,6 +296,21 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
 
   if (route.resource_kind == ResourceKind::GlobalMemory ||
       route.resource_kind == ResourceKind::ScratchMemory) {
+    // A store holds a slot of route.store_wait until it completes even though
+    // it leaves no register pending, and where that counter is the one loads
+    // use, the slot is what holds an older load back. Reported once for the
+    // instruction rather than per lane, because the counter tracks issued
+    // instructions and an all-lanes-off store still occupies its slot. An
+    // atomic that returns a value is left to its destination register, which
+    // already takes a slot of the load counter.
+    if (route.is_store) {
+      ResourceAccessEvent slot =
+          make_base_resource_event(instruction, size_bytes, route.is_atomic, route.exec_mask);
+      slot.resource_kind = route.resource_kind;
+      slot.hazards.memory_op_wait = route.store_wait;
+      api_.on_resource_access(slot);
+    }
+
     emit_per_lane_or_scalar(
         route.per_lane_addresses, route.address, route.exec_mask, [&](uint64_t address) {
           ResourceAccessEvent memory =
