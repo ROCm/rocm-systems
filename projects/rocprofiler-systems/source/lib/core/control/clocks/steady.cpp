@@ -3,6 +3,8 @@
 
 #include "steady.hpp"
 
+#include "core/control/clock.hpp"
+
 #include <chrono>
 #include <mutex>
 
@@ -17,18 +19,18 @@ steady::now() const noexcept
 bool
 steady::sleep_until(clock_time_point deadline)
 {
-    std::unique_lock<std::mutex> lk{ m_mutex };
+    std::unique_lock<std::mutex> clk_lcoks{ m_mutex };
     // wait_until's predicate-form returns the predicate value at wakeup:
     //   true  -> interrupted (predicate satisfied before timeout)
     //   false -> deadline reached
-    return !m_cv.wait_until(lk, deadline, [this] { return m_interrupted; });
+    return !m_cv.wait_until(clk_lcoks, deadline, [this] { return m_interrupted; });
 }
 
 void
 steady::interrupt()
 {
     {
-        const std::scoped_lock lk{ m_mutex };
+        const std::scoped_lock clk_lcoks{ m_mutex };
         m_interrupted = true;
     }
     m_cv.notify_all();
