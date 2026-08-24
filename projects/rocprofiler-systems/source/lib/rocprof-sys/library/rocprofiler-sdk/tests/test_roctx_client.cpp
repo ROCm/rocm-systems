@@ -108,7 +108,7 @@ TEST_F(roctx_client_test, constructor_creates_controller)
                                       .use_timemory           = true,
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "TestRegion" };
-    auto                      session = std::make_shared<rocprofsys::control::session>();
+    const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
 }
 
@@ -121,7 +121,7 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
                                       .use_timemory           = true,
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
-    auto                      session = std::make_shared<rocprofsys::control::session>();
+    const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().filter_active());
 }
@@ -135,7 +135,7 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
                                       .use_timemory           = true,
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
-    auto                      session = std::make_shared<rocprofsys::control::session>();
+    const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().filter_active());
 }
@@ -149,7 +149,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
                                       .use_timemory           = true,
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
-    auto                      session = std::make_shared<rocprofsys::control::session>();
+    const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().should_write_markers());
 }
@@ -163,7 +163,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
                                       .use_timemory           = true,
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
-    auto                      session = std::make_shared<rocprofsys::control::session>();
+    const auto                session = std::make_shared<rocprofsys::control::session>();
     const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().should_write_markers());
 }
@@ -204,11 +204,14 @@ protected:
         auto client = std::make_unique<roctx_client_t>(m_session, config);
 
         const auto& ctrl = client->get_session();
-        ctrl->subscribe(
-            { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
+        ctrl->subscribe({ .on_pause  = [this]() { stop_count++; },
+                          .on_resume = [this]() { start_count++; },
+                          .name      = "test_counters" });
 
         return client;
     }
+
+    static constexpr std::uint64_t k_unknown_range_id = 999;
 };
 
 // ---------------------------------------------------------------------------
@@ -550,7 +553,7 @@ TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 {
     auto client = make_client("Region 1");
 
-    client->get_trigger().on_range_stop(999);
+    client->get_trigger().on_range_stop(k_unknown_range_id);
     EXPECT_EQ(stop_count, 0);
     EXPECT_FALSE(client->get_trigger().should_write_markers());
 }
@@ -755,8 +758,9 @@ protected:
         auto client = std::make_unique<roctx_client_t>(m_session, config);
 
         const auto& ctrl = client->get_session();
-        ctrl->subscribe(
-            { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
+        ctrl->subscribe({ .on_pause  = [this]() { stop_count++; },
+                          .on_resume = [this]() { start_count++; },
+                          .name      = "test_counters" });
 
         return client;
     }

@@ -56,5 +56,7 @@ private:
     [[nodiscard]] action compute_action() const noexcept;
     [[nodiscard]] bool   compute_should_write() const noexcept;
     void                 refresh_state();
+    [[nodiscard]] bool   remove_active_range(std::uint64_t range_id);
+    void                 warn_if_paused_region_ended();
 };
 }  // namespace rocprofsys::control::triggers
