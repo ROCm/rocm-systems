@@ -82,7 +82,7 @@ class TestNativeToolFinder:
     def test_when_a_named_artifact_is_requested__finds_it_in_the_install_dir(
         self, tmp_path: Path
     ) -> None:
-        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        artifact_name = "torch_trace_collector-2.9.0.so"
         rocm_path = tmp_path / "opt" / "rocm"
         root_path = rocm_path / "libexec" / "rocprofiler-compute"
         root_path.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,7 @@ class TestNativeToolFinder:
     def test_when_a_named_artifact_is_built__is_found_under_the_build_path(
         self, tmp_path: Path
     ) -> None:
-        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        artifact_name = "torch_trace_collector-2.9.0.so"
         root_path = tmp_path / "src"
         build_path = tmp_path / "cache" / "_build"
         artifact_path = (
@@ -115,7 +115,7 @@ class TestNativeToolFinder:
     def test_when_reuse_is_requested__an_existing_artifact_skips_cmake(
         self, tmp_path: Path
     ) -> None:
-        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        artifact_name = "torch_trace_collector-2.9.0.so"
         root_path = tmp_path / "src"
         build_path = tmp_path / "cache" / "_build"
         artifact_path = (
@@ -138,7 +138,7 @@ class TestNativeToolFinder:
     def test_when_reuse_is_requested__a_missing_artifact_still_builds(
         self, tmp_path: Path
     ) -> None:
-        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        artifact_name = "torch_trace_collector-2.9.0.so"
         root_path = tmp_path / "src"
         build_path = tmp_path / "cache" / "_build"
         artifact_path = (

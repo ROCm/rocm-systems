@@ -5,11 +5,9 @@
 
 The loader first looks for a prebuilt ``.so`` under the install prefix, then
 builds the extension from the source tree, using the user cache as the build
-directory when the source tree is read-only. Artifacts are named by the Python
-and torch versions in use and a fingerprint of the C++ inputs, so an artifact
-already present in the build directory is imported without running cmake
-again. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to discard the build
-directory and build again.
+directory when the source tree is read-only. Artifacts are named for the
+installed PyTorch version. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to
+discard the build directory and build again.
 """
 
 import importlib.util
@@ -21,13 +19,34 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from utils.inject_roctx._backends import torch_trace_fingerprint
-
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
 # in installed layouts; both host the torch_trace_collector sources at lib/.
 _NATIVE_TOOL_ROOT = _THIS_DIR.parents[2]
 _NATIVE_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib"
+_COLLECTOR_SOURCE_DIR = _NATIVE_SOURCE_DIR / "torch_trace_collector"
+_COLLECTOR_CMAKELISTS = _COLLECTOR_SOURCE_DIR / "CMakeLists.txt"
+_SHARED_UTILS_HEADERS = (
+    _NATIVE_SOURCE_DIR / "utils" / "synchronized" / "synchronized.hpp",
+    _NATIVE_SOURCE_DIR / "utils" / "gsl_assert" / "gsl_assert.h",
+)
+_COLLECTOR_SOURCE_NAMES = (
+    "torch_trace_collector.cpp",
+    "torch_trace_collector_module.cpp",
+)
+_COLLECTOR_HEADER_NAMES = (
+    "leaf_context.h",
+    "marker_stack.h",
+    "process_state.h",
+    "record_function_callback.h",
+    "record_function_installation.h",
+    "scope_guard.h",
+    "snapshot_store.h",
+    "stack_entry.h",
+    "stats.h",
+    "user_scope.h",
+    "wire_format.h",
+)
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
@@ -85,9 +104,23 @@ def format_load_diagnostic_trail(
     return "\n".join(rendered)
 
 
-def compute_tag() -> Optional[str]:
-    """Return the artifact tag for the running interpreter, or ``None``."""
-    return torch_trace_fingerprint.artifact_tag()
+def required_input_paths() -> Tuple[Path, ...]:
+    """Paths required to build the extension."""
+    return (
+        *(_COLLECTOR_SOURCE_DIR / name for name in _COLLECTOR_SOURCE_NAMES),
+        *(_COLLECTOR_SOURCE_DIR / name for name in _COLLECTOR_HEADER_NAMES),
+        _COLLECTOR_CMAKELISTS,
+        *_SHARED_UTILS_HEADERS,
+    )
+
+
+def torch_version() -> Optional[str]:
+    """Return ``torch.__version__`` with any local build suffix removed, or ``None``."""
+    try:
+        import torch
+    except Exception:
+        return None
+    return torch.__version__.split("+", 1)[0]
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
@@ -100,22 +133,22 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
     return module
 
 
-def _install_tree_prebuilt_candidates(tag: str) -> List[Path]:
+def _install_tree_prebuilt_candidates(pytorch_version: str) -> List[Path]:
     """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
     # parents[4] reaches the install prefix from this file's location in
     # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
     # <prefix>/libexec/<project>/utils/inject_roctx/_backends when installed.
     install_root = _THIS_DIR.parents[4]
-    so_name = f"torch_trace_collector-{tag}.so"
+    so_name = f"torch_trace_collector-{pytorch_version}.so"
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
     return sorted(install_root.glob(pattern))
 
 
 def _try_prebuilt(
-    tag: str,
+    pytorch_version: str,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
-    for so_path in _install_tree_prebuilt_candidates(tag):
+    for so_path in _install_tree_prebuilt_candidates(pytorch_version):
         if not so_path.exists():
             continue
         try:
@@ -147,7 +180,7 @@ def _user_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path
 
 
 _PREBUILT_HINT = (
-    "ship a prebuilt torch_trace_collector-<tag>.so under "
+    "ship a prebuilt torch_trace_collector-<torch-version>.so under "
     "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/"
 )
 
@@ -241,15 +274,13 @@ def _unlink_runtime_build_artifact(so_path: Path, build_path: Path) -> None:
 
 
 def _try_runtime_build(
-    tag: str,
+    pytorch_version: str,
     *,
     force_rebuild: bool = False,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
     """Build the extension from the source tree and import the result."""
-    missing_inputs = [
-        p.name for p in torch_trace_fingerprint.required_input_paths() if not p.exists()
-    ]
+    missing_inputs = [p.name for p in required_input_paths() if not p.exists()]
     if missing_inputs:
         _safe_log(
             "log",
@@ -286,13 +317,11 @@ def _try_runtime_build(
     if force_rebuild:
         shutil.rmtree(build_path, ignore_errors=True)
 
-    artifact_name = f"torch_trace_collector-{tag}.so"
-    build_target = f"torch_trace_collector-{tag}"
-    # The tag is passed whole so cmake names its target exactly what the loader
-    # looks for, rather than re-deriving the same string from its own inputs.
+    artifact_name = f"torch_trace_collector-{pytorch_version}.so"
+    build_target = f"torch_trace_collector-{pytorch_version}"
     configure_options = (
         f"-DTORCH_TRACE_PYTHON={sys.executable}",
-        f"-DTORCH_TRACE_ARTIFACT_TAG={tag}",
+        f"-DTORCH_TRACE_TORCH_VERSION={pytorch_version}",
         "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
         "-DCMAKE_BUILD_TYPE=Release",
     )
@@ -343,8 +372,8 @@ def load(force_python_fallback: bool = False) -> LoadResult:
         )
         return LoadResult(None, None, diagnostics)
 
-    tag = compute_tag()
-    if tag is None:
+    pytorch_version = torch_version()
+    if pytorch_version is None:
         _safe_log(
             "warning", "torch not importable; using Python-only injector", diagnostics
         )
@@ -354,21 +383,21 @@ def load(force_python_fallback: bool = False) -> LoadResult:
         _safe_log(
             "warning",
             f"{_REBUILD_ENV_VAR}=1: discarding the build directory and "
-            f"building again for tag {tag}",
+            f"building again for PyTorch {pytorch_version}",
             diagnostics,
         )
         mod = _try_runtime_build(
-            tag,
+            pytorch_version,
             force_rebuild=True,
             diagnostics=diagnostics,
         )
         tier = TIER_RUNTIME_BUILD if mod is not None else None
         return LoadResult(mod, tier, diagnostics)
 
-    mod = _try_prebuilt(tag, diagnostics=diagnostics)
+    mod = _try_prebuilt(pytorch_version, diagnostics=diagnostics)
     if mod is not None:
         return LoadResult(mod, TIER_PREBUILT, diagnostics)
-    mod = _try_runtime_build(tag, diagnostics=diagnostics)
+    mod = _try_runtime_build(pytorch_version, diagnostics=diagnostics)
     if mod is not None:
         return LoadResult(mod, TIER_RUNTIME_BUILD, diagnostics)
 

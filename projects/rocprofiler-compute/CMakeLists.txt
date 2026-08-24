@@ -878,16 +878,8 @@ add_test(
 add_test(
     NAME test_torch_trace_kernel_names
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_kernel_names.xml ${COV_OPTION}
-        tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_torch_trace_fingerprint
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_fingerprint.xml ${COV_OPTION}
-        tests/unit/utils/inject_roctx/_backends/test_torch_trace_fingerprint.py
-        ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_kernel_names.xml
+        ${COV_OPTION} tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1080,7 +1072,6 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_torch_cpp_loader
         test_torch_trace_kernel_names
-        test_torch_trace_fingerprint
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
@@ -1284,13 +1275,14 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so and torch_trace_collector-<tag>.so
+# install librocprofiler-compute-tool.so and
+# torch_trace_collector-<torch-version>.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
 # BUILD_TORCH_TRACE_COLLECTOR=AUTO skips the extension when Torch is absent.
-# The loader globs lib*/rocprofiler-compute/ for the tagged artifact.
+# The loader searches lib*/rocprofiler-compute/ for the versioned artifact.
 if(TARGET ${TORCH_TRACE_COLLECTOR_TARGET})
     install(
         TARGETS ${TORCH_TRACE_COLLECTOR_TARGET}
