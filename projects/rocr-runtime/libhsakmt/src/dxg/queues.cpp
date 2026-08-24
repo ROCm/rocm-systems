@@ -141,6 +141,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
     QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
     QueueResource->Queue_write_ptr_aql = queue_->GetRingWptr();
     QueueResource->Queue_read_ptr_aql = queue_->GetRingRptr();
+    // Native SDMA user queue exposes the HwQueue progress-fence VA so ROCr can
+    // emit a matching FENCE packet; 0 for the SWS-thread path.
+    QueueResource->SdmaProgressFenceVA = queue_->hwqueue_progress_fence_va_;
+    // Tell the producer how many epilogue bytes RingDoorbell will append per submit
+    // so it reserves matching headroom. Only the native HwQueue path appends them.
+    QueueResource->SdmaHwQueueEpilogueBytes =
+        queue_->IsNativeSdma() ? wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes : 0;
   } break;
   default:
     assert(false);
@@ -260,6 +267,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
+  fprintf(stderr, "[sdma] hsaKmtQueueRingDoorbell QueueId=%p value=0x%llx\n",
+          (void*)QueueId, (unsigned long long)value);
+  fflush(stderr);
   queue_->RingDoorbell(value);
   return HSAKMT_STATUS_SUCCESS;
 }

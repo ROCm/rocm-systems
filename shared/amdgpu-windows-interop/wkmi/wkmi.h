@@ -44,6 +44,13 @@ enum SchedLevel {
   kHigh = 2,    ///< High priority scheduling
 };
 
+/// @brief Kind of hardware queue to create. AQL and SDMA are mutually exclusive.
+enum HwQueueKind {
+  kHwQueuePm4 = 0,  ///< PM4 / compute queue (AQL->PM4 translation); default
+  kHwQueueAql,      ///< Native AQL queue
+  kHwQueueSdma,     ///< Native HSA SDMA user queue
+};
+
 /// @brief Hardware scheduling information
 /// Contains hardware scheduling (HWS) capabilities and engine support information
 struct HwsInfo {
@@ -54,7 +61,8 @@ struct HwsInfo {
       uint32_t dmaHwsEnabled     : 1;  ///< DMA engine HWS enabled
       uint32_t dma1HwsEnabled    : 1;  ///< DMA1 engine HWS enabled
       uint32_t aql_queue         : 1;  ///< Kernel mode driver supports native AQL queue
-      uint32_t reserved : 27;          ///< Reserved for future use
+      uint32_t sdma_queue        : 1;  ///< Kernel mode driver supports native HSA SDMA user queue
+      uint32_t reserved : 26;          ///< Reserved for future use
     } hwsMask;                         ///< Hardware scheduling mask bitfield
     uint32_t osHwsEnableFlags;         ///< OS HWS enable flags (raw value)
   };
@@ -129,7 +137,8 @@ struct DeviceInfo {
   uint32_t num_cp_queues;                     ///< Number of command processor queues
   HwsInfo hwsInfo;                            ///< Hardware scheduling information
   std::vector<int> sdma_schedid;              ///< SDMA scheduler IDs
-  uint32_t compute_schedid;                   ///< Compute scheduler ID
+  uint32_t compute_schedid;                   ///< Compute scheduler ID (AQL-preferred: COMPUTE1 if AQL-on-COMPUTE1 is supported, else COMPUTE0)
+  uint32_t pm4_compute_schedid;              ///< Compute scheduler ID for PM4 queues (always COMPUTE0 when present, else same as compute_schedid)
   
   // Advanced features
   bool state_shadowing_by_cpfw;               ///< True if CP firmware supports state shadowing
@@ -319,13 +328,13 @@ int GetHwQueuePrivDataSize();
 void FillinHwQueuePrivData(void* priv_data,              ///< Pointer to HW queue private data structure
                            bool FwManagedGfxState,       ///< True to enable firmware-managed graphics state
                            SchedLevel level = kNormal,   ///< Queue scheduling priority level (default: kNormal)
-                           bool aql = false,             ///< True if creating an AQL queue (default: false)
-                           uint64_t queue_va = 0,        ///< Virtual address of AQL queue memory (for AQL queues)
-                           uint64_t queue_size = 0,      ///< Size of AQL queue memory in bytes (for AQL queues)
+                           HwQueueKind kind = kHwQueuePm4, ///< Queue kind: PM4 (default), AQL, or SDMA
+                           uint64_t queue_va = 0,        ///< Virtual address of queue memory (AQL queue memory, or the SDMA ring)
+                           uint64_t queue_size = 0,      ///< Size of queue memory in bytes (AQL queue memory, or the SDMA ring)
                            uint64_t wptr = 0,            ///< Initial write pointer value (for AQL queues)
                            uint64_t rptr = 0,            ///< Initial read pointer value (for AQL queues)
                            D3DKMT_HANDLE aql_queue_desc = 0, ///< Handle to AQL queue descriptor (for AQL queues)
-                           uint32_t** doorbell_ptr = nullptr, ///< [out] Pointer to receive doorbell offset address (for AQL queues)
+                           uint32_t** doorbell_ptr = nullptr, ///< [out] Pointer to receive doorbell offset address (for AQL/SDMA queues)
                            D3DKMT_HANDLE cwsr_mem_handle = 0); ///< Allocation handle of CWSR region (UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle)
 
 // ============================================================================
@@ -345,7 +354,8 @@ NTSTATUS ParseAdapterInfo(D3DKMT_HANDLE adapter,      ///< Handle to the D3DKMT 
 void FillinContextPrivData(void* priv_data,                ///< Pointer to context private data structure
                            bool FwManagedGfxState,         ///< True to enable firmware-managed graphics state
                            uint32_t schedId = 0,           ///< Scheduler ID for the context (default: 0)
-                           uint64_t debuggerData = 0);
+                           uint64_t debuggerData = 0,      ///< Debugger AQL packet list data (default: 0)
+                           bool rocr_client = false);      ///< True to tag the context with the ROCr client id (native SDMA queue support)
 
 // ============================================================================
 // AQL Queue Submit Interfaces (Windows only)
@@ -358,6 +368,14 @@ int GetAqlSubmitPrivDataSize();
 /// @brief Configure AQL packet submission with doorbell value
 void FillinAqlSubmitPrivData(void* priv_data,              ///< Pointer to AQL submission private data structure
                              uint64_t doorbell_value);     ///< Write pointer (doorbell) value for AQL submission
+
+/// @brief Get the size of native HSA SDMA submission private data structure
+/// @return Size in bytes of the SDMA submission private data structure
+int GetSdmaSubmitPrivDataSize();
+
+/// @brief Configure native HSA SDMA queue submission with the write pointer byte offset
+void FillinSdmaSubmitPrivData(void* priv_data,             ///< Pointer to SDMA submission private data structure
+                              uint64_t wptr_in_bytes);     ///< SDMA write pointer as a byte offset (WptrInBytes)
 
 // ============================================================================
 // Queue CU Mask Interface (Windows only)
