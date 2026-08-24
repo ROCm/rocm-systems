@@ -59,6 +59,8 @@ ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXm
 
 /* Auto-detect functions */
 ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct ncclXmlNode** gpuNode);
+/* Fill missing xgmi/nvlink tclass from sysfs (or NVSwitch fallback). Skips nodes that already have tclass. */
+ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode);
 ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* tagName, const char* pciPath, const char* netName,
                              struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent = NULL);
 
@@ -388,6 +390,25 @@ static ncclResult_t xmlAddNode(struct ncclXml* xml, struct ncclXmlNode* parent, 
   s->name[MAX_STR_LEN] = '\0';
   return ncclSuccess;
 }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Direct XGMI peers come from the accelerator enumeration, so stamp their class here
+// rather than inferring it from the target's sysfs PCI class (a GPU at a non-zero PCI
+// function may alias an unrelated device at that BDF).
+static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXmlNode* gpuNode, const char* target,
+                                              int count, struct ncclXmlNode** nvlNodeOut) {
+  struct ncclXmlNode* nvlNode = NULL;
+  NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", target));
+  if (nvlNode == NULL) {
+    NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
+    NCCLCHECK(xmlSetAttr(nvlNode, "target", target));
+    NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+    NCCLCHECK(xmlSetAttr(nvlNode, "tclass", PCI_ACCELERATOR_CLASS));
+  }
+  if (nvlNodeOut) *nvlNodeOut = nvlNode;
+  return ncclSuccess;
+}
+#endif
 
 static ncclResult_t xmlRemoveNode(struct ncclXmlNode* node) {
   node->type = NODE_TYPE_NONE;

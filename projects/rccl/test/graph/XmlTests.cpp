@@ -1751,3 +1751,58 @@ TEST_F(XmlTest, TestXmlWarnings_EdgeCaseSuccess) {
 
   free(xml);
 }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// The GetXmlFromGpu SMI paths stamp tclass via ncclTopoXmlAddXgmiPeerGpu; covering
+// that helper (and the fill skip) so dropping the stamp would fail these tests.
+TEST_F(XmlTest, AddXgmiPeerGpu_StampsAcceleratorTclass) {
+  struct ncclXmlNode *gpuNode = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, rootNode, "gpu", &gpuNode), ncclSuccess);
+
+  struct ncclXmlNode *xgmi = nullptr;
+  ASSERT_EQ(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, "0001:01:00.1", 1, &xgmi),
+            ncclSuccess);
+  ASSERT_NE(xgmi, nullptr);
+
+  const char *tclass = nullptr;
+  ASSERT_EQ(xmlGetAttr(xgmi, "tclass", &tclass), ncclSuccess);
+  EXPECT_STREQ(tclass, PCI_ACCELERATOR_CLASS);
+
+  int count = 0;
+  ASSERT_EQ(xmlGetAttrInt(xgmi, "count", &count), ncclSuccess);
+  EXPECT_EQ(count, 1);
+}
+
+TEST_F(XmlTest, FillLinkTclass_SkipsWhenTclassAlreadySet) {
+  struct ncclXmlNode *gpuNode = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, rootNode, "gpu", &gpuNode), ncclSuccess);
+
+  // Hand-write tclass so this tests the fill short-circuit, not the stamp helper.
+  struct ncclXmlNode *xgmi = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, gpuNode, "xgmi", &xgmi), ncclSuccess);
+  ASSERT_EQ(xmlSetAttr(xgmi, "target", "0001:01:00.1"), ncclSuccess);
+  ASSERT_EQ(xmlSetAttr(xgmi, "tclass", PCI_ACCELERATOR_CLASS), ncclSuccess);
+
+  ASSERT_EQ(ncclTopoXmlFillLinkTclass(gpuNode), ncclSuccess);
+
+  const char *tclass = nullptr;
+  ASSERT_EQ(xmlGetAttr(xgmi, "tclass", &tclass), ncclSuccess);
+  EXPECT_STREQ(tclass, PCI_ACCELERATOR_CLASS);
+}
+
+TEST_F(XmlTest, FillLinkTclass_MissingTclass_DoesNotLeaveUnset) {
+  struct ncclXmlNode *gpuNode = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, rootNode, "gpu", &gpuNode), ncclSuccess);
+
+  struct ncclXmlNode *xgmi = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, gpuNode, "xgmi", &xgmi), ncclSuccess);
+  ASSERT_EQ(xmlSetAttr(xgmi, "target", "fffffff:ffff:ff"), ncclSuccess);
+
+  ASSERT_EQ(ncclTopoXmlFillLinkTclass(gpuNode), ncclSuccess);
+
+  const char *tclass = nullptr;
+  ASSERT_EQ(xmlGetAttr(xgmi, "tclass", &tclass), ncclSuccess);
+  ASSERT_NE(tclass, nullptr);
+  EXPECT_STREQ(tclass, PCI_NVSWITCH_CLASS);
+}
+#endif

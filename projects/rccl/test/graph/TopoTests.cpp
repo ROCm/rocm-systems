@@ -155,8 +155,9 @@ protected:
     EXPECT_EQ(xmlSetAttrInt(gpu, "rank", rank), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(gpu, "dev", dev), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(gpu, "gdr", 1), ncclSuccess);
-    if (mloPart != NCCL_TOPO_UNDEF)
+    if (mloPart != NCCL_TOPO_UNDEF) {
       EXPECT_EQ(xmlSetAttrInt(gpu, "mlopart", mloPart), ncclSuccess);
+    }
     return gpu;
   }
 
@@ -223,6 +224,7 @@ TEST_F(TopoTest, GetDevNodes_MatchesMloPartOnFunctionOne) {
   const int64_t id0 = NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(busFn1, 0));
   const int64_t id1 = NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(busFn1, 1));
   ASSERT_NE(id0, id1);
+  EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(id1) & 0xf, 1);
 
   struct ncclTopoNode* d0 = nullptr;
   struct ncclTopoNode* d1 = nullptr;

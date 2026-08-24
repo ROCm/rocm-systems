@@ -366,7 +366,7 @@ ncclResult_t ncclTopoXmlLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlN
 #else
   struct xmlHandler handlers[] = {{"nvlink", ncclTopoXmlLoadNvlink}, {"c2c", ncclTopoXmlLoadC2c}};
 #endif
-  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 2));
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, sizeof(handlers) / sizeof(handlers[0])));
   return ncclSuccess;
 }
 
@@ -998,10 +998,19 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             lowerId[c] = tolower(busIdStr[c]);
             if (busIdStr[c] == 0) break;
           }
+          // gfx1250 takes this branch only when SMI reports fabricSupported on both
+          // devices in the same clique; otherwise it uses 1-hop XGMI below. On this
+          // DPX+NPS2 package ualink is link_type=invalid / accel_state=unconfigured,
+          // so canUseUALoE is false and discovery uses 1-hop XGMI. Either way the
+          // peer is an enumerated GPU, so stamp accelerator tclass rather than
+          // PCI_NVSWITCH_CLASS (switch fallback is the missing-tclass sysfs path).
+          int created = 0;
           NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-          if (nvlNode == NULL) {
-            NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-            NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+          if (nvlNode == NULL) created = 1;
+          // count=1: amd-smi does not yet report UALoE link count.
+          // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
+          NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode));
+          if (created) {
             uint64_t uuidHigh = 0;
             uint64_t uuidLow = 0;
             memcpy(&uuidHigh, fabInfo.clusterUuid, sizeof(uuidHigh));
@@ -1015,11 +1024,6 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             NCCLCHECK(xmlSetAttrInt(nvlNode, "ppod_size", fabInfo.ppodSize));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_id", fabInfo.cliqueId));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_size", fabInfo.vpodSize));
-            // We don't have a way to get the number of links between two devices when using UALoE, so we will set it to 1 to avoid breaking topology construction.
-            // This is not ideal, but it will allow us to use UALoE without having to wait for a new version of amd-smi that returns the number of links.
-            // We can update this later when we have that information available.
-            // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE and update this code accordingly.
-            NCCLCHECK(xmlSetAttrInt(nvlNode, "count", 1));
           }
         } else {
           int hops, count;
@@ -1032,17 +1036,12 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
                 lowerId[c] = tolower(busIdStr[c]);
                 if (busIdStr[c] == 0) break;
               }
+              int created = 0;
               NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-              if (nvlNode == NULL) {
-                NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-                NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
-                NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+              if (nvlNode == NULL) created = 1;
+              NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode));
+              if (created) {
                 NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
-                // The target is a GPU by construction (it comes from the accelerator enumeration
-                // above), so record its class here rather than letting it be inferred from the
-                // target's sysfs PCI class: a GPU reported at a non-zero PCI function may alias an
-                // unrelated PCI device at that BDF, which would misclassify the XGMI peer.
-                NCCLCHECK(xmlSetAttr(nvlNode, "tclass", PCI_ACCELERATOR_CLASS));
               }
             }
           }
@@ -1064,15 +1063,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
               lowerId[c] = tolower(busIdStr[c]);
               if (busIdStr[c] == 0) break;
             }
-            NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-            if (nvlNode == NULL) {
-              NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-              NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
-              NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
-              // See the amd_smi path above: the target's class is known from the enumeration and
-              // must not be inferred from the sysfs PCI class of its (possibly aliased) BDF.
-              NCCLCHECK(xmlSetAttr(nvlNode, "tclass", PCI_ACCELERATOR_CLASS));
-            }
+            NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode));
           }
         }
       }
@@ -1181,7 +1172,12 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
     }
   }
 #endif
-  // Fill target classes
+  NCCLCHECK(ncclTopoXmlFillLinkTclass(gpuNode));
+  *gpuNodeRet = gpuNode;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
   for (int s = 0; s < gpuNode->nSubs; s++) {
     struct ncclXmlNode* sub = gpuNode->subs[s];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -1212,7 +1208,6 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
       }
     }
   }
-  *gpuNodeRet = gpuNode;
   return ncclSuccess;
 }
 

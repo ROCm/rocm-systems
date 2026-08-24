@@ -127,6 +127,9 @@ struct ncclTopoLinkList {
   (((((int64_t)(mloPart) << 1) | 0x1) << NCCL_TOPO_MLOPART_SHIFT) & NCCL_TOPO_MLOPART_MASK)
 #define NCCL_TOPO_MLOPART_BUSID(busId, mloPart) \
   ((mloPart) != NCCL_TOPO_UNDEF ? ((busId) | NCCL_TOPO_MLOPART(mloPart)) : (busId))
+static_assert(NCCL_TOPO_MLOPART_SHIFT >= 36, "MLOPart bits must sit above the 36-bit PCI busId");
+static_assert(NCCL_TOPO_MLOPART_SHIFT + 2 <= NCCL_TOPO_GPU_LOCAL_RANK_SHIFT,
+              "MLOPart bits overlap GPU local rank");
 
 struct ncclTopoNode {
   int type;
