@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -13,14 +14,35 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-uint32_t clamp_xcd_partition_count(std::span<SoC *> socs, uint32_t requested_partitions) {
+namespace {
+
+uint32_t total_xcds(std::span<SoC *> socs) {
   uint32_t num_xcds = 0;
   for (SoC *soc : socs) {
     if (soc)
       num_xcds += soc->num_xcds();
   }
+  return num_xcds;
+}
 
-  return std::clamp(requested_partitions, 1u, std::max(num_xcds, 1u));
+} // namespace
+
+uint32_t default_xcd_partition_count(std::span<SoC *> socs) {
+  // hardware_concurrency() returns 0 when the host thread count is
+  // indeterminate; fall back to a single partition rather than guessing.
+  const uint32_t host_threads = std::thread::hardware_concurrency();
+  if (host_threads == 0)
+    return 1;
+  return std::max(std::min(host_threads, total_xcds(socs)), 1u);
+}
+
+uint32_t default_xcd_partition_count(SoC *soc) {
+  std::array<SoC *, 1> socs = {soc};
+  return default_xcd_partition_count(std::span<SoC *>(socs));
+}
+
+uint32_t clamp_xcd_partition_count(std::span<SoC *> socs, uint32_t requested_partitions) {
+  return std::clamp(requested_partitions, 1u, std::max(total_xcds(socs), 1u));
 }
 
 uint32_t clamp_xcd_partition_count(SoC *soc, uint32_t requested_partitions) {

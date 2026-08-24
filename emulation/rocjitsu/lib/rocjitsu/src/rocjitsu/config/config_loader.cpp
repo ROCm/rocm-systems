@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 
@@ -683,6 +684,22 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i)
       result.extra_gpu_builds.push_back(build_topology(topo_def, result.exec_mode, arch));
+  }
+
+  // An unset (or zero) num_threads means "use the default": one engine
+  // partition per XCD, capped at the host's hardware thread count. Resolve it
+  // here, once the SoC trees exist, so every LoadedConfig consumer sees a
+  // concrete worker count instead of re-deriving one.
+  if (result.engine_config.num_threads == 0) {
+    std::vector<SoC *> socs;
+    socs.reserve(result.extra_gpu_builds.size() + 1);
+    if (auto *soc = result.soc())
+      socs.push_back(soc);
+    for (auto &eb : result.extra_gpu_builds) {
+      if (auto *extra_soc = dynamic_cast<SoC *>(eb.root.get()))
+        socs.push_back(extra_soc);
+    }
+    result.engine_config.num_threads = amdgpu::default_xcd_partition_count(socs);
   }
 
   return result;

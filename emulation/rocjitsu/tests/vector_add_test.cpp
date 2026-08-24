@@ -69,10 +69,13 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  // Build the simulation engine with CDNA4 topology.
+  // Build the simulation engine with CDNA4 topology. This is the
+  // single-threaded golden reference for the multi-threaded test below, so pin
+  // one worker rather than taking the config's one-partition-per-XCD default.
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());

@@ -102,6 +102,10 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
     return 0;
   auto num_xcds = soc->num_xcds();
 
+  // These tests drive the engine directly and inspect single-partition state, so
+  // pin one worker instead of taking the config's default of one partition per
+  // XCD.
+  loaded.engine_config.num_threads = 1;
   loaded.engine_config.max_ticks = 0;
   loaded.engine_config.await_primaries = true;
   simdojo::SimulationEngine engine(loaded.engine_config);
@@ -143,6 +147,10 @@ protected:
     soc_ = soc;
     auto num_xcds = soc->num_xcds();
 
+    // These tests drive the engine directly and inspect single-partition state,
+    // so pin one worker instead of taking the config's default of one partition
+    // per XCD.
+    loaded_.engine_config.num_threads = 1;
     loaded_.engine_config.max_ticks = 0;
     loaded_.engine_config.await_primaries = true;
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);

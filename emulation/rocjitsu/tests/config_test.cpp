@@ -47,6 +47,23 @@ const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
+// The shipped configs omit num_threads so they pick up the default of one
+// engine partition per XCD. Tests that need a single partition read the config
+// and insert an explicit override after the opening brace.
+std::string single_threaded_config_json(const std::string &path) {
+  std::ifstream input(path);
+  if (!input.is_open())
+    throw std::runtime_error("Failed to open config: " + path);
+
+  std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  const auto brace_pos = json.find('{');
+  if (brace_pos == std::string::npos)
+    throw std::runtime_error("Config is not a JSON object: " + path);
+
+  json.insert(brace_pos + 1, "\n  \"num_threads\": 1,");
+  return json;
+}
+
 test::ScopedTempFile write_temp_config(std::string_view json) {
   test::ScopedTempFile file("rocjitsu-config-");
   file.write(json);
@@ -1439,9 +1456,12 @@ TEST(CApiTest, CreateAndDestroyFromString) {
 }
 
 TEST(CApiTest, CheckpointRoundTrip) {
+  // rj_vm_step() needs a single engine partition, so override the config's
+  // one-partition-per-XCD default. The restored VM inherits the saved count.
+  const std::string json = single_threaded_config_json(CONFIG_DIR_PATH + "/gfx942_cdna3.json");
+
   rj_vm_t *raw_source = nullptr;
-  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
-                         &raw_source),
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
             ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(raw_source, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);

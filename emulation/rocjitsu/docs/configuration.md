@@ -38,7 +38,6 @@ The remaining sections describe simulator topology configs.
 ```json
 {
   "max_ticks": 100000,
-  "num_threads": 1,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": {
@@ -64,14 +63,14 @@ The remaining sections describe simulator topology configs.
 }
 ```
 
-The example above is intentionally minimal and single-threaded.
+The example above is intentionally minimal.
 
 ### Top-level fields
 
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
+| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -88,11 +87,32 @@ The value is clamped to the number of XCDs visible to the VM. With
 round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
 partition. A single XCD is never split across partitions.
 
-For multi-GPU VMs, clamping uses the aggregate XCD count across all SoCs.
-Partition assignment follows one global XCD ordering across the SoCs and is
-deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
-partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
-partition.
+**Default.** Omitting `num_threads` (or setting it to `0`) selects
+`min(host hardware threads, XCD count)` — normally one partition per XCD, since
+any host that runs the simulator has more threads than the GPU has XCDs. The
+host cap keeps the simulation from asking for more workers than it can run
+concurrently; the conservative PDES barrier makes oversubscription markedly
+worse than a smaller partition count. The shipped configs omit the field and
+take this default. Set it explicitly to pin a count.
+
+Two things need `num_threads: 1` and have to say so in the config:
+`rj_vm_step()` and `SimulationEngine::step()` both require a single partition,
+and any code that builds an engine from a `LoadedConfig` without calling
+`partition_topology_by_xcds()` will fail `create()` with "multi-threaded
+SimulationEngine requires an explicit topology partition policy".
+
+For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
+across all SoCs. Partition assignment follows one global XCD ordering across
+the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
+permit up to 16 partitions, while `num_threads: 4` assigns XCDs from both GPUs
+to each partition.
+
+`gfx950_mi355x_kmd_2gpu.json` is the one shipped config that still pins
+`num_threads: 1`. Any multi-partition setting on that config hangs RCCL
+collectives (`AllReduce`, `Broadcast`, `AllGather`, `ReduceScatter`) with the
+engine workers spinning and the simulation making no progress; point-to-point
+`SendRecv` is unaffected. The hang predates the default and reproduces on the
+2-GPU config with as few as two partitions. Remove the pin once it is fixed.
 
 ### Topology
 

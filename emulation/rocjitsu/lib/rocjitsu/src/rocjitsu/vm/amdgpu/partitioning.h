@@ -17,6 +17,20 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// @brief Default partition count for a set of SoCs.
+///
+/// @details min(host hardware threads, total XCDs), floored at 1. This is what
+/// a config resolves to when it leaves `num_threads` unset (or sets it to 0):
+/// one engine partition per XCD, capped so the simulation never asks the host
+/// for more worker threads than it can actually run concurrently. The
+/// conservative PDES barrier makes oversubscription markedly worse than a
+/// smaller partition count.
+/// @returns The default partition count, always at least 1.
+[[nodiscard]] uint32_t default_xcd_partition_count(std::span<SoC *> socs);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t default_xcd_partition_count(SoC *soc);
+
 /// @brief Clamp a requested partition count to the visible XCD count.
 ///
 /// @details Counts XCDs across all non-null SoCs and clamps
