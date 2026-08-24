@@ -158,9 +158,14 @@ endif()
 if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
-  # LibVA
+  # LibVA - headers always needed for VA-API type definitions.
+  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
+  # RTLD_LOCAL | RTLD_DEEPBIND (see rocjpeg_vaapi_loader.cpp) to prevent symbol
+  # collision with any system libva.so.2 in the same process; no direct
+  # link-time dependency is needed in that case.
+  # On non-TheRock builds, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT USING_THE_ROCK)
+  if(NOT (USING_THE_ROCK AND UNIX))
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
   endif()
@@ -206,8 +211,12 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
 
   if(USING_THE_ROCK)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
-    target_link_libraries(${PROJECT_NAME} dl)
+    if(UNIX)
+      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
+      # dlopen is Linux-only.
+      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
+      target_link_libraries(${PROJECT_NAME} dl)
+    endif()
   endif()
 
   # rocprofiler
