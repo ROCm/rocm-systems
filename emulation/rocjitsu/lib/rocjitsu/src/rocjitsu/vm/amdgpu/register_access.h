@@ -23,6 +23,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -43,6 +44,11 @@
 
 namespace rocjitsu::amdgpu {
 
+struct OperandPair32 {
+  uint32_t lo;
+  uint32_t hi;
+};
+
 /// @brief Facade for instruction-visible register reads and writes.
 ///
 /// @details This class centralizes the observation contract for
@@ -61,6 +67,8 @@ namespace rocjitsu::amdgpu {
 /// API selection guide:
 /// - Use read_scalar(), read_lane(), and the 64-bit variants for
 ///   value-semantic logical operand reads.
+/// - Use read_lane_pair32() when a packed operation treats a 64-bit register
+///   source as two 32-bit words but splats single-word sources.
 /// - Use write_scalar(), write_lane(), and the 64-bit variants for
 ///   value-semantic logical operand writes.
 /// - Use read_chunk() / write_chunk() for logical operand lane chunks.
@@ -83,7 +91,8 @@ namespace rocjitsu::amdgpu {
 ///
 /// Operand read views may be VGPR-backed or scalar-backed. Scalar-backed views
 /// represent SGPR, inline literal, immediate, and special-register operands as
-/// lane-broadcast values; they do not imply a missing VGPR read.
+/// lane-broadcast values; pair views preserve distinct words for register
+/// pairs. They do not imply a missing VGPR read.
 ///
 /// The view objects are intentionally lightweight and instruction-scoped. They
 /// expose spans over the underlying VGPR lane storage so hot paths can keep the
@@ -574,7 +583,7 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "load_lo_native expects 32-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandReadPair32View has no source");
       auto value = storage_.lo ? storage_.lo.template simd_load<T>(lane_base)
-                               : util::broadcast<T>(scalar_fallback());
+                               : util::broadcast<T>(scalar_fallback(/*high=*/false));
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask)
         return value;
       auto bits = std::bit_cast<util::native<uint32_t>>(value);
@@ -586,7 +595,7 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "load_hi_native expects 32-bit lanes");
       assert((storage_.hi || scalar_fallback_) && "OperandReadPair32View has no source");
       auto value = storage_.hi ? storage_.hi.template simd_load<T>(lane_base)
-                               : util::broadcast<T>(scalar_fallback());
+                               : util::broadcast<T>(scalar_fallback(/*high=*/true));
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask)
         return value;
       auto bits = std::bit_cast<util::native<uint32_t>>(value);
@@ -601,15 +610,17 @@ public:
                           uint8_t byte_mask)
         : storage_(storage), byte_mask_(byte_mask) {
       if (!storage_.lo)
-        scalar_fallback_.emplace(op.read_lane(wf, 0));
+        scalar_fallback_.emplace(RegisterAccess(wf).read_lane_pair32(op, 0));
     }
 
-    uint32_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadPair32View");
+    uint32_t scalar_fallback(bool high) const {
+      const OperandPair32 pair =
+          RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadPair32View");
+      return high ? pair.hi : pair.lo;
     }
 
     ConstVgprStoragePair64 storage_{};
-    std::optional<uint32_t> scalar_fallback_;
+    std::optional<OperandPair32> scalar_fallback_;
     uint8_t byte_mask_ = rocjitsu::ExecutionPlugin::kFullByteMask;
   };
 
@@ -870,6 +881,35 @@ public:
   }
   [[nodiscard]] uint64_t read_lane64(const Operand &op, uint32_t lane) const {
     return op.read_lane64(wavefront(), lane);
+  }
+
+  /// @brief Read a packed pair of 32-bit words from one logical source.
+  /// @details Literal64 operands split into low and high words. AMDGPU VGPR,
+  /// SGPR, and special scalar pair selectors use their 64-bit execution
+  /// resolver. Inline constants, literal32 operands, M0, and other single-word
+  /// scalar sources are read as 32-bit values and splatted. Pair classification
+  /// uses the same execution predicate as resolve_src_scalar64(), independently
+  /// of the narrower analysis-liveness mapping in to_register_ref().
+  [[nodiscard]] OperandPair32 read_lane_pair32(const Operand &op, uint32_t lane) const {
+    if (const auto literal = op.literal64_value())
+      return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
+
+    if (const auto constant = op.const_value()) {
+      const uint32_t value = static_cast<uint32_t>(*constant);
+      return {value, value};
+    }
+
+    const Wavefront &wf = wavefront();
+    const bool is_register_pair =
+        op.size_bits() >= 64 &&
+        (op.simd_vgpr_base(wf).has_value() || is_src_scalar_register_pair(op.encoding_value()));
+    if (is_register_pair) {
+      const uint64_t pair = op.read_lane64(wf, lane);
+      return {static_cast<uint32_t>(pair), static_cast<uint32_t>(pair >> 32)};
+    }
+
+    const uint32_t value = op.read_lane(wf, lane);
+    return {value, value};
   }
   void write_scalar(const Operand &op, uint32_t value) const {
     op.write_scalar(mutable_wavefront(), value);
