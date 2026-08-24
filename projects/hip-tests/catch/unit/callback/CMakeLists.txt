@@ -15,7 +15,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code
-                  -I${HIP_INCLUDE_DIR}
+                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                   COMMENT "Compiling SimpleKernel.code")
