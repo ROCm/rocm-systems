@@ -222,6 +222,11 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             EXPECT_NE(line.find("\"AllReduce\""), std::string::npos);
             EXPECT_NE(line.find("\"coll_msg_size_bytes\":4096"),
                        std::string::npos);
+            EXPECT_NE(line.find("\"coll_exec_time_us\":50.00"),
+                       std::string::npos)
+                << "Expected GPU-timed exec of 50us (5000 ticks / 100MHz)";
+            EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
+                       std::string::npos);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_lifecycle"}}
     );
@@ -288,6 +293,21 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // Verify the output JSONL carries proxy op data
+            char hostname[256] = {0};
+            gethostname(hostname, sizeof(hostname) - 1);
+            char path[1024];
+            snprintf(path, sizeof(path),
+                "/tmp/accl_test_proxy/accl_profiler_rank0_%s_pid%d_0xcafe.jsonl",
+                hostname, (int)getpid());
+            std::ifstream ifs(path);
+            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
+            std::string line;
+            ASSERT_TRUE(std::getline(ifs, line));
+            EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos)
+                << "Record must carry the proxy op that stopped after the kernel";
+            EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxy"}}
     );
