@@ -38,9 +38,7 @@ def test_torch_version_is_none_without_torch(monkeypatch):
     real_import = builtins.__import__
 
     def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "torch" or (
-            isinstance(name, str) and name.startswith("torch.")
-        ):
+        if name == "torch" or (isinstance(name, str) and name.startswith("torch.")):
             raise ImportError("torch missing")
         return real_import(name, globals, locals, fromlist, level)
 
@@ -168,9 +166,7 @@ def test_load_selects_the_matching_prebuilt_artifact(monkeypatch, tmp_path):
     ]
 
 
-def test_load_raises_import_error_when_matching_artifact_fails(
-    monkeypatch, tmp_path
-):
+def test_load_raises_import_error_when_matching_artifact_fails(monkeypatch, tmp_path):
     install_root = _install_tree_with_artifacts(tmp_path, _FAKE_TORCH_VERSION)
     monkeypatch.setattr(inject_roctx_loader, "_install_prefix", lambda: install_root)
     monkeypatch.setattr(
