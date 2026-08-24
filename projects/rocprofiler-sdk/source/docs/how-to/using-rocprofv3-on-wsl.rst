@@ -48,10 +48,13 @@ parameter, so each node is read into storage deliberately longer than the
 record this build expects, and a thunk that writes a longer one overruns that
 slack instead of the rest of the stack frame. An optional ``DxgAbiCheck``
 handshake, by which a thunk reports the ``sizeof(HsaNodeProperties)`` it was
-built with, is called when the thunk exports it; it is not required, and in
-practice it is not offered, so records are normally read on the assumption that
-the layouts match. A layout rearranged without a change of ``sizeof()`` cannot
-be detected either way. None of this substitutes for a matched pair.
+built with, is called when the thunk exports it, so whether the layout can be
+negotiated depends on which ``librocdxg`` is installed: the released packages
+export it, and a thunk reporting a different size is refused rather than read,
+while a thunk built from the in-tree sources does not, and its records are read
+on the assumption that the layouts match. A layout rearranged without a change
+of ``sizeof()`` cannot be detected either way. None of this substitutes for a
+matched pair.
 
 Required environment variables
 ------------------------------
@@ -356,9 +359,14 @@ the missing symbol named, before anything is opened.
 When agents are missing
 -----------------------
 
-A ``librocdxg`` that does not export what the read needs yields **no GPU
-agents at all** in ROCprofiler-SDK. This is
-visible rather than silent, but it is not harmless: the HSA runtime loads the
+A ``librocdxg`` that does not export what the read needs, or that offers the
+``DxgAbiCheck`` handshake and reports a different record layout, yields **no GPU
+agents at all** in ROCprofiler-SDK. The log separates the two: a missing entry
+point is named as such, while a rejected layout reads ``wsl topology: ...
+rejected the HsaNodeProperties layout``. Only a thunk offering the handshake can
+be turned away for its layout; one that does not offer it is read on the
+assumption that the layouts match. This is visible rather than silent, but it is
+not harmless: the HSA runtime loads the
 same thunk and still reports its GPUs, so ROCprofiler-SDK and HSA disagree about
 which agents exist. Partially described topologies land in the same place — the
 GPU that could be described is published and the other is omitted, while HSA
