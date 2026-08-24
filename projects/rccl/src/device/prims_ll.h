@@ -7,36 +7,14 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
+#include "op128.h"
 
-// Non-temporal 128-bit load for LL communication (FIFO) buffers. Comm buffers
-// are uncached; a single explicit vector load avoids relying on the backend to
-// fuse two independent 64-bit nontemporal loads into one 16-byte op.
 inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLFifoLine& dst) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.v = __builtin_nontemporal_load((v4u_gptr)src->v);
-  dst.v[0] = u.u64[0];
-  dst.v[1] = u.u64[1];
+  load128NT(src->v, dst.v[0], dst.v[1]);
 }
 
-// Plain 128-bit vector store for LL FIFO lines. Like LL128 store128Plain, a
-// single 128-bit store keeps data and flag words in one memory transaction so
-// the reader's flag poll cannot observe flags before their paired data.
 inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLLFifoLine& src) {
-#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
-  __hip_atomic_store((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  __hip_atomic_store((u64_gptr)dst->v + 1, src.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-#else
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = src.v[0];
-  u.u64[1] = src.v[1];
-  *((v4u_gptr)dst->v) = u.v;
-#endif
+  store128LLFifo(dst->v, src.v[0], src.v[1]);
 }
 
 // UserRegMode is accepted only to match the Primitives primary template (which

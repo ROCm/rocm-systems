@@ -46,6 +46,47 @@ inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// Comm-FIFO 128-bit loads/stores (uncached LL / LL128 protocol buffers).
+// Kept separate from load128/store128 above: no cooperative-atomic or
+// system-scope global_load/store_b128. Those paths are for registered user
+// buffers; comm FIFO traffic always uses the plain variants below.
+// ---------------------------------------------------------------------------
+
+inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
+}
+
+// Plain vector store for comm-FIFO writes. A single 128-bit store keeps data
+// and flag words in one memory transaction so the reader's flag poll cannot
+// observe flags before their paired data.
+inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  *((v4u_gptr)ptr) = u.v;
+}
+
+// LL FIFO store: plain b128 on most targets; on gfx1200/gfx1201 without global
+// b128 builtins, paired system-scope atomic stores preserve flag/data ordering.
+inline __device__ void store128LLFifo(uint64_t* v, uint64_t v0, uint64_t v1) {
+#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
+  __hip_atomic_store((u64_gptr)v, v0, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store((u64_gptr)v + 1, v1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
+  store128Plain(v, v0, v1);
+#endif
+}
+
 inline __device__ uint64_t* shmemCvtPtr(volatile uint64_t* shmemGenericPtr) {
   return (uint64_t*)shmemGenericPtr;
 }

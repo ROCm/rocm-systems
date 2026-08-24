@@ -309,6 +309,8 @@ if(BUILD_TESTS)
       CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestLLFifo.cpp
+      device/TestLL128Vector.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -682,6 +684,7 @@ if(BUILD_TESTS)
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
+      LL128VectorMPITests.cpp
       HostApiMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
