@@ -211,8 +211,8 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 
 TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  if (util::native<float>::size() <= 1)
+    GTEST_SKIP() << "test requires native SIMD";
   constexpr uint32_t source_b = 0;
   constexpr uint32_t destination_and_source_a = 64;
   constexpr uint32_t accumulator = 128;

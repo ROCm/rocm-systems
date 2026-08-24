@@ -4270,27 +4270,26 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
 /// the hoist reads each operand word straight through observed register-access
-/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
-/// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
-/// so the 4x4 shape stays on the generic path). Falls back to the generic
-/// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time
+/// M/N/K/BATCH fully unroll the matmul; it loops over N in native-width chunks.
+/// Falls back to the generic exec_f32 without host SIMD, when N is not divisible
+/// by the native width, under force-scalar, or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
 void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || W <= 1 || N % W != 0 ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads =
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
