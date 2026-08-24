@@ -4135,9 +4135,6 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
   }
 #endif
   if (num_items == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
   auto r = rsmi_compute_process_info_get(reinterpret_cast<rsmi_process_info_t*>(procs), num_items);
   return amd::smi::rsmi_to_amdsmi_status(r);
 }
@@ -4152,9 +4149,6 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
   }
 #endif
   if (proc == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
   auto r = rsmi_compute_process_info_by_pid_get(pid, reinterpret_cast<rsmi_process_info_t*>(proc));
   return amd::smi::rsmi_to_amdsmi_status(r);
 }
@@ -4169,9 +4163,6 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
   }
 #endif
   if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
   auto r = rsmi_compute_process_gpus_get(pid, dv_indices, num_devices);
   return amd::smi::rsmi_to_amdsmi_status(r);
 }
@@ -8733,9 +8724,6 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t* info) {
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 
   // Read current TTM pages limit from sysfs
   // Check both AMD-specific (amdttm) and upstream (ttm) kernel module paths
@@ -8865,9 +8853,6 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
   if (pages == 0) {
     return AMDSMI_STATUS_INVAL;
   }
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 
   if (is_dry_run()) {
     std::string mod = ttm_module_name();
@@ -8912,10 +8897,6 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 
 amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   AMDSMI_CHECK_INIT();
-#ifdef ENABLE_WSL_BACKEND
-  if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
-
 #ifdef ENABLE_WSL_BACKEND
   if (amd::smi::WSLGPUBackend::is_active()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
