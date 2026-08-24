@@ -36,7 +36,7 @@ records come from a context the native collector can control but does not itself
 
 The native collector also subscribes to code-object tracing, but those events describe load-time
 objects rather than individual dispatches, so kernel replay does not multiply them. PC sampling runs
-in its own invocation.
+in its own invocation today; under kernel replay it occupies its own replay pass instead.
 
 ### Proposed SDK replay mechanism
 
@@ -183,16 +183,19 @@ flowchart LR
   may not support it. In either case, kernel replay shall produce a hard error naming the unmet
   condition before any workload runs.
 - Kernel replay shall preserve the counter bucket membership used by application replay. The pass
-  count shall equal the bucket count, every bucket shall fit one hardware pass, and `_ACCUM`
-  pairing, TCC grouping, and same-bucket priority shall remain unchanged.
+  count shall equal the bucket count, or the bucket count plus one when `--pc-sampling` is selected.
+  Every bucket shall fit one hardware pass, and `_ACCUM` pairing, TCC grouping, and same-bucket
+  priority shall remain unchanged.
 - One kernel-replay invocation shall produce a consolidated `results_*.csv` artifact that the
   existing workload join and analysis path can consume without an analysis-side contract change.
 - All passes of one logical dispatch shall resolve to one `Dispatch_ID` group holding the complete
   counter set. Start and end timestamps shall follow the same cross-pass normalization semantics used
   for application-replay results.
-- Kernel replay combined with `--iteration-multiplexing`, `--attach-pid`, or `--pc-sampling` shall
-  produce a hard error. `--roof-only`, `--set`, and `--block` shall continue to interoperate
-  unchanged.
+- Kernel replay combined with `--iteration-multiplexing` or `--attach-pid` shall produce a hard
+  error. `--roof-only`, `--set`, and `--block` shall continue to interoperate unchanged.
+- Kernel replay shall compose with `--pc-sampling` by adding one replay pass to every admitted
+  dispatch. That pass shall run with counter collection disabled, and shall not alter the bucket
+  membership or the ordering of the counter passes that precede it.
 - Kernel replay shall produce a hard error when the installed SDK predates the supported version
   floor, and shall state the required version.
 - Kernel replay shall remain available for multi-rank workloads.
@@ -239,14 +242,21 @@ application and kernel replay, and the kernel-replay adapter hands those buckets
 collector without regrouping them.
 
 All *N* counter groups go to a single replay-enabled invocation, and the native collector derives the
-pass count from the per-agent profiles it built from them. There is no separate pass-count option or
-environment value, which is what keeps the bucket count and the pass count from ever disagreeing.
+pass count from the per-agent profiles it built from them, adding one pass when PC sampling is
+selected. There is no separate pass-count option or environment value. The pass count is always
+derived from the buckets rather than configured alongside them, so the two cannot drift apart.
 
 ### Pass-count ownership and profile validity
 
 Counter-group parsing creates one profile-vector entry per group, per agent. For an admitted
 dispatch, `pass_count_cb` returns the size of the vector belonging to that dispatch's agent, and
 replay pass *i* selects entry *i* from the same vector.
+
+When PC sampling is selected, `pass_count_cb` returns that size plus one. Passes 0 through *N*−1
+still map one-to-one onto the profile vector; pass *N* selects no counter profile and runs with
+counter collection disabled. This changes only the count the callback returns — the rule below,
+that a return of one means "do not replay," is unaffected, so a filtered dispatch opts out of the
+PC sampling pass along with the counter passes.
 
 A return value of one carries a specific meaning: "do not replay." It is not a safe fallback when an
 agent lookup fails or its vector turns out to be empty. Using it that way would execute the dispatch
@@ -368,11 +378,15 @@ Both are hard errors. The split matters: a capability failure leaves a workload 
 whereas a flag conflict leaves nothing.
 
 `rocprof-compute` likewise rejects kernel mode before profiling when it appears alongside iteration
-multiplexing, live attach, or PC sampling. Kernel replay rejects iteration multiplexing because both
-strategies claim the same per-dispatch passes, not because of any backend restriction — iteration
-multiplexing needs the native collector too. PC
-sampling is agent-wide, does not consume the localized context override, and today runs in a separate
-counter-disabled invocation, so there is no supported replay pass to insert it into.
+multiplexing or live attach. Kernel replay rejects iteration multiplexing because both strategies
+claim the same per-dispatch passes, not because of any backend restriction — iteration multiplexing
+needs the native collector too.
+
+PC sampling is different. It is agent-wide, it does not consume the localized context override, and
+today it runs in a separate counter-disabled invocation. None of that rules out replay: PC sampling
+takes a replay pass of its own, appended after the *N* counter passes and running with counter
+collection disabled. Kernel replay therefore accepts `--pc-sampling` and replays each admitted
+dispatch *N*+1 times.
 
 `--roof-only`, `--set`, and `--block` continue through ordinary counter selection. Multi-rank
 profiling stays available and keeps its warning. Kernel replay also needs a supported SDK version
@@ -389,7 +403,7 @@ none quietly turns a multi-bucket request into a single pass.
 | Native collector declined while kernel replay is selected | Hard error from the argument combination alone, before discovery. |
 | Native collector unavailable: unsupported ROCm version or unresolvable library | Hard error after discovery, naming which of the two conditions failed. |
 | SDK below the supported version floor | Hard error stating the required version. This is distinct from the ROCm version the native collector needs, so the diagnostic has to say which one is unmet. The numeric floor is pending upstream merge. |
-| Iteration multiplexing, live attach, or PC sampling selected with kernel replay | Hard error before profiling starts. |
+| Iteration multiplexing or live attach selected with kernel replay | Hard error before profiling starts. |
 | Missing or empty per-agent profile vector | Diagnose the agent/profile mismatch and reject the profile; never return one as a fallback. |
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
 | Upstream drain timeout or process abort | Abort the failed run without recovery. |
@@ -442,10 +456,10 @@ normalization, and the analysis boundary that should not have moved.
 - **Counter accuracy.** For one logical dispatch, and for state covered by the equivalence guarantee,
   a counter present in more than one bucket must report the same value in every pass. A mismatch is a
   validation failure. Evaluate cache-sensitive counters separately, as a documented limitation.
-- **Completeness and identity.** For each dispatch admitted by the replay filters, the observed pass
-  count must equal the application replay count, every bucket must appear exactly once, and all pass
-  rows must collapse into one complete `Dispatch_ID`. Incomplete results have to fail before
-  analysis.
+- **Completeness and identity.** For each dispatch admitted by the replay filters, the observed
+  counter-pass count must equal the application replay count, every bucket must appear exactly once,
+  and all pass rows must collapse into one complete `Dispatch_ID`. Incomplete results have to fail
+  before analysis.
 - **Filtering.** Logical indices must advance once per dispatch, not once per pass. A confirmed
   filter exclusion must take the ordinary no-snapshot path. Kernel replay must not misread it as a
   missing-profile failure or an incomplete replay result.
@@ -454,9 +468,12 @@ normalization, and the analysis boundary that should not have moved.
   Existing application replay must come out unchanged.
 - **Service composition.** Kernel replay must expose one pass-0 trace record and one non-multiplied
   logical duration per dispatch.
-- **Compatibility.** Cover the accepted options and every rejected combination: iteration
-  multiplexing, live attach, PC sampling, roofline selection, the multi-rank warning, and the
-  default-off behavior.
+- **PC sampling composition.** With `--pc-sampling` selected, each admitted dispatch must replay
+  *N*+1 times. Every counter bucket must still appear exactly once across passes 0 through *N*−1,
+  and pass *N* must produce PC sampling output and no counter rows.
+- **Compatibility.** Cover the accepted options — PC sampling, roofline selection, the multi-rank
+  warning, and the default-off behavior — and every rejected combination: iteration multiplexing and
+  live attach.
 - **Configuration rejection.** Cover each unmet native-collector condition on its own — declined
   native collector, unsupported ROCm version, unresolvable library. Each must fail before profiling
   starts, with a diagnostic naming that specific condition.
