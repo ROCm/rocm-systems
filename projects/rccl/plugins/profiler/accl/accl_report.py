@@ -17,7 +17,7 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -52,7 +52,7 @@ class Record:
 
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
     records = []
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or not line.startswith('{'):
@@ -208,7 +208,7 @@ def classify_bottleneck(agg: SizeAgg) -> str:
 
 def print_single_report(records: List[Record]):
     aggs = aggregate(records)
-    colls = sorted(set(k[0] for k in aggs.keys()))
+    colls = sorted(set(k[0] for k in aggs))
 
     for coll in colls:
         print(f"\n{'='*140}")
@@ -247,8 +247,8 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
                          threshold: float = 10.0):
     base_aggs = aggregate(base_recs)
     cand_aggs = aggregate(cand_recs)
-    colls = sorted(set(list(k[0] for k in base_aggs.keys()) +
-                       list(k[0] for k in cand_aggs.keys())))
+    colls = sorted(set(list(k[0] for k in base_aggs) +
+                       list(k[0] for k in cand_aggs)))
 
     summary_results = []
 
@@ -326,10 +326,8 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
             busbw_auc_c += c.mean_busbw
             exec_auc_b += b.mean_exec_us
             exec_auc_c += c.mean_exec_us
-            if b.mean_busbw > peak_bw_b:
-                peak_bw_b = b.mean_busbw
-            if c.mean_busbw > peak_bw_c:
-                peak_bw_c = c.mean_busbw
+            peak_bw_b = max(peak_bw_b, b.mean_busbw)
+            peak_bw_c = max(peak_bw_c, c.mean_busbw)
 
             print(f"{fmt_size(sz):>8s} │ "
                   f"{b.mean_exec_us:10.1f} {c.mean_exec_us:10.1f} {exec_d:>7s} │ "
@@ -340,7 +338,7 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
         # Decomposition comparison for flagged sizes
         all_flags = bw_flags + kern_flags
         if all_flags:
-            print(f"\n  Decomposition for flagged sizes:")
+            print("\n  Decomposition for flagged sizes:")
             print(f"  {'Size':>8s} │ {'Component':>16s} │ {'Base(us)':>10s} {'Cand(us)':>10s} {'Δ%':>8s} │ Diagnosis")
             print(f"  {'─'*8}─┼─{'─'*16}─┼─{'─'*10}─{'─'*10}─{'─'*8}─┼─{'─'*30}")
             for sz, _ in all_flags:
@@ -398,7 +396,7 @@ def print_compare_report(base_recs: List[Record], cand_recs: List[Record],
 
     # Final summary table
     print(f"\n{'='*80}")
-    print(f"  EXECUTIVE SUMMARY")
+    print("  EXECUTIVE SUMMARY")
     print(f"{'='*80}")
     print(f"  {'Collective':>15s} │ {'Verdict':>8s} │ {'AUC Δ':>8s} │ {'Peak Δ':>8s} │ {'Exec Δ':>8s} │ Flags")
     print(f"  {'─'*15}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*8}─┼─{'─'*10}")
@@ -428,7 +426,7 @@ def main():
         sys.exit(1)
 
     if args.output:
-        sys.stdout = open(args.output, 'w')
+        sys.stdout = open(args.output, 'w', encoding="utf-8")  # noqa: SIM115
 
     if args.cmd == 'single':
         records = load_dir_or_file(args.input, args.warmup)
