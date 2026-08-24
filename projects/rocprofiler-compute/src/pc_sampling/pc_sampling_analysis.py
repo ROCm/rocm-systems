@@ -319,8 +319,12 @@ def _aggregate_active_thread_percent(
     wave_size: Optional[int],
 ) -> Optional[float]:
     """Return the mean active-lane percentage for present execution masks."""
+    # Denominator first: the terminal path aggregates without sys_info, so this
+    # returns before paying for a per-group dropna().
+    if wave_size is None:
+        return None
     present = exec_masks.dropna()
-    if present.empty or wave_size is None:
+    if present.empty:
         return None
 
     population_count = sum(bin(exec_mask).count("1") for exec_mask in present)
@@ -332,8 +336,10 @@ def _aggregate_wave_occupancy_percent(
     max_waves_per_cu: Optional[int],
 ) -> Optional[float]:
     """Return mean resident-wave occupancy for present wave counts."""
+    if max_waves_per_cu is None:
+        return None
     present = wave_counts.dropna()
-    if present.empty or max_waves_per_cu is None:
+    if present.empty:
         return None
 
     return float(sum(present) / len(present) / max_waves_per_cu * 100)
