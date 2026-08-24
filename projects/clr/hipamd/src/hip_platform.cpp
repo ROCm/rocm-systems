@@ -77,6 +77,12 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
       : VgprWaves;
 
+  if (GprWaves == 0) {
+    // As above: a bad SGPR count would zero alu_limited_threads, and hence
+    // bestBlockSize, giving a divide by zero when bestBlocksPerCU is computed.
+    return hipErrorUnknown;
+  }
+
   // The table contains SIMD per CU, not per WGP, so when WGP mode is set
   // on kernel metadata, multiply the number of SIMDs by 2, to account for
   // 2CUs in 1 WGP.
