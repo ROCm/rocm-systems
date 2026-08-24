@@ -5296,6 +5296,56 @@ class CodeGenerator:
               const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
               return {pair.lo, pair.hi};
             }
+
+            struct PkU64Pair {
+              uint64_t lo;
+              uint64_t hi;
+            };
+
+            struct PkU32Pair {
+              uint32_t lo;
+              uint32_t hi;
+            };
+
+            bool is_general_register(const std::optional<RegisterRef> &reg) {
+              return reg && (reg->cls == RegClass::SGPR || reg->cls == RegClass::VGPR);
+            }
+
+            Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
+              Operand shifted = operand;
+              shifted.encoding_value_ += static_cast<int>(dword_offset);
+              return shifted;
+            }
+
+            PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf,
+                                       uint32_t lane) {
+              const uint64_t lo = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
+              const auto reg = operand.to_register_ref();
+              if (!reg || reg->cls != RegClass::VGPR)
+                return {lo, lo};
+
+              const Operand hi_operand = packed_register_dword_offset(operand, 2);
+              return {lo, amdgpu::RegisterAccess(wf).read_lane64(hi_operand, lane)};
+            }
+
+            PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
+                                       uint32_t lane) {
+              if (!is_general_register(operand.to_register_ref())) {
+                const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
+                return {value, value};
+              }
+
+              const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
+              return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+            }
+
+            void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
+                                   PkU64Pair value) {
+              const Operand hi_operand = packed_register_dword_offset(operand, 2);
+              amdgpu::RegisterAccess access(wf);
+              access.write_lane64(operand, lane, value.lo);
+              access.write_lane64(hi_operand, lane, value.hi);
+            }
             ''')
         model = (
             'namespace {\n\n'
