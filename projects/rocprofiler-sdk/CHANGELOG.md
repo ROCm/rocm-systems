@@ -99,6 +99,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
   - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+  - Anytime initialization support.
+    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured rocprofiler-sdk.
+      - NOTE: during the initialization of another tool, there is a small window where previously existing tools will not receive records generated from application background threads.
 
 **rocprofv3(CLI):**
   - SPM counter collection support in `rocprofv3` (beta):
@@ -197,7 +200,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Removed
 
 - Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
-
 
 ### Resolved issues
 

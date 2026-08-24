@@ -190,9 +190,12 @@ static int ginAnvilSdmaThresholdFromEnv() {
   return ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_THRESHOLD", (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT);
 }
 
-static int ginAnvilSdmaNumChannelsFromEnv() {
-  int v = ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS", 1);
-  return v >= 1 && v <= 8 ? v : 1;
+static int ginAnvilSdmaNumChannels() {
+  // Forced to a single SDMA channel. Multi-channel (>=4 channels) at
+  // >=256 MiB/peer aborts with a fail-loud "unhandled system error" on
+  // 8x MI355X, and the collective GIN-put paths issue their puts from a single
+  // warp anyway (channel 0), so additional channels provide no benefit.
+  return 1;
 }
 
 static uint32_t ginAnvilFusedSignalFromEnv() {
@@ -230,7 +233,7 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
     return ncclSystemError;
   }
 
-  int numCh = ginAnvilSdmaNumChannelsFromEnv();
+  int numCh = ginAnvilSdmaNumChannels();
 
   gin_anvil_sdma_handle_t h = nullptr;
   void* gpu_handles = nullptr;
