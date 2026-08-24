@@ -17,8 +17,10 @@ namespace rocprofsys::control
 {
 session::session() noexcept
 {
-    for(auto& a : m_scope_tracing)
-        a.store(true, std::memory_order_relaxed);
+    for(auto& tracing_flag : m_scope_tracing)
+    {
+        tracing_flag.store(true, std::memory_order_relaxed);
+    }
 }
 
 void
@@ -32,9 +34,13 @@ session::shutdown()
     {
         const std::scoped_lock action_lock{ m_actions_mutex };
         for(auto& scoped : m_actions)
+        {
             scoped.clear();
-        for(auto& a : m_scope_tracing)
-            a.store(true, std::memory_order_relaxed);
+        }
+        for(auto& tracing_flag : m_scope_tracing)
+        {
+            tracing_flag.store(true, std::memory_order_relaxed);
+        }
     }
 }
 
@@ -125,17 +131,17 @@ bool
 session::resolve_locked(scope event_scope) const noexcept
 {
     const auto& scoped = m_actions[static_cast<std::size_t>(event_scope)];
-    return std::none_of(scoped.begin(), scoped.end(),
-                        [](const auto& kv) { return kv.second == action::pause; });
+    return std::ranges::none_of(
+        scoped, [](const auto& entry) { return entry.second == action::pause; });
 }
 
 bool
 session::is_active_without(std::string_view name, scope event_scope) const noexcept
 {
-    const std::scoped_lock lk{ m_actions_mutex };
+    const std::scoped_lock actions_lk{ m_actions_mutex };
     const auto&            scoped = m_actions[static_cast<std::size_t>(event_scope)];
-    return std::none_of(scoped.begin(), scoped.end(), [name](const auto& kv) {
-        return kv.first != name && kv.second == action::pause;
+    return std::ranges::none_of(scoped, [name](const auto& entry) {
+        return entry.first != name && entry.second == action::pause;
     });
 }
 
@@ -155,7 +161,10 @@ session::notify_pause(scope event_scope)
     const std::scoped_lock notify_lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
-        if(!listens_to(sub, event_scope)) continue;
+        if(!listens_to(sub, event_scope))
+        {
+            continue;
+        }
         LOG_DEBUG("session: pausing subscriber '{}'", sub.name);
         if(sub.on_pause)
         {
@@ -171,10 +180,16 @@ session::notify_resume(scope event_scope)
     const std::scoped_lock notify_lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
-        if(!listens_to(sub, event_scope)) continue;
+        if(!listens_to(sub, event_scope))
+        {
+            continue;
+        }
         const bool all_active =
             sub.scopes.all_of([this](scope listened) { return is_active(listened); });
-        if(!all_active) continue;
+        if(!all_active)
+        {
+            continue;
+        }
         LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
         if(sub.on_resume)
         {
