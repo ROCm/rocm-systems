@@ -687,9 +687,10 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3p_disassembly(
-        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), inst->neg, inst->neg_hi,
-        inst->clamp, omits_vop3p_source_modifiers() ? 0 : vop3p_encoded_source_count(),
-        inst_.op <= 18);
+        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp,
+        omits_vop3p_source_modifiers() ? 0 : vop3p_encoded_source_count(),
+        inst_.op <= 18 || inst_.op == 35 || (inst_.op >= 38 && inst_.op <= 39));
   }
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;

@@ -637,6 +637,7 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  bool uses_vop3p_absolute_source_syntax() const;
   uint32_t vop3p_encoded_source_count() const;
   bool has_encoded_literal32() const;
   static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
@@ -648,12 +649,38 @@ public:
       return emit_error.emit() << "DPP and literal operands cannot be combined";
     return Result::success();
   }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const Operand *operand = src_operands_[operand_index];
+    if (!uses_vop3p_absolute_source_syntax() || operand_index >= 3) {
+      Instruction::append_src_operand(out, operand_index);
+      return;
+    }
+    if ((inst_.neg >> operand_index) & 1u)
+      out += '-';
+    const bool absolute = ((inst_.neg_hi >> operand_index) & 1u) != 0;
+    if (absolute)
+      out += '|';
+    const uint32_t selector =
+        operand_index == 0 ? inst_.src0 : (operand_index == 1 ? inst_.src1 : inst_.src2);
+    if (selector == 255) {
+      out += "lit(";
+      out += operand->name();
+      out += ')';
+    } else {
+      out += operand->name();
+    }
+    if (absolute)
+      out += '|';
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3p_disassembly(
-        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), inst->neg, inst->neg_hi,
-        inst->clamp, vop3p_encoded_source_count(), inst_.op <= 18);
+        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2),
+        uses_vop3p_absolute_source_syntax() ? 0 : inst->neg,
+        uses_vop3p_absolute_source_syntax() ? 0 : inst->neg_hi, inst->clamp,
+        uses_vop3p_absolute_source_syntax() ? 3 : (vop3p_encoded_source_count()),
+        uses_vop3p_absolute_source_syntax() ? false : (inst_.op <= 19 || inst_.op == 26));
     if (has_encoded_dpp())
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
@@ -769,9 +796,77 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  bool omits_gfx11_mimg_dim_dmask() const;
+  uint32_t gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const;
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const Operand *operand = src_operands_[operand_index];
+    if (!inst_.nsa || operand != nsa_vaddr_operand_) {
+      Instruction::append_src_operand(out, operand_index);
+      return;
+    }
+    const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;
+    out += "[";
+    uint32_t consumed_words = 0;
+    for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {
+      const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);
+      if (group_words == 0)
+        break;
+      if (index != 0)
+        out += ", ";
+      const uint32_t selector =
+          index == 0 ? inst_.vaddr : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;
+      if (group_words > 1) {
+        out += "v[" + std::to_string(selector) + ":";
+        out += std::to_string(selector + group_words - 1) + "]";
+      } else {
+        out += "v" + std::to_string(selector);
+      }
+      consumed_words += group_words;
+    }
+    out += "]";
+  }
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask & 0xfu];
+    }
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      static constexpr std::string_view dims[] = {
+          "1D", "2D", "3D", "CUBE", "1D_ARRAY", "2D_ARRAY", "2D_MSAA", "2D_MSAA_ARRAY"};
+      out += " dim:SQ_RSRC_IMG_";
+      out += dims[inst->dim & 7u];
+    }
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      if (inst->unorm)
+        out += " unorm";
+      if (inst->glc)
+        out += " glc";
+      if (inst->slc)
+        out += " slc";
+      if (inst->dlc)
+        out += " dlc";
+      if (inst->r128)
+        out += " r128";
+    }
+    if (inst->a16)
+      out += " a16";
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      if (inst->tfe)
+        out += " tfe";
+      if (inst->lwe)
+        out += " lwe";
+      if (inst->d16)
+        out += " d16";
+    }
+  }
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {

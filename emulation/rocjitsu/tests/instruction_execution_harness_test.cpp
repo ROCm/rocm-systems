@@ -5188,6 +5188,44 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
     wf->halt();
 }
 
+TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
+  amdgpu::GpuMemory gpu_mem("rdna35_true16_vop1_mem");
+  amdgpu::L2Cache l2("rdna35_true16_vop1_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_5", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 5, 0, 0xAAAA1111u);
+  cu->write_vgpr(vb + 1, 0, 0x2222BBBBu);
+
+  // v_swap_b16 v5.l, v1.h
+  const uint32_t words[] = {0x7E0ACD81u, 0u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->disassemble(), "v_swap_b16 v5.l, v1.h");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
+  EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
   const float input[] = {-5.0f, 5.0f,  7.0f,  -2.0f, -3.0f, -6.0f, 7.0f,  -2.0f, -4.0f, 6.0f, 3.0f,
                          -2.0f, -7.0f, -1.0f, 7.0f,  -7.0f, 2.0f,  -3.0f, 0.0f,  -6.0f, 7.0f, -3.0f,
