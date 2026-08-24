@@ -3,14 +3,15 @@
 
 """ROCTX instrumentation backend for PyTorch.
 
-ATen ops use the C++ RecordFunction tier (torch_trace_collector.so) when
-TorchBackend.install() initializes it, with a Python TorchDispatchMode
-fallback. Structural wraps (nn.Module, Optimizer, distributed,
-CUDA graph, torch.compile) run on both tiers. Triton kernel launches
-are wrapped by the separate triton backend.
+ATen operators use the C++ RecordFunction tier when
+``torch_trace_collector`` is available; otherwise a Python
+``TorchDispatchMode`` is used. If no collector matches the workload
+PyTorch version, the process exits. Structural wraps (``nn.Module``,
+Optimizer, distributed, CUDA graph, ``torch.compile``) apply on both
+tiers. Triton kernel launches are handled by the triton backend.
 
-Module import is side-effect free with respect to PyTorch state. Torch is
-imported lazily by TorchBackend.install.
+Import has no effect on PyTorch state. Torch is imported by
+``TorchBackend.install``.
 """
 
 import importlib
@@ -26,7 +27,7 @@ from typing import Any, Callable, Optional
 from utils.inject_roctx import core
 from utils.inject_roctx._backends.torch_cpp_loader import UnsupportedTorchVersionError
 from utils.inject_roctx.registry import register
-from utils.logger import console_log, console_warning
+from utils.logger import console_error, console_log, console_warning
 
 _BACKEND_NAME = "torch"
 
@@ -272,8 +273,8 @@ def _initialize_c_tier() -> bool:
 
     try:
         result = _STATE.load_torch_trace_collector()
-    except UnsupportedTorchVersionError:
-        raise
+    except UnsupportedTorchVersionError as exc:
+        console_error("ml api trace", str(exc))
     except Exception as exc:
         console_warning(
             "ml api trace",

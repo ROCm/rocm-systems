@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Resolve and load the ``torch_trace_collector`` pybind11 extension.
+"""Load the ``torch_trace_collector`` extension for the workload PyTorch version.
 
-Selects the installed ``torch_trace_collector-<torch-version>.so`` that matches
-the workload PyTorch version.
+Searches ``<prefix>/lib*/rocprofiler-compute/``, then
+``<package_root>/lib/_build/lib/``, for
+``torch_trace_collector-<torch-version>.so``.
 """
 
 import importlib.util
@@ -21,7 +22,11 @@ _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 _ARTIFACT_PREFIX = "torch_trace_collector-"
 _ARTIFACT_SUFFIX = ".so"
 _ARTIFACT_NAME_PATTERN = re.compile(
-    r"^" + re.escape(_ARTIFACT_PREFIX) + r"(.+)" + re.escape(_ARTIFACT_SUFFIX) + r"$"
+    r"^"
+    + re.escape(_ARTIFACT_PREFIX)
+    + r"(\d+[^/]*)"
+    + re.escape(_ARTIFACT_SUFFIX)
+    + r"$"
 )
 
 TIER_PREBUILT = "prebuilt"
@@ -31,7 +36,7 @@ _Diagnostics = List[Tuple[str, str]]
 
 
 class UnsupportedTorchVersionError(RuntimeError):
-    """Raised when no installed collector matches the workload PyTorch version."""
+    """No ``torch_trace_collector`` matches the workload PyTorch version."""
 
     def __init__(
         self,
@@ -52,7 +57,7 @@ class UnsupportedTorchVersionError(RuntimeError):
 
 @dataclass
 class LoadResult:
-    """Outcome of a ``load()`` attempt."""
+    """Result of ``load()``."""
 
     module: Optional[types.ModuleType]
     tier: Optional[str]
@@ -64,7 +69,7 @@ def _safe_log(
     msg: str,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> None:
-    """Log via ``utils.logger`` if importable, otherwise stderr."""
+    """Append to ``diagnostics`` and emit through ``utils.logger`` or stderr."""
     if diagnostics is not None:
         diagnostics.append((level, msg))
     try:
@@ -83,7 +88,7 @@ def format_load_diagnostic_trail(
     *,
     max_lines: int = 24,
 ) -> str:
-    """Render diagnostics as indented lines, capped at ``max_lines``."""
+    """Format diagnostics as indented lines, limited to ``max_lines``."""
     if not diagnostics:
         return ""
     rendered = [f"  [{lvl}] {msg}" for lvl, msg in diagnostics[-max_lines:]]
@@ -91,7 +96,7 @@ def format_load_diagnostic_trail(
 
 
 def torch_version() -> Optional[str]:
-    """Return ``torch.__version__`` with any local build suffix removed, or ``None``."""
+    """Return ``torch.__version__`` without a local ``+...`` suffix, or ``None``."""
     try:
         import torch
     except Exception:
@@ -100,7 +105,7 @@ def torch_version() -> Optional[str]:
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
-    """Import a shared object from a filesystem path."""
+    """Import a shared library from ``path``."""
     spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"failed to build importlib spec for {path}")
@@ -109,29 +114,72 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
     return module
 
 
-def _install_prefix() -> Path:
-    """Return the install prefix that hosts ``lib*/rocprofiler-compute/``."""
-    return _THIS_DIR.parents[4]
+def _package_root() -> Path:
+    """Return the package root (``src`` or ``libexec/rocprofiler-compute``)."""
+    return _THIS_DIR.parents[2]
 
 
-def _installed_collector_artifacts() -> List[Path]:
-    """Return installed ``torch_trace_collector-*.so`` paths."""
-    pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{_ARTIFACT_PREFIX}*{_ARTIFACT_SUFFIX}"
-    return sorted(path for path in _install_prefix().glob(pattern) if path.is_file())
+def _install_prefix(package_root: Optional[Path] = None) -> Path:
+    """Return the install prefix that contains ``lib*/rocprofiler-compute/``."""
+    root = _package_root() if package_root is None else package_root
+    return root.parents[1] if len(root.parents) > 1 else Path()
+
+
+def _build_lib_dir(package_root: Optional[Path] = None) -> Path:
+    """Return ``<package_root>/lib/_build/lib``."""
+    root = _package_root() if package_root is None else package_root
+    return root / "lib" / "_build" / "lib"
 
 
 def _torch_version_from_artifact_name(path: Path) -> Optional[str]:
-    """Return the PyTorch version encoded in an artifact filename."""
+    """Return the PyTorch version encoded in ``path.name``, or ``None``."""
     match = _ARTIFACT_NAME_PATTERN.match(path.name)
     if match is None:
         return None
     return match.group(1)
 
 
+def _artifact_paths_in_dir(directory: Path) -> List[Path]:
+    """Return ``torch_trace_collector-<version>.so`` paths under ``directory``."""
+    if not directory.is_dir():
+        return []
+    pattern = f"{_ARTIFACT_PREFIX}*{_ARTIFACT_SUFFIX}"
+    return sorted(
+        path
+        for path in directory.glob(pattern)
+        if path.is_file() and _torch_version_from_artifact_name(path) is not None
+    )
+
+
+def _discover_collector_artifacts() -> List[Path]:
+    """Return collector paths from the install prefix, then the build lib directory."""
+    package_root = _package_root()
+    found: List[Path] = []
+    seen = set()
+
+    def _add(paths: List[Path]) -> None:
+        for path in paths:
+            key = path.resolve()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(path)
+
+    prefix = _install_prefix(package_root)
+    install_pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}"
+    for artifact_dir in sorted(
+        path for path in prefix.glob(install_pattern) if path.is_dir()
+    ):
+        _add(_artifact_paths_in_dir(artifact_dir))
+
+    _add(_artifact_paths_in_dir(_build_lib_dir(package_root)))
+    return found
+
+
 def supported_torch_versions() -> Tuple[str, ...]:
-    """Return installed collector PyTorch versions, sorted and unique."""
+    """Return sorted unique PyTorch versions with a discovered collector."""
     versions = []
-    for path in _installed_collector_artifacts():
+    for path in _discover_collector_artifacts():
         version = _torch_version_from_artifact_name(path)
         if version is not None:
             versions.append(version)
@@ -139,16 +187,16 @@ def supported_torch_versions() -> Tuple[str, ...]:
 
 
 def _artifact_paths_for_torch_version(workload_torch_version: str) -> List[Path]:
-    """Return installed artifacts for ``workload_torch_version``."""
+    """Return discovered collectors named for ``workload_torch_version``."""
     so_name = f"{_ARTIFACT_PREFIX}{workload_torch_version}{_ARTIFACT_SUFFIX}"
-    return [path for path in _installed_collector_artifacts() if path.name == so_name]
+    return [path for path in _discover_collector_artifacts() if path.name == so_name]
 
 
 def _load_prebuilt(
     workload_torch_version: str,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> types.ModuleType:
-    """Load the installed collector for ``workload_torch_version``."""
+    """Load the collector for ``workload_torch_version``."""
     candidates = _artifact_paths_for_torch_version(workload_torch_version)
     if not candidates:
         raise UnsupportedTorchVersionError(
