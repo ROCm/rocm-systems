@@ -2908,6 +2908,50 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoComputeFails_PropagatesAndRunsClean
   EXPECT_EQ(2, g_ncclOsCpuCountCalls);  // :1608 and exit::2403 -- unlike the :1618 bypass above
 }
 
+// --- The graphs[] alias table (init.cc:1401) ---
+// `graphs[]` is indexed by ALGORITHM (7) but there are only 5 graphs, because two algorithms reuse
+// another's: NVLS_TREE shares the NVLS graph and PAT shares the TREE graph. So graphs[5] == graphs[4]
+// and graphs[6] == graphs[0] are the same objects, and a write through the alias silently edits the
+// real graph. Upstream NCCL owns this (2.22.3-1 added the nvls duplicate, 2.23.4-1 the tree one);
+// RCCL only reflowed the line, so the guard below is a canary, not a fix.
+
+// The alias table is POSITIONAL. If upstream inserts or reorders an algorithm, the initializer at
+// :1401 keeps compiling and silently maps the wrong graph to the wrong algorithm. These are the exact
+// assumptions that line bakes in -- when one of them fails, re-audit :1401 before touching anything.
+TEST_F(InitMicrotest, AlgorithmEnum_StillMatchesTheGraphAliasTable) {
+  static_assert(NCCL_NUM_ALGORITHMS == 7, ":1401 lists exactly 7 initializers");
+  static_assert(NCCL_ALGO_TREE == 0, "graphs[0] is treeGraph");
+  static_assert(NCCL_ALGO_RING == 1, "graphs[1] is ringGraph");
+  static_assert(NCCL_ALGO_COLLNET_DIRECT == 2, "graphs[2] is collNetDirectGraph");
+  static_assert(NCCL_ALGO_COLLNET_CHAIN == 3, "graphs[3] is collNetChainGraph");
+  static_assert(NCCL_ALGO_NVLS == 4, "graphs[4] is nvlsGraph");
+  static_assert(NCCL_ALGO_NVLS_TREE == 5, "graphs[5] ALIASES graphs[4]");
+  static_assert(NCCL_ALGO_PAT == 6, "graphs[6] ALIASES graphs[0]");
+  SUCCEED() << "alias table assumptions hold; see init.cc:1401";
+}
+
+// Poisons every graph slot, runs to the :1648 terminator, and asserts that ONLY the ring graph was
+// written. Watching the aliased-TO slots is the point: a stray write through the local graphs[5]
+// lands on NVLS (slot 4) and through graphs[6] on TREE (slot 0), leaving slots 5 and 6 pristine --
+// so a test that only poisoned the two unused slots would miss exactly the corruption it was for.
+TEST_F(InitMicrotest, InitTransportsRank_ThroughRingCompute_WritesOnlyTheRingGraph) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  const std::vector<unsigned char> poison(sizeof(ncclTopoGraph), 0xA5);
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+    std::memcpy(&c.get()->graphs[a], poison.data(), poison.size());
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  // Ring IS seeded at :1643-1647 -- without this the test would pass on a run that did nothing.
+  EXPECT_NE(0, std::memcmp(&c.get()->graphs[NCCL_ALGO_RING], poison.data(), poison.size()));
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+    if (a == NCCL_ALGO_RING) continue;
+    EXPECT_EQ(0, std::memcmp(&c.get()->graphs[a], poison.data(), poison.size()))
+        << "graphs[" << a << "] was written before :1648; if a is 0 or 4 this may be a write through "
+        << "the :1401 alias for PAT or NVLS_TREE";
+  }
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_RingGraphSeededBeforeTopoCompute) {
   TransportsRankComm c(4, 0);
   c.installTopo();
