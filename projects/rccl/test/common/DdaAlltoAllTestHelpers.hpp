@@ -21,7 +21,6 @@ namespace RcclUnitTesting
 {
 
 // Use the production rcclDdaEnabled() from rccl_common.h directly.
-// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
@@ -75,7 +74,7 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx942ThresholdBytes /
+    4194304UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

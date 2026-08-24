@@ -144,7 +144,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
         kAlltoAllFloat32CountAt4MbThreshold,
         mockComm_.comm.nRanks,
         sizeof(float));
-    EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_EQ(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
 }
 
@@ -154,7 +154,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEli
     const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 4;
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         count, mockComm_.comm.nRanks, sizeof(float));
-    EXPECT_GT(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_GT(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32));
 }
