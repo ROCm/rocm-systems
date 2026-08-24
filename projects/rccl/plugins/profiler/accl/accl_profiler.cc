@@ -342,9 +342,8 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (coll->finalized) return 0;
   if (!coll->collStopped) return 0;
-  if (coll->nKernelChCompleted != coll->nKernelChStarted) return 0;
+  if (coll->nKernelChCompleted != coll->nChannels) return 0;
   if (coll->nProxyOpsCompleted != coll->nProxyOpsStarted) return 0;
-  if (coll->nChannels > 0 && coll->nKernelChStarted == 0) return 0;
   coll->finalized = 1;
   return 1;
 }
