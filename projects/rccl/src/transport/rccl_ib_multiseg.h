@@ -12,8 +12,8 @@
 
 // RCCL-only IB helper (same convention as rccl_wrap.cc): register one dma-buf
 // MR per physical segment. Not part of the NCCL-synced plugin API in
-// include/net.h (review ID 19). Implemented by the classic NET/IB plugin
-// (net_ib/reg.cc). CAST is a separate follow-up PR.
+// include/net.h. Implemented by the classic NET/IB plugin (net_ib/reg.cc).
+// CAST is a separate follow-up PR.
 ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle);
 
