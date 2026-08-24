@@ -223,8 +223,10 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
-  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
-                   " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
+  util::Logger::cp([&](auto &os) {
+    os << "DISPATCH_WF cu=" << full_path() << " wf=" << wf->wf_id() << " slot=" << wf_id << " pc=0x"
+       << std::hex << pc << std::dec << " wg=" << wg_id << " pid=" << wf->process_id();
+  });
 
   schedule_work();
   return wf;
@@ -708,7 +710,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     if (active->num_vgprs_ > 0) {
       util::Logger::vm([&](auto &os) {
         uint32_t vb = active->vgpr_alloc().base;
-        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} sz={}", this->full_path(),
+        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} sz={}", full_path(),
                           active->wg_id(), active->wf_id(), active->trace_inst_count_, active->pc,
                           inst->mnemonic(), inst_size);
         os << " enc=";
@@ -1016,7 +1018,7 @@ bool ComputeUnitCore::step() {
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {
       util::Logger::cp([&](auto &os) {
-        os << std::format("CU[{}] steps={}M", this->full_path(), step_count_ >> 20);
+        os << std::format("CU[{}] steps={}M", full_path(), step_count_ >> 20);
         for (auto &wf : wfs_) {
           auto st = wf->state();
           if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
