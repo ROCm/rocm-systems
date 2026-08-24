@@ -98,6 +98,14 @@ struct InstructionHazardSemantics {
   // Wait counter that guards async writes to local memory. LDS covers DS/flat
   // LDS writes; TENSOR covers tensor-load-to-LDS style operations.
   WaitCntType local_write_wait = WaitCntType::NONE;
+
+  // Wait counter this instruction occupies a slot of as a memory operation,
+  // separately from any register it leaves pending. It names the counter a
+  // vector memory store is outstanding on, which is where the architectures
+  // differ: gfx9 and CDNA count stores on the same vmcnt as loads, so a store
+  // set to VMEM holds up the retirement of older loads, while gfx10 and later
+  // count them on their own vscnt/storecnt and set STORE.
+  WaitCntType memory_op_wait = WaitCntType::NONE;
 };
 
 struct ResourceHazardSemantics {
@@ -115,6 +123,12 @@ struct ResourceHazardSemantics {
   // and an LDS/DScnt side. Frontends that know this per access can set it
   // here instead of encoding the fact in instruction-wide state.
   bool write_also_waits_lds = false;
+
+  // Per-access form of InstructionHazardSemantics::memory_op_wait, for
+  // frontends that learn which counter a store occupies only when they route
+  // its access. Repeats across the accesses of one instruction are folded, so
+  // a per-lane frontend may set it on every lane.
+  WaitCntType memory_op_wait = WaitCntType::NONE;
 };
 
 struct InstructionEvent {

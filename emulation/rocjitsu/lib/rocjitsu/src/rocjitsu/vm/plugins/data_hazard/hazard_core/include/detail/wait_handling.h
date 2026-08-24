@@ -17,7 +17,6 @@
 #pragma once
 
 #include "fifo_ops.h"
-#include "hash_utils.h"
 #include "hazard_events.h"
 #include "types.h"
 #include "wait_suggestion.h"
@@ -28,136 +27,129 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace hazard_core {
 
+/// Drain the entries of one counter from an address-keyed FIFO. An instruction
+/// scattering several accesses still occupies a single counter slot, so whole
+/// instructions retire together.
 inline void clear_address_fifo(std::deque<std::pair<uint32_t, PendingAsyncOp>> &fifo,
                                uint32_t keep_count, WaitCntType wait_type) {
-  if (keep_count == 0) {
-    fifo.erase(std::remove_if(
-                   fifo.begin(), fifo.end(),
-                   [wait_type](const auto &entry) { return entry.second.wait_type == wait_type; }),
-               fifo.end());
-    return;
-  }
-
-  uint32_t matching_entries = 0;
-  for (const auto &entry : fifo) {
-    if (entry.second.wait_type == wait_type)
-      ++matching_entries;
-  }
-
-  if (keep_count >= matching_entries)
+  const auto matches = [wait_type](const auto &entry) {
+    return entry.second.wait_type == wait_type;
+  };
+  const std::vector<uint64_t> retiring = instructions_to_retire(fifo, keep_count, matches);
+  if (retiring.empty())
     return;
 
-  uint32_t entries_to_remove = matching_entries - keep_count;
   fifo.erase(std::remove_if(fifo.begin(), fifo.end(),
                             [&](const auto &entry) {
-                              if (entries_to_remove == 0 || entry.second.wait_type != wait_type)
-                                return false;
-                              --entries_to_remove;
-                              return true;
+                              return matches(entry) &&
+                                     is_retiring(retiring, entry.second.instruction_id);
                             }),
              fifo.end());
 }
 
-enum class VmemPendingSource {
-  Register,
-  Lds,
-};
-
-struct VmemPendingRef {
-  VmemPendingSource source;
-  uint32_t key;
-  EntityId instruction_id;
-
-  bool operator==(const VmemPendingRef &other) const {
-    return source == other.source && key == other.key && instruction_id == other.instruction_id;
+/// Count the stores a wait covers, and retire the ones it drains.
+///
+/// Which counter a store is outstanding on is an architectural difference the
+/// frontend resolves per store: gfx9 and CDNA count vector stores on the same
+/// vmcnt as loads, gfx10 and later on a vscnt/storecnt of their own. Both
+/// drains therefore look at the same queues and take only the entries tagged
+/// with the counter they are clearing.
+inline void note_store_ops(const WaveState &wave, WaitCntType counter,
+                           const std::function<void(EntityId)> &note) {
+  for (const auto &op : wave.vmem_store_ops) {
+    if (op.wait_type == counter)
+      note(op.instruction_id);
   }
-};
-
-struct VmemPendingRefHash {
-  size_t operator()(const VmemPendingRef &ref) const noexcept {
-    size_t seed = std::hash<int>{}(static_cast<int>(ref.source));
-    hash_combine(seed, ref.key);
-    hash_combine(seed, ref.instruction_id);
-    return seed;
+  for (const auto &entry : wave.vmem_store_fifo) {
+    if (entry.second.wait_type == counter)
+      note(entry.second.instruction_id);
   }
-};
-
-using VmemPendingRefCounts = std::unordered_map<VmemPendingRef, uint32_t, VmemPendingRefHash>;
-
-inline bool consume_vmem_pending_ref(VmemPendingRefCounts &counts, const VmemPendingRef &ref) {
-  auto it = counts.find(ref);
-  if (it == counts.end() || it->second == 0)
-    return false;
-  --it->second;
-  return true;
+  for (const auto &entry : wave.acc_vmem_store_fifo) {
+    if (entry.second.wait_type == counter)
+      note(entry.second.instruction_id);
+  }
 }
 
-inline void clear_vmem_pending_ops(WaveState &wave, uint32_t keep_count) {
-  std::vector<VmemPendingRef> pending;
-  pending.reserve(wave.vmem_load_fifo.size() + wave.acc_vmem_load_fifo.size() +
-                  wave.lds_fifo.size());
-
-  for (const auto &entry : wave.vmem_load_fifo)
-    pending.push_back({VmemPendingSource::Register, entry.first, entry.second.instruction_id});
-  for (const auto &entry : wave.acc_vmem_load_fifo)
-    pending.push_back({VmemPendingSource::Register, entry.first, entry.second.instruction_id});
-  for (const auto &entry : wave.lds_fifo) {
-    if (entry.second.wait_type == WaitCntType::VMEM)
-      pending.push_back({VmemPendingSource::Lds, entry.first, entry.second.instruction_id});
-  }
-
-  if (keep_count >= pending.size())
+inline void retire_store_ops(WaveState &wave, const std::vector<uint64_t> &retiring) {
+  if (retiring.empty())
     return;
 
-  std::stable_sort(pending.begin(), pending.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.instruction_id < rhs.instruction_id;
-  });
+  wave.vmem_store_ops.erase(std::remove_if(wave.vmem_store_ops.begin(), wave.vmem_store_ops.end(),
+                                           [&retiring](const PendingAsyncOp &op) {
+                                             return is_retiring(retiring, op.instruction_id);
+                                           }),
+                            wave.vmem_store_ops.end());
+  retire_register_entries(wave.vmem_store_fifo, wave.pending_vgpr_reads, retiring);
+  retire_register_entries(wave.acc_vmem_store_fifo, wave.pending_acc_vgpr_reads, retiring);
+}
 
-  VmemPendingRefCounts to_remove;
-  to_remove.reserve(pending.size() - keep_count);
-  for (auto it = pending.begin(); it != pending.end() - keep_count; ++it)
-    ++to_remove[*it];
-
-  auto drain_register_fifo = [&](std::deque<std::pair<uint32_t, PendingAsyncOp>> &load_fifo,
-                                 std::unordered_map<uint32_t, PendingAsyncOp> &pending_writes) {
-    std::vector<uint32_t> removed_registers;
-    std::deque<std::pair<uint32_t, PendingAsyncOp>> kept_load_fifo;
-    for (auto &entry : load_fifo) {
-      VmemPendingRef ref{VmemPendingSource::Register, entry.first, entry.second.instruction_id};
-      if (consume_vmem_pending_ref(to_remove, ref)) {
-        removed_registers.push_back(entry.first);
-        continue;
-      }
-      kept_load_fifo.push_back(std::move(entry));
-    }
-    load_fifo = std::move(kept_load_fifo);
-
-    for (uint32_t reg : removed_registers) {
-      const bool still_pending =
-          std::any_of(load_fifo.begin(), load_fifo.end(),
-                      [reg](const auto &entry) { return entry.first == reg; });
-      if (!still_pending)
-        pending_writes.erase(reg);
-    }
+/// Drain LOADcnt, which spans the VGPR loads, the accumulator VGPR loads, the
+/// VMEM-tracked LDS writes of global_load_lds, and — where one counter tracks
+/// loads and stores together — the outstanding stores. The counter counts
+/// instructions across all of them, so they are drained as one sequence
+/// ordered by instruction id. Stores taking up slots of this counter is what
+/// lets a gfx9 s_waitcnt vmcnt(2) retire a load that two later stores sit
+/// behind.
+inline void clear_vmem_pending_ops(WaveState &wave, uint32_t keep_count) {
+  std::vector<uint64_t> outstanding;
+  const auto note = [&outstanding](EntityId instruction_id) {
+    if (std::find(outstanding.begin(), outstanding.end(), instruction_id) == outstanding.end())
+      outstanding.push_back(instruction_id);
   };
 
-  drain_register_fifo(wave.vmem_load_fifo, wave.pending_vgpr_writes);
-  drain_register_fifo(wave.acc_vmem_load_fifo, wave.pending_acc_vgpr_writes);
-
-  decltype(wave.lds_fifo) kept_lds_fifo;
-  for (auto &entry : wave.lds_fifo) {
-    VmemPendingRef ref{VmemPendingSource::Lds, entry.first, entry.second.instruction_id};
-    if (entry.second.wait_type == WaitCntType::VMEM && consume_vmem_pending_ref(to_remove, ref))
-      continue;
-    kept_lds_fifo.push_back(std::move(entry));
+  for (const auto &entry : wave.vmem_load_fifo)
+    note(entry.second.instruction_id);
+  for (const auto &entry : wave.acc_vmem_load_fifo)
+    note(entry.second.instruction_id);
+  for (const auto &entry : wave.lds_fifo) {
+    if (entry.second.wait_type == WaitCntType::VMEM)
+      note(entry.second.instruction_id);
   }
-  wave.lds_fifo = std::move(kept_lds_fifo);
+  note_store_ops(wave, WaitCntType::VMEM, note);
+
+  if (outstanding.size() <= keep_count)
+    return;
+
+  // Ids increase with program order, which the per-FIFO walk above does not
+  // preserve across FIFOs.
+  std::sort(outstanding.begin(), outstanding.end());
+  outstanding.resize(outstanding.size() - keep_count);
+
+  retire_register_entries(wave.vmem_load_fifo, wave.pending_vgpr_writes, outstanding);
+  retire_register_entries(wave.acc_vmem_load_fifo, wave.pending_acc_vgpr_writes, outstanding);
+
+  wave.lds_fifo.erase(std::remove_if(wave.lds_fifo.begin(), wave.lds_fifo.end(),
+                                     [&outstanding](const auto &entry) {
+                                       return entry.second.wait_type == WaitCntType::VMEM &&
+                                              is_retiring(outstanding, entry.second.instruction_id);
+                                     }),
+                      wave.lds_fifo.end());
+
+  retire_store_ops(wave, outstanding);
+}
+
+/// Drain STOREcnt: the stores held for counter occupancy, plus the source
+/// registers a frontend chose to keep live for the duration of a store.
+inline void clear_store_pending_ops(WaveState &wave, uint32_t keep_count) {
+  std::vector<uint64_t> outstanding;
+  const auto note = [&outstanding](EntityId instruction_id) {
+    if (std::find(outstanding.begin(), outstanding.end(), instruction_id) == outstanding.end())
+      outstanding.push_back(instruction_id);
+  };
+  note_store_ops(wave, WaitCntType::STORE, note);
+
+  if (outstanding.size() <= keep_count)
+    return;
+
+  std::sort(outstanding.begin(), outstanding.end());
+  outstanding.resize(outstanding.size() - keep_count);
+
+  retire_store_ops(wave, outstanding);
 }
 
 /// True when [address, address + size) and [other_address, other_address + other_size) intersect.
@@ -270,8 +262,7 @@ inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_c
     break;
 
   case WaitCntType::STORE:
-    clear_register_fifo(wave->vmem_store_fifo, wave->pending_vgpr_reads, keep_count);
-    clear_register_fifo(wave->acc_vmem_store_fifo, wave->pending_acc_vgpr_reads, keep_count);
+    clear_store_pending_ops(*wave, keep_count);
     break;
 
   case WaitCntType::LDS: {
@@ -280,26 +271,13 @@ inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_c
     clear_register_fifo(wave->flat_vgpr_ds_fifo, wave->pending_vgpr_writes_ds, keep_count);
     clear_register_fifo(wave->flat_acc_vgpr_ds_fifo, wave->pending_acc_vgpr_writes_ds, keep_count);
 
-    auto &read_fifo = wave->lds_read_fifo;
-    if (keep_count == 0) {
-      read_fifo.clear();
-    } else {
-      while (read_fifo.size() > keep_count)
-        read_fifo.pop_front();
-    }
+    clear_address_fifo(wave->lds_read_fifo, keep_count, WaitCntType::LDS);
     break;
   }
 
-  case WaitCntType::TENSOR: {
-    auto &tensor_fifo = wave->tensor_lds_fifo;
-    if (keep_count == 0) {
-      tensor_fifo.clear();
-    } else {
-      while (tensor_fifo.size() > keep_count)
-        tensor_fifo.pop_front();
-    }
+  case WaitCntType::TENSOR:
+    clear_address_fifo(wave->tensor_lds_fifo, keep_count, WaitCntType::TENSOR);
     break;
-  }
 
   case WaitCntType::XCNT:
     // Address translation counter: no data hazard FIFO to drain.
@@ -314,6 +292,10 @@ inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_c
     return false;
   }
   return true;
+}
+
+inline bool clear_pending_ops(WaveState *wave, const WaitCounterClear &counter) {
+  return clear_pending_ops(wave, counter.kind, counter.keep_count);
 }
 
 } // namespace hazard_core

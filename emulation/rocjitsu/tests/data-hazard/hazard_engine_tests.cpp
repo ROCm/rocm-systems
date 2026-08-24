@@ -750,6 +750,146 @@ TEST(GenericDataHazardEngineTest, WaitActionClearsPendingRawHazard) {
   EXPECT_TRUE(engine.warning_snapshot().empty());
 }
 
+TEST(GenericDataHazardEngineTest, PartialWaitLeavesEveryDestinationOfAWideLoadPending) {
+  // global_load_dwordx4 v[4:7] takes one LOADcnt slot, so s_wait_loadcnt 1 does
+  // not retire any of it and reading v4 is still a RAW hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 16;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+namespace {
+
+/// The kernel shape behind the gfx9 scratch spill: a global load into v4, two
+/// scratch stores, then s_waitcnt vmcnt(N) and a read of v4. @p store_counter
+/// is the counter the stores are outstanding on, which is what separates gfx9
+/// from gfx10 and later.
+void run_load_stores_wait_read(DataHazardEngine &engine, WaitCntType store_counter,
+                               uint32_t keep_count) {
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  for (EntityId id : {2u, 3u}) {
+    InstructionEvent store;
+    store.instruction = make_instruction(id, 0x100 + 4 * id);
+    store.hazards.memory_op_wait = store_counter;
+    engine.on_instruction(store);
+  }
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(4, 0x120);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, keep_count});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(5, 0x124);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, VmcntCountsStoresSharingItsCounterWhenRetiringALoad) {
+  // gfx9: one vmcnt holds the load and both stores, so vmcnt(2) retires the
+  // load and reading its destination is safe.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::VMEM, 2);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, VmcntStillReportsRawWhenTooFewOperationsPrecedeTheLoad) {
+  // The same wait keeping one more operation than the counter holds leaves the
+  // load in flight, so the read of its destination is a hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::VMEM, 3);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, VmcntIgnoresStoresCountedOnTheirOwnCounter) {
+  // gfx10 and gfx11 count stores on vscnt, so the same vmcnt(2) sees only the
+  // load, keeps it outstanding, and the read is a hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::STORE, 2);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
 TEST(GenericDataHazardEngineTest, CounterWaitClearsPendingEvenWithoutWaitInstructionFlag) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);

@@ -270,6 +270,8 @@ template <typename Fn> inline void for_each_pending_op(const WaveState *wave, Fn
     visit(entry.second);
   for (const auto &entry : wave->acc_vmem_store_fifo)
     visit(entry.second);
+  for (const auto &op : wave->vmem_store_ops)
+    visit(op);
   for (const auto &entry : wave->lds_read_fifo)
     visit(entry.second);
   for (const auto &entry : wave->flat_vgpr_ds_fifo)

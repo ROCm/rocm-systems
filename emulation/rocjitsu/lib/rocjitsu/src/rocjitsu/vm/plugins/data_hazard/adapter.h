@@ -92,6 +92,11 @@ struct MemoryRouteView {
   bool is_tensor = false;
   bool writes_local_memory = false;
   hazard_core::WaitCntType local_write_wait = hazard_core::WaitCntType::NONE;
+  /// Counter a store of this route is outstanding on: VMEM where one counter
+  /// covers loads and stores, as on gfx9 and CDNA, and STORE where gfx10 and
+  /// later count them apart. Read from the decoded instruction rather than
+  /// assumed, and ignored when the route is not a store.
+  hazard_core::WaitCntType store_wait = hazard_core::WaitCntType::STORE;
   uint64_t exec_mask = 0;
 };
 

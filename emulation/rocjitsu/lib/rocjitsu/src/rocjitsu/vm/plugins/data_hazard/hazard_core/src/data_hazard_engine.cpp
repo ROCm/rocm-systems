@@ -166,6 +166,9 @@ InstructionHazardSemantics
 merge_resource_semantics(const InstructionHazardSemantics &instruction_hazards,
                          const ResourceAccessEvent &event) {
   InstructionHazardSemantics hazards = instruction_hazards;
+  if (event.hazards.memory_op_wait != WaitCntType::NONE)
+    hazards.memory_op_wait = event.hazards.memory_op_wait;
+
   switch (event.resource_kind) {
   case ResourceKind::VectorRegister:
   case ResourceKind::AccumVectorRegister:
@@ -191,6 +194,27 @@ merge_resource_semantics(const InstructionHazardSemantics &instruction_hazards,
     break;
   }
   return hazards;
+}
+
+/// Record a memory operation that holds a wait counter slot without leaving
+/// pending register state, which is what an ordinary vector memory store does.
+/// The frontend names the counter it is outstanding on, VMEM where one counter
+/// covers loads and stores and STORE where they are counted apart. A frontend
+/// may report one store once per lane or per access, so an instruction already
+/// at the back of the queue is not queued again.
+void track_memory_operation(WaveState &wave, const EngineInstructionContext &ctx,
+                            WaitCntType memory_op_wait) {
+  if (memory_op_wait != WaitCntType::VMEM && memory_op_wait != WaitCntType::STORE)
+    return;
+  if (!wave.vmem_store_ops.empty() &&
+      wave.vmem_store_ops.back().instruction_id == ctx.instruction_id)
+    return;
+
+  PendingAsyncOp op;
+  op.instruction_id = ctx.instruction_id;
+  op.pc = ctx.pc;
+  op.wait_type = memory_op_wait;
+  wave.vmem_store_ops.push_back(op);
 }
 
 bool same_workgroup(const EngineGlobalAccessInfo &info, const EngineInstructionContext &ctx) {
@@ -417,8 +441,7 @@ void DataHazardEngine::on_workgroup_end(EntityId dispatch_id, EntityId cluster_i
 
 void DataHazardEngine::on_wavegroup_end(EntityId dispatch_id, EntityId cluster_id,
                                         EntityId workgroup_id, EntityId wavegroup_id) {
-  flush_wavegroup_epoch(
-      EngineWavegroupKey{dispatch_id, cluster_id, workgroup_id, wavegroup_id});
+  flush_wavegroup_epoch(EngineWavegroupKey{dispatch_id, cluster_id, workgroup_id, wavegroup_id});
 }
 
 void DataHazardEngine::on_wave_begin(const ExecutionKey &wave_key) {
@@ -463,6 +486,11 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
 
     const EngineInstructionContext ctx =
         get_instruction_context(*wave, instruction.instruction.instruction_id);
+
+    // Ahead of the wait handling below, which a plain store returns before
+    // reaching because it carries no wait action of its own.
+    track_memory_operation(wave->core, ctx, instruction.hazards.memory_op_wait);
+
     const WaitAction &action = instruction.wait_action;
     if (!wait_action_has_effect(action))
       return;
@@ -473,7 +501,7 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
     }
 
     for (const auto &counter : action.counters) {
-      if (!hazard_core::clear_pending_ops(&wave->core, counter.kind, counter.keep_count))
+      if (!hazard_core::clear_pending_ops(&wave->core, counter))
         reject_event("on_instruction: wait counter has no pending queue to drain");
     }
     prune_pending_raw_isa(*wave);
@@ -526,6 +554,13 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
     ctx.wavegroup_id = event.instruction.execution.wavegroup_id;
 
   InstructionHazardSemantics hazards = merge_resource_semantics(ctx.hazards, event);
+  if (event.hazards.memory_op_wait != WaitCntType::NONE) {
+    track_memory_operation(wave->core, ctx, event.hazards.memory_op_wait);
+    // A frontend that reports counter occupancy on its own, rather than
+    // alongside an access it already reports, sends no address to examine.
+    if (!event.is_read && !event.is_write)
+      return;
+  }
 
   switch (event.resource_kind) {
   case ResourceKind::VectorRegister:
@@ -1500,9 +1535,8 @@ void DataHazardEngine::check_wavegroup_lds_epoch_for_races(
       // Pairs from one wavegroup are exactly what this sweep is here to judge.
       /*skip_intra_wavegroup=*/false,
       [&](uint32_t overlap_addr, EntityId wave_lo, EntityId wave_hi) {
-        const EngineWavegroupLdsRaceKey race_key{key.dispatch_id,  key.cluster_id,
-                                                 key.workgroup_id, key.wavegroup_id,
-                                                 overlap_addr,     wave_lo,
+        const EngineWavegroupLdsRaceKey race_key{key.dispatch_id,  key.cluster_id, key.workgroup_id,
+                                                 key.wavegroup_id, overlap_addr,   wave_lo,
                                                  wave_hi};
         std::lock_guard<std::shared_mutex> lock(state_.mutex);
         return state_.reported_wavegroup_lds_races.insert(race_key).second;

@@ -426,15 +426,21 @@ TEST(DataHazardAdapterTest, ScratchStorePerLaneRouteEmitsActiveScratchWritesOnly
   store.exec_mask = 0x5;
   adapter.on_memory_route(store);
 
-  ASSERT_EQ(api.resources.size(), 2u);
-  EXPECT_EQ(api.resources[0].resource_kind, ResourceKind::ScratchMemory);
-  EXPECT_EQ(api.resources[0].address, 0x7100u);
-  EXPECT_TRUE(api.resources[0].is_write);
+  // One counter slot for the instruction, then the writes of the two active
+  // lanes. The route did not name a counter, so the store takes a slot of the
+  // separate store counter this adapter defaults to.
+  ASSERT_EQ(api.resources.size(), 3u);
+  EXPECT_EQ(api.resources[0].hazards.memory_op_wait, WaitCntType::STORE);
+  EXPECT_FALSE(api.resources[0].is_write);
   EXPECT_FALSE(api.resources[0].is_read);
   EXPECT_EQ(api.resources[1].resource_kind, ResourceKind::ScratchMemory);
-  EXPECT_EQ(api.resources[1].address, 0x7300u);
+  EXPECT_EQ(api.resources[1].address, 0x7100u);
   EXPECT_TRUE(api.resources[1].is_write);
   EXPECT_FALSE(api.resources[1].is_read);
+  EXPECT_EQ(api.resources[2].resource_kind, ResourceKind::ScratchMemory);
+  EXPECT_EQ(api.resources[2].address, 0x7300u);
+  EXPECT_TRUE(api.resources[2].is_write);
+  EXPECT_FALSE(api.resources[2].is_read);
 }
 
 TEST(DataHazardAdapterTest, ReturningAtomicRouteEmitsMemoryRmwAndReturnEvents) {
@@ -2002,15 +2008,18 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   wait.kind = dh::WaitKind::Waitcnt;
   wait.immediate = 0x4000u | (5u << 8) | 7u;
 
+  // s_waitcnt drains the vector memory counter, LDS and scalar memory. It
+  // names no store counter of its own: a gfx9 store is outstanding on the
+  // vector memory counter this already drains, and a gfx10 or gfx11 store
+  // waits for the separate s_waitcnt_vscnt.
   WaitAction action = dh::make_wait_action(wait);
   ASSERT_TRUE(action.is_wait_instruction);
-  ASSERT_EQ(action.counters.size(), 4u);
+  ASSERT_EQ(action.counters.size(), 3u);
   ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
-  ASSERT_NE(find_counter(action, WaitCntType::STORE), nullptr);
+  ASSERT_EQ(find_counter(action, WaitCntType::STORE), nullptr);
   ASSERT_NE(find_counter(action, WaitCntType::LDS), nullptr);
   ASSERT_NE(find_counter(action, WaitCntType::SMEM), nullptr);
   EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 0x17u);
-  EXPECT_EQ(find_counter(action, WaitCntType::STORE)->keep_count, 0x17u);
   EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 5u);
   EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 5u);
 

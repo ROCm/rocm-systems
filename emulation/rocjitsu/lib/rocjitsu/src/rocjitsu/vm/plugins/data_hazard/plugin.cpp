@@ -34,6 +34,19 @@ bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
+/// The hazard counter a store is outstanding on, taken from the counter the
+/// decoder assigned it. gfx9 and CDNA count stores on the same vmcnt as loads;
+/// gfx10 and later count them on vscnt/storecnt of their own.
+hazard_core::WaitCntType make_store_wait(amdgpu::WaitCounterType counter) {
+  switch (counter) {
+  case amdgpu::WaitCounterType::VSCNT:
+  case amdgpu::WaitCounterType::STORECNT:
+    return hazard_core::WaitCntType::STORE;
+  default:
+    return hazard_core::WaitCntType::VMEM;
+  }
+}
+
 bool is_vector_load_mnemonic(std::string_view mnemonic) {
   return starts_with(mnemonic, "buffer_load") || starts_with(mnemonic, "global_load") ||
          starts_with(mnemonic, "flat_load") || starts_with(mnemonic, "scratch_load");
@@ -498,6 +511,7 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
   route.is_atomic = vmem->atomic_op != amdgpu::AtomicOp::NONE;
   route.exec_mask = vmem->lane_mask != 0 ? vmem->lane_mask : vmem->exec_mask;
   route.is_flat = starts_with(inst.mnemonic(), "flat_");
+  route.store_wait = make_store_wait(vmem->wait_counter_type);
 
   const size_t lanes = std::min<size_t>(vmem->wf_size, vmem->per_lane_addr.size());
   route.per_lane_addresses.reserve(lanes);

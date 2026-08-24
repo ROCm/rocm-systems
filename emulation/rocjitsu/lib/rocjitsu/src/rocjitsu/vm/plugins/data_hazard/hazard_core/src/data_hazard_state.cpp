@@ -27,6 +27,8 @@ void merge_hazards(InstructionHazardSemantics &current, const InstructionHazardS
     current.scalar_write_wait = update.scalar_write_wait;
   if (update.local_write_wait != WaitCntType::NONE)
     current.local_write_wait = update.local_write_wait;
+  if (update.memory_op_wait != WaitCntType::NONE)
+    current.memory_op_wait = update.memory_op_wait;
 }
 
 void merge_instruction_context(EngineInstructionContext &current,

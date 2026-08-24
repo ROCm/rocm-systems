@@ -142,7 +142,15 @@ struct WaveState {
   std::unordered_map<uint32_t, PendingAsyncOp> pending_vgpr_writes;
   std::unordered_map<uint32_t, PendingAsyncOp> pending_sgpr_writes;
 
-  // FIFO queues for proper waitcnt N handling (RAW)
+  // FIFO queues for proper waitcnt N handling (RAW).
+  //
+  // An instruction leaves one entry per register or address it touches, all
+  // carrying its instruction id. The counter these drain against counts issued
+  // instructions, so a wait of N keeps the N newest *instructions*, and every
+  // entry of an instruction retires with it: global_load_dwordx4 v[0:3] leaves
+  // four entries in one LOADcnt slot, and s_wait_loadcnt 1 leaves all four
+  // pending. See detail/fifo_ops.h for the drain itself.
+  //
   // Design trade-off for LDS: We use address ranges rather than a per-byte bitmap.
   // Ranges are memory-efficient for typical contiguous accesses, while a
   // bitmap would require 8KB per wave (LDS is 64KB). Ranges may have rare
@@ -171,6 +179,13 @@ struct WaveState {
 
   // FIFO for store operations (WAR)
   std::deque<std::pair<uint32_t, PendingAsyncOp>> vmem_store_fifo;
+
+  // Vector memory stores in flight, held for wait-counter occupancy alone. A
+  // store leaves no pending register state behind because its data sources are
+  // captured at issue, but it does hold a memory counter slot, and where one
+  // counter tracks loads and stores together that slot delays the retirement of
+  // older loads. One entry per issued store instruction, oldest first.
+  std::deque<PendingAsyncOp> vmem_store_ops;
 
   // Pending async LDS reads (DS loads in flight): address -> op.
   // WAR hazard: a DS write to an overlapping address before s_wait_dscnt
@@ -210,6 +225,7 @@ struct WaveState {
     acc_vmem_store_fifo.clear();
     pending_vgpr_reads.clear();
     vmem_store_fifo.clear();
+    vmem_store_ops.clear();
     lds_read_fifo.clear();
     tensor_lds_fifo.clear();
     reported_raw_hazards.clear();

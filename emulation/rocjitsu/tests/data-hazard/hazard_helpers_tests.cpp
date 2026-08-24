@@ -352,6 +352,14 @@ protected:
     auto op = make_op(id, type);
     wave.lds_fifo.push_back({addr, op});
   }
+
+  /// A store as the frontends report it: a slot of the counter it is
+  /// outstanding on and nothing else, its data sources having been captured
+  /// when it issued. VMEM is the gfx9 and CDNA counter, STORE the gfx10-and-
+  /// later one.
+  void push_store_op(EntityId id, WaitCntType counter) {
+    wave.vmem_store_ops.push_back(make_op(id, counter));
+  }
 };
 
 TEST_F(ClearPendingOpsTest, NullWaveIsNoop) {
@@ -403,6 +411,132 @@ TEST_F(ClearPendingOpsTest, KeepsNewestEntriesForWaitN) {
   EXPECT_EQ(wave.vmem_load_fifo.size(), 1u);
   EXPECT_EQ(wave.vmem_load_fifo.front().first, 2u);
   EXPECT_EQ(wave.pending_vgpr_writes.count(2), 1u);
+}
+
+TEST_F(ClearPendingOpsTest, WaitNCountsInstructionsNotDestinationRegisters) {
+  // global_load_dwordx4 v[0:3] leaves four FIFO entries but occupies a single
+  // LOADcnt slot, so s_wait_loadcnt 1 leaves the whole load outstanding.
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    push_vmem_load(reg, 1);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::VMEM, 1);
+
+  EXPECT_EQ(wave.vmem_load_fifo.size(), 4u);
+  EXPECT_EQ(wave.pending_vgpr_writes.size(), 4u);
+}
+
+TEST_F(ClearPendingOpsTest, WaitNRetiresEveryRegisterOfTheOperationsItDrains) {
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    push_vmem_load(reg, 1);
+  for (uint32_t reg = 4; reg < 8; ++reg)
+    push_vmem_load(reg, 2);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::VMEM, 1);
+
+  // The older load retires whole; the newer one stays whole.
+  EXPECT_EQ(wave.vmem_load_fifo.size(), 4u);
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    EXPECT_EQ(wave.pending_vgpr_writes.count(reg), 0u) << "register " << reg;
+  for (uint32_t reg = 4; reg < 8; ++reg)
+    EXPECT_EQ(wave.pending_vgpr_writes.count(reg), 1u) << "register " << reg;
+}
+
+TEST_F(ClearPendingOpsTest, SmemWaitNCountsInstructionsNotDestinationRegisters) {
+  // s_load_dwordx8 s[0:7]: one KMcnt slot, eight FIFO entries.
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    push_smem_load(reg, 1);
+  for (uint32_t reg = 8; reg < 16; ++reg)
+    push_smem_load(reg, 2);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::SMEM, 1);
+
+  // Scalar loads complete out of order, so a partial wait drains nothing at all.
+  EXPECT_EQ(wave.smem_load_fifo.size(), 16u);
+  EXPECT_EQ(wave.pending_sgpr_writes.size(), 16u);
+}
+
+TEST_F(ClearPendingOpsTest, StoreWaitNCountsInstructionsNotSourceRegisters) {
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    push_store(reg, 1);
+  for (uint32_t reg = 4; reg < 8; ++reg)
+    push_store(reg, 2);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::STORE, 1);
+
+  EXPECT_EQ(wave.vmem_store_fifo.size(), 4u);
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    EXPECT_EQ(wave.pending_vgpr_reads.count(reg), 0u) << "register " << reg;
+  for (uint32_t reg = 4; reg < 8; ++reg)
+    EXPECT_EQ(wave.pending_vgpr_reads.count(reg), 1u) << "register " << reg;
+}
+
+TEST_F(ClearPendingOpsTest, StoreWaitDrainsCounterSlotsHoldingNoRegisterState) {
+  push_store_op(1, WaitCntType::STORE);
+  push_store_op(2, WaitCntType::STORE);
+  push_store_op(3, WaitCntType::STORE);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::STORE, 1);
+
+  ASSERT_EQ(wave.vmem_store_ops.size(), 1u);
+  EXPECT_EQ(wave.vmem_store_ops.front().instruction_id, 3u);
+}
+
+TEST_F(ClearPendingOpsTest, VmemWaitCountsStoresOfItsOwnCounterAgainstTheLoadsItKeeps) {
+  // The gfx9 sequence a scratch spill produces: one global load, then two
+  // scratch stores, then s_waitcnt vmcnt(2). One counter holds all three in
+  // issue order, so keeping two retires the load and the read of its
+  // destination that follows is safe.
+  push_vmem_load(0, 1);
+  push_store_op(2, WaitCntType::VMEM);
+  push_store_op(3, WaitCntType::VMEM);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::VMEM, 2);
+
+  EXPECT_TRUE(wave.vmem_load_fifo.empty());
+  EXPECT_TRUE(wave.pending_vgpr_writes.empty());
+  EXPECT_EQ(wave.vmem_store_ops.size(), 2u);
+}
+
+TEST_F(ClearPendingOpsTest, VmemWaitLeavesLoadPendingWhenTooFewOperationsPrecedeIt) {
+  // The same wait with one store fewer keeps two operations outstanding, so
+  // the load has not landed and reading its destination is still a hazard.
+  push_vmem_load(0, 1);
+  push_store_op(2, WaitCntType::VMEM);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::VMEM, 2);
+
+  EXPECT_EQ(wave.vmem_load_fifo.size(), 1u);
+  EXPECT_EQ(wave.pending_vgpr_writes.count(0), 1u);
+  EXPECT_EQ(wave.vmem_store_ops.size(), 1u);
+}
+
+TEST_F(ClearPendingOpsTest, VmemWaitIgnoresStoresCountedOnTheirOwnCounter) {
+  // gfx10 and gfx11 count stores on vscnt, so the same three operations leave
+  // vmcnt(2) with one load outstanding and nothing to retire. The stores wait
+  // for s_waitcnt_vscnt instead.
+  push_vmem_load(0, 1);
+  push_store_op(2, WaitCntType::STORE);
+  push_store_op(3, WaitCntType::STORE);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::VMEM, 2);
+
+  EXPECT_EQ(wave.vmem_load_fifo.size(), 1u);
+  EXPECT_EQ(wave.pending_vgpr_writes.count(0), 1u);
+  EXPECT_EQ(wave.vmem_store_ops.size(), 2u);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::STORE, 0);
+  EXPECT_TRUE(wave.vmem_store_ops.empty());
+  EXPECT_EQ(wave.vmem_load_fifo.size(), 1u);
+}
+
+TEST_F(ClearPendingOpsTest, StoreWaitLeavesStoresOfTheLoadCounterOutstanding) {
+  // An explicit store wait on a target whose stores are counted with its loads
+  // has nothing of its own to drain.
+  push_store_op(1, WaitCntType::VMEM);
+
+  hazard_core::clear_pending_ops(&wave, WaitCntType::STORE, 0);
+
+  EXPECT_EQ(wave.vmem_store_ops.size(), 1u);
 }
 
 TEST_F(ClearPendingOpsTest, VmemWaitNCombinesRegisterAndLdsOperations) {
