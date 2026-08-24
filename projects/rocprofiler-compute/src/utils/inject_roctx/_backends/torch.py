@@ -277,7 +277,8 @@ def _initialize_c_tier() -> bool:
     except Exception as exc:
         console_warning(
             "ml api trace",
-            f"loader raised; falling back to Python tier: {exc}",
+            "C++ RecordFunction tier unavailable "
+            f"({type(exc).__name__}: {exc}); falling back to Python tier",
         )
         result = None
 
@@ -303,7 +304,8 @@ def _initialize_c_tier() -> bool:
         except Exception as exc:
             console_warning(
                 "ml api trace",
-                f".so install() raised; falling back to Python tier: {exc}",
+                "C++ RecordFunction tier install failed "
+                f"({type(exc).__name__}: {exc}); falling back to Python tier",
             )
             _STATE.torch_trace_collector = None
 
