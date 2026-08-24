@@ -126,7 +126,9 @@ def main():
         # Generate coverage report
         if not args.coverage_report:
             print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
-        executor.generate_coverage_report()
+        if not executor.generate_coverage_report():
+            print("ERROR: Coverage report generation failed")
+            sys.exit(1)
 
         # Emit structured results for the dashboard (no-op unless
         # --emit-results / --db-push was passed). Coverage is emitted too when a

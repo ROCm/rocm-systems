@@ -33,6 +33,19 @@
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942",
     "parallel_jobs": 64
   },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx942"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "env_variables": {}
+  },
   "test_configurations": {
     "default": {
       "env_variables": {},
