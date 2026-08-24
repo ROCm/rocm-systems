@@ -119,10 +119,14 @@ void checkMaxP2pResolver(int expected)
 
 void checkUpperBound(int expectedUpper, bool expectedOptedHigher)
 {
+    // Neutral arch and topology: gfx942 resolves to the default bound on any node count,
+    // so these param-layer cases isolate env handling from the per-arch policy.
+    P2pChannelsComm fixture;
+    fixture.initSingleNode("gfx942", /*nRanks=*/8, /*nChannels=*/256, /*seedP2pPerPeer=*/8);
     bool optedHigher = !expectedOptedHigher;
-    EXPECT_EQ(ncclP2pChannelsUpperBound(&optedHigher), expectedUpper);
+    EXPECT_EQ(ncclP2pChannelsUpperBound(fixture.comm, &optedHigher), expectedUpper);
     EXPECT_EQ(optedHigher, expectedOptedHigher);
-    EXPECT_EQ(ncclP2pChannelsUpperBound(nullptr), expectedUpper);
+    EXPECT_EQ(ncclP2pChannelsUpperBound(fixture.comm, nullptr), expectedUpper);
 }
 
 void checkSingleNodeCompute(const char* gcn, int expectedP2pChannels)
@@ -248,8 +252,21 @@ TEST_P(P2pMaxNchannelsSingleNodeTest, Explicit64_StaysAt64)
         {{"NCCL_MAX_P2P_NCHANNELS", "64"}});
 }
 
+// gfx1250 takes the full pool on single node, so it has its own case below.
 INSTANTIATE_TEST_SUITE_P(Mi3xxSingleNode, P2pMaxNchannelsSingleNodeTest,
-                         ::testing::Values("gfx942", "gfx950", "gfx1250"));
+                         ::testing::Values("gfx942", "gfx950"));
+
+TEST(P2pMaxNchannelsSingleNodeGfx1250Test, UnsetEnv_TakesFullPool)
+{
+    RUN_ISOLATED_TEST(
+        "UnsetEnv_TakesFullPool_gfx1250",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            // Seeded pool is 256, below MAXCHANNELS in either build, so it is the bound.
+            checkSingleNodeCompute("gfx1250", 256);
+        });
+}
 
 // --- Multi-node MI350 caps apply only without extended opt-in ---------------
 
