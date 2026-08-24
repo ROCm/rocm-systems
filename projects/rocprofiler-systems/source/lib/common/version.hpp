@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#pragma once
+
 #include <compare>
 #include <cstdint>
-
-#pragma once
 
 namespace rocprofsys
 {

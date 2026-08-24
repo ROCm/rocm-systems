@@ -9,15 +9,15 @@
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/tracing-config.hpp"
 
-#include <cctype>
-#include <cstddef>
-#include <iterator>
-#include <ranges>
+#include <spdlog/fmt/fmt.h>
 
 #include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
+#include <ranges>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -108,10 +108,10 @@ private:
     static operation_options_env_names assemble_operation_env_names_for_kind(
         TracingKind kind);
 
-    static constexpr std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
+    static const std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
     get_supported_callback_domains();
 
-    static constexpr std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
+    static const std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
     get_supported_buffer_domains();
 
     /// @brief Domain-name -> kind(s) lookup table for get_callback_domains(),
@@ -284,13 +284,19 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
 
     for(const auto& itr : domains_input)
     {
-        // Domains that pass validation but aren't in the compile-time supported
-        // set (e.g. an older SDK header) have no domain_map entry; skip silently.
         if(const auto domain_map_itr = domain_map.find(itr);
            domain_map_itr != domain_map.end())
         {
             callback_domains.insert(domain_map_itr->second.begin(),
                                     domain_map_itr->second.end());
+        }
+        else
+        {
+            // Domain passed validation but isn't in the compile-time supported
+            // set (e.g. an older SDK header).
+            LOG_WARNING("ROCPROFSYS_ROCM_DOMAINS: domain '{}' is not supported by "
+                        "the loaded rocprofiler-sdk headers and will be ignored.",
+                        itr);
         }
     }
 
@@ -578,7 +584,7 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-constexpr std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
+const std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::callback_tracing_kind_t>{
@@ -620,7 +626,7 @@ tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-constexpr std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
+const std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>{
@@ -698,7 +704,7 @@ tracing_config<SdkBackend, Externals>::get_callback_domain_map()
         },
     };
 
-    for(size_t idx = 0; idx < callback_info.size(); ++idx)
+    for(std::size_t idx = 0; idx < callback_info.size(); ++idx)
     {
         const auto& ditr = callback_info[idx];
         if(supported.contains(ditr.value))
@@ -805,7 +811,7 @@ tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
         });
     }
 
-    for(size_t index = 0; index < buffer_info.size(); ++index)
+    for(std::size_t index = 0; index < buffer_info.size(); ++index)
     {
         const auto& domain = buffer_info[index];
         if(supported.contains(domain.value))

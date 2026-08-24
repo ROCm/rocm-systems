@@ -24,23 +24,11 @@ struct default_externals
     {
         return ::rocprofsys::config::get_use_unified_memory_profiling();
     }
-    static bool get_use_process_sampling()
-    {
-        return ::rocprofsys::config::get_use_process_sampling();
-    }
-    static std::string get_trace_region()
-    {
-        return ::rocprofsys::config::get_trace_region();
-    }
     static std::string get_rocm_domains()
     {
         return ::rocprofsys::get_setting_value<std::string>(
                    std::string{ ::rocprofsys::env_vars::ROCM_DOMAINS })
             .value_or(std::string{});
-    }
-    static std::string get_gpu_perf_counters()
-    {
-        return ::rocprofsys::get_gpu_perf_counters();
     }
 
     static std::optional<std::string> get_setting_value(std::string_view s)
