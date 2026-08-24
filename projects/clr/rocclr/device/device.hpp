@@ -676,6 +676,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
+  //! SGPR allocation granularity. Zero if the backend does not report it.
+  uint32_t sgprAllocGranularity_;
+  //! Per-wave SGPRs reserved by the trap handler. Zero if absent or unreported.
+  uint32_t sgprTrapHandlerReserve_;
 
   uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 

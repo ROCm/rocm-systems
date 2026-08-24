@@ -63,9 +63,18 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     return hipErrorUnknown;
   }
 
+  // A wave costs its granule-rounded SGPRs plus the trap handler's reserve;
+  // omitting the reserve over-reports SGPR-bound kernels by a wave per SIMD.
+  // Mirrors LLVM AMDGPUUtils::getOccupancyWithNumSGPRs().
+  constexpr size_t DefaultSgprAllocGranule = 16;
+  const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
+      ? device.info().sgprAllocGranularity_
+      : DefaultSgprAllocGranule;
+  const size_t sgprsPerWave =
+      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
-      ? std::min(VgprWaves, device.info().sgprsPerSimd_ /
-                            amd::alignUp(wrkGrpInfo->usedSGPRs_, 16))
+      ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
       : VgprWaves;
 
   // The table contains SIMD per CU, not per WGP, so when WGP mode is set

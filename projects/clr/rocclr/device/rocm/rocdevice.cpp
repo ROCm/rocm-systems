@@ -1732,6 +1732,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
