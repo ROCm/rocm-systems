@@ -25,6 +25,8 @@ THE SOFTWARE.
 #include "rocjpeg_vaapi_loader.h"
 
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -79,6 +81,24 @@ void RocJpegVaapiLoader::LoadSym(const char *name, T *&fn_ptr) {
         throw std::runtime_error(std::string("RocJpegVaapiLoader: dlsym('") + name + "'): " +
                                  (err ? err : "symbol not found"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared-instance accessor
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<RocJpegVaapiLoader> RocJpegVaapiLoader::GetShared() {
+    static std::mutex mtx;
+    static std::weak_ptr<RocJpegVaapiLoader> weak;
+
+    std::lock_guard<std::mutex> lock(mtx);
+    if (auto shared = weak.lock()) {
+        return shared;
+    }
+    // Allocate manually because the constructor is private.
+    auto loader = std::shared_ptr<RocJpegVaapiLoader>(new RocJpegVaapiLoader());
+    weak = loader;
+    return loader;
 }
 
 // ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ THE SOFTWARE.
 //
 // All va*() calls in this translation unit are macro-redirected through
 // g_va_loader->fn.*, which resolves to the isolated librocm_sysdeps_va.so.2
-// loaded into a private link-map namespace.  This prevents system libva.so.2
+// loaded with dlopen(RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND). This prevents system libva.so.2
 // (e.g. loaded by libavcodec in the same process) from winning the symbol
 // table and intercepting rocdecode's VA calls.
 //

@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>

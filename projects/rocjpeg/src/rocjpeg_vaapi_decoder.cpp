@@ -28,13 +28,14 @@ THE SOFTWARE.
 
 #ifdef ROCJPEG_USE_DLOPEN_VA
 // ---------------------------------------------------------------------------
-// VA-API call redirection through the per-instance dlopen vtable.
+// VA-API call redirection through the process-wide shared dlopen vtable.
 // All va*() calls in this translation unit are macro-redirected through
 // g_va_loader->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
 // loaded with RTLD_LOCAL | RTLD_DEEPBIND.  This prevents system libva.so.2
 // (e.g. loaded by libavcodec) from intercepting rocjpeg's VA calls.
-// Macros are expanded at invocation time, so vaErrorStr inside error-logging
-// calls is also transparently redirected.
+// g_va_loader is a raw pointer to the process-wide shared loader owned by
+// all live RocJpegVappiDecoder instances via shared_ptr. It is valid
+// whenever any decoder exists; nulled only when the last decoder is destroyed.
 // ---------------------------------------------------------------------------
 static RocJpegVaapiLoader *g_va_loader = nullptr;
 
@@ -387,7 +388,7 @@ RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
 #ifdef ROCJPEG_USE_DLOPEN_VA
-    va_loader_ = std::make_unique<RocJpegVaapiLoader>();
+    va_loader_ = RocJpegVaapiLoader::GetShared();
     g_va_loader = va_loader_.get();
 #endif
 };
@@ -431,7 +432,15 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
 
     }
 #ifdef ROCJPEG_USE_DLOPEN_VA
-    g_va_loader = nullptr;
+    // Null the global before releasing our shared_ptr reference. If this is
+    // the last decoder instance (use_count == 1), the loader will be destroyed
+    // and any post-destruction macro call would fault — nulling first makes
+    // that fault visible rather than silent. If other decoders still exist,
+    // they will reset g_va_loader to their own (identical) pointer in their
+    // own constructor, so it remains valid for them.
+    if (va_loader_.use_count() == 1) {
+        g_va_loader = nullptr;
+    }
     va_loader_.reset();
 #endif
 }

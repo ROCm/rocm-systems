@@ -26,6 +26,8 @@ THE SOFTWARE.
 
 #include <dlfcn.h>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <va/va.h>
@@ -88,13 +90,19 @@ class RocJpegVaapiLoader {
 public:
     RocJpegVaapiVtable fn{};
 
-    RocJpegVaapiLoader();
+    // Returns the process-wide shared loader, constructing it on first call.
+    // Thread-safe. Throws std::runtime_error if the library cannot be found
+    // or loaded.
+    static std::shared_ptr<RocJpegVaapiLoader> GetShared();
+
     ~RocJpegVaapiLoader();
 
     RocJpegVaapiLoader(const RocJpegVaapiLoader &) = delete;
     RocJpegVaapiLoader &operator=(const RocJpegVaapiLoader &) = delete;
 
 private:
+    RocJpegVaapiLoader();
+
     void *va_drm_handle_ = nullptr;
 
     static std::string FindVaDrmLibPath();

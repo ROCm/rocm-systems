@@ -341,7 +341,10 @@ public:
 private:
 #ifdef ROCJPEG_USE_DLOPEN_VA
     // Owns the dlopen handle and all VA function pointers for this decoder instance.
-    std::unique_ptr<RocJpegVaapiLoader> va_loader_;
+    // Shared reference to the process-wide VA loader. The dlopen handle stays
+    // open as long as at least one decoder instance exists; dlclose runs when
+    // the last shared_ptr is destroyed.
+    std::shared_ptr<RocJpegVaapiLoader> va_loader_;
 #endif
     int device_id_; // The ID of the device
     int drm_fd_; // The file descriptor for the DRM device
