@@ -300,4 +300,153 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
     );
 }
 
+// =========================================================================
+// Pool reclaim: teardown-orphaned slots must be reclaimable
+// =========================================================================
+TEST(AcclProfilerLifecycle, PoolReclaimsOrphanedSlots) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.PoolReclaimsOrphanedSlots",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD00D, &mask, "pool_test",
+                                     1, 1, 0, nullptr), 0);
+
+            // Fill the pool (256 slots) with collectives that have
+            // nChannels=1 but no KernelCh events. Stop each coll
+            // immediately — collStopped=1, nKernelChCompleted(0) != nChannels(1),
+            // so acclShouldFinalize never fires and the slot stays pinned.
+            void* handles[256];
+            for (int i = 0; i < 256; i++) {
+                ncclProfilerEventDescr_v5_t d;
+                memset(&d, 0, sizeof(d));
+                d.type = (1 << 1);
+                d.coll.func = "AllReduce";
+                d.coll.algo = "Ring";
+                d.coll.proto = "Simple";
+                d.coll.datatype = "ncclFloat32";
+                d.coll.count = 1;
+                d.coll.seqNumber = i;
+                d.coll.nChannels = 1;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &handles[i], &d), 0);
+                ASSERT_NE(handles[i], nullptr) << "Pool exhausted at i=" << i;
+                ASSERT_EQ(acclPluginStopEvent(handles[i]), 0);
+            }
+
+            // Pool is now full. The next alloc should trigger reclaim
+            // of the collStopped slots and succeed.
+            ncclProfilerEventDescr_v5_t d;
+            memset(&d, 0, sizeof(d));
+            d.type = (1 << 1);
+            d.coll.func = "AllReduce";
+            d.coll.algo = "Ring";
+            d.coll.proto = "Simple";
+            d.coll.datatype = "ncclFloat32";
+            d.coll.count = 1;
+            d.coll.seqNumber = 999;
+            d.coll.nChannels = 0;
+            void* h = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &h, &d), 0);
+            EXPECT_NE(h, nullptr) << "Pool reclaim failed — slot 257 should succeed";
+            if (h) ASSERT_EQ(acclPluginStopEvent(h), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_pool"}}
+    );
+}
+
+// =========================================================================
+// Coll stop before KernelCh: verify no corrupt/duplicate records
+// =========================================================================
+TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.CollStopBeforeAllChannels",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xFACE, &mask, "ordering_test",
+                                     1, 2, 0, nullptr), 0);
+
+            // Start coll with 2 channels
+            ncclProfilerEventDescr_v5_t collDescr;
+            memset(&collDescr, 0, sizeof(collDescr));
+            collDescr.type = (1 << 1);
+            collDescr.coll.func = "AllReduce";
+            collDescr.coll.algo = "Ring";
+            collDescr.coll.proto = "Simple";
+            collDescr.coll.datatype = "ncclFloat32";
+            collDescr.coll.count = 512;
+            collDescr.coll.seqNumber = 42;
+            collDescr.coll.nChannels = 2;
+
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            // Start both KernelCh events
+            void* kch0 = nullptr;
+            void* kch1 = nullptr;
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = (1 << 6);
+            kd.parentObj = collHandle;
+
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 2000000;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
+
+            kd.kernelCh.channelId = 1;
+            kd.kernelCh.pTimer = 2000100;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kd), 0);
+
+            // Record GPU stop timestamps
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 2010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+            sa.kernelCh.pTimer = 2010200;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+
+            // Stop Coll FIRST (before any KernelCh stop)
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+
+            // Stop both channels — the last one should trigger finalization
+            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch1), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // Verify exactly one record with both channels
+            char hostname[256] = {0};
+            gethostname(hostname, sizeof(hostname) - 1);
+            char path[1024];
+            snprintf(path, sizeof(path),
+                "/tmp/accl_test_ordering/accl_profiler_rank0_%s_pid%d_0xface.jsonl",
+                hostname, (int)getpid());
+            std::ifstream ifs(path);
+            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
+
+            int lineCount = 0;
+            std::string line;
+            while (std::getline(ifs, line)) {
+                if (!line.empty()) lineCount++;
+            }
+            EXPECT_EQ(lineCount, 1)
+                << "Expected exactly 1 record, got " << lineCount;
+
+            // Re-read the single line to verify content
+            ifs.clear();
+            ifs.seekg(0);
+            ASSERT_TRUE(std::getline(ifs, line));
+            EXPECT_NE(line.find("\"coll_sn\":42"), std::string::npos);
+            EXPECT_NE(line.find("\"coll_n_channels\":2"), std::string::npos);
+            EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
+                       std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ordering"}}
+    );
+}
+
 } // namespace RcclUnitTesting
