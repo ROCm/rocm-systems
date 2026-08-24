@@ -1982,6 +1982,12 @@ write_rocpd(
                             tool_metadata.get_marker_message(itr.correlation_id.internal);
                         if(!message.empty())
                         {
+                            // name the region after the user-provided ROCTx message rather
+                            // than the synthetic API name (e.g. "warm up" instead of
+                            // "roctxThreadRangeA"). Matches generatePerfetto.cpp. The message
+                            // remains in extdata for consumers already reading it from there.
+                            name = message;
+
                             msg = get_json_string(
                                 [](auto& ar, std::string_view _msg) {
                                     ar(cereal::make_nvp("message", std::string{_msg}));

@@ -7,9 +7,9 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/refcount.h"
-#include "util/except.h"
 
 #include <memory>
+#include <new>
 
 using namespace rocjitsu;
 
@@ -17,31 +17,47 @@ struct rj_code_decoder_t : RefCounted {
   std::unique_ptr<Decoder> decoder;
 };
 
+namespace {
+
+template <typename Factory>
+rj_status_t create_decoder_handle(Factory &&factory, rj_code_decoder_t **decoder) {
+  try {
+    auto implementation = factory();
+    if (!implementation)
+      return ROCJITSU_STATUS_ERROR;
+
+    auto handle = std::make_unique<rj_code_decoder_t>();
+    handle->decoder = std::move(implementation);
+    *decoder = handle.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
+}
+
+} // namespace
+
 rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder) {
-  if (!decoder || arch < ROCJITSU_CODE_ARCH_CDNA1 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
+  if (!decoder)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *decoder = nullptr;
+  if (arch < ROCJITSU_CODE_ARCH_CDNA1 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto d = Decoder::create(arch);
-  if (!d)
-    return ROCJITSU_STATUS_ERROR;
-
-  *decoder = new rj_code_decoder_t{};
-  (*decoder)->decoder = std::move(d);
-  return ROCJITSU_STATUS_SUCCESS;
+  return create_decoder_handle([arch] { return Decoder::create(arch); }, decoder);
 }
 
 rj_status_t rj_code_decoder_create_for_target(const char *target_id, rj_code_decoder_t **decoder) {
-  if (target_id == nullptr || target_id[0] == '\0' || decoder == nullptr)
+  if (decoder == nullptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *decoder = nullptr;
+  if (target_id == nullptr || target_id[0] == '\0')
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  std::unique_ptr<Decoder> target_decoder =
-      Decoder::create(default_isa_target_registry(), target_id);
-  if (!target_decoder)
-    return ROCJITSU_STATUS_ERROR;
-
-  *decoder = new rj_code_decoder_t{};
-  (*decoder)->decoder = std::move(target_decoder);
-  return ROCJITSU_STATUS_SUCCESS;
+  return create_decoder_handle(
+      [target_id] { return Decoder::create(default_isa_target_registry(), target_id); }, decoder);
 }
 
 void rj_code_decoder_retain(rj_code_decoder_t *decoder) {
@@ -66,19 +82,28 @@ void rj_code_decoder_destroy(rj_code_decoder_t *decoder) {
 rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                    const rj_code_binary_inst_t *binary_inst,
                                    rj_code_inst_t **inst) {
-  if (!decoder || !decoder->decoder || !binary_inst || !inst)
+  if (!inst)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *inst = nullptr;
+  if (!decoder || !decoder->decoder || !binary_inst)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  *inst = nullptr;
-  Instruction *decoded = nullptr;
   try {
-    decoded = decoder->decoder->decode(binary_inst);
-  } catch (const util::InvalidInst &) {
+    Instruction::ScopedHeapAllocation heap_allocation;
+    DecodeResult decoded = decoder->decoder->decode(binary_inst);
+    if (decoded.failed())
+      return ROCJITSU_STATUS_ERROR;
+
+    *inst = reinterpret_cast<rj_code_inst_t *>(decoded.value().release());
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
     return ROCJITSU_STATUS_ERROR;
   }
-  if (!decoded)
-    return ROCJITSU_STATUS_ERROR;
+}
 
-  *inst = reinterpret_cast<rj_code_inst_t *>(decoded);
-  return ROCJITSU_STATUS_SUCCESS;
+void rj_code_inst_destroy(rj_code_inst_t *inst) {
+  Instruction::ScopedHeapAllocation heap_allocation;
+  delete reinterpret_cast<Instruction *>(inst);
 }

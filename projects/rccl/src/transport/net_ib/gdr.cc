@@ -36,10 +36,10 @@ static void ibGdrSupportInitOnce() {
     if (ncclIbScanDefaultPeerMemClients()) ncclIbGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
-    (void)ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
+    (void)ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
     if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbPciRelaxedOrdering();
-      (void)ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
+      (void)ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
       if (strcmp(strValue, "1") == 0 && roMode == 0) ncclIbGdrModuleLoaded = 0;
     }
   }
@@ -64,7 +64,8 @@ static void ibPeerMemSupportInitOnce() {
   ncclIbPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
 }
 
-// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem (e.g. nv_mem, nv_mem_nc)
+// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem
+// (e.g. nv_mem, nv_mem_nc)
 ncclResult_t ncclIbPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);

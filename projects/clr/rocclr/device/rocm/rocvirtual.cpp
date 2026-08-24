@@ -1262,11 +1262,22 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
 }
 
 // ================================================================================================
-void VirtualGPU::AcquireQueueWithPreference() {
-  std::scoped_lock lock(execution());
-  if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
+void VirtualGPU::AcquireHwQueueIfNeeded() {
+  if (!dedicated_queue_ && gpu_queue_ == nullptr) {
     SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_));
     last_hwq_ = nullptr;
+    if (gpu_queue_ == nullptr) {
+      LogError("Runtime failed to acquire a HW queue!");
+    }
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::AcquireQueueWithPreference() {
+  std::scoped_lock lock(execution());
+  // Graph launch: only reattach when a preferred queue was actually saved by SetPreferredQueue().
+  if (last_hwq_ != nullptr) {
+    AcquireHwQueueIfNeeded();
   }
 }
 
@@ -1288,10 +1299,7 @@ bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& exc
 // ================================================================================================
 uint64_t VirtualGPU::getQueueID() {
   std::scoped_lock lock(execution());
-  // Dedicated queues keep their HW queue, never acquire from pool
-  if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_));
-  }
+  AcquireHwQueueIfNeeded();
   return gpu_queue_->id;
 }
 
@@ -2361,10 +2369,7 @@ VirtualGPU::~VirtualGPU() {
 
   if (tracking_created_) {
     std::scoped_lock l(execution());
-    // Dedicated queues keep their HW queue, never acquire from pool
-    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_));
-    }
+    AcquireHwQueueIfNeeded();
     // Windows requires an interrupt in more cases than Linux for OS fence updates
     force_irq_ = IS_WINDOWS;
     // Force extra barrier to make sure OS gets an interrupt,
@@ -2584,6 +2589,11 @@ void VirtualGPU::ManagedBuffer::ResetPool() {
 // ================================================================================================
 void* VirtualGPU::allocKernArg(size_t size, size_t alignment) {
   return managed_kernarg_buffer_.Acquire(size, alignment);
+}
+
+// ================================================================================================
+size_t VirtualGPU::KernArgPoolChunkSize() const {
+  return roc_device_.settings().kernargPoolSize_ / kKernArgPoolNumSignals;
 }
 
 // ================================================================================================
@@ -5067,8 +5077,20 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   if (vcmd.cooperativeGroups()) {
-    // Wait for the execution on the current queue, since the coop groups will use the device queue
-    releaseGpuMemoryFence(kSkipCpuWait);
+    {
+      // Hold execution() across reacquire + fence: ReleaseHwQueue() nulls gpu_queue_ under the
+      // same mutex, so an unlocked window could leave it null before dispatchBarrierPacket() derefs.
+      std::scoped_lock lock(execution());
+
+      // Dynamic queues may have reclaimed an idle stream's HW queue; reacquire before the fence.
+      AcquireHwQueueIfNeeded();
+      if (gpu_queue_ == nullptr) {
+        vcmd.setStatus(CL_INVALID_OPERATION);
+        return;
+      }
+      // Wait for the execution on the current queue, since the coop groups will use the device queue
+      releaseGpuMemoryFence(kSkipCpuWait);
+    }
 
     // Get device queue for exclusive GPU access
     VirtualGPU* queue = dev().xferQueue();
@@ -5145,9 +5167,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     force_irq_ = IS_WINDOWS;
     // It should be safe to call flush directly if there are not pending dispatches without
     // HSA signal callback
-    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_));
-    }
+    AcquireHwQueueIfNeeded();
     flush(vcmd.GetBatchHead());
     SetCoalesceWindow(0, nullptr);
   } else {

@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib> // getenv (grid-shape tuning overrides)
+#include <utility>
 
 // Runtime-adjustable LL128 AllGather block size (threads/block). Must be a
 // multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
@@ -91,6 +92,19 @@ static inline int ddaLL128AgBlocksPerPeer(size_t perRankBytes) {
   return (int)bpp;
 }
 
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
+// per-peer line split, clamped so flatBlockId (nRanks*bpp-1) stays within the
+// device epoch array (sized for nRanks*kDdaLLAgMaxBlocksPerPeer cells).
+static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
+  const unsigned threads = ddaLL128AgThreads(1024); // multiple of 16 (lanes/line)
+  int blocksPerPeer = ddaLL128AgBlocksPerPeer(perRankBytes);
+  if (comm->nRanks * blocksPerPeer > comm->ddaLLEpochLen) {
+    blocksPerPeer = comm->ddaLLEpochLen / comm->nRanks;
+    if (blocksPerPeer < 1) blocksPerPeer = 1;
+  }
+  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+}
+
 template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
@@ -99,23 +113,14 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
 
-  // grid.x == nRanks (peer), grid.y == blocksPerPeer (line split, 1 for small).
-  const unsigned threads = ddaLL128AgThreads(1024); // multiple of 16 (lanes/line)
-  int blocksPerPeer = ddaLL128AgBlocksPerPeer(perRankBytes);
+  auto gridBlock = ddaAllGatherFabricLL128Geom(comm, perRankBytes);
+  const dim3 grid = gridBlock.first;
+  const dim3 block = gridBlock.second;
+  const int blocksPerPeer = (int)grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-
-  // Clamp so flatBlockId (nRanks*bpp-1) stays within the device epoch array,
-  // which is sized for nRanks*kDdaLLAgMaxBlocksPerPeer cells.
-  if (nRanks * blocksPerPeer > epochLen) {
-    blocksPerPeer = epochLen / nRanks;
-    if (blocksPerPeer < 1) blocksPerPeer = 1;
-  }
-
-  dim3 block(threads);
-  dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
 
   INFO(NCCL_COLL, "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
@@ -178,6 +183,11 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   }
 
   return true;
+}
+
+uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  const auto grid = ddaAllGatherFabricLL128Geom(comm, sendcount * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,

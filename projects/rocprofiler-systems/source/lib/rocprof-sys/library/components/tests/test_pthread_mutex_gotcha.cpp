@@ -399,8 +399,8 @@ TEST_F(pthread_mutex_gotcha_test, test_configure_skips_all_when_causal_enabled)
 
 TEST_F(pthread_mutex_gotcha_test, test_operator_mutex_passthrough_when_inactive)
 {
-    auto data = make_data("pthread_mutex_lock");
-    sut  g(data);
+    auto      data = make_data("pthread_mutex_lock");
+    const sut g(data);
 
     pthread_mutex_t mtx           = PTHREAD_MUTEX_INITIALIZER;
     test_globals::g_callee_retval = 42;
@@ -411,8 +411,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_mutex_passthrough_when_inactive)
 
 TEST_F(pthread_mutex_gotcha_test, test_operator_spinlock_passthrough_when_inactive)
 {
-    auto data = make_data("pthread_spin_lock");
-    sut  g(data);
+    auto      data = make_data("pthread_spin_lock");
+    const sut g(data);
 
     pthread_spinlock_t lock{};
     test_globals::g_callee_retval = 7;
@@ -423,8 +423,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_spinlock_passthrough_when_inacti
 
 TEST_F(pthread_mutex_gotcha_test, test_operator_rwlock_passthrough_when_inactive)
 {
-    auto data = make_data("pthread_rwlock_rdlock");
-    sut  g(data);
+    auto      data = make_data("pthread_rwlock_rdlock");
+    const sut g(data);
 
     pthread_rwlock_t rwlock       = PTHREAD_RWLOCK_INITIALIZER;
     test_globals::g_callee_retval = 3;
@@ -435,8 +435,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_rwlock_passthrough_when_inactive
 
 TEST_F(pthread_mutex_gotcha_test, test_operator_barrier_passthrough_when_inactive)
 {
-    auto data = make_data("pthread_barrier_wait");
-    sut  g(data);
+    auto      data = make_data("pthread_barrier_wait");
+    const sut g(data);
 
     pthread_barrier_t barrier{};
     test_globals::g_callee_retval = 0;
@@ -447,8 +447,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_barrier_passthrough_when_inactiv
 
 TEST_F(pthread_mutex_gotcha_test, test_operator_join_passthrough_when_inactive)
 {
-    auto data = make_data("pthread_join");
-    sut  g(data);
+    auto      data = make_data("pthread_join");
+    const sut g(data);
 
     test_globals::g_callee_retval = 0;
 
@@ -462,8 +462,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_calls_callee_when_disabled)
     test_globals::g_is_disabled    = true;
     test_globals::g_callee_retval  = 99;
 
-    auto data = make_data("pthread_mutex_lock");
-    sut  g(data);
+    auto      data = make_data("pthread_mutex_lock");
+    const sut g(data);
 
     pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -478,8 +478,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_null_callee_returns_einval_when_
     test_globals::g_inactive_state = false;
     test_globals::g_is_disabled    = true;
 
-    auto data = make_data("pthread_mutex_lock");
-    sut  g(data);
+    auto      data = make_data("pthread_mutex_lock");
+    const sut g(data);
 
     pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -493,8 +493,8 @@ TEST_F(pthread_mutex_gotcha_test, test_operator_audit_path_calls_callee_and_audi
     test_globals::g_is_disabled    = false;
     test_globals::g_callee_retval  = 55;
 
-    auto data = make_data("pthread_mutex_lock");
-    sut  g(data);
+    auto      data = make_data("pthread_mutex_lock");
+    const sut g(data);
 
     pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -513,7 +513,7 @@ TEST_F(pthread_mutex_gotcha_test, test_pause_disables_audit_path)
     sut::pause();
 
     auto            data = make_data("pthread_mutex_lock");
-    sut             g(data);
+    const sut       g(data);
     pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
     EXPECT_EQ(g(mock_mutex_fn, &mtx), 7);
@@ -534,7 +534,7 @@ TEST_F(pthread_mutex_gotcha_test, test_resume_reenables_audit_path)
     sut::resume();
 
     auto            data = make_data("pthread_mutex_lock");
-    sut             g(data);
+    const sut       g(data);
     pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
     EXPECT_EQ(g(mock_mutex_fn, &mtx), 3);

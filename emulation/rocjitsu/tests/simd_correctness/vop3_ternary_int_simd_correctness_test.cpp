@@ -12,6 +12,7 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -169,7 +170,7 @@ void check_case(const Case &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_tern_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -211,6 +212,58 @@ TEST(Vop3TernaryIntSimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
+  struct GoldenCase {
+    const char *name;
+    uint32_t opcode;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t src2;
+    uint32_t expected;
+  };
+  constexpr std::array golden_cases{
+      // Per-byte averages use the low bit of the corresponding src2 byte as
+      // the rounding addend, without carries crossing byte boundaries.
+      GoldenCase{"v_lerp_u8", 461, 0xFF020100u, 0x01030401u, 0x01000101u, 0x80020301u},
+      // Zero reference bytes mask their positions; the two remaining
+      // absolute differences total 24 before adding the accumulator 7.
+      GoldenCase{"v_msad_u8", 484, 0x10203040u, 0x00102800u, 7u, 31u},
+      // Selectors 8 and 11 sign-extend source bytes 1 and 7; 12 produces zero;
+      // selectors 13 and above produce all ones.
+      GoldenCase{"v_perm_b32", 493, 0x80FF7F01u, 0xFE028100u, 0x0D0C0B08u, 0xFF00FFFFu},
+      // Ordinary selectors gather bytes from {src0:src1}, with src1 low.
+      GoldenCase{"v_perm_b32", 493, 0x80FF7F01u, 0xFE028100u, 0x07040500u, 0x80017F00u},
+  };
+
+  ForceScalarGuard gate_guard;
+  for (const auto &golden : golden_cases) {
+    SCOPED_TRACE(golden.name);
+    for (const bool force_scalar : {true, false}) {
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      uint32_t words[2]{};
+      vop3_tern_encode(golden.opcode, kDstVgpr, 256, 257, 258, words);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), golden.name);
+
+      const uint32_t base = fx.wf->vgpr_alloc().base;
+      fx.wf->set_exec(1u);
+      fx.cu->write_vgpr(base, 0, golden.src0);
+      fx.cu->write_vgpr(base + 1, 0, golden.src1);
+      fx.cu->write_vgpr(base + 2, 0, golden.src2);
+      fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
+      fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
+      fx.cu->execute_instruction(inst.get(), *fx.wf);
+
+      EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), golden.expected);
+      EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);
+    }
+  }
 }
 
 } // namespace

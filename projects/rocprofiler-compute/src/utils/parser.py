@@ -137,9 +137,9 @@ def build_dfs(
                         profile_panel_filter=profile_panel_filter,
                     ):
                         continue
-                    df = pd.DataFrame(
-                        [data_config["source"]], columns=["from_pc_sampling"]
-                    )
+                    # Only the column name is read downstream; the value is a
+                    # placeholder to keep the marker frame non-empty.
+                    df = pd.DataFrame([True], columns=["from_pc_sampling"])
 
                 else:
                     df = pd.DataFrame()
@@ -388,25 +388,12 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
-@demarcate
-def load_pc_sampling_data_per_kernel(
+def _build_pc_sampling_partial_frame(
     method: str,
     tool_data: dict[str, Any],
-    sorting_type: str,
     kernel_name: Optional[str] = None,
-    num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Build the detailed per-instruction PC sampling table from *tool_data*.
-
-    Filtered to *kernel_name* when given, otherwise every kernel's rows.
-
-    :param method: "host_trap" or "stochastic".
-    :param tool_data: The parsed ``rocprofiler-sdk-tool[0]`` dict.
-    :param sorting_type: "offset" or "count".
-    :param kernel_name: Kernel to filter to, or None for all kernels.
-    :param num_rows: Keep only the first *num_rows* rows after sorting; None or
-        0 keeps every row.
-    """
+    """Build one process's enriched sampling frame for an optional kernel."""
     kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
     pc_samples = tool_data["buffer_records"][
         "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
@@ -441,6 +428,8 @@ def load_pc_sampling_data_per_kernel(
     df = df.rename(
         columns={"code_object_offset": "offset", "kernel_name": "Kernel_Name"}
     )
+    # Row identity is process-scoped, so every row carries its own process.
+    df["pid"] = tool_data["metadata"]["pid"]
 
     if kernel_name is not None:
         df = df[df["Kernel_Name"] == kernel_name]
@@ -448,14 +437,27 @@ def load_pc_sampling_data_per_kernel(
             console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
             return df
 
+    return df
+
+
+def _format_pc_sampling_display_frame(
+    df: pd.DataFrame,
+    method: str,
+    sorting_type: str,
+    num_rows: Optional[int] = None,
+) -> pd.DataFrame:
+    """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
-    # format offset as hex for display.
+    # format offset as hex for display. Leading with pid keeps each process's
+    # rows contiguous.
     if sorting_type == "offset":
-        df_sorted = df.sort_values(by=["code_object_id", "offset"])
+        df_sorted = df.sort_values(
+            by=["pid", "code_object_id", "Kernel_Name", "offset"]
+        )
     elif sorting_type == "count":
         df_sorted = df.sort_values(by=["count"], ascending=False)
     else:
@@ -471,73 +473,102 @@ def load_pc_sampling_data_per_kernel(
     df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
     # Stochastic adds issue/stall detail on top of the host_trap columns.
-    shared_columns = ["source_line", "instruction", "code_object_id", "offset", "count"]
+    shared_columns = [
+        "pid",
+        "source_line",
+        "instruction",
+        "code_object_id",
+        "offset",
+        "count",
+    ]
     stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
     columns_to_return = shared_columns + (
         stochastic_only_columns if method == "stochastic" else []
     )
     columns_to_return.append("Kernel_Name")
-    return df_sorted[columns_to_return]
+    # Renumber after sorting so the displayed index reads 0..n-1 rather than the
+    # pre-sort positions the row happened to land on.
+    return df_sorted[columns_to_return].reset_index(drop=True)
 
 
 @demarcate
 def load_pc_sampling_data(
     workload: schema.Workload,
-    file_prefix: str,
     sorting_type: str,
-    tool_data: Optional[dict[str, Any]],
+    tool_data_records: Optional[list[dict[str, Any]]] = None,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """Return the detailed per-instruction table for a single kernel or all.
 
-    Thin dispatcher over :func:`load_pc_sampling_data_per_kernel`: detects the
-    method, then builds the table for all kernels (no ``-k``) or a single
-    kernel (one ``-k``). The output schema is identical either way. Callers
-    pass the already-parsed *tool_data*.
+    Detects the method, builds one frame per tool record, then formats the
+    concatenation for all kernels (no ``-k``) or a single kernel (one ``-k``).
+    The output schema is identical either way. Rows are process-scoped: the
+    same offset in two processes can be different code, so frames are never
+    merged across records. Callers pass the already-parsed *tool_data_records*.
     """
-    if not file_prefix or file_prefix.lower() == "none" or tool_data is None:
+    if not tool_data_records:
         return pd.DataFrame()
 
-    pc_sampling_method = detect_pc_sampling_method(tool_data)
-    if pc_sampling_method is None:
-        console_warning(
-            f"PC sampling: can not detect pc sampling method for {file_prefix}"
-        )
-        return pd.DataFrame()
-
-    # No kernel filter: return every kernel's rows.
-    if not workload.filter_kernel_ids:
-        return load_pc_sampling_data_per_kernel(
-            pc_sampling_method,
-            tool_data,
-            sorting_type,
-            num_rows=num_rows,
-        )
-
-    if len(workload.filter_kernel_ids) > 1:
+    # One invocation configures one sampling method, so every record is assumed
+    # to share it. Zero-sample processes still produce valid result records when
+    # another enabled domain, such as kernel tracing, contains data, so infer the
+    # method from every process that captured at least one PC sample.
+    detected_pc_sampling_methods = {
+        method
+        for tool_data in tool_data_records
+        if (method := detect_pc_sampling_method(tool_data)) is not None
+    }
+    if len(detected_pc_sampling_methods) > 1:
+        conflicting_methods = ", ".join(sorted(detected_pc_sampling_methods))
         console_error(
-            "PC sampling supports single kernel only! Please specify -k with "
-            "single kernel.",
+            f"PC sampling: conflicting sampling methods ({conflicting_methods}) "
+            "found across result files",
             exit=False,
         )
         return pd.DataFrame()
 
-    # Exactly one kernel filter.
-    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-    kernel_index = workload.filter_kernel_ids[0]
-    if kernel_index >= len(kernel_top_df):
-        console_warning(
-            f"Kernel index {kernel_index} is out of bounds. "
-            f"kernel_top table has only {len(kernel_top_df)} rows."
-        )
+    pc_sampling_method = next(iter(detected_pc_sampling_methods), None)
+    if pc_sampling_method is None:
+        console_warning("PC sampling: can not detect pc sampling method.")
         return pd.DataFrame()
 
-    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-    return load_pc_sampling_data_per_kernel(
+    # No kernel filter means every kernel's rows.
+    kernel_name = None
+    if workload.filter_kernel_ids:
+        if len(workload.filter_kernel_ids) > 1:
+            console_error(
+                "PC sampling supports single kernel only! Please specify -k with "
+                "single kernel.",
+                exit=False,
+            )
+            return pd.DataFrame()
+
+        kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+        kernel_index = workload.filter_kernel_ids[0]
+        if kernel_index >= len(kernel_top_df):
+            console_warning(
+                f"Kernel index {kernel_index} is out of bounds. "
+                f"kernel_top table has only {len(kernel_top_df)} rows."
+            )
+            return pd.DataFrame()
+
+        kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+
+    process_frames = []
+    for tool_data in tool_data_records:
+        frame = _build_pc_sampling_partial_frame(
+            pc_sampling_method, tool_data, kernel_name
+        )
+        if not frame.empty:
+            process_frames.append(frame)
+
+    if not process_frames:
+        return pd.DataFrame()
+
+    return _format_pc_sampling_display_frame(
+        pd.concat(process_frames, ignore_index=True),
         pc_sampling_method,
-        tool_data,
         sorting_type,
-        kernel_name,
         num_rows=num_rows,
     )
 
@@ -586,7 +617,7 @@ def load_non_mertrics_table(
     workload: schema.Workload,
     dir_path: str,
     args: argparse.Namespace,
-    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
+    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -627,7 +658,6 @@ def load_non_mertrics_table(
         elif "from_pc_sampling" in df.columns:
             tmp[df_id] = load_pc_sampling_data(
                 workload,
-                df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
                 pc_sampling_tool_data,
                 num_rows=args.pc_sampling_rows,
@@ -649,7 +679,7 @@ def load_table_data(
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
-    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
+    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """
     - Load data for all "raw_csv_table"

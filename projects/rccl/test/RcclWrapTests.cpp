@@ -11,14 +11,21 @@
 #include <cstring>
 #include <memory>
 
+#include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
+#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "enqueue.h"
+#include "graph.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+
+#include <algorithm>
 
 namespace RcclUnitTesting
 {
@@ -88,55 +95,8 @@ ncclResult_t testStaticExposeCheck()
     return ncclSuccess;
 }
 
-// Helper function to create and initialize mock communicator
-static void CreateMockComm(
-    ncclComm_t&            mockComm,
-    struct ncclTopoSystem& mockTopo,
-    struct ncclTopoNode&   mockGpuNode,
-    const char*            arch,
-    int                    nRanks
-)
-{
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
-
-    // Initialize basic communicator fields
-    mockComm->nRanks = nRanks;
-    mockComm->nNodes = 1; // Default to single node for P2P tests
-    mockComm->rank   = 0; // Default rank
-
-    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
-    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-
-    // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
-    mockComm->topo = &mockTopo;
-
-    // Initialize GPU node
-    mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
-
-    // Set GPU architecture
-    strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
-    mockGpuNode.gpu.gcn[sizeof(mockGpuNode.gpu.gcn) - 1] = '\0';
-
-    // Copy the node into the topology array
-    mockTopo.nodes[GPU].nodes[0] = mockGpuNode;
-
-    // Initialize other required fields for tests
-    memset(mockComm->minMaxLLRange, 0, sizeof(mockComm->minMaxLLRange));
-}
-
-// Helper function to cleanup mock communicator
-static void CleanupMockComm(ncclComm_t& mockComm)
-{
-    if(mockComm)
-    {
-        delete mockComm;
-        mockComm = nullptr;
-    }
-}
+// CreateMockComm / CleanupMockComm moved to common/MockComm.hpp so other fixtures
+// can reuse them.
 
 // Helper function to determine if rcclSetPipelining test should be skipped
 static bool ShouldSkipRcclSetPipeliningTests()
@@ -1761,6 +1721,174 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
 }
 
 // ===========================================================================
+// Direct ReduceScatter getAlgoInfo host-side guard (AICOMRCCL-1819).
+// When enableDirectReduceScatter is set, getAlgoInfo must force Ring/Simple
+// even if the tuner or RCCL_OVERRIDE_* env picks LL.
+// ===========================================================================
+
+namespace
+{
+
+constexpr uint64_t kDirectRsTestCount = 65536;
+
+ncclResult_t mockRingLlTunerGetCollInfo(void* /*context*/, ncclFunc_t /*collType*/, size_t /*nBytes*/,
+                                        int /*numPipeOps*/, float** collCostTable, int numAlgo, int numProto,
+                                        int /*regBuff*/, int* nChannels)
+{
+    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+    for(int a = 0; a < numAlgo; ++a)
+    {
+        for(int p = 0; p < numProto; ++p)
+        {
+            table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        }
+    }
+    table[NCCL_ALGO_RING][NCCL_PROTO_LL] = 0.0;
+    if(nChannels)
+    {
+        *nChannels = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclTuner_t g_mockRingLlTuner = {
+  .name         = "MockRingLlTuner",
+  .init         = nullptr,
+  .getCollInfo  = mockRingLlTunerGetCollInfo,
+  .finalize     = nullptr,
+  .getChunkSize = nullptr,
+};
+
+void InitGetAlgoInfoMockComm(ncclComm_t&           comm,
+                             struct ncclTopoSystem& topo,
+                             const char*            arch,
+                             int                    nRanks,
+                             int                    nNodes)
+{
+    struct ncclTopoNode gpuNode{};
+    CreateMockComm(comm, topo, gpuNode, arch, nRanks);
+    comm->nNodes        = nNodes;
+    comm->nChannels     = 4;
+    comm->collChannels  = 4;
+    comm->nvlsChannels  = 4;
+    comm->WarpSize      = 64;
+    comm->maxLocalRanks = std::max(1, nRanks / std::max(1, nNodes));
+    comm->topo->tuning  = rcclGetTuningIndexForArch(arch);
+    comm->topo->type |= RCCL_TOPO_XGMI_ALL;
+
+    for(int a = 0; a < NCCL_NUM_ALGORITHMS; ++a)
+    {
+        for(int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+        {
+            comm->maxThreads[a][p]                      = 256;
+            comm->threadThresholds[a][p]                 = 8192;
+            comm->bandwidths[ncclFuncReduceScatter][a][p] = 100.0f;
+            comm->latencies[ncclFuncReduceScatter][a][p]  = 1.0f;
+        }
+    }
+}
+
+ncclTaskColl MakeReduceScatterTask(uint64_t count = kDirectRsTestCount, ncclDataType_t dt = ncclFloat32)
+{
+    ncclTaskColl task{};
+    task.func     = ncclFuncReduceScatter;
+    task.count    = count;
+    task.datatype = dt;
+    return task;
+}
+
+void ExpectGetAlgoInfoSelection(ncclComm_t comm, ncclTaskColl& task, int algo, int proto)
+{
+    ASSERT_EQ(ncclGetAlgoInfo(comm, &task, 0, 0, 1, nullptr), ncclSuccess);
+    EXPECT_EQ(task.algorithm, algo);
+    EXPECT_EQ(task.protocol, proto);
+}
+
+} // namespace
+
+// Tuner picks Ring+LL; Direct RS host guard must override to Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsOverridesMockTunerRingLl)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsOverridesMockTunerRingLl",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// Same tuner pick without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// RCCL_OVERRIDE_PROTO=LL forces LL; Direct RS host guard must still pick Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// Same env override without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_LlOverridePreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_LlOverridePreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// ===========================================================================
 // CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
 // for the capture-vs-eager ordering bug: the latch must stay set for the
 // entire lifetime of a captured plan and must never clear mid-capture.
@@ -2205,6 +2333,76 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 
 #endif // ENABLE_WARP_SPEED
 
+// Builds a mock comm that satisfies every CE AllReduce eligibility rule except
+// the one under test, so a single field or argument decides the outcome.
+static void CreateCeAllReduceEligibleComm(
+    ncclComm_t&            mockComm,
+    struct ncclTopoSystem& mockTopo,
+    struct ncclTopoNode&   mockGpuNode,
+    int                    nRanks
+)
+{
+    CreateMockComm(mockComm, mockTopo, mockGpuNode, "gfx950", nRanks);
+    mockComm->nNodes             = 1;
+    mockComm->symmetricSupport   = 1;
+    mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
+}
+
+// A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
+static constexpr size_t kCeAllReduceCount = 4096;
+
+// rcclUseCeAllReduce gates the Copy Engine AllReduce path. The CE kernels never
+// read the bias buffer, so an eligible-looking ncclAllReduceWithBias call must
+// still be refused; taking CE there silently drops the bias from the result.
+TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_BiasBufferRejected",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                struct ncclTopoSystem topo;
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, topo, gpu, /*nRanks=*/8);
+
+                int biasBuffer = 0;
+                EXPECT_FALSE(rcclUseCeAllReduce(comm,
+                                                kCeAllReduceCount,
+                                                ncclFloat32,
+                                                ncclSum,
+                                                /*acc=*/&biasBuffer))
+                    << "CE AllReduce must be refused when a bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}}),
+
+        // Control case: identical arguments with no bias must still select CE,
+        // proving the rejection above is caused by the bias and not by an
+        // unrelated ineligibility in the mock comm.
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_NoBiasAccepted",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                struct ncclTopoSystem topo;
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, topo, gpu, /*nRanks=*/8);
+
+                EXPECT_TRUE(rcclUseCeAllReduce(comm,
+                                               kCeAllReduceCount,
+                                               ncclFloat32,
+                                               ncclSum,
+                                               /*acc=*/nullptr))
+                    << "CE AllReduce should be selected when no bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}})
+    );
+}
+
 // ---------------------------------------------------------------------------
 // rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.
 //
@@ -2212,14 +2410,18 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 // false when it should yield (to CE AllReduce, the symmetric kernel, or the
 // generic ring/tree fallback). DDA is taken when the buffers are not
 // symmetric-kernel eligible, CE AllReduce will not service the call, and DDA is
-// enabled for this arch and size. CE is only allowed to claim the call when it
-// can actually run it: symmetricSupport, single node, count divisible by nRanks,
-// a supported op and datatype, and an in-range size. Otherwise DDA keeps it.
+// enabled for this arch and size.
 //
-// These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1,
-// LAUNCH_ORDER_IMPLICIT to 0 and ncclGroupDepth to 0, so rcclDdaEnabled() runs
-// its real arch/threshold logic. RCCL_CE_ALLREDUCE defaults to 1, so CE is
-// gated only by symmetricSupport / nNodes / count / op / dtype / size.
+// `ceAllReduceAllowed` is passed in directly rather than derived inside the
+// test: the call site computes it once from rcclUseCeAllReduce() plus whatever
+// additional gating CE AllReduce requires (graph latch, ncclGroupDepth,
+// force/symReg, op/dtype/size/divisibility support, etc). Driving it directly
+// keeps these cases independent of RCCL_CE_ALLREDUCE's default and of CE
+// AllReduce's own eligibility rules -- each case just asserts what the DDA
+// guard does for a given (symEligible, ceAllReduceAllowed) combination.
+//
+// These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1
+// and ncclGroupDepth to 0, so rcclDdaEnabled() runs its real arch/threshold logic.
 namespace
 {
 // Fill a zero-initialized comm with just the fields the decision reads. Filled by
@@ -2246,8 +2448,8 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_LargeMsg_TakesDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
@@ -2256,8 +2458,8 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_SmallMsg_TakesDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx950 with symmetricSupport on and every CE prerequisite met: CE will service
@@ -2267,30 +2469,30 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_CeEligible_YieldsToCe)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
-// CE eligible by size/op/dtype but disabled by the graph latch (ceArGraphAllowed
-// false): CE will not run, so DDA must reclaim the call.
+// CE eligible by size/op/dtype but disabled by the graph latch (folded into the
+// caller's ceAllReduceAllowed=false): CE will not run, so DDA must reclaim the call.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_GraphLatched_TakesDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/false));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
-// CE declines on an unsupported op (ncclAvg) even with symmetricSupport on, so
-// DDA reclaims the call.
+// CE declines on an unsupported op (folded into ceAllReduceAllowed=false) even
+// with symmetricSupport on, so DDA reclaims the call.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_UnsupportedOp_TakesDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclAvg,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx942 with symmetricSupport off: a 6 MiB call is within the 8 MiB gfx942 DDA
@@ -2300,8 +2502,8 @@ TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_MidMsg_TakesDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
@@ -2310,45 +2512,45 @@ TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_AboveCap_NoDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx942 with symmetricSupport on and every CE prerequisite met: CE claims the call
 // and the DDA guard yields, even though 6 MiB is within the 8 MiB gfx942 DDA cap.
-// Mirror of Gfx942_SymOff_MidMsg_TakesDda: symmetricSupport flips the decision.
+// Mirror of Gfx942_SymOff_MidMsg_TakesDda: ceAllReduceAllowed flips the decision.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_CeEligible_YieldsToCe)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
-// gfx942 with symmetricSupport on but CE declines on an unsupported op (ncclAvg):
-// DDA reclaims the call since 6 MiB is within the 8 MiB gfx942 cap.
+// gfx942 with symmetricSupport on but CE declines on an unsupported op (folded
+// into ceAllReduceAllowed=false): DDA reclaims the call since 6 MiB is within
+// the 8 MiB gfx942 cap.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_UnsupportedOp_TakesDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclAvg,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx1250 forces the DDA fabric path regardless of CE eligibility: the
 // ddaFabricArch1250 short-circuit means CE never claims the call on this arch.
-// symmetricSupport is on (the gfx1250 default) and the call is otherwise fully
-// CE-eligible (64 MiB, sum, divisible), so the short-circuit is the only reason
-// DDA is chosen here.
+// ceAllReduceAllowed=true (the call is otherwise fully CE-eligible: 64 MiB, sum,
+// divisible), so the short-circuit is the only reason DDA is chosen here.
 TEST(RcclAllReduceDdaDecision, Gfx1250_CeEligible_StillTakesDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(64ull * 1024 * 1024, ncclFloat32); // CE-eligible size, divisible by 8
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
 // An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
@@ -2357,8 +2559,8 @@ TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
@@ -2367,8 +2569,8 @@ TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
@@ -2378,8 +2580,8 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
-                                                /*symEligible=*/true, /*ceArGraphAllowed=*/true));
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
 }
 
 } // namespace RcclUnitTesting
