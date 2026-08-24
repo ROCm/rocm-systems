@@ -41,7 +41,8 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Loading the hook activates MOI Record/Replay by default. On gfx1201, the
+Loading the hook is itself the activation action; no separate enable variable
+is required. It selects MOI Record/Replay by default. On gfx1201, the
 empirical recommendation is to select Sampled for ordinary barrier/LDS triage
 and reserve Record/Replay for expert synchronization investigations. The coded
 default has not yet changed. Add `RJ_CONSAN_LOG=1` for instrumentation and

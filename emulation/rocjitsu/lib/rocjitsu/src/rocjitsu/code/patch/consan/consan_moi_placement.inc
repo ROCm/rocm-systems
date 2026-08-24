@@ -4209,10 +4209,23 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // proof while only the persistent dispatch pair excludes this component.
     // Retain that transient window and override just the dispatch
     // representation rather than inventing a second scalar ABI.
-    std::optional<uint16_t> selected =
-        dispatch_only || (!needs_exec_override && needs_dispatch_override)
-            ? options.moi_exec_save_sgpr
-            : std::nullopt;
+    struct SgprSelection {
+      uint16_t base = 0u;
+      bool valid = false;
+
+      void set(uint16_t selected_base) {
+        base = selected_base;
+        valid = true;
+      }
+      void reset() {
+        base = 0u;
+        valid = false;
+      }
+    } selected;
+    if ((dispatch_only || (!needs_exec_override && needs_dispatch_override)) &&
+        options.moi_exec_save_sgpr) {
+      selected.set(*options.moi_exec_save_sgpr);
+    }
     std::optional<uint16_t> spill_pc;
     std::optional<uint16_t> spill_call_return;
     std::optional<uint16_t> spill_scc;
@@ -4220,7 +4233,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_visible;
     bool branch_only_scalar_spill = false;
     std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
-    if (!selected &&
+    if (!selected.valid &&
         (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled)) {
       for (uint32_t base = util::align_up(liveness_search_floor, 2u); base + count <= limit;
            base += 2u) {
@@ -4238,11 +4251,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         if (moi_scalar_contexts_conflict_with_physical_vcc(component_contexts->summaries, candidate,
                                                            count, arch))
           continue;
-        selected = candidate;
+        selected.set(candidate);
         break;
       }
     }
-    if (!selected && options.moi_engine == ConSanMoiEngine::InlineShadow &&
+    if (!selected.valid && options.moi_engine == ConSanMoiEngine::InlineShadow &&
         instrumentation::is_admitted_arch(arch) && address_free_scratch_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return overlaps_architectural_state(base, width) ||
@@ -4286,7 +4299,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       const uint32_t router_begin =
           is_rdna4_family_arch(arch) ? liveness_search_floor : fresh_begin;
       for (uint32_t base = util::align_up(scalar_spill_begin, 2u);
-           !selected && base + count <= limit; base += 2u) {
+           !selected.valid && base + count <= limit; base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
         std::vector<MoiSgprRange> selected_ranges{{spill_base, count}};
         if (architecturally_reserved(spill_base, count) || conflicts_with_cdna_vcc(selected_ranges))
@@ -4338,7 +4351,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
           spill_key = spill_scc;
           spill_call_return = spill_pc;
-          selected = spill_base;
+          selected.set(spill_base);
           break;
         }
         for (uint32_t reg = router_begin; spill_scc && reg < limit; ++reg) {
@@ -4366,7 +4379,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           }
         }
         if (spill_call_return)
-          selected = spill_base;
+          selected.set(spill_base);
         else
           spill_visible = spill_pc = spill_scc = spill_key = std::nullopt;
       }
@@ -4429,7 +4442,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         spill_key.reset();
         spill_visible.reset();
       }
-      if (!selected && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
+      if (!selected.valid && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
         uint16_t allocated_limit = limit;
         for (const auto &summary : component_contexts->summaries)
           allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
@@ -4461,7 +4474,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           return overlaps;
         };
 
-        for (uint32_t base = 0; !selected && base + count <= allocated_limit; base += 2u) {
+        for (uint32_t base = 0; !selected.valid && base + count <= allocated_limit; base += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(base);
           const std::array scalar_window{MoiSgprRange{candidate, count}};
           if (overlaps_instrumentation_state(candidate, count) ||
@@ -4469,7 +4482,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             continue;
           }
           if (all_owners_use_fixed_stack) {
-            selected = candidate;
+            selected.set(candidate);
             branch_only_scalar_spill = true;
             break;
           }
@@ -4484,7 +4497,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                 conflicts_with_cdna_vcc(combined_ranges)) {
               continue;
             }
-            selected = candidate;
+            selected.set(candidate);
             branch_only_scalar_spill = true;
             dynamic_stack_borrowed_sgpr = borrowed;
             break;
@@ -4495,14 +4508,14 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // dead at every instrumentation site remains useful for external-shadow
       // probes.  It cannot carry the entry-to-probe visible-evidence latch;
       // access selection therefore keeps such owners off the local LDS mirror.
-      if (!selected) {
+      if (!selected.valid) {
         for (uint32_t base = util::align_up(std::max(initialized_end, liveness_search_floor), 2u);
              base + count <= limit; base += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(base);
           const std::array ranges{MoiSgprRange{candidate, count}};
           if (!architecturally_reserved(candidate, count) &&
               !intersects(unavailable, candidate, count) && !conflicts_with_cdna_vcc(ranges)) {
-            selected = candidate;
+            selected.set(candidate);
             break;
           }
         }
@@ -4511,7 +4524,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     const bool supports_compact_scalar_spill =
         (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) &&
         (instrumentation::is_admitted_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5);
-    if (!selected && supports_compact_scalar_spill && address_free_scratch_private_limit(arch)) {
+    if (!selected.valid && supports_compact_scalar_spill &&
+        address_free_scratch_private_limit(arch)) {
       const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
         return moi_scalar_contexts_conflict_with_physical_vcc(component_contexts->summaries, base,
                                                               width, arch);
@@ -4568,7 +4582,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             !range_overlaps(candidate, spilled_scalar_count, *spill_scc, 1u) &&
             !range_overlaps(candidate, spilled_scalar_count, *spill_key, 1u) &&
             !range_overlaps(candidate, spilled_scalar_count, *spill_call_return, 2u)) {
-          selected = candidate;
+          selected.set(candidate);
           break;
         }
       }
@@ -4579,7 +4593,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     // VGPR spill reservoir and reach the appended body using only direct SOPP
     // branch relays. Unlike the compact scalar-spill path above, this remains
     // valid without a dead indirect-PC pair or SCC slot.
-    if (!selected && supports_compact_scalar_spill &&
+    if (!selected.valid && supports_compact_scalar_spill &&
         (instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
         address_free_scratch_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
@@ -4622,14 +4636,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         return overlaps;
       };
       for (uint32_t base = 0u;
-           all_owners_use_fixed_stack && !selected && base + count <= allocated_limit; base += 2u) {
+           all_owners_use_fixed_stack && !selected.valid && base + count <= allocated_limit;
+           base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);
         if (overlaps_instrumentation_state(candidate, count) ||
             moi_scalar_contexts_conflict_with_physical_vcc(component_contexts->summaries, candidate,
                                                            count, arch)) {
           continue;
         }
-        selected = candidate;
+        selected.set(candidate);
         branch_only_scalar_spill = true;
         // Record/Replay can back up a borrowed entry-only PC/SCC tuple in the
         // site scratch VGPR, then restore the complete guest window before its
@@ -4639,8 +4654,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         // return survives the entry island. Other engines retain the fully
         // branch-only ABI.
         if (options.moi_engine == ConSanMoiEngine::RecordReplay && count >= 4u) {
-          spill_pc = static_cast<uint16_t>(*selected + 2u);
-          spill_scc = *selected;
+          spill_pc = static_cast<uint16_t>(selected.base + 2u);
+          spill_scc = selected.base;
         } else {
           spill_pc.reset();
           spill_scc.reset();
@@ -4650,10 +4665,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         spill_visible.reset();
       }
     }
-    if (!selected) {
+    if (!selected.valid) {
       missed_required_assignment = true;
       continue;
     }
+    const uint16_t selected_sgpr = selected.base;
     const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
                               branch_only_scalar_spill || dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
@@ -4661,16 +4677,16 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
                 moi_scalar_contexts_admit_reserved_window(
                     component_contexts->summaries, *options.moi_dispatch_id_sgpr,
                     moi_dispatch_state_sgpr_count(options), arch) &&
-                !range_overlaps(*selected, count, *options.moi_dispatch_id_sgpr,
+                !range_overlaps(selected_sgpr, count, *options.moi_dispatch_id_sgpr,
                                 moi_dispatch_state_sgpr_count(options))
             ? options.moi_dispatch_id_sgpr
             : std::nullopt;
     for (uint64_t owner : owners) {
       options.moi_transient_sgpr_assignments.push_back(
           {.descriptor_file_offset = owner,
-           .exec_save_sgpr = *selected,
+           .exec_save_sgpr = selected_sgpr,
            .owner_sgpr = moi_inline_uses_planned_owner_sgpr(options)
-                             ? std::optional<uint16_t>(*selected)
+                             ? std::optional<uint16_t>(selected_sgpr)
                              : options.moi_owner_sgpr,
            .dispatch_id_sgpr = dispatch_id_sgpr,
            .spill_backed = spill_backed,

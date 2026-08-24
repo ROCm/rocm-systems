@@ -328,6 +328,12 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                    ? std::optional<uint16_t>(
                          static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 5u))
                    : std::nullopt);
+    // These scalars are used only when the optionals are engaged and a dense
+    // relay is selected. Materializing them here keeps that invariant explicit
+    // without asking GCC 13 to retain optional engagement across the long
+    // placement path.
+    const uint16_t dense_call_return = dense_call_return_sgpr.value_or(0u);
+    const uint16_t dense_dispatch_key = dense_dispatch_key_sgpr.value_or(0u);
     const auto dense_indirect_state = moi_indirect_jump_sgprs(candidate_options);
     const auto dense_special_state = moi_special_state_sgprs(candidate_options);
     const uint64_t patch_text_offset = planned.candidate.patch_text_offset;
@@ -395,7 +401,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           patch_words <= displaced_words.size() && !overlaps_existing_patch &&
           !swallows_another_fence &&
           moi_entry_window_is_single_entry(resource_state.block_index, patch_text_offset,
-                                            displaced_end - patch_text_offset) &&
+                                           displaced_end - patch_text_offset) &&
           displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
         displaced_tail_words.assign(displaced_words.begin() + patch_words, displaced_words.end());
         displaced_original_size = static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
@@ -433,7 +439,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
             layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
-            return_text_offset, *dense_call_return_sgpr,
+            return_text_offset, dense_call_return,
             /*displaced_tail_words=*/{},
             planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
                                   : std::nullopt,
@@ -479,7 +485,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (entry_island_at_anchor) {
       // The indirect island written below occupies the relocated prefix.
     } else if (dense_relay) {
-      const auto call = instrumentation::build_s_call_i64(*dense_call_return_sgpr, *fwd, arch);
+      const auto call = instrumentation::build_s_call_i64(dense_call_return, *fwd, arch);
       if (!call) {
         result.errors.emplace_back("ConSan MOI fence record patch could not encode dense call");
         return;
@@ -555,8 +561,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         return;
       }
       dispatcher_words.pop_back();
-      const uint16_t key_sgpr = *dense_dispatch_key_sgpr;
-      const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+      const auto compare =
+          instrumentation::build_s_cmp_eq_u32(dense_dispatch_key, /*literal=*/255u, arch);
       if (!compare) {
         result.errors.emplace_back(
             "ConSan MOI fence record patch could not extend dense dispatcher");

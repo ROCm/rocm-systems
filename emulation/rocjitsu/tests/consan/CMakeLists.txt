@@ -192,6 +192,7 @@ function(rj_add_consan_hip_case)
     # the focused default access-only and require barrier/atomic cases to opt in
     # explicitly below.
     set(_case_is_moi FALSE)
+    set(_case_is_record_replay FALSE)
     set(_case_is_dense_runtime FALSE)
     set(_case_sets_barrier_tracking FALSE)
     set(_case_sets_atomic_tracking FALSE)
@@ -203,6 +204,9 @@ function(rj_add_consan_hip_case)
                 "^RJ_CONSAN_MODE=(record-replay|inline-shadow|sampled)$"
         )
             set(_case_is_moi TRUE)
+            if(_environment_entry STREQUAL "RJ_CONSAN_MODE=record-replay")
+                set(_case_is_record_replay TRUE)
+            endif()
             if(
                 _environment_entry STREQUAL "RJ_CONSAN_MODE=record-replay"
                 OR _environment_entry STREQUAL "RJ_CONSAN_MODE=sampled"
@@ -334,6 +338,16 @@ function(rj_add_consan_hip_case)
     if(_case_FAIL_REGEX)
         list(APPEND _case_fail_regex "${_case_FAIL_REGEX}")
     endif()
+    if(_case_is_record_replay)
+        # Automatic reports are consumed by both the GPU and host. A coarse
+        # region may appear to work on a single-GPU host while faulting on a
+        # different runtime/topology, so pin the portable allocation contract
+        # in every real Record/Replay device execution.
+        list(
+            APPEND _case_fail_regex
+            "coarse_grained_snapshot_bytes=[1-9][0-9]*"
+        )
+    endif()
     set_property(
         TEST "${_case_NAME}"
         PROPERTY FAIL_REGULAR_EXPRESSION "${_case_fail_regex}"
@@ -395,6 +409,57 @@ function(rj_add_consan_device_conformance_cases)
         )
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
+
+    # Loading the tool DSO is ConSan's activation contract and selects
+    # Record/Replay by default. Exercise synchronized and racy real LDS
+    # workloads and require a fine-grained report snapshot so the
+    # no-configuration path cannot pass merely by leaving the hook inert or by
+    # allocating topology-sensitive coarse memory.
+    foreach(_outcome IN ITEMS Correct Incorrect)
+        string(TOLOWER "${_outcome}" _outcome_label)
+        set(
+            _hook_default_environment
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE="
+            "RJ_CONSAN_POLICY="
+            "RJ_CONSAN_FLAVOR="
+            "RJ_CONSAN_MOI_ENGINE="
+            "RJ_CONSAN_MOI_BACKEND="
+            "RJ_CONSAN_LOG=1"
+            "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+        )
+        if(_outcome STREQUAL "Correct")
+            list(
+                APPEND _hook_default_environment
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            )
+        else()
+            list(
+                APPEND _hook_default_environment
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+            )
+        endif()
+        rj_add_consan_hip_case(
+            NAME
+                "${_device_PREFIX}.HookLoadDefaultsToRecordReplayLds.${_outcome}"
+            TARGET
+                hip_consan_device_ordered_tile_handoff_${_device_TARGET}_test
+            FILTER "ConSanDeviceOrderedTileHandoffTest.${_outcome}"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 60
+            PASS_REGEX
+                "fine_grained_snapshot_bytes=[1-9][0-9]* coarse_grained_snapshot_bytes=0"
+            FAIL_REGEX "coarse_grained_snapshot_bytes=[1-9][0-9]*"
+            ENVIRONMENT ${_hook_default_environment}
+            LABELS
+                ${_labels}
+                hook-default
+                "${_outcome_label}"
+                record-replay
+                regression-10622
+        )
+    endforeach()
 
     set(_device_workloads
         "OrderedTileHandoff|ordered_tile_handoff|ConSanDeviceOrderedTileHandoffTest"

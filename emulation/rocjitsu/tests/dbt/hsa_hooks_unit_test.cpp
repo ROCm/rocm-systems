@@ -440,7 +440,9 @@ hsa_amd_memory_pool_t g_last_memory_lock_to_pool_pool{};
 int g_code_object_reader_create_calls = 0;
 bool g_fail_replacement_reader_create = false;
 bool g_fail_core_memory_allocate = false;
+bool g_offer_fine_report_region = true;
 bool g_offer_coarse_report_region = false;
+bool g_offer_coarse_report_region_first = false;
 int g_core_memory_allocate_calls = 0;
 int g_core_memory_free_calls = 0;
 int g_core_memory_runtime_reclaim_calls = 0;
@@ -915,10 +917,19 @@ hsa_status_t HSA_API fake_agent_iterate_regions(hsa_agent_t agent,
                                                 void *data) {
   if (agent.handle != kHostAgent.handle || callback == nullptr)
     return HSA_STATUS_ERROR_INVALID_AGENT;
-  hsa_status_t status = callback(hsa_region_t{30}, data);
-  if (status != HSA_STATUS_SUCCESS || !g_offer_coarse_report_region)
-    return status;
-  return callback(hsa_region_t{31}, data);
+  if (g_offer_coarse_report_region && g_offer_coarse_report_region_first) {
+    const hsa_status_t coarse_status = callback(hsa_region_t{31}, data);
+    if (coarse_status != HSA_STATUS_SUCCESS)
+      return coarse_status;
+  }
+  if (g_offer_fine_report_region) {
+    const hsa_status_t fine_status = callback(hsa_region_t{30}, data);
+    if (fine_status != HSA_STATUS_SUCCESS)
+      return fine_status;
+  }
+  if (g_offer_coarse_report_region && !g_offer_coarse_report_region_first)
+    return callback(hsa_region_t{31}, data);
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_region_get_info(hsa_region_t region, hsa_region_info_t attribute,
@@ -1800,7 +1811,9 @@ void reset_code_object_observations() {
 void reset_core_memory_observations() {
   ASSERT_TRUE(g_core_memory_allocations.empty());
   g_fail_core_memory_allocate = false;
+  g_offer_fine_report_region = true;
   g_offer_coarse_report_region = false;
+  g_offer_coarse_report_region_first = false;
   g_core_memory_allocate_calls = 0;
   g_core_memory_free_calls = 0;
   g_core_memory_runtime_reclaim_calls = 0;
@@ -1901,8 +1914,10 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   g_transform_override_result = unchanged;
 
   FakeApiTable api;
+  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
   InstalledDbiHook hook(api);
   ASSERT_TRUE(hook.installed()) << hook.error();
+  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, original_load);
 
   constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
   hsa_code_object_reader_t reader{};
@@ -5748,17 +5763,25 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportAllocationFailureRejectsWhenFailClosed)
   g_fail_core_memory_allocate = false;
 }
 
-TEST(HsaHooksUnitTest, RecordReplayAutoReportPrefersCoarseRegionWithoutMovingOtherEngines) {
+TEST(HsaHooksUnitTest, AutoReportsPreferFineRegionAcrossEnginesAndIterationOrders) {
   struct Case {
     const char *mode;
+    bool offer_fine_region;
     bool offer_coarse_region;
+    bool offer_coarse_region_first;
     uint64_t expected_region;
   };
   constexpr std::array cases = {
-      Case{"record-replay", true, 31u},
-      Case{"record-replay", false, 30u},
-      Case{"sampled", true, 30u},
-      Case{"inline-shadow", true, 30u},
+      Case{"record-replay", true, false, false, 30u},
+      Case{"record-replay", true, true, false, 30u},
+      Case{"record-replay", true, true, true, 30u},
+      Case{"sampled", true, false, false, 30u},
+      Case{"sampled", true, true, false, 30u},
+      Case{"sampled", true, true, true, 30u},
+      Case{"inline-shadow", true, false, false, 30u},
+      Case{"inline-shadow", true, true, false, 30u},
+      Case{"inline-shadow", true, true, true, 30u},
+      Case{"record-replay", false, true, false, 31u},
   };
   for (const Case &test : cases) {
     SCOPED_TRACE(test.mode);
@@ -5772,7 +5795,9 @@ TEST(HsaHooksUnitTest, RecordReplayAutoReportPrefersCoarseRegionWithoutMovingOth
 
     reset_code_object_observations();
     reset_core_memory_observations();
+    g_offer_fine_report_region = test.offer_fine_region;
     g_offer_coarse_report_region = test.offer_coarse_region;
+    g_offer_coarse_report_region_first = test.offer_coarse_region_first;
     g_transform_override_result = std::string_view(test.mode) == "sampled"
                                       ? auto_report_sampled_transform_result()
                                       : auto_report_replay_transform_result();
@@ -5793,7 +5818,9 @@ TEST(HsaHooksUnitTest, RecordReplayAutoReportPrefersCoarseRegionWithoutMovingOth
     }
     EXPECT_TRUE(g_core_memory_allocations.empty());
   }
+  g_offer_fine_report_region = true;
   g_offer_coarse_report_region = false;
+  g_offer_coarse_report_region_first = false;
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAndCleansUp) {

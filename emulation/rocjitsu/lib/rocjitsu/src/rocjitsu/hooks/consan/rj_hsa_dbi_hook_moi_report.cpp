@@ -112,7 +112,6 @@ public:
     RegionSearch search;
     search.core = core;
     search.requested_size = requested;
-    search.prefer_coarse_grained = engine == rocjitsu::ConSanMoiEngine::RecordReplay;
     const hsa_status_t iterate_status =
         core->hsa_agent_iterate_regions_fn(agent, select_region, &search);
     if (iterate_status != HSA_STATUS_SUCCESS && iterate_status != HSA_STATUS_INFO_BREAK) {
@@ -448,7 +447,6 @@ private:
     hsa_region_t region{};
     bool found = false;
     bool fine_grained = false;
-    bool prefer_coarse_grained = false;
   };
 
   struct Entry {
@@ -680,17 +678,16 @@ private:
       return status;
     const bool fine_grained = (flags & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED) != 0;
     const bool coarse_grained = (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0;
-    if (fine_grained && (!search->found || !search->prefer_coarse_grained)) {
+    if (fine_grained) {
       search->region = region;
       search->found = true;
       search->fine_grained = true;
-      return search->prefer_coarse_grained ? HSA_STATUS_SUCCESS : HSA_STATUS_INFO_BREAK;
+      return HSA_STATUS_INFO_BREAK;
     }
-    if (coarse_grained && (!search->found || search->prefer_coarse_grained)) {
+    if (!search->found && coarse_grained) {
       search->region = region;
       search->found = true;
       search->fine_grained = false;
-      return search->prefer_coarse_grained ? HSA_STATUS_INFO_BREAK : HSA_STATUS_SUCCESS;
     }
     return HSA_STATUS_SUCCESS;
   }

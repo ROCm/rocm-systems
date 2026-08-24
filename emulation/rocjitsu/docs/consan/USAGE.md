@@ -36,8 +36,9 @@ env \
   ./application
 ```
 
-Loading the hook enables ConSan and defaults to MOI Record/Replay.
-`RJ_CONSAN_LOG=1` is optional.
+Loading the hook is itself the activation action and defaults to MOI
+Record/Replay; no separate enable variable is required. `RJ_CONSAN_LOG=1` is
+optional.
 
 Every valid code object on a waitcheck-supported target is checked for missing
 AMDGPU waits at load time before ConSan allocates runtime state or runs its DBI
