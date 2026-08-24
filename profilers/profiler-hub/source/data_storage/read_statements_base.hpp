@@ -512,6 +512,9 @@ struct scalar_detail_result
 // shared_ptr<read_statements_base>, selected once at construction based on the
 // detected schema version. Both schema_v3::read_statements and
 // schema_v4::read_statements derive from this and provide their own SQL.
+//
+// The v4.0 schema targeted here is a draft and is expected to change; this seam is
+// where that revision lands.
 // ---------------------------------------------------------------------------
 struct read_statements_base
 {
