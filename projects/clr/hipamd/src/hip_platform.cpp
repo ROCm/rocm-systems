@@ -732,7 +732,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     }
 
     // Propagate all other errors
-    return {err != hipSuccess ? err : hipErrorInvalidDeviceFunction, nullptr};
+    return {err, nullptr};
   }();
 
   if (hip_error != hipSuccess) {
