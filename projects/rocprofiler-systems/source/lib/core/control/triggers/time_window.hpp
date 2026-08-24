@@ -7,11 +7,11 @@
 #include "core/control/session.hpp"
 #include "core/state.hpp"
 
-#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace rocprofsys::control::triggers
 {
@@ -50,9 +50,15 @@ public:
     /// serializing start()/stop() calls (guarded via m_lifecycle_mutex).
     void start()
     {
-        const std::scoped_lock lk{ m_lifecycle_mutex };
-        if(!has_window()) return;
-        if(m_thread.joinable()) return;
+        const std::scoped_lock window_lk{ m_lifecycle_mutex };
+        if(!has_window())
+        {
+            return;
+        }
+        if(m_thread.joinable())
+        {
+            return;
+        }
         m_thread = std::thread{ [this]() { worker(); } };
     }
 
@@ -63,8 +69,11 @@ public:
     /// the destructor), never from worker().
     void stop() noexcept
     {
-        const std::scoped_lock lk{ m_lifecycle_mutex };
-        if(!m_thread.joinable()) return;
+        const std::scoped_lock window_lk{ m_lifecycle_mutex };
+        if(!m_thread.joinable())
+        {
+            return;
+        }
         m_clock.interrupt();
         m_thread.join();
     }
@@ -80,8 +89,14 @@ private:
 
     [[nodiscard]] static action initial_action(const config& cfg) noexcept
     {
-        if(cfg.delay > clock_duration::zero()) return action::pause;
-        if(cfg.duration > clock_duration::zero()) return action::trace;
+        if(cfg.delay > clock_duration::zero())
+        {
+            return action::pause;
+        }
+        if(cfg.duration > clock_duration::zero())
+        {
+            return action::trace;
+        }
         return action::skip;
     }
 
@@ -93,22 +108,28 @@ private:
 
     void worker()
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-        const auto t0           = m_clock.now();
+        const auto current_ts   = m_clock.now();
         const bool has_delay    = m_config.delay > clock_duration::zero();
         const bool has_duration = m_config.duration > clock_duration::zero();
 
         if(has_delay)
         {
-            if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
+            if(!m_clock.sleep_until(current_ts + m_config.delay))
+            {
+                return;  // interrupted
+            }
             m_session->set_action(trigger_name, action::trace);
         }
 
         if(has_duration)
         {
-            const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;                // interrupted
+            const auto end = current_ts + m_config.delay + m_config.duration;
+            if(!m_clock.sleep_until(end))
+            {
+                return;  // interrupted
+            }
             m_session->set_action(trigger_name, action::pause);  // terminal
         }
     }
