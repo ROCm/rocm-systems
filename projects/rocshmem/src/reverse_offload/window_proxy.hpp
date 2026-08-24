@@ -34,15 +34,15 @@ namespace rocshmem {
 
 class WindowProxy {
  private:
-  using ProxyT = DeviceProxy<HostAllocator, WindowInfoMPI *>;
+  using ProxyT = DeviceProxy<WindowInfoMPI *>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
   WindowProxy(SymmetricHeap *heap, MPI_Comm comm, size_t num_windows,
-              [[maybe_unused]] const HostAllocator& alloc = HostAllocator())
-    : proxy_{num_windows}, num_windows_{num_windows} {
+              const HostAllocator& alloc = HostAllocator())
+    : alloc_{alloc}, proxy_{num_windows, alloc_}, num_windows_{num_windows} {
 
     WindowInfoMPI** window_info{proxy_.get()};
 
@@ -79,6 +79,7 @@ class WindowProxy {
 
   __host__ size_t get_num_MPI_windows() { return num_windows_; }
  private:
+  HostAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */

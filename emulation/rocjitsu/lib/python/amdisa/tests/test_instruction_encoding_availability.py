@@ -1,20 +1,22 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import os
 from pathlib import Path
 
 import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
 from amdisa.parser import Parser
 
 
 def _mrisa_dir() -> Path:
-    return (
+    default = (
         Path(__file__).resolve().parents[6] / 'shared' / 'machine-readable-isa' / 'isa'
     )
+    return Path(os.environ.get('MRISA_PATH', default))
 
 
 def _find_instruction(spec, encoding_name: str, instruction_name: str):
@@ -22,12 +24,14 @@ def _find_instruction(spec, encoding_name: str, instruction_name: str):
     return next(inst for inst in encoding.insts if inst.name == instruction_name)
 
 
-def test_cdna4_preserves_conditional_dpp_encoding_availability():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+def test_cdna4_manual_opcode_rule_filters_xml_dpp_availability():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     inst = _find_instruction(spec, 'ENC_VOP1', 'V_CVT_F64_I32')
 
+    # The XML exposes the conditional extension, but CDNA4 section 12.16.1
+    # explicitly prohibits DPP for this opcode.
     assert 'VOP1_VOP_DPP' in inst.available_encodings
-    assert CodeGenerator(spec, '')._instruction_supports_dpp(inst, 'ENC_VOP1')
+    assert not CodeGenerator(spec, '')._instruction_supports_dpp(inst, 'ENC_VOP1')
 
 
 def test_rdna4_distinguishes_vop1_instructions_with_and_without_dpp():
@@ -48,7 +52,7 @@ def test_rdna4_distinguishes_vop1_instructions_with_and_without_dpp():
 
 
 def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     supported = _find_instruction(spec, 'ENC_VOP1', 'V_MOV_B32')
     unsupported = _find_instruction(spec, 'ENC_VOP1', 'V_CVT_F64_I32')
 
@@ -61,7 +65,7 @@ def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
 
 
 def test_modifier_availability_requires_explicit_encoding_provenance():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     generator = CodeGenerator(spec, '')
     unknown = Instruction('V_SYNTHETIC', 'ENC_VOP1', 0, [])
     known_absent = Instruction(

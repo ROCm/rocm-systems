@@ -107,6 +107,5 @@ foreach(i RANGE 0 ${convert_test_length})
         ARGS --input ${output} ${validate_args}
         TIMEOUT 45
         LABELS "integration-tests"
-        FIXTURES_REQUIRED ${test_name}
-        UNSTABLE)
+        FIXTURES_REQUIRED ${test_name})
 endforeach()

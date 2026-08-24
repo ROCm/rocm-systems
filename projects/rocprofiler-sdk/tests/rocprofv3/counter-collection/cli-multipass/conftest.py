@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
-import os
 import pytest
 
 
@@ -33,6 +31,35 @@ def pytest_addoption(parser):
         action="store",
         help="Path to output directory.",
     )
+    parser.addoption(
+        "--expected-counters",
+        action="store",
+        nargs="+",
+        default=[],
+        help="Ordered list of counters, one per pass (pass_1, pass_2, ...). "
+        "The number of passes is derived from the length of this list.",
+    )
+    parser.addoption(
+        "--binary-dir",
+        action="store",
+        help="Path to the directory holding the per-test output directories.",
+    )
+    parser.addoption(
+        "--absent-globs",
+        action="store",
+        nargs="+",
+        default=[],
+        help="Glob patterns, relative to --binary-dir, that must not match any "
+        "directory because the runs that would have created them were rejected.",
+    )
+    parser.addoption(
+        "--present-globs",
+        action="store",
+        nargs="+",
+        default=[],
+        help="Glob patterns, relative to --binary-dir, that must match. Confirms "
+        "--binary-dir points where the absent patterns are meant to be checked.",
+    )
 
 
 @pytest.fixture
@@ -41,48 +68,20 @@ def output_dir(request):
 
 
 @pytest.fixture
-def pass1_agent_info(output_dir):
-    """Agent info from pass 1"""
-    filename = os.path.join(output_dir, "pass_1", "out_agent_info.csv")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+def expected_counters(request):
+    return request.config.getoption("--expected-counters")
 
 
 @pytest.fixture
-def pass1_counter_data(output_dir):
-    """Counter data from pass 1"""
-    filename = os.path.join(output_dir, "pass_1", "out_counter_collection.csv")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+def binary_dir(request):
+    return request.config.getoption("--binary-dir")
 
 
 @pytest.fixture
-def pass2_agent_info(output_dir):
-    """Agent info from pass 2"""
-    filename = os.path.join(output_dir, "pass_2", "out_agent_info.csv")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+def absent_globs(request):
+    return request.config.getoption("--absent-globs")
 
 
 @pytest.fixture
-def pass2_counter_data(output_dir):
-    """Counter data from pass 2"""
-    filename = os.path.join(output_dir, "pass_2", "out_counter_collection.csv")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+def present_globs(request):
+    return request.config.getoption("--present-globs")

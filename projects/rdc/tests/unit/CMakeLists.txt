@@ -62,6 +62,19 @@ target_link_libraries(${RDC_CODEC_TESTS} PRIVATE rdc_bootstrap GTest::gtest_main
 set_target_properties(${RDC_CODEC_TESTS} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
 add_test(NAME ${RDC_CODEC_TESTS} COMMAND ${RDC_CODEC_TESTS})
 
+# rdc_diag_kernel_tests: packaging guard for the precompiled diagnostic HSACO
+# kernels. Pure-logic and GPU-less: it reads the committed kernel assets
+# directly, so it links no rdc libraries and no amdsmi and runs on GPU-less CI.
+# RDC_KERNELS_HSACO_DIR points at the in-tree kernel sources; the test skips when
+# that tree is not reachable (for example a packaged test run).
+add_executable(rdc_diag_kernel_tests ${SRC_DIR}/test_diag_kernels.cc)
+target_compile_definitions(
+    rdc_diag_kernel_tests
+    PRIVATE RDC_KERNELS_HSACO_DIR="${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/kernels/hsaco"
+)
+target_link_libraries(rdc_diag_kernel_tests PRIVATE GTest::gtest_main pthread)
+add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
@@ -83,7 +96,7 @@ set_target_properties(
 add_test(NAME ${RDC_UNIT_TESTS} COMMAND ${RDC_UNIT_TESTS})
 
 install(
-    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS}
+    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )

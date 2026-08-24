@@ -10,7 +10,7 @@
 /// which have access to the encoding's inst_ member. These populate the
 /// VectorMemState with computed addresses.
 
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>

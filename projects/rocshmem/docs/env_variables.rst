@@ -39,6 +39,16 @@ control the behavior of rocSHMEM.
         |
         | Examples: ``trace:noversion``, ``env:full``, ``api:noenv``, ``trace:nocolor``
 
+    * - | ``ROCSHMEM_HEAP_ALLOCATOR_TYPE``
+        | Selects the GPU memory allocator used for the symmetric heap.
+      - arch-dependent
+      - | ``uncached``: GPU memory in uncached mode (default on most architectures).
+        | ``finegrained``: Fine-grained coherent GPU memory (default on gfx1100, gfx1201).
+        | ``coarsegrained``: Coarse-grained coherent GPU memory.
+        | ``vmm_posix``: VMM with POSIX fd-based IPC (requires ROCm 7.2+, Linux 5.6+, TCP bootstrap).
+        | ``vmm_fabric``: VMM with fabric handle IPC (requires ROCm 7.14+, gfx1250/MI455 only).
+        | Values are case-insensitive.
+
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).
       - ``1073741824`` (1 GB)
