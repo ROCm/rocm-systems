@@ -132,7 +132,6 @@ set(TEST_SRC
   hipGraphExecDestroy.cc
   hipGraphUpload.cc
   hipGraphCrossDeviceLaunch.cc
-  hipGraphStreamPoolFootprint.cc
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
