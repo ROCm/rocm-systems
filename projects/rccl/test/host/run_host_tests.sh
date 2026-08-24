@@ -121,9 +121,13 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
+    # --gtest_shuffle: these binaries share ~40 mutable file-scope globals whose reset lives in the
+    # fixture TearDown, so order-independence is a real property. Shuffling enforces it per run
+    # instead of leaving it to review; the seed is printed so a failure is reproducible.
     "$BUILD_DIR/$name" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
+      --gtest_shuffle \
       --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
   done
   return "$rc"
