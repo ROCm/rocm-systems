@@ -1603,6 +1603,11 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    if name in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64'):
+        operation = 'add' if name == 'V_PK_ADD_NC_U64' else 'sub'
+        return InstructionSemantics(
+            name, 'pk_binop_u64', operation=operation, data_type='u64'
+        )
     if name == 'V_PK_LSHL_ADD_U64':
         return InstructionSemantics(
             name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'

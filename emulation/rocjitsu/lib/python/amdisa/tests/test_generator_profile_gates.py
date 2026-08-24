@@ -4991,6 +4991,50 @@ def test_gfx1250_packed_f32_execute_uses_local_simd_probe(
     assert fma_body.index('ROCJITSU_TRY_SIMD') < fma_body.index('for (uint32_t lane')
 
 
+def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    for class_name in ('VPkAddNcU64Vop3p', 'VPkSubNcU64Vop3p'):
+        body = _generated_decode_body(source, class_name)
+        assert 'has an invalid packed U64 element layout' in body
+        assert 'has an invalid unused src2 encoding' in body
+        assert 'does not support combined source negation and clamp' not in body
+        assert 'vdst register tuple that exceeds the selector range' in body
+        assert 'src0 register tuple that exceeds the selector range' in body
+        assert 'src1 register tuple that exceeds the selector range' in body
+        assert 'invalid vdst register tuple alignment' in body
+        assert 'invalid src0 register tuple alignment' in body
+        assert 'invalid src1 register tuple alignment' in body
+        assert 'invalid src0 packed U64 source selector' in body
+        assert 'invalid src1 packed U64 source selector' in body
+        for operand_name in ('src0', 'src1'):
+            assert f'{operand_name} == 107u' in body
+            assert f'{operand_name} == 125u' in body
+            assert f'{operand_name} >= 209u' in body
+            assert f'{operand_name} >= 237u' in body
+            assert f'{operand_name} >= 249u' in body
+
+    lshl = _generated_decode_body(source, 'VPkLshlAddU64Vop3p')
+    assert 'has an invalid packed U64 element layout' in lshl
+    assert 'does not support source modifiers or clamp' in lshl
+    assert 'vdst register tuple that exceeds the selector range' in lshl
+    assert 'src0 register tuple that exceeds the selector range' in lshl
+    assert 'src1 register tuple that exceeds the selector range' in lshl
+    assert 'src2 register tuple that exceeds the selector range' in lshl
+    assert 'invalid vdst register tuple alignment' in lshl
+    assert 'invalid src0 register tuple alignment' in lshl
+    assert 'invalid src1 register tuple alignment' in lshl
+    assert 'invalid src2 register tuple alignment' in lshl
+    assert 'invalid src0 packed U64 source selector' in lshl
+    assert 'invalid src1 packed U64 source selector' in lshl
+    assert 'invalid src2 packed U64 source selector' in lshl
+    assert 'src1 == 107u' in lshl
+    assert 'src1 == 125u' in lshl
+    assert 'src1 == 127u' in lshl
+
+
 def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(
     gfx1250_generated_root: Path,
 ):
@@ -5072,15 +5116,13 @@ def test_split_execution_ids_name_and_match_callbacks(
         assert sorted(selected_ids) == sorted(callbacks)
 
 
-def test_cdna5_model_only_variant_instructions_have_no_execution_callbacks(
+def test_cdna5_variant_execution_callback_inventory(
     gfx1250_generated_root: Path,
 ) -> None:
     model_only_classes = (
         'VPkFmaF64Vop3p',
         'VPkMulF64Vop3p',
         'VPkAddF64Vop3p',
-        'VPkAddNcU64Vop3p',
-        'VPkSubNcU64Vop3p',
         'VPkMaxNumF64Vop3p',
         'VPkMinNumF64Vop3p',
         'VWmmaF6416x16x4F64Vop3p',
@@ -5102,16 +5144,26 @@ def test_cdna5_model_only_variant_instructions_have_no_execution_callbacks(
         assert class_name not in backend_source
         assert class_name not in execution_source
 
-    executable_class = 'VPkLshlAddU64Vop3p'
-    class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[0]
-    assert 'execute_impl' in class_body
-    constructor = model.split(f'{executable_class}::{executable_class}(', 1)[1].split(
-        '\n}', 1
-    )[0]
-    assert 'selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)' in constructor
-    assert executable_class in backend_header
-    assert executable_class in backend_source
-    assert executable_class in execution_source
+    executable_classes = (
+        'VPkAddNcU64Vop3p',
+        'VPkSubNcU64Vop3p',
+        'VPkLshlAddU64Vop3p',
+    )
+    for executable_class in executable_classes:
+        class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[
+            0
+        ]
+        assert 'execute_impl' in class_body
+        constructor = model.split(f'{executable_class}::{executable_class}(', 1)[
+            1
+        ].split('\n}', 1)[0]
+        assert (
+            f'selected_exec_fn(InstructionExecutionId::{executable_class})'
+            in constructor
+        )
+        assert executable_class in backend_header
+        assert executable_class in backend_source
+        assert executable_class in execution_source
     assert 'PkU64Pair read_pk_u64_pair' in execution_source
     assert 'PkU32Pair read_pk_u32_pair' in execution_source
     assert 'void write_pk_u64_pair' in execution_source
