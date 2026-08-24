@@ -13,8 +13,10 @@ to change before a stable release. Command-line `rocprofv3` wiring is the stacke
 PR, not this SDK change.
 
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
-hardware counters, kernel timing statistics, PC sampling, thread trace, or anything else, and it
-decides per pass which of its services are active.
+hardware counters, kernel timing statistics, PC sampling, thread trace, SPM, or anything else, and
+it decides per pass which of its services are active. ``rocprofv3`` wires replay to dispatch counter
+collection only; SPM, PC sampling, and thread trace require a custom tool (see
+:ref:`kernel-replay-sdk-api` and the ``samples/kernel_replay/`` examples).
 
 An earlier prototype (`rocprofiler_configure_kernel_replay_counting_service()`) was a dedicated
 counting service mutually exclusive with ordinary dispatch counting. That configure function, a
@@ -94,7 +96,12 @@ dispatch. Passes are distinguished by `current_pass`.
 
 The application observes **exactly one** kernel completion regardless of the pass count, an early
 exit, or an indefinite loop. The application's completion signal is suppressed on every pass and
-fired once after the loop ends, not at pass `N-1`.
+fired once after the loop ends (including after an indefinite loop breaks out), not at pass `N-1`.
+
+Each pass produces its own kernel start/end timestamps in dispatch tracing and counter records.
+Those timestamps differ per pass even though `dispatch_info.dispatch_id` is the same for all of
+them. Distinguish passes with `current_pass` (or the JSON `replay_pass` field on counter records),
+not with `dispatch_id` alone.
 
 ## Pass-count semantics
 
@@ -113,38 +120,58 @@ fired once after the loop ends, not at pass `N-1`.
 Returning non-zero continues the loop; returning zero breaks out. Because the break happens before
 `restore()`, the last executed pass leaves device memory in the state the application expects.
 
+``rocprofv3`` never sets ``replay_continue_cb``; early exit and indefinite loops are custom-tool
+features only.
+
 There is no environment variable that overrides this. A tool returns whatever count it needs —
 for example the number of counter groups collectable on the dispatch's agent.
 
 ## Localized context control
 
-Tools frequently want different services active on different passes — for example collect kernel
-timing or PC sampling once, but hardware counters on every pass. Calling the global
+Tools frequently want different services active on different passes — for example collect hardware
+counters on every pass but PC sampling on the last pass only. Calling the global
 `rocprofiler_start_context()` / `rocprofiler_stop_context()` would leak those changes into other,
-non-replayed dispatches. Instead the tool calls the localized equivalents delivered in the `PASS`
+non-replayed dispatches. Instead the tool calls the localized toggles delivered in the `PASS`
 payload:
 
 ```c
 payload->replay_local_stop_context_cb(my_pc_sampling_ctx);
 ```
 
+Contexts are configured and started **globally before replay** (outside the replay callbacks).
+The localized toggles only mask which of those already-active contexts participate in each pass;
+they do not create contexts and never mutate global state.
+
 Semantics:
 
 - **Only legal during `PASS` `PHASE_ENTER`.** Calls made outside that window return
   `ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR` and record nothing.
 - **Sticky across passes.** A context stopped in one pass stays stopped until it is started again
-  within the same replay loop, and vice versa. This is what avoids redundant work: PC sampling
-  requires reprogramming hardware, so a non-sticky design would toggle the hardware on and off every
-  pass — 15 extra reprogrammings in a 16-pass replay that samples once.
+  within the same replay loop, and vice versa.
 - **Scoped to the replay loop.** Each context's pre-replay active or inactive state is in effect
-  again once the loop completes. Global context state is never modified, and only the replaying
-  thread observes the overrides.
+  again once the loop completes.
 
-Kernel dispatch tracing honors the overrides by dropping disabled contexts from the pass's tracing
-data, so their timestamp records are skipped. Counter collection, PC sampling, SPM, and thread trace
-consult the same override map at dispatch time. See
+**Service combination limits.** Dispatch counter collection and PC sampling are mutually exclusive
+on MI2xx/MI3xx when both would run on the **same** replay pass (clock gating). ATT and SPM cannot
+safely share one pass because both inject AQL instrumentation. Use separate passes and separate
+contexts — locally stop one service before starting another. Kernel dispatch tracing honors the
+overrides by dropping disabled contexts from the pass's tracing data. Counter collection, SPM, and
+thread trace consult the override map at dispatch time and skip building AQL packets for disabled
+contexts. PC sampling and device counting are agent-wide today: the toggle is recorded but
+collection continues regardless, so separate passes are still required to avoid running counters and
+PC sampling together.
+
+See
 [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
 for how the override map is scoped.
+
+### Correlation IDs across passes
+
+The SDK reads the **internal** correlation ID once before the replay loop and threads the same value
+through CONFIG and every PASS callback. The **external** correlation ID is produced by the tool's
+own callback on each submit; a tool that increments it blindly will emit a different external ID per
+pass. Use `current_pass` (or `replay_pass` on counter records) as the reliable per-pass
+discriminator, not the external correlation ID.
 
 ## Configuring the service
 
