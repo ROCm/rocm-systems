@@ -33,6 +33,8 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
+#   GTEST_SHUFFLE gtest ordering flag (run phase)  (default: --gtest_shuffle; set empty to disable
+#                                                   when bisecting a failure)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -46,6 +48,7 @@ GPU_TARGETS="${GPU_TARGETS:-gfx942}"
 BUILD_TYPE="${BUILD_TYPE:-Debug}"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 GTEST_FILTER="${GTEST_FILTER:-*}"
+GTEST_SHUFFLE="${GTEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
@@ -121,13 +124,14 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
-    # --gtest_shuffle: these binaries share ~40 mutable file-scope globals whose reset lives in the
-    # fixture TearDown, so order-independence is a real property. Shuffling enforces it per run
-    # instead of leaving it to review; the seed is printed so a failure is reproducible.
+    # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
+    # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
+    # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
+    # GTEST_SHUFFLE to run in declaration order while bisecting.
     "$BUILD_DIR/$name" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
-      --gtest_shuffle \
+      ${GTEST_SHUFFLE:+"$GTEST_SHUFFLE"} \
       --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
   done
   return "$rc"
