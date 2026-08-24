@@ -36,7 +36,9 @@ extern "C"
 {
 #endif
 
+    // NOLINTNEXTLINE(modernize-use-using) -- C-style typedef for C ABI compatibility
     typedef int (*rocprofsys_causal_region_func_t)(const char*);
+    // NOLINTNEXTLINE(modernize-use-using) -- C-style typedef for C ABI compatibility
     typedef int (*rocprofsys_causal_annotated_func_t)(const char*,
                                                       rocprofsys_annotation_t*, size_t);
 
@@ -45,6 +47,7 @@ extern "C"
     /// librocprof-sys-dl when it is preloaded; left null (no-op) otherwise.
     ///
     /// @typedef rocprofsys_causal_callbacks rocprofsys_causal_callbacks_t
+    // NOLINTNEXTLINE(modernize-use-using) -- C-style typedef for C ABI compatibility
     typedef struct rocprofsys_causal_callbacks
     {
         rocprofsys_causal_region_func_t    begin;

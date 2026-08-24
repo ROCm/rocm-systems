@@ -18,7 +18,7 @@
 #endif
 
 #if ROCPROFSYS_CAUSAL_ENABLED > 0
-#    include <rocprofiler-systems/causal_api.h>
+#    include <rocprofiler-systems/causal_api.h>  // NOLINT(misc-include-cleaner)
 
 #    if !defined(ROCPROFSYS_CAUSAL_LABEL)
 /** @cond ROCPROFSYS_HIDDEN_DEFINES */

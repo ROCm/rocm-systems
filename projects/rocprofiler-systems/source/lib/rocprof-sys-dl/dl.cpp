@@ -16,6 +16,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
 #include "common/path.hpp"
@@ -23,6 +24,7 @@
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/annotation.h"
 #include "rocprofiler-systems/categories.h"
+#include "rocprofiler-systems/causal_api.h"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -377,7 +379,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(ompt_start_tool_f, m_omnihandle, "ompt_start_tool");
 #endif
 
-        if(!m_causal_api_handle) m_causal_api_handle = open(m_causal_api_lib);
+        if(!m_causal_api_handle)
+        {
+            m_causal_api_handle = open(m_causal_api_lib);
+        }
         _warn_verbose = 0;
         ROCPROFSYS_DLSYM(rocprofsys_causal_register_callbacks_f, m_causal_api_handle,
                          "rocprofsys_causal_register_callbacks");
@@ -482,9 +487,9 @@ public:
 private:
     void*       m_omnihandle        = nullptr;
     void*       m_causal_api_handle = nullptr;
-    std::string m_omnilib           = {};
-    std::string m_dllib             = {};
-    std::string m_causal_api_lib    = {};
+    std::string m_omnilib;
+    std::string m_dllib;
+    std::string m_causal_api_lib;
 };
 
 inline indirect&
@@ -498,9 +503,9 @@ get_indirect()
     static auto _libomni = get_env(env_vars::LIBRARY, "librocprof-sys.so");
     static auto _libcausal =
         get_env(env_vars::CAUSAL_API_LIBRARY, "librocprof-sys-causal-api.so");
-    static auto  _libdlib = get_env(env_vars::DL_LIBRARY, "librocprof-sys-dl.so");
-    static auto* _v       = new indirect{ _libomni, _libcausal, _libdlib };
-    return *_v;
+    static auto  _libdlib  = get_env(env_vars::DL_LIBRARY, "librocprof-sys-dl.so");
+    static auto* _instance = new indirect{ _libomni, _libcausal, _libdlib };
+    return *_instance;
 }
 
 auto&
@@ -726,7 +731,10 @@ extern "C"
         }
         else
         {
-            if(dl::get_thread_count()-- == 0) dl::get_thread_enabled() = true;
+            if(dl::get_thread_count()-- == 0)
+            {
+                dl::get_thread_enabled() = true;
+            }
         }
     }
 
@@ -753,7 +761,10 @@ extern "C"
         }
         else
         {
-            if(dl::get_thread_count()-- == 0) dl::get_thread_enabled() = true;
+            if(dl::get_thread_count()-- == 0)
+            {
+                dl::get_thread_enabled() = true;
+            }
         }
         return 0;
     }
@@ -796,17 +807,17 @@ extern "C"
                                                rocprofsys_annotation_t* _annotations,
                                                size_t                   _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active())
+        {
+            return 0;
+        }
         if(dl::get_thread_enabled())
         {
             return ROCPROFSYS_DL_INVOKE(
                 get_indirect().rocprofsys_push_category_region_python_f, name,
                 _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+        ++dl::get_thread_count();
         return 0;
     }
 
@@ -814,17 +825,17 @@ extern "C"
                                               rocprofsys_annotation_t* _annotations,
                                               size_t                   _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active())
+        {
+            return 0;
+        }
         if(dl::get_thread_enabled())
         {
             return ROCPROFSYS_DL_INVOKE(
                 get_indirect().rocprofsys_pop_category_region_python_f, name,
                 _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+        ++dl::get_thread_count();
         return 0;
     }
 
@@ -867,13 +878,19 @@ extern "C"
 
     int rocprofsys_causal_begin_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active())
+        {
+            return 0;
+        }
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
     }
 
     int rocprofsys_causal_end_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active())
+        {
+            return 0;
+        }
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
     }
 

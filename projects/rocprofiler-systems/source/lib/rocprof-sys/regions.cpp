@@ -6,6 +6,8 @@
 #include "core/config.hpp"
 #include "library/components/category_region.hpp"
 #include "library/tracing.hpp"
+#include "rocprofiler-systems/categories.h"
+
 #include <cstdint>
 
 #if defined(__GNUC__) && (__GNUC__ == 7)

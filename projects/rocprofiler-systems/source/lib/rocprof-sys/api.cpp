@@ -97,9 +97,9 @@ rocprofsys_push_category_region_python(const char*              _name,
     {
         rocprofsys_push_category_region_python_hidden(_name, _annotations,
                                                       _annotation_count);
-    } catch(std::exception& _e)
+    } catch(std::exception& _err)
     {
-        LOG_WARNING("Exception caught: {}", _e.what());
+        LOG_WARNING("Exception caught: {}", _err.what());
         return -1;
     }
     return 0;
@@ -114,9 +114,9 @@ rocprofsys_pop_category_region_python(const char*              _name,
     {
         rocprofsys_pop_category_region_python_hidden(_name, _annotations,
                                                      _annotation_count);
-    } catch(std::exception& _e)
+    } catch(std::exception& _err)
     {
-        LOG_WARNING("Exception caught: {}", _e.what());
+        LOG_WARNING("Exception caught: {}", _err.what());
         return -1;
     }
     return 0;

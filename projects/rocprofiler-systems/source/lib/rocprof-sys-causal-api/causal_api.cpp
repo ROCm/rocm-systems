@@ -7,6 +7,8 @@
 
 #include "rocprofiler-systems/causal_api.h"
 
+#include "rocprofiler-systems/annotation.h"
+
 #include <cstddef>
 
 namespace

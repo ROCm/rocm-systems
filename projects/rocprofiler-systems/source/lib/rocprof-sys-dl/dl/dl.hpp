@@ -13,7 +13,6 @@
 #endif
 
 #include "rocprofiler-systems/annotation.h"
-#include "rocprofiler-systems/causal_api.h"
 
 #include <atomic>
 #include <cstdint>

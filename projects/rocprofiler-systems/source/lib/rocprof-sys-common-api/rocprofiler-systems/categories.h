@@ -12,6 +12,8 @@ extern "C"
     /// @typedef rocprofsys_category_t
     /// @brief Identifier for categories
     ///
+    // C-style enum/typedef for C ABI compatibility
+    // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,modernize-use-using)
     typedef enum ROCPROFSYS_CATEGORIES
     {
         // Do not use first enum value

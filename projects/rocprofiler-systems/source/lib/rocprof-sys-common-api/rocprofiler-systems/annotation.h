@@ -16,6 +16,8 @@ extern "C"
     /// if the data type is not a pointer, pass the address of
     /// data.
     /// @typedef ROCPROFSYS_ANNOTATION_TYPE rocprofsys_annotation_type_t
+    // C-style enum/typedef for C ABI compatibility
+    // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,modernize-use-using)
     typedef enum ROCPROFSYS_ANNOTATION_TYPE
     {
         // Do not use first enum value
@@ -94,6 +96,7 @@ extern "C"
     /// }
     /// @endcode
     /// @typedef rocprofsys_annotation rocprofsys_annotation_t
+    // NOLINTNEXTLINE(modernize-use-using) -- C-style typedef for C ABI compatibility
     typedef struct rocprofsys_annotation
     {
         /// label for annotation
