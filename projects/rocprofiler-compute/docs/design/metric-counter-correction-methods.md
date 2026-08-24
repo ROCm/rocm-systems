@@ -101,7 +101,7 @@ These symptoms appear across architectures more or less.
 
 | Root cause | Mechanism | When it dominates |
 |---|---|---|
-| **Multi-pass profiling** | Hardware perfmon slot limits require multiple replay passes; analyze **imputes** counters from different passes onto the same dispatch row (`utils_analysis.py`) | Default full analyze (`--block` all panels) |
+| **Multi-pass profiling** | Hardware perfmon slot limits require multiple re-run passes; analyze **imputes** counters from different passes onto the same dispatch row (`utils_analysis.py`) | Default full analyze (`--block` all panels) |
 | **Asynchronous counter sampling** | Counters in different IP blocks are not sample-aligned even within one pass | Short dispatches, low event counts |
 | **Non-partition counter pairs** | Numerator and denominator measure different semantics (not strict subset) | Workgroup Manager Utilization: `GRBM_SPI_BUSY / GRBM_GUI_ACTIVE` |
 | **Aggregate ratio inflation** | `SUM(a)/SUM(b)` exceeds 100% when some rows have `a > b`, even if most rows are valid | HBM avg on noisy workloads |
@@ -129,7 +129,7 @@ Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are dow
 
 ### 2.1 Single-pass counter grouping
 
-**Definition:** Place counters that appear together in ratio or subtraction formulas into the same PMC perfmon bucket so they are collected during the same kernel replay pass.
+**Definition:** Place counters that appear together in ratio or subtraction formulas into the same PMC perfmon bucket so they are collected during the same kernel re-run pass.
 
 **Implementation today:**
 
@@ -515,7 +515,7 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 *Secondary audience — port to FAQ, conceptual docs, or analyze warnings when ready. Not user documentation yet.*
 
-- **Why can some Percent metrics exceed 100%?** Multi-pass profiling merges counters from different replay passes; occasional misalignment can inflate ratios. When caps are applied in product, they follow internal single-pass validation (§0 Rule 3) — display values reflect known collection noise, not a substitute for counter correctness review.
+- **Why can some Percent metrics exceed 100%?** Multi-pass profiling merges counters from different re-run passes; occasional misalignment can inflate ratios. When caps are applied in product, they follow internal single-pass validation (§0 Rule 3) — display values reflect known collection noise, not a substitute for counter correctness review.
 - **Why is VALU Utilization sometimes > 100%?** On some GPUs (e.g. gfx942), dual-issue execution can exceed 100% — this is expected (`ValuDualIssueDetector.candidate_metrics`), not a bug; ratio caps are not applied.
 - **What do “counter variance corrected” warnings mean?** A subtraction-based metric had a negative intermediate value (usually multi-pass noise) and was clamped to zero.
 - **Do HBM + Remote always sum to 100%?** Not exactly after independent corrections; each split is sanitized separately.
