@@ -396,3 +396,81 @@ hrr:
   Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
     <<: *level_2
     tags: [capture, playback, roundtrip, regions, memcpy]
+  Unit_HRR_ApiMatrix_ManifestWellFormed:
+    <<: *level_2
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_ReplayClassMarkers:
+    <<: *level_2
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_InfoBreakdownParse:
+    <<: *level_2
+    tags: [api-matrix, cpu]
+  Unit_HRR_ApiMatrix_T0_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T1_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T2_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T3_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T4_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_T5_Roundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, api-matrix]
+  Unit_HRR_ApiMatrix_Breadth_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Breadth2_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Deprioritised_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_GraphNodes_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacyCtx_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacyLaunch_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_LegacySurface_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_MemPoolShare_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_MultiGpu_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix, multigpu]
+  Unit_HRR_ApiMatrix_PayloadLoss_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_ProcAddress_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_Reset_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_ShareableHandle_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SilentFailure_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SptCoopLaunch_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_SptKernelLaunch_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
+  Unit_HRR_ApiMatrix_UC1Dense_Direct:
+    <<: *level_2
+    tags: [direct, api-matrix]
