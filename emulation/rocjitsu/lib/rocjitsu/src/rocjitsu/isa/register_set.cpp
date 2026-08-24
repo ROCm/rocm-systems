@@ -61,7 +61,6 @@ void RegisterSet::expand(RegisterRef ref) {
   case RegClass::SCC:
   case RegClass::M0:
   case RegClass::FLAT_SCRATCH:
-  case RegClass::TTMP:
   case RegClass::PC:
     // Special singleton: index/width are meaningless, so just set its bit.
     special_regs_ |= special_bit(ref.cls);
@@ -86,7 +85,6 @@ void RegisterSet::erase(RegisterRef ref) {
   case RegClass::SCC:
   case RegClass::M0:
   case RegClass::FLAT_SCRATCH:
-  case RegClass::TTMP:
   case RegClass::PC:
     special_regs_ &= static_cast<uint16_t>(~special_bit(ref.cls));
     break;
@@ -109,7 +107,6 @@ void RegisterSet::clear_class(RegClass cls) {
   case RegClass::SCC:
   case RegClass::M0:
   case RegClass::FLAT_SCRATCH:
-  case RegClass::TTMP:
   case RegClass::PC:
     special_regs_ &= static_cast<uint16_t>(~special_bit(cls));
     break;
@@ -130,7 +127,6 @@ bool RegisterSet::contains(RegisterRef ref) const {
   case RegClass::SCC:
   case RegClass::M0:
   case RegClass::FLAT_SCRATCH:
-  case RegClass::TTMP:
   case RegClass::PC:
     return (special_regs_ & special_bit(ref.cls)) != 0;
   }

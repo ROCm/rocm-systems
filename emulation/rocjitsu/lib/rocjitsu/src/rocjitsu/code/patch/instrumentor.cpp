@@ -112,8 +112,6 @@ std::string reg_name(RegisterRef ref) {
     return "m0";
   case RegClass::FLAT_SCRATCH:
     return "flat_scratch";
-  case RegClass::TTMP:
-    return "ttmp";
   case RegClass::PC:
     return "pc";
   }

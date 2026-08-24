@@ -590,7 +590,6 @@ TEST(RegisterSetSpecial, ClassifiesSpecialVersusOrdinaryClasses) {
   EXPECT_TRUE(is_special_reg_class(RegClass::SCC));
   EXPECT_TRUE(is_special_reg_class(RegClass::M0));
   EXPECT_TRUE(is_special_reg_class(RegClass::FLAT_SCRATCH));
-  EXPECT_TRUE(is_special_reg_class(RegClass::TTMP));
   EXPECT_TRUE(is_special_reg_class(RegClass::PC));
 }
 
@@ -692,13 +691,13 @@ TEST(RegisterSetSpecial, EqualityDistinguishesSpecialMembership) {
   EXPECT_NE(a, b); // the special mask participates in equality
 }
 
-TEST(RegisterSetSpecial, HighValuedTtmpAndPcMaskBitsRoundTrip) {
-  // TTMP and PC are the highest RegClass values, where a mask-width bug would
-  // first surface.
+TEST(RegisterSetSpecial, HighValuedSpecialMaskBitsRoundTrip) {
+  // FLAT_SCRATCH and PC are the highest RegClass values, where a mask-width bug
+  // would first surface.
   RegisterSet s;
-  s.expand({RegClass::TTMP, 0, 1});
+  s.expand({RegClass::FLAT_SCRATCH, 0, 1});
   s.expand({RegClass::PC, 0, 1});
-  EXPECT_EQ(specials_in(s), special_regs({RegClass::TTMP, RegClass::PC}));
+  EXPECT_EQ(specials_in(s), special_regs({RegClass::FLAT_SCRATCH, RegClass::PC}));
   EXPECT_FALSE(s.contains({RegClass::SGPR, 0, 1})); // no aliasing onto bit 0
 }
 
@@ -741,7 +740,7 @@ TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
   const uint32_t words[] = {0xBE802000u, 0x00000000u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
 
@@ -773,7 +772,7 @@ TEST(SpecialEffectAnalysis, SelectorEncodedExecWriteIsNotSurfaced) {
   for (const uint32_t word :
        {0xbefe0080u /* s_mov_b32 exec_lo, 0 */, 0xbeff0080u /* s_mov_b32 exec_hi, 0 */}) {
     const std::array<uint32_t, 2> words{word, 0u};
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "s_mov_b32") << std::hex << word;
 
@@ -800,7 +799,7 @@ TEST(SpecialEffectAnalysis, ImplicitPreserveReadDropsSelectorEncodedSpecial) {
   {
     const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 4});
     const std::array<uint32_t, 2> words{built[0], 0u};
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
 
@@ -818,7 +817,7 @@ TEST(SpecialEffectAnalysis, ImplicitPreserveReadDropsSelectorEncodedSpecial) {
   {
     const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 126});
     const std::array<uint32_t, 2> words{built[0], 0u};
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
 
@@ -837,7 +836,7 @@ TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
   constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, kWritelaneV141S4Lane2.data()));
   ASSERT_NE(inst, nullptr);
 
   InstDefUse du(*inst);
@@ -858,7 +857,7 @@ TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
   const std::array<uint32_t, 2> words{built[0], 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
@@ -870,9 +869,9 @@ TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
 TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
   const auto built = cdna5::build_vopc(cdna5::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
   const std::array<uint32_t, 2> words{built[0], 0u};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
@@ -888,7 +887,7 @@ TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnRdna) {
   const std::array<uint32_t, 2> words{built[0], 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
 
@@ -904,7 +903,7 @@ TEST(SpecialEffectAnalysis, CbranchSccIsSpecialSccUse) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_scc0");
 
@@ -918,7 +917,7 @@ TEST(SpecialEffectAnalysis, CbranchVccIsSpecialVccUse) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_vccz");
 
@@ -932,7 +931,7 @@ TEST(SpecialEffectAnalysis, CbranchExecIsSpecialExecUse) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_cbranch_execz");
 
@@ -950,7 +949,7 @@ TEST(SpecialEffectAnalysis, Vop2CarryCdnaAddcUsesAndDefsVcc) {
   const std::array<uint32_t, 2> words{built[0], 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "v_addc_co_u32_e32");
 
@@ -964,9 +963,9 @@ TEST(SpecialEffectAnalysis, Vop2CarryGfx1250AddCoCiUsesAndDefsVcc) {
   const auto built =
       cdna5::build_vop2(cdna5::kVAddCoCiU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
   const std::array<uint32_t, 2> words{built[0], 0u};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "v_add_co_ci_u32_e32");
 
@@ -982,7 +981,7 @@ TEST(SpecialEffectAnalysis, GetpcReadsPc) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_getpc_b64");
 
@@ -997,7 +996,7 @@ TEST(SpecialEffectAnalysis, SetpcWritesPc) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_setpc_b64");
 
@@ -1012,7 +1011,7 @@ TEST(SpecialEffectAnalysis, ScallReadsAndWritesPc) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_call_b64");
 
@@ -1030,7 +1029,7 @@ TEST(SpecialEffectAnalysis, MovrelsReadsM0) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_movrels_b32");
 
@@ -1045,7 +1044,7 @@ TEST(SpecialEffectAnalysis, SetGprIdxIdxReadsAndWritesM0) {
   const std::array<uint32_t, 2> words{word, 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "s_set_gpr_idx_idx");
 
@@ -1059,9 +1058,9 @@ TEST(SpecialEffectAnalysis, SetGprIdxIdxReadsAndWritesM0) {
 // defs/uses.
 TEST(SpecialEffectAnalysis, MemoryPseudoOperandProducesNoSpecialEffect) {
   const auto words = cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer, {.vdata = 1, .rsrc = 0});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b32");
 
@@ -1083,7 +1082,7 @@ TEST(SpecialEffectLiveness, SpecialEffectsAreAbsentFromOrdinaryLiveness) {
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_FALSE(blocks.empty());
 
   BasicBlock *entry = block_starting_at(blocks, 0);

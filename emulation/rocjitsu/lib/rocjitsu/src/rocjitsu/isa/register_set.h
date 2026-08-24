@@ -6,7 +6,7 @@
 ///
 /// @details Tracks the ordinary indexed register files (SGPR, VGPR, AccVGPR) as
 /// per-index bitsets and the architectural special registers (EXEC, VCC, SCC,
-/// M0, FLAT_SCRATCH, TTMP, PC) as a compact singleton mask in the same set.
+/// M0, FLAT_SCRATCH, PC) as a compact singleton mask in the same set.
 /// Consumers that only reason about allocatable/indexed registers (scratch
 /// liveness, spilling) project the special members out with `ordinary_only()`.
 
@@ -66,12 +66,11 @@ enum class RegClass : uint8_t {
   SCC,          ///< Scalar condition code bit. Special singleton register.
   M0,           ///< M0 special scalar register. Special singleton register.
   FLAT_SCRATCH, ///< Flat-scratch base pair. Special singleton register.
-  TTMP,         ///< Trap-temporary registers. Special singleton register.
   PC,           ///< Program counter/control-flow dep. Special singleton register.
 };
 
 /// @brief True if @p cls is an architectural special register (EXEC, VCC, SCC,
-/// M0, FLAT_SCRATCH, TTMP, PC) rather than an ordinary indexed register file
+/// M0, FLAT_SCRATCH, PC) rather than an ordinary indexed register file
 /// (SGPR, VGPR, ACC_VGPR). Special registers are singletons held in the set's
 /// special mask; ordinary ones occupy per-index bitsets.
 [[nodiscard]] constexpr bool is_special_reg_class(RegClass cls) {
@@ -81,7 +80,6 @@ enum class RegClass : uint8_t {
   case RegClass::SCC:
   case RegClass::M0:
   case RegClass::FLAT_SCRATCH:
-  case RegClass::TTMP:
   case RegClass::PC:
     return true;
   case RegClass::SGPR:
@@ -90,6 +88,18 @@ enum class RegClass : uint8_t {
     return false;
   }
   return false;
+}
+
+/// @brief Widest special-class value that can set a bit in a special mask.
+/// @details Derived from `is_special_reg_class` rather than a named enumerator,
+/// so appending a RegClass keeps the bound correct without updating callers.
+[[nodiscard]] constexpr uint8_t widest_special_reg_class() {
+  uint8_t widest = 0;
+  for (unsigned v = 0; v <= 0xFF; ++v) {
+    if (is_special_reg_class(static_cast<RegClass>(v)))
+      widest = static_cast<uint8_t>(v);
+  }
+  return widest;
 }
 
 /// @brief A contiguous register reference within one register file.
@@ -236,11 +246,12 @@ private:
     return static_cast<uint16_t>(1u << static_cast<uint8_t>(cls));
   }
 
-  // The special mask indexes bits by raw RegClass value, so every class must
-  // fit in `special_regs_`. If RegClass ever grows past the mask width, widen
-  // it (and the shift base in `special_bit`) rather than truncating membership.
-  static_assert(static_cast<uint8_t>(RegClass::PC) < 16,
-                "special_regs_ must hold a bit for every RegClass value");
+  // The special mask indexes bits by raw RegClass value, so every special class
+  // must fit in `special_regs_`. If a special class ever grows past the mask
+  // width, widen it (and the shift base in `special_bit`) rather than
+  // truncating membership.
+  static_assert(widest_special_reg_class() < 16,
+                "special_regs_ must hold a bit for every special RegClass");
 
   std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;
   std::bitset<REGISTER_SET_MAX_VGPRS> vgprs_;

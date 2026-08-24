@@ -23,8 +23,8 @@ namespace {
 // InstDefUse surfaces only ordinary register-file refs (SGPR/VGPR/AccVGPR)
 // through to_register_ref(). A generic selector operand can decode to a special
 // register (e.g. EXEC_LO/EXEC_HI in an OPR_SDST field), but that ref collapses
-// the LO/HI halves (and, for TTMP, the register index) into one class-wide
-// singleton, so it is dropped here rather than recorded imprecisely. Genuinely
+// the LO/HI halves into one class-wide singleton, so it is dropped here rather
+// than recorded imprecisely. Genuinely
 // fieldless special operands are surfaced instead through to_special_reg_class().
 // See def_use_chain.h.
 [[nodiscard]] std::optional<RegisterRef> ordinary_register_ref(const Operand &op) {
