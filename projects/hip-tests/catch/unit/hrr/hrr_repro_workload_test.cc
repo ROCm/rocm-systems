@@ -15,7 +15,8 @@
  *   - embedded device pointers inside a by-value struct kernel argument,
  *   - an uncaptured host write that deterministically diverges replay,
  *   - the "null optional output pointer + 0x20000" GPU-fault class, and
- *   - replay zero-init of an otherwise-uninitialised device allocation.
+ *   - replay zero-init of an allocation whose capture-time contents come from
+ *     an unrecorded host write.
  *
  * Like hrr_workload.cc, every TEST_CASE here is hidden with the Catch2 [.] tag
  * so it is NOT auto-discovered by CTest.  Each is driven from hrr_roundtrip.cc:
@@ -274,19 +275,20 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// A5. Zero-init read of an uninitialised device allocation
+// A5. Zero-init read of an allocation initialized by an unrecorded host write
 //
-// hipMalloc a buffer and do NOT initialise it; a kernel copies it to `out`,
-// then D2H.  Fresh ROCm allocations are zeroed, so at capture out == 0 and the
-// recorded blob is all-zero.  Replay with HIP_HRR_REPLAY_ZERO_INIT=1 reproduces
-// the zeroed source deterministically, so the replayed out matches; with the
-// knob off, replay may reuse stale bytes and diverge.
+// hipMallocManaged a buffer and zero it through the host pointer. HRR records
+// the allocation but cannot observe the CPU stores, so replay must reproduce
+// the zeros through HIP_HRR_REPLAY_ZERO_INIT. Using managed memory makes the
+// capture oracle deterministic without recording a hipMemset that playback
+// would execute independently of the zero-init knob.
 // ===========================================================================
 TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
 
-  float* dsrc = nullptr;  // intentionally never written
-  HIP_CHECK(hipMalloc(&dsrc, kSZ));
+  float* dsrc = nullptr;
+  HIP_CHECK(hipMallocManaged(&dsrc, kSZ));
+  for (int i = 0; i < kN; ++i) dsrc[i] = 0.0f;  // CPU stores are not captured
   float* dout = nullptr;
   HIP_CHECK(hipMalloc(&dout, kSZ));
 
@@ -297,15 +299,7 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
 
   float* hout = new float[kN];
   HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost));
-  // Precondition: fresh device allocations are zeroed by the driver. This is
-  // what replay zero-init reproduces; assert it so a non-zeroing platform fails
-  // here (clearly) rather than flaking the roundtrip.
-  //
-  // But with ASAN enabled this won't be true, because doing so would
-  // add significant performance overhead and hide bugs related to uninitialized data
-#if !defined(ENABLE_ADDRESS_SANITIZER)
   for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 0.0f);
-#endif
 
   HIP_CHECK(hipFree(dsrc));
   HIP_CHECK(hipFree(dout));
