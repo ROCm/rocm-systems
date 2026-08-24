@@ -21,7 +21,8 @@ For JSON output validation with the shared test harness, see `tests/counter-coll
 
 ## What each sample shows
 
-Each client is intentionally small — only kernel replay plus the service being demonstrated.
+Start with the **basic** samples — each client is small and only wires kernel replay plus one
+service (same idea as `samples/counter_collection/`).
 
 | Sample | Passes | Services |
 |---|---|---|
@@ -32,6 +33,20 @@ Each client is intentionally small — only kernel replay plus the service being
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
 | `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue_cb` to stop after pass 1 even though `pass_count_cb` returns 4. |
+
+### Advanced: multi-service pass ordering
+
+These two targets share one larger client (`service_sequence_client.cpp`) that runs **five**
+passes with PC sampling, ATT, SPM, and counters in a fixed order. Use them when you want to see
+how incompatible services are kept on separate passes in a single replay loop.
+
+| Sample | Pass order (5 passes) |
+|---|---|
+| `kernel-replay-services-first` | PC sampling → ATT → SPM → counters → counters |
+| `kernel-replay-services-last` | Counters → counters → PC sampling → ATT → SPM |
+
+Set `KR_SERVICE_ORDER=services-first` or `services-last` (the CTest targets set this for you).
+Requires `ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON` and `ROCPROFILER_SPM_BETA_ENABLED=True`.
 
 ## Incompatible services use separate passes
 
