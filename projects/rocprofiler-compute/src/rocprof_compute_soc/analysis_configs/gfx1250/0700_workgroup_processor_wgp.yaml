@@ -25,9 +25,9 @@ Panel Config:
           max: MAX(SQG_REFCLKS_sum)
           unit: Cycles
         Active WGPs:
-          avg: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM) / SUM(SQG_CYCLES)
-          min: MIN(SQG_LEVEL_WGP_ACTIVE_ACCUM / SQG_CYCLES)
-          max: MAX(SQG_LEVEL_WGP_ACTIVE_ACCUM / SQG_CYCLES)
+          avg: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM) / SUM(SQG_CYCLES_sum)
+          min: MIN(SQG_LEVEL_WGP_ACTIVE_ACCUM / SQG_CYCLES_sum)
+          max: MAX(SQG_LEVEL_WGP_ACTIVE_ACCUM / SQG_CYCLES_sum)
           unit: Count
 
   - metric_table:
@@ -505,9 +505,9 @@ Panel Config:
         unit: Unit
       metric:
         LDS Access Latency:
-          avg: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
-          min: MIN(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
-          max: MAX(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
+          avg: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS_sum)
+          min: MIN(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS_sum)
+          max: MAX(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS_sum)
           unit: Cycles
   - metric_table:
       id: 714
