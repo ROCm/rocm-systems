@@ -155,6 +155,19 @@ any_stream_pollin(const pollfd* fds, size_t count)
     return false;
 }
 
+// Whether any STREAM pollfd reported POLLERR. poll() reports POLLERR without
+// waiting, so a stream stuck at POLLERR wakes the reader immediately every pass
+// while copying nothing -- exactly the spin the empty-wake backstop bounds. It
+// therefore feeds the backstop alongside POLLIN. POLLHUP/POLLNVAL are excluded:
+// those are quarantined out of the poll set after one drain, so they self-limit.
+inline bool
+any_stream_error(const pollfd* fds, size_t count)
+{
+    for(size_t k = kFirstStreamPollSlot; k < count; ++k)
+        if((fds[k].revents & POLLERR) != 0) return true;
+    return false;
+}
+
 // Spin backstop for a sticky level trigger. `empty_wakes` is how many consecutive
 // pre-timeout wakes have copied nothing. Once it passes kMaxConsecutiveEmptyWakes
 // the reader must stop trusting the level trigger and wait on the timeout only,
@@ -168,6 +181,36 @@ inline bool
 empty_wake_backstop_tripped(int empty_wakes)
 {
     return empty_wakes > kMaxConsecutiveEmptyWakes;
+}
+
+// A wake is unproductive when a stream reported readiness (POLLIN) or an error
+// (POLLERR, which poll() re-reports every pass until the reset clears) yet the
+// drain copied nothing -- the spin symptom the backstop bounds. A bare control
+// nudge (neither bit) is never unproductive.
+inline bool
+wake_is_unproductive(bool stream_pollin, bool stream_pollerr, uint64_t copied)
+{
+    return (stream_pollin || stream_pollerr) && copied == 0;
+}
+
+// The empty-wake backstop as a pure transition, so the sticky-POLLERR state
+// machine is testable without a reader thread. The latch (empty_wakes) only clears
+// on real copy progress or a GENUINE idle timeout -- one where the stream was
+// actually polled (`!backstop_tripped`) and did not fire. A timeout taken while the
+// backstop is tripped polls only the control fd, so it proves nothing about the
+// stream and must HOLD the latch; otherwise a sticky POLLERR would reset every
+// timeout and re-burst (~100 Hz) forever.
+inline int
+next_empty_wakes(int  empty_wakes,
+                 bool unproductive,
+                 bool copied_any,
+                 bool timed_out,
+                 bool backstop_tripped)
+{
+    if(unproductive) return empty_wakes + 1;
+    if(copied_any) return 0;
+    if(timed_out && !backstop_tripped) return 0;
+    return empty_wakes;
 }
 }  // namespace kfd
 }  // namespace rocprofiler
