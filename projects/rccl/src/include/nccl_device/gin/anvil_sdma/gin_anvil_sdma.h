@@ -10,6 +10,7 @@
 #include "../gin_device_common.h"
 #include "../../hip_compat.h"
 #include "gin_anvil_sdma_device_host_common.h"
+#include "gin_anvil_sdma_put_policy.h"
 #include "gin_anvil_ipc_copy.h"
 #include "gin_anvil_ipc_table_device.h"
 #include "sdma/anvil_device.hpp"
@@ -27,7 +28,6 @@ static constexpr int kSdmaDirtyBitWidth = NCCL_GIN_ANVIL_SDMA_DIRTY_BITS;
 NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
-
 
 NCCL_DEVICE_INLINE void* resolveRemotePeerVa(ncclGinAnvilSdmaGPUContext* rsCtx, ncclGinAnvilSdmaMemHandle* mh, int peer,
                                              size_t off) {
@@ -225,10 +225,25 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
             if (remoteSig != nullptr) sdmaFusedSignal = true;
           }
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-          if (sdmaFusedSignal) {
-            ::sdma_anvil::putSignal(*handle, dstAddr, srcAddr, bytes, remoteSig);
-          } else {
-            ::sdma_anvil::put(*handle, dstAddr, srcAddr, bytes);
+          // The SDMA linear-copy count field is 30 bits (max 1 GiB), and a single
+          // fused copy+signal >=256 MiB stalls the engine on MI355X, so split any
+          // large put into <= kGinPutSegBytes (128 MiB) segments. The backend runs
+          // a single in-order SDMA queue per peer (numChannels forced to 1), so the
+          // fused signal on the FINAL segment (or the explicit SignalInc emitted
+          // below when the copy is not fused) still means the whole message landed.
+          // See gin_anvil_sdma_put_policy.h. A <=128 MiB put is one segment, so the
+          // common path is unchanged.
+          const size_t segMax = gin_sdma::kGinPutSegBytes;
+          const size_t nSeg = gin_sdma::ginPutSegmentCount(bytes, segMax);
+          for (size_t si = 0; si < nSeg; ++si) {
+            const gin_sdma::PutSegment seg = gin_sdma::ginPutSegmentAt(bytes, segMax, si);
+            void* segDst = static_cast<void*>(static_cast<char*>(dstAddr) + seg.offset);
+            void* segSrc = static_cast<void*>(static_cast<char*>(srcAddr) + seg.offset);
+            if (seg.isFinal && sdmaFusedSignal) {
+              ::sdma_anvil::putSignal(*handle, segDst, segSrc, seg.bytes, remoteSig);
+            } else {
+              ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
+            }
           }
           markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
         }
@@ -380,8 +395,8 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      cuda::memory_order ord, uint32_t* abortFlag) {
     (void)hasDescriptor;
     (void)descriptor;
     (void)ord;

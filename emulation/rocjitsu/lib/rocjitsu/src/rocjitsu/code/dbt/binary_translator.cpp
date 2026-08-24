@@ -37,6 +37,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <deque>
@@ -58,6 +59,42 @@
 namespace rocjitsu {
 
 namespace {
+
+/// @brief Normalize legacy scaled-WMMA prefixes for the common decoder.
+///
+/// @details Legacy source objects may populate the architecturally unused prefix SRC2 field
+/// with a noncanonical selector (the offline oracle uses inline zero, 0x080), while the ISA
+/// requires that field to encode VGPR0 (0x100). Normalize it inside the revision-specific
+/// translation path so translated objects remain ISA-canonical; the architecture decoder
+/// separately accepts LLVM's exact compatibility encoding without weakening other fixed-field
+/// checks.
+class Gfx1250B0ToA0CanonicalizingDecoder final : public Decoder {
+public:
+  explicit Gfx1250B0ToA0CanonicalizingDecoder(std::unique_ptr<Decoder> decoder)
+      : decoder_(std::move(decoder)) {
+    assert(decoder_ != nullptr);
+    assert(decoder_->max_instruction_words() <= kLookaheadWords);
+  }
+
+  DecodeResult decode(const rj_code_binary_inst_t *inst,
+                      const DecodeErrorEmitter &emit_error) override {
+    const uint32_t prefix_op = (inst[0] >> 16) & 0xffu;
+    if ((inst[0] >> 24) != 0xccu || (prefix_op != 0x35u && prefix_op != 0x3au))
+      return decoder_->decode(inst, emit_error);
+
+    std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
+    std::copy_n(inst, kLookaheadWords, canonical.begin());
+    constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
+    canonical[1] = (canonical[1] & ~kSrc2Mask) | (0x100u << 18);
+    return decoder_->decode(canonical.data(), emit_error);
+  }
+
+  std::size_t max_instruction_words() const override { return decoder_->max_instruction_words(); }
+
+private:
+  static constexpr std::size_t kLookaheadWords = 4;
+  std::unique_ptr<Decoder> decoder_;
+};
 
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
@@ -331,6 +368,10 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return offsets;
+  const std::size_t lookahead_words = decoder->max_instruction_words();
+  if (lookahead_words == 0)
+    return offsets;
+  std::vector<uint32_t> slot_words(lookahead_words, 0);
 
   const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
   const uint32_t skip_pool =
@@ -352,7 +393,7 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
           offset + (kGeneratedIslandPoolHeaderWords + slot) * sizeof(uint32_t);
       // A malformed slot can select an extension-bearing format. Pad the
       // speculative decode so pool recognition never reads beyond its input.
-      const std::array<uint32_t, 3> slot_words = {text_word_at(text, slot_offset), 0, 0};
+      slot_words[0] = text_word_at(text, slot_offset);
       DecodeResult decoded = decoder->decode(slot_words.data());
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
@@ -2407,6 +2448,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "unsupported guest_arch: no decoder available");
     return leave_unchanged();
   }
+  if (is_gfx1250_b0_to_a0())
+    decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
 
   // Phase 1: descriptor translation gives DBT the source kernel roots and any
   // target descriptor/prologue bytes that must be materialized with the body.

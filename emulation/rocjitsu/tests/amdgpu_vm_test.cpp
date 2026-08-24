@@ -6,6 +6,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -174,13 +175,20 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
-                        uint32_t enable_vgpr_workitem_id = 0,
-                        uint32_t extra_compute_pgm_rsrc1 = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
+                        bool wave32 = true) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    static_cast<uint32_t>(wave32));
+    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
+    const uint32_t wave_size = kernel_wavefront_size(cu()->arch(), kd);
+    const uint32_t vgpr_granule =
+        descriptor_vgpr_granularity_for_wavefront(cu()->arch(), wave_size);
+    assert(vgpr_granule != 0 && vgprs % vgpr_granule == 0);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / 8) - 1));
+                    ((vgprs / vgpr_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
@@ -188,8 +196,6 @@ struct VmFixture {
     kd.group_segment_fixed_size = group_segment_fixed_size;
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
-    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
-
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
                       addr + sizeof(kernel_descriptor_t));
@@ -225,6 +231,40 @@ void step_until_halted(simdojo::SimulationEngine &engine,
       saw_work = true;
     else if (saw_work)
       break;
+  }
+}
+
+TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
+  constexpr uint32_t kRdnaEndpgm = 0xBFB00000u;
+
+  for (bool wave32 : {false, true}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    VmFixture fixture("rdna4", 1, 4, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128,
+                      /*vgprs_per_wf=*/64);
+    auto *snapshots = fixture.capture_halts();
+    const uint32_t expected_wave_size = wave32 ? 32u : 64u;
+    const uint32_t expected_vgprs = wave32 ? 8u : 4u;
+    const uint64_t kernel_object = fixture.write_kernel(
+        0x1000, &kRdnaEndpgm, sizeof(kRdnaEndpgm), /*sgprs=*/104, expected_vgprs,
+        /*user_sgprs=*/2, /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+        /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0, wave32);
+    rocr::llvm::amdhsa::kernel_descriptor_t stored_descriptor{};
+    fixture.mem()->read_block(kernel_object, {reinterpret_cast<uint8_t *>(&stored_descriptor),
+                                              sizeof(stored_descriptor)});
+    ASSERT_EQ(kernel_wavefront_size(fixture.cu()->arch(), stored_descriptor), expected_wave_size);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
+
+    ASSERT_NO_THROW(fixture.engine->run());
+    ASSERT_FALSE(snapshots->snapshots().empty());
+    EXPECT_EQ(snapshots->snapshots().size(), wave32 ? 2u : 1u);
+    for (const auto &snapshot : snapshots->snapshots()) {
+      EXPECT_EQ(snapshot.wf_size, expected_wave_size);
+      EXPECT_EQ(snapshot.num_vgprs, expected_vgprs);
+    }
+    if (!wave32) {
+      EXPECT_EQ(snapshots->snapshots().front().vgpr(0, 43), 43u);
+    }
   }
 }
 

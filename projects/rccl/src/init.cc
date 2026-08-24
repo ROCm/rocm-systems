@@ -1801,12 +1801,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4 / ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS / 2) allGather3Data[rank].nc = 1;
   // cheap fence is only safe with cache bypassing load/store availability in kernel.
-  comm->cheapPostSendFenceOff = rcclComputeCheapPostSendFenceOff(
-      comm->cudaArch, rcclParamCheapPostSendFenceOff(),
+  comm->cheapPostSendFenceOff = rcclComputeCheapPostSendFenceOff(comm->cudaArch, rcclParamCheapPostSendFenceOff(),
 #ifdef HIP_UNCACHED_MEMORY
-      true);
+                                                                 true);
 #else
-      false);
+                                                                 false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
@@ -1847,9 +1846,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  // gfx1250 defaults to the full pool; ncclTopoPostset caps nc by CU count and NCCL_MAX_NCHANNELS.
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
-    allGather3Data[rank].nc = 2;
+    allGather3Data[rank].nc = MAXCHANNELS;
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
@@ -2767,7 +2766,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
-  
+
   // Initialize hierarchical sub-communicators and temp buffers
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
       (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {

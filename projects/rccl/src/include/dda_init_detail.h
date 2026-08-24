@@ -23,35 +23,33 @@
 
 namespace nccl_dda_detail {
 
+using meta::comms::kDdaLLMaxBytes;
 constexpr int kDdaNranks = meta::comms::NRANKS;
 
 // LL/LL128 fixed slot layout constants. These define the per-rank slot stride
 // used by the kernels, which must be known at compile time so all ranks use
 // identical offsets. The values match the algorithm headers:
-//   LL:    128 KiB per rank (all_gather_dda_fabric_ll.h, etc.)
 //   LL128: 512 KiB per rank (all_gather_dda_fabric_ll128.h, etc.)
-constexpr size_t kDdaLLMaxPerRankBytes = 131072;      // 128 KiB
 constexpr size_t kDdaLL128MaxPerRankBytes = 524288;   // 512 KiB
 constexpr int kDdaLL128DataElems = 15;                // payload words per 128B line
 
 // Derive slot stride from max per-rank bytes.
-constexpr size_t kDdaLLSlotStridePkts = kDdaLLMaxPerRankBytes / 8;  // 16384 pkts (16B lines)
 constexpr size_t kDdaLL128SlotStrideLines =
-    (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
+  (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
 
 // Compute the fabric scratch allocation from the runtime configuration.
 // An explicit buffer-size override takes precedence over derived sizing.
 //
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
 // - simpleCap: DDA_THRESHOLD (default 128 MiB)
-// - llFloor:   2 banks * nRanks * kDdaLLSlotStridePkts * 16B (when LL enabled)
+// - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
 // - ll128Floor: 2 banks * nRanks * kDdaLL128SlotStrideLines * 128B (when LL128 enabled)
 //
 // Collectives that need more scratch (e.g., LL128 AR with large messages) are
 // bounded by the eligibility check (scratchNeeded > ddaScratchBytes), which
 // causes them to fall through to Simple path.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled,
-                                     int64_t ddaThreshold, int64_t llEnabled, int64_t ll128Enabled) {
+inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
+                                     int64_t llEnabled, int64_t ll128Enabled) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }
@@ -63,8 +61,8 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
 
   if (nRanks < 1) nRanks = 1;
 
-  // LL fixed slot arrays: 2 banks * nRanks * slotStridePkts * 16B.
-  const size_t llFloor = llEnabled ? (size_t)2 * nRanks * kDdaLLSlotStridePkts * 16 : 0;
+  // LL fixed slot arrays: 2 banks * nRanks * slotMaxBytes.
+  const size_t llFloor = llEnabled ? (size_t)2 * nRanks * kDdaLLMaxBytes : 0;
 
   // LL128 fixed slot arrays: 2 banks * nRanks * slotStrideLines * 128B.
   const size_t ll128Floor = ll128Enabled ? (size_t)2 * nRanks * kDdaLL128SlotStrideLines * 128 : 0;
@@ -113,12 +111,6 @@ inline int ddaFabricMaxNBlocksForScratch() {
 }
 
 constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
-
-// The LL AllReduce tier is intentionally narrow (tiny messages, latency-bound),
-// so it caps its grid at kDdaFabricLLArMaxBlocks instead of the 256-wide limit
-// used by LL128/Simple. AR uses the shared ddaLLEpochDev counter (same as AG/RS)
-// so that bank = flag & 1 is consistent across all LL operation types.
-constexpr int kDdaFabricLLArMaxBlocks = 24;
 
 // Number of device epoch cells for the LL collectives. it is sized for the larger of the two
 // max(AG total blocks, AR total blocks).

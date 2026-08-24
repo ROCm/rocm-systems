@@ -27,6 +27,16 @@ _MFMA_F32_SPEC = {'F32': 'f32', 'XF32': 'f32', 'F16': 'f16', 'BF16': 'bf16'}
 _F8_FIXED = frozenset({'FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'})
 
 
+def _matrix_base(supports_gpr_idx: bool, base: str, role: str) -> str:
+    """Apply MODE.GPR_IDX_EN to an architectural-VGPR MMA base."""
+    if not supports_gpr_idx:
+        return base
+    return (
+        f'amdgpu::apply_gpr_idx_to_mma_base(wf, vb, {base}, '
+        f'amdgpu::VgprMsbRole::{role})'
+    )
+
+
 def _mma_targ(M: int, N: int, K: int, B: int, *, batch_optional: bool) -> str:
     """Spec template argument list, dropping a defaulted BATCH==1."""
     if batch_optional and B == 1:
@@ -112,6 +122,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     """
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
     arch_name = ctx.arch_name
+    supports_gpr_idx = ctx.profile.supports_gpr_idx
     name = inst.name
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
 
@@ -187,16 +198,21 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'  uint32_t idx = vb + *index_off;')
         else:
             if 'acc_cd' in ctx.enc_field_names:
-                L.append(
-                    f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
-                )
+                dst_base = f'amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd)'
             else:
-                L.append(
-                    f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);'
-                )
-            L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
-            L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
-            L.append(f'  uint32_t idx = amdgpu::src_base(vb, {s2}.encoding_value_);')
+                dst_base = f'amdgpu::dst_base(vb, {d}.encoding_value_, 1)'
+            L.append(
+                f'  uint32_t dst = {_matrix_base(supports_gpr_idx, dst_base, "Dst")};'
+            )
+            L.append(
+                f'  uint32_t s0b = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
+            )
+            L.append(
+                f'  uint32_t s1b = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
+            )
+            L.append(
+                f'  uint32_t idx = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
+            )
 
         if input_type in ('F16', 'BF16'):
             read_fn = _SMFMAC_READ[input_type]
@@ -326,7 +342,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'  if (!index_off)')
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
             L.append(f'  uint32_t index_base = vb + *index_off;')
-            L.append(f'  uint32_t index_key = inst_.opsel & 0x1u;')
+            if uses_fixed_wave_swmmac_layout:
+                # CDNA5 OPSEL bits are RA/RB matrix-reuse hints, not sparse
+                # index-set selectors. The K128 index payload contains one set.
+                L.append(f'  uint32_t index_key = 0u;')
+            else:
+                L.append(f'  uint32_t index_key = inst_.opsel & 0x1u;')
             index_base_expr = 'index_base'
             index_key_expr = 'index_key'
         else:
@@ -343,18 +364,24 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'    const_acc = amdgpu::RegisterAccess(wf).read_scalar({s2});')
             L.append(f'  }}')
     else:
-        src0_base_expr = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
-        src1_base_expr = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
+        src0_base_expr = _matrix_base(
+            supports_gpr_idx, f'amdgpu::src_base(vb, {s0}.encoding_value_)', 'Src0'
+        )
+        src1_base_expr = _matrix_base(
+            supports_gpr_idx, f'amdgpu::src_base(vb, {s1}.encoding_value_)', 'Src1'
+        )
         # ACC_CD selects VGPRs or AccVGPRs for the C and D matrices. Encodings
         # without the field always use AccVGPRs.
         if 'acc_cd' in ctx.enc_field_names:
             L.append(
-                f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
+                f'  uint32_t dst = {_matrix_base(supports_gpr_idx, f"amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd)", "Dst")};'
             )
         elif uses_plain_vgpr_dst:
             L.append(f'  uint32_t dst = vb + {d}.encoding_value_;')
         else:
-            L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
+            L.append(
+                f'  uint32_t dst = {_matrix_base(supports_gpr_idx, f"amdgpu::dst_base(vb, {d}.encoding_value_, 1)", "Dst")};'
+            )
         if uses_supported_swmmac_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
             L.append(f'  uint32_t s2 = dst;')
@@ -371,6 +398,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'      {s2}.encoding_value_, const_acc,'
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'
             )
+            if supports_gpr_idx:
+                L.append('  if (const_acc == amdgpu::ACC_FROM_VGPR)')
+                L.append(
+                    '    s2 = amdgpu::apply_gpr_idx_to_mma_base('
+                    'wf, vb, s2, amdgpu::VgprMsbRole::Src2);'
+                )
 
     if result_type == 'F64':
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
@@ -634,43 +667,22 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         elif input_type in ('F8_F6_F4', 'F8F6F4'):
             # f8f6f4 MFMA: cbsz/blgp encode data format, NOT lane
             # permutation. Use dispatch_matrix_fmt_pair to select the
-            # correct extract functions and bit widths.
+            # correct extract functions and bit widths. Scaled MFMA is a
+            # distinct VOP3PX2 compound instruction generated by
+            # _generator.py; a dense suffix never consumes prefix fields.
             L.append(f'  uint32_t s0b = {src0_base_expr};')
             L.append(f'  uint32_t s1b = {src1_base_expr};')
-            L.append('  bool dispatched;')
-            L.append('  if (!(inst_.abid & 1u)) {')
             L.append(
-                '    dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+                '  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+            )
+            L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
+            L.append(
+                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
             )
             L.append(
-                '        [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
+                f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
             )
-            L.append(
-                f'          amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
-            )
-            L.append(
-                f'                                 dst, s0b, s1b, s2, ea, eb, const_acc);'
-            )
-            L.append('        });')
-            L.append('  } else {')
-            L.append(
-                '    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
-            )
-            L.append(
-                '    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
-            )
-            L.append('    dispatched = amdgpu::dispatch_matrix_fmt_pair(')
-            L.append(
-                '        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
-            )
-            L.append(
-                f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
-            )
-            L.append(
-                f'                                        eb, const_acc, sa_base, sb_base);'
-            )
-            L.append('        });')
-            L.append('  }')
+            L.append('      });')
             L.append('  if (!dispatched)')
             L.append('    throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):

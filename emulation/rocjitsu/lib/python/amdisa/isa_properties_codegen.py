@@ -34,6 +34,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             continue
         enum_name = name.upper()
         supports_wgp_mode = 'true' if profile.supports_wgp_mode else 'false'
+        mode_has_gpr_idx_en = 'true' if profile.supports_gpr_idx else 'false'
         descriptor_sgpr_count_encoded = (
             'true' if profile.descriptor_sgpr_count_encoded else 'false'
         )
@@ -53,6 +54,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'  case ROCJITSU_CODE_ARCH_{enum_name}:',
             '    return {',
             f'        .supports_wgp_mode = {supports_wgp_mode},',
+            f'        .mode_has_gpr_idx_en = {mode_has_gpr_idx_en},',
             f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
@@ -83,6 +85,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '',
         'struct IsaProperties {',
         '  bool supports_wgp_mode = false;',
+        '  bool mode_has_gpr_idx_en = false;',
         '  bool descriptor_sgpr_count_encoded = true;',
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
