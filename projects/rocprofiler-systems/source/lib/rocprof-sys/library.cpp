@@ -739,18 +739,18 @@ rocprofsys_init_tooling_hidden(void)
 
             // clang-format off
             auto subscribers = std::to_array<control::subscriber>({
-                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm" },
+                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm", .scopes = { control::scope::global } },
                 { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling",
                   .scopes = { control::scope::global, control::scope::sampling } },
-                { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi" },
-                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx" },
-                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem" },
-                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi" },
-                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread" },
-                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa" },
-                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos" },
-                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler" },
-                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external" },
+                { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi", .scopes = { control::scope::global } },
+                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx", .scopes = { control::scope::global } },
+                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem", .scopes = { control::scope::global } },
+                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi", .scopes = { control::scope::global } },
+                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread", .scopes = { control::scope::global } },
+                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa", .scopes = { control::scope::global } },
+                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos", .scopes = { control::scope::global } },
+                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler", .scopes = { control::scope::global } },
+                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external", .scopes = { control::scope::global } },
             });
             // clang-format on
             for(auto& sub : subscribers)
@@ -781,7 +781,8 @@ rocprofsys_init_tooling_hidden(void)
                       []() {
                           categories::enable_categories(config::get_enabled_categories());
                       },
-                      "trace_categories" });
+                      "trace_categories",
+                      { control::scope::global } });
 
                 if(trace_config_t::get_trace_period_clock_id() ==
                    CLOCK_PROCESS_CPUTIME_ID)
