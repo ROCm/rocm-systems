@@ -2136,7 +2136,7 @@ class TransportsRankComm {
         archName_(archName) {
     comm_->rank = rank;
     comm_->nRanks = nRanks;
-    comm_->sharedRes = sr_.get();  // owner stays null, so exit::2405 short-circuits before ncclCuMemEnable
+    comm_->sharedRes = sr_.get();  // owner stays null, so exit::2408 short-circuits before ncclCuMemEnable
     comm_->ncclNet = net_.get();
     comm_->archName = archName_.empty() ? nullptr : &archName_[0];
     comm_->commHash = 0xC0FFEEULL;
@@ -2206,7 +2206,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
   g_bootstrapAllGather = [specs, selfRank, nranks](void*, void* allData, int size) -> ncclResult_t {
     if (size != static_cast<int>(sizeof(ncclPeerInfo))) {
       ADD_FAILURE() << "AllGather1 payload size " << size << ", expected sizeof(ncclPeerInfo)";
-      return ncclInternalError;
+      return ncclInvalidArgument;  // distinct from every seam default, so a stray hit is traceable
     }
     auto* info = static_cast<ncclPeerInfo*>(allData);
     const ncclPeerInfo self = info[selfRank];  // copied first: every peer is derived from it
@@ -2234,6 +2234,15 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
 }
 
 // Override specific NCCL_PARAM/RCCL_PARAM values; everything else keeps its compiled-in default.
+// Restores g_ncclTopoGetSystem when it goes out of scope. Needed only where the installed lambda
+// captures a stack local by reference -- the global would otherwise outlive what it points at.
+class ScopedTopoGetSystem {
+ public:
+  ~ScopedTopoGetSystem() {
+    g_ncclTopoGetSystem = [](ncclComm*, ncclTopoSystem**, const char*) { return ncclRemoteError; };
+  }
+};
+
 void SetParams(std::vector<std::pair<std::string, int64_t>> overrides) {
   g_loadParam = [overrides](const char* env, int64_t deft) {
     for (const auto& o : overrides)
@@ -2253,7 +2262,7 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerInfoCallocFails_ReturnsSystemError)
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_FillInfoFails_PropagatesAndSkipsAllGather) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   g_hipGetDeviceProperties = [](hipDeviceProp_t*, int) { return hipErrorInvalidValue; };
   g_bootstrapAllGather = [](void*, void*, int) -> ncclResult_t {
     ADD_FAILURE() << "AllGather1 must not run after fillInfo failed";
@@ -2263,22 +2272,22 @@ TEST_F(InitMicrotest, InitTransportsRank_FillInfoFails_PropagatesAndSkipsAllGath
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AllGatherFails_PropagatesAndLeavesPeerInfoInvalid) {
-  TransportsRankComm c(4, 0);  // g_bootstrapAllGather defaults to ncclInternalError
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);  // g_bootstrapAllGather defaults to ncclInternalError
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_FALSE(c.get()->peerInfoValid);  // :1467 sits past the failure point
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AllGatherSucceeds_MarksPeerInfoValid) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));  // stops at :1576
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // stops at :1576
   EXPECT_TRUE(c.get()->peerInfoValid);  // positive anchor for the negative assertion above
 }
 
 // --- The peer-scan loop (init.cc:1470-1495) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_PeerVersionMismatch_WarnsWithBothRanksAndVersions) {
-  TransportsRankComm c(4, /*rank=*/1);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
   std::vector<PeerSpec> specs(4);
   specs[2].version = 12345;
   InstallPeerInfoAllGather(c, specs);
@@ -2294,46 +2303,50 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerVersionMismatch_WarnsWithBothRanksA
 // reads every slot including our own, so with the default of 0 self clears comm->cuMemSupport and
 // the peer under test proves nothing.
 TEST_F(InitMicrotest, InitTransportsRank_PeerWithoutCuMemSupport_ClearsCommCuMemSupport) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   g_cuMemEnable = [] { return 1; };
   std::vector<PeerSpec> specs(4);
   specs[2].cuMemSupport = 0;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->cuMemSupport);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AllPeersCuMemSupport_KeepsCommCuMemSupportSet) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   g_cuMemEnable = [] { return 1; };
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->cuMemSupport);  // :1469 sets it, the loop never clears it
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_PeerWithMloPart_SetsHasMloPart) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[3].mloPart = 2;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->hasMloPart);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 
+// NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
+// function-locals first read at :2346-2363, ~700 lines past the terminator. They execute (so they count
+// as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.
+// Adding PeerSpec knobs would not help without an oracle -- assert them from the rung that reaches :2346.
 TEST_F(InitMicrotest, InitTransportsRank_ComputesMinAndMaxCompCapAcrossPeers) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[1].compCap = 42;   // asymmetric around self's 90, so swapping min/max is visible
   specs[2].compCap = 110;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(42, c.get()->minCompCap);
   EXPECT_EQ(110, c.get()->maxCompCap);
 }
@@ -2341,7 +2354,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ComputesMinAndMaxCompCapAcrossPeers) {
 // --- The duplicate-GPU guard (init.cc:1484-1489) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidSameHost_ReturnsInvalidUsageAndSkipsCleanup) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[1].uuidTag = 9;  // ranks 1 and 2: same node (default) and the same GPU UUID
   specs[2].uuidTag = 9;
@@ -2355,54 +2368,58 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidSameHost_ReturnsInvalid
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidDifferentHosts_IsAllowed) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[1].uuidTag = 9;
   specs[2].uuidTag = 9;
   specs[2].node = 1;  // same UUID but a different host -- the hostHash conjunct at :1484 saves it
   InstallPeerInfoAllGather(c, specs);
   const std::string log = RcclUnitTesting::CaptureLog([&] {
-    EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));  // ran on to :1576
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // ran on to :1576
   });
+  // No log-liveness anchor is possible here: this path emits nothing at all, so the oracle is the pair
+  // of positive anchors below -- the ncclRemoteError sentinel (reached :1576) and the exit: call count.
   EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Continues) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"MULTI_RANK_GPU_ENABLE", 1}});
   std::vector<PeerSpec> specs(4);
   specs[1].uuidTag = 9;
   specs[2].uuidTag = 9;
   InstallPeerInfoAllGather(c, specs);
   const std::string log = RcclUnitTesting::CaptureLog([&] {
-    EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   });
   EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
 // --- hasMultiRankNvml (init.cc:1482) ---
-// PINS CURRENT BEHAVIOUR, WHICH LOOKS WRONG: the assignment is `=`, not `|=`, inside the (i,j)
-// double loop, so only the FINAL pair survives and an earlier collision is erased. Consumed by
-// src/transport/nvls.cc:252. Reported separately; these two tests document what ships today.
+// PINS CURRENT BEHAVIOUR, WHICH LOOKS ODD: the assignment is `=`, not `|=`, inside the (i,j) double
+// loop, so only the FINAL pair survives and an earlier collision is erased. On AMD this is write-only
+// dead state, not a live wrong answer: the sole reader (src/transport/nvls.cc:252) sits inside
+// `#if CUDART_VERSION >= 12010`, and CUDART_VERSION is not defined under hipcc. These two tests
+// document what ships today so a `|=` change has to update a test rather than pass silently.
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_EarlyCollisionOverwrittenByLastPair) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[1].nvmlDev = 7;  // ranks 1 and 2 really do share a device on the same host...
   specs[2].nvmlDev = 7;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_FALSE(c.get()->hasMultiRankNvml);  // ...but the last pair (3,2) does not, and it wins
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_LastPairCollision_IsTheOnlyOneObserved) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[2].nvmlDev = 7;  // the final (i,j) pair examined is (3,2)
   specs[3].nvmlDev = 7;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->hasMultiRankNvml);
 }
 
@@ -2412,7 +2429,7 @@ TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_LastPairCollision_IsTheOn
 // the return code is identical either way.
 
 TEST_F(InitMicrotest, InitTransportsRank_UserP2pLevelFails_PropagatesAndSkipsMnnvlCheck) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   g_ncclGetUserP2pLevel = [](int*) { return ncclInvalidArgument; };
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -2420,65 +2437,65 @@ TEST_F(InitMicrotest, InitTransportsRank_UserP2pLevelFails_PropagatesAndSkipsMnn
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlForcedOn_ChecksEvenOnSingleNode) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"MNNVL_ENABLE", 1}});
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));  // all one node, arch gfx942
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclMnnvlCheckCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlForcedOff_SkipsCheckEvenOnMultiNode) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"MNNVL_ENABLE", 0}});  // the zero-valued arm, tested alone: 0 and "auto" differ only here
   std::vector<PeerSpec> specs(4);
   specs[2].node = 1;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclMnnvlCheckCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlAutoMultiNode_ChecksAndCountsNodes) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
   specs[2].node = 1;  // one peer off-node -> nNodes becomes 2 at :1477
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclMnnvlCheckCalls);  // the only observable that nNodes>1 was computed
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlAutoSingleNode_SkipsCheck) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclMnnvlCheckCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlAutoGfx1250SingleNode_Checks) {
-  TransportsRankComm c(4, 0, /*archName=*/"gfx1250");
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0, /*archName=*/"gfx1250");
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclMnnvlCheckCalls);  // single node, but the arch arm at :1504 opens auto scope
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlAutoP2pLevelZero_SkipsCheckDespiteMultiNode) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   g_ncclGetUserP2pLevel = [](int* level) { *level = 0; return ncclSuccess; };
   std::vector<PeerSpec> specs(4);
   specs[2].node = 1;
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclMnnvlCheckCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlAutoNullArchName_DoesNotDereference) {
-  TransportsRankComm c(4, 0, /*archName=*/"");  // comm->archName == NULL; :1504 must short-circuit
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0, /*archName=*/"");  // comm->archName == NULL; :1504 must short-circuit
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclMnnvlCheckCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlCheckFails_PropagatesError) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"MNNVL_ENABLE", 1}});
   g_ncclMnnvlCheckResult = ncclSystemError;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2489,57 +2506,60 @@ TEST_F(InitMicrotest, InitTransportsRank_MnnvlCheckFails_PropagatesError) {
 // --- The intra-process block (init.cc:1512-1565) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_SameHostAndPid_ClearsNvlsRegSupport) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}});  // else :1545 forces it straight back to 1
   std::vector<PeerSpec> specs(4);
   auto peer1 = std::make_unique<ncclComm>();  // heap: ncclComm embeds channels[MAXCHANNELS], far too big for the stack
   specs[1].proc = 0;  // shares our process, so the :1533 inner scan finds a colliding pair
   specs[1].comm = peer1.get();
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->nvlsRegSupport);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AllDistinctProcesses_KeepsNvlsRegSupport) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}});
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->nvlsRegSupport);  // positive anchor for the test above
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_SingleProcMemRegEnabled_RestoresNvlsRegSupport) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"SINGLE_PROC_MEM_REG_ENABLE", 1}});
   std::vector<PeerSpec> specs(4);
   auto peer1 = std::make_unique<ncclComm>();
   specs[1].proc = 0;  // the scan clears it at :1536; :1545 then puts it back
   specs[1].comm = peer1.get();
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->nvlsRegSupport);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MnnvlComm_ClearsNvlsRegSupportBeforeSingleProcOverride) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetParams({{"SINGLE_PROC_MEM_REG_ENABLE", 1}});  // would set it to 1, but MNNVL wins the else-if
   c.get()->MNNVL = 1;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->nvlsRegSupport);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_IntraProcPeers_LinkIntraNextInReverseRankOrder) {
-  TransportsRankComm c(4, /*rank=*/0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   auto peer1 = std::make_unique<ncclComm>();
   auto peer2 = std::make_unique<ncclComm>();
   auto peer3 = std::make_unique<ncclComm>();
   std::vector<PeerSpec> specs(4);
-  specs[1].proc = 0; specs[1].comm = peer1.get();
-  specs[2].proc = 0; specs[2].comm = peer2.get();
-  specs[3].proc = 0; specs[3].comm = peer3.get();
+  specs[1].proc = 0;
+  specs[1].comm = peer1.get();
+  specs[2].proc = 0;
+  specs[2].comm = peer2.get();
+  specs[3].proc = 0;
+  specs[3].comm = peer3.get();
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, c.get()->intraRank);
   EXPECT_EQ(4, c.get()->intraRanks);
   EXPECT_EQ(c.get(), c.get()->intraComm0);
@@ -2554,18 +2574,59 @@ TEST_F(InitMicrotest, InitTransportsRank_IntraProcPeers_LinkIntraNextInReverseRa
 // Self is NOT the first same-process rank here, which is the only shape that separates
 // `intraProcRank = intraProcRanks` (:1524) from `= i`: with rank 0 leading they are both 0.
 TEST_F(InitMicrotest, InitTransportsRank_SelfNotFirstInProcess_IntraRankIsTheLocalIndex) {
-  TransportsRankComm c(4, /*rank=*/2);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/2);
   auto peer1 = std::make_unique<ncclComm>();
   auto peer3 = std::make_unique<ncclComm>();
   std::vector<PeerSpec> specs(4);
-  specs[1].proc = 0; specs[1].comm = peer1.get();  // rank 0 stays in its own process, so ranks
-  specs[3].proc = 0; specs[3].comm = peer3.get();  // 1,2,3 form the group and rank 1 leads it
+  // Rank 0 stays in its own process, so ranks 1,2,3 form the group and rank 1 leads it.
+  specs[1].proc = 0;
+  specs[1].comm = peer1.get();
+  specs[3].proc = 0;
+  specs[3].comm = peer3.get();
   InstallPeerInfoAllGather(c, specs);
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, c.get()->intraRank);   // local index within the process, not the global rank 2
   EXPECT_EQ(3, c.get()->intraRanks);
   EXPECT_EQ(peer1.get(), c.get()->intraComm0);
   EXPECT_EQ(nullptr, c.get()->intraNext);  // only intraProcRank0 builds the chain, and that is rank 1
+}
+
+// The leader test at :1526 is `intraProcRank0 == rank`. Every other case here has either rank 0 leading
+// or a non-leader, so the conjunct is indistinguishable from a bare `intraProcRank0 == 0`; here rank 1
+// leads its own group, which is the only shape where the two differ.
+TEST_F(InitMicrotest, InitTransportsRank_NonZeroRankLeadsItsProcess_StillBuildsTheChain) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
+  auto peer2 = std::make_unique<ncclComm>();
+  auto peer3 = std::make_unique<ncclComm>();
+  std::vector<PeerSpec> specs(4);
+  // Rank 0 sits in its own process, so ranks 1,2,3 group up and rank 1 leads them.
+  specs[0].proc = -1;
+  specs[2].proc = 0;
+  specs[2].comm = peer2.get();
+  specs[3].proc = 0;
+  specs[3].comm = peer3.get();
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->intraRank);
+  EXPECT_EQ(3, c.get()->intraRanks);
+  EXPECT_EQ(c.get(), c.get()->intraComm0);
+  EXPECT_EQ(peer3.get(), c.get()->intraNext);  // chain built, in reverse rank order
+  EXPECT_EQ(peer2.get(), peer3->intraNext);
+  EXPECT_EQ(nullptr, peer2->intraNext);
+}
+
+// nRanks == 1 is the most common non-trivial production shape and the only one that exercises the
+// assert(intraProcRank == 0 ? comm == comm0 : true) at :1558 -- asserts are live, Debug has no -DNDEBUG.
+TEST_F(InitMicrotest, InitTransportsRank_SingleRank_IsItsOwnIntraProcGroup) {
+  TransportsRankComm c(/*nRanks=*/1, /*rank=*/0);
+  g_cuMemEnable = [] { return 1; };  // fillInfo stamps our own slot from this, and :1478 reads it back
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(1));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->intraRank);
+  EXPECT_EQ(1, c.get()->intraRanks);
+  EXPECT_EQ(c.get(), c.get()->intraComm0);
+  EXPECT_EQ(nullptr, c.get()->intraNext);  // nobody else to link
+  EXPECT_EQ(1, c.get()->cuMemSupport);     // the scan ran over exactly our own slot
 }
 
 // The guard at :1549 is `intraProcRank == -1 || intraProcRank0 == -1 || peerInfo[...].comm == NULL`.
@@ -2574,7 +2635,7 @@ TEST_F(InitMicrotest, InitTransportsRank_SelfNotFirstInProcess_IntraRankIsTheLoc
 // intraProcRanks was incremented at least once, which implies intraProcRank0 != -1. Do not try to
 // cover it. The first needs an empty comm -- see the ZeroRanks test below.
 TEST_F(InitMicrotest, InitTransportsRank_IntraProcRank0PeerHasNullComm_ReturnsInternalErrorAndWarns) {
-  TransportsRankComm c(4, /*rank=*/1);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
   std::vector<PeerSpec> specs(4);
   specs[0].proc = 0;  // rank 0 shares our process but never registered its comm; :1526 cannot fire
   specs[0].comm = nullptr;
@@ -2582,7 +2643,10 @@ TEST_F(InitMicrotest, InitTransportsRank_IntraProcRank0PeerHasNullComm_ReturnsIn
   const std::string log = RcclUnitTesting::CaptureLog([&] {
     EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
   });
-  // The WARN is the discriminator: ncclInternalError alone is also what the :1576 terminator returns.
+  // Anchor on the WARN's own lead text, not just the value tail: the TRACE at :1547 ends in an identical
+  // "intraProcRank %d intraProcRanks %d intraProcRank0 %d", and the ncclDebugLog fake ignores level, so a
+  // tail-only assertion is satisfied by the TRACE alone under an ENABLE_TRACE build.
+  EXPECT_TRUE(LogHas(log, "Failed to determine intra proc ranks rank 1 ")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "intraProcRank 1 intraProcRanks 2 intraProcRank0 0")) << "actual log:\n" << log;
 }
 
@@ -2595,13 +2659,15 @@ TEST_F(InitMicrotest, InitTransportsRank_ZeroRanks_ReturnsInternalErrorFromIntra
   const std::string log = RcclUnitTesting::CaptureLog([&] {
     EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
   });
+  // Same trap as above -- the value tail alone is also emitted by the :1547 TRACE.
+  EXPECT_TRUE(LogHas(log, "Failed to determine intra proc ranks rank 0 ")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "intraProcRank -1 intraProcRanks 0 intraProcRank0 -1")) << "actual log:\n" << log;
 }
 
 // --- The ladder terminator and the exit: block (init.cc:1569-1576, :2402-2419) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoGetSystemFails_PropagatesAndRunsCleanup) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   g_ncclTopoGetSystem = [](ncclComm*, ncclTopoSystem**, const char*) { return ncclSystemError; };
   EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));  // not the default error
@@ -2610,9 +2676,12 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoGetSystemFails_PropagatesAndRunsCle
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NoTopoDumpFile_PassesNullPathToTopoGetSystem) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   std::vector<std::string> paths;
+  // The seam captures a reference to `paths`, a local. Drop it when this scope ends rather than
+  // relying on nothing reaching topo detection between here and TearDown's ResetInitFakes().
+  ScopedTopoGetSystem restore_topo_seam;
   g_ncclTopoGetSystem = [&paths](ncclComm*, ncclTopoSystem**, const char* f) {
     paths.push_back(f ? f : "<null>");
     return ncclSystemError;
@@ -2622,10 +2691,13 @@ TEST_F(InitMicrotest, InitTransportsRank_NoTopoDumpFile_PassesNullPathToTopoGetS
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoDumpFileSet_PassesThatPathToTopoGetSystem) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   SetMicroEnv("NCCL_TOPO_DUMP_FILE", "/tmp/rccl-topo-microtest.xml");
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   std::vector<std::string> paths;
+  // The seam captures a reference to `paths`, a local. Drop it when this scope ends rather than
+  // relying on nothing reaching topo detection between here and TearDown's ResetInitFakes().
+  ScopedTopoGetSystem restore_topo_seam;
   g_ncclTopoGetSystem = [&paths](ncclComm*, ncclTopoSystem**, const char* f) {
     paths.push_back(f ? f : "<null>");
     return ncclSystemError;
@@ -2636,12 +2708,12 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoDumpFileSet_PassesThatPathToTopoGet
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_CpuAffinitySet_RestoresThatAffinityAtExit) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   CPU_ZERO(&c.get()->cpuAffinity);
   CPU_SET(5, &c.get()->cpuAffinity);
   g_ncclOsCpuCountValue = 1;  // non-zero, so exit::2404 restores the mask
-  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   // Only exit::2404 runs here -- :1607-1610 are past the rung-1 terminator.
   ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
   // Assert the MASK, not just the call: forwarding any other affinity would otherwise pass.
@@ -2659,7 +2731,7 @@ TEST_F(InitMicrotest, InitTransportsRank_CpuAffinitySet_RestoresThatAffinityAtEx
 // --- Topology detection (init.cc:1576-1603) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoDetected_StampsTopoDefaults) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = c.installTopo();
   g_tuningIndexValue = 7;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2675,7 +2747,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoDetected_StampsTopoDefaults) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TuningIndex_IsLookedUpByCommArchName) {
-  TransportsRankComm c(4, 0, /*archName=*/"gfx90a");
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0, /*archName=*/"gfx90a");
   ncclTopoSystem* topo = c.installTopo();
   g_tuningIndexValue = 3;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2685,7 +2757,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TuningIndex_IsLookedUpByCommArchName) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsBeforeTrim_StopsAtFirstCall) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoComputePathsFailAt = 0;  // the :1591 call
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2694,7 +2766,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsBeforeTrim_StopsAtFirs
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsAfterTrim_RunsBothCalls) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoComputePathsFailAt = 1;  // the :1596 recompute; only a call index separates it from :1591
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2703,7 +2775,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsAfterTrim_RunsBothCall
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TrimSystemFails_PropagatesBetweenThePathsCalls) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoTrimSystemResult = ncclInvalidArgument;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2712,7 +2784,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TrimSystemFails_PropagatesBetweenThePat
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoSearchInitFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoSearchInitResult = ncclInvalidUsage;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2721,7 +2793,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoSearchInitFails_Propagates) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoComputeCommCpuFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoComputeCommCPUResult = ncclUnhandledCudaError;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2729,7 +2801,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoComputeCommCpuFails_Propagates) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoPrintFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoPrintResult = ncclInvalidArgument;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2740,7 +2812,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoPrintFails_Propagates) {
 // --- CPU affinity (init.cc:1607-1611) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoGetCpuAffinityFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity*) { return ncclSystemError; };
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2748,7 +2820,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoGetCpuAffinityFails_Propagates) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_CpuAffinityLookedUpForThisRank) {
-  TransportsRankComm c(4, /*rank=*/2);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/2);
   c.installTopo();
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -2756,7 +2828,7 @@ TEST_F(InitMicrotest, InitTransportsRank_CpuAffinityLookedUpForThisRank) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_EmptyCpuAffinity_SkipsSaveAndApply) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));  // cpu count 0 by default
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -2764,7 +2836,7 @@ TEST_F(InitMicrotest, InitTransportsRank_EmptyCpuAffinity_SkipsSaveAndApply) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NonEmptyCpuAffinity_AppliesAtBothSites) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity* a) {
     CPU_ZERO(a); CPU_SET(6, a); return ncclSuccess;
@@ -2776,10 +2848,15 @@ TEST_F(InitMicrotest, InitTransportsRank_NonEmptyCpuAffinity_AppliesAtBothSites)
   EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsSetAffinityMasks[0]));
   EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsSetAffinityMasks[1]));
   EXPECT_TRUE(CPU_ISSET(6, &c.get()->cpuAffinity));  // :1607 wrote through to the comm
+  // ncclOsCpuCount is asked about the SAME mask at both its call sites; without this, handing either
+  // :1608 or exit::2403 the zeroed affinitySave instead of comm->cpuAffinity goes unnoticed.
+  ASSERT_EQ(2u, g_ncclOsCpuCountMasks.size());
+  EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsCpuCountMasks[0]));
+  EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsCpuCountMasks[1]));
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_OsGetAffinityFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclOsCpuCountValue = 1;
   g_ncclOsGetAffinity = [](ncclAffinity*) { return ncclSystemError; };
@@ -2788,7 +2865,7 @@ TEST_F(InitMicrotest, InitTransportsRank_OsGetAffinityFails_Propagates) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_OsSetAffinityFails_Propagates) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclOsCpuCountValue = 1;
   g_ncclOsSetAffinityResult = ncclInvalidUsage;  // :1610 is NCCLCHECKGOTO'd, unlike exit::2404
@@ -2800,7 +2877,7 @@ TEST_F(InitMicrotest, InitTransportsRank_OsSetAffinityFails_Propagates) {
 // not the saved mask, so the caller's original affinity is deliberately NOT restored. Pinned here so a
 // future "restore affinitySave" change has to update a test rather than pass silently.
 TEST_F(InitMicrotest, InitTransportsRank_AffinitySaveIsCapturedButNeverRestored) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclOsCpuCountValue = 1;
   g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity* a) {
@@ -2823,7 +2900,7 @@ TEST_F(InitMicrotest, InitTransportsRank_AffinitySaveIsCapturedButNeverRestored)
 // --- CollNet, host index and the ring graph (init.cc:1613-1648) ---
 
 TEST_F(InitMicrotest, InitTransportsRank_NoCollNetPlugin_ClearsCollnetEnable) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   c.get()->config.collnetEnable = 1;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2832,7 +2909,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NoCollNetPlugin_ClearsCollnetEnable) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_CollNetPluginPresent_KeepsCollnetEnable) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   ncclCollNet_t collNet{};
   c.get()->ncclCollNet = &collNet;
@@ -2843,7 +2920,7 @@ TEST_F(InitMicrotest, InitTransportsRank_CollNetPluginPresent_KeepsCollnetEnable
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NvlsInitFails_ReturnsWithoutRunningCleanup) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclNvlsInitResult = ncclSystemError;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -2855,7 +2932,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NvlsInitFails_ReturnsWithoutRunningClea
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_ComputesHostCountAndHostIndex) {
-  TransportsRankComm c(4, /*rank=*/3);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/3);
   ncclTopoSystem* topo = c.installTopo();
   std::vector<PeerSpec> specs(4);
   specs[0].node = 1;  // hosts, in rank order: B B C A -- self (rank 3) is on host A, seen last,
@@ -2868,7 +2945,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ComputesHostCountAndHostIndex) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_SingleHost_HostIndexIsZero) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = c.installTopo();
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
@@ -2877,7 +2954,7 @@ TEST_F(InitMicrotest, InitTransportsRank_SingleHost_HostIndexIsZero) {
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_UniformRanksPerHost_KeepsPresetTopoMatching) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = c.installTopo();
   std::vector<PeerSpec> specs(4);
   specs[2].node = 1;  // 2 hosts x 2 ranks
@@ -2888,7 +2965,7 @@ TEST_F(InitMicrotest, InitTransportsRank_UniformRanksPerHost_KeepsPresetTopoMatc
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsPresetTopoMatching) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   ncclTopoSystem* topo = c.installTopo();
   std::vector<PeerSpec> specs(4);
   specs[3].node = 1;  // 3 ranks on one host, 1 on the other
@@ -2898,7 +2975,7 @@ TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsPresetTopoM
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoComputeFails_PropagatesAndRunsCleanup) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclOsCpuCountValue = 1;
   g_ncclTopoComputeResult = ncclInvalidArgument;
@@ -2935,7 +3012,7 @@ TEST_F(InitMicrotest, AlgorithmEnum_StillMatchesTheGraphAliasTable) {
 // lands on NVLS (slot 4) and through graphs[6] on TREE (slot 0), leaving slots 5 and 6 pristine --
 // so a test that only poisoned the two unused slots would miss exactly the corruption it was for.
 TEST_F(InitMicrotest, InitTransportsRank_ThroughRingCompute_WritesOnlyTheRingGraph) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   const std::vector<unsigned char> poison(sizeof(ncclTopoGraph), 0xA5);
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
@@ -2953,7 +3030,7 @@ TEST_F(InitMicrotest, InitTransportsRank_ThroughRingCompute_WritesOnlyTheRingGra
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_RingGraphSeededBeforeTopoCompute) {
-  TransportsRankComm c(4, 0);
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));

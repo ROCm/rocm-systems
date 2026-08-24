@@ -18,6 +18,7 @@
 #ifndef RCCL_TEST_HOST_INIT_FAKES_H_
 #define RCCL_TEST_HOST_INIT_FAKES_H_
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -146,6 +147,8 @@ extern int g_initChannelLastId;
 // -------------------------------------------------------------------------
 extern int g_ncclOsCpuCountValue;
 extern int g_ncclOsCpuCountCalls;
+// Every mask ncclOsCpuCount was handed, in call order: [0] is :1608, the last is exit::2403.
+extern std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 extern ncclResult_t g_ncclOsSetAffinityResult;
 // Every mask handed to ncclOsSetAffinity, in call order: [0] is :1610, [1] is exit::2404. A single
 // "last" slot is not enough -- the exit: write masks whatever :1610 forwarded.

@@ -22,7 +22,8 @@ ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
 // Controllable (was fail-loud). A std::function, not a result code: initTransportsRank:1506 branches on the WRITTEN
-// *level, so a result-only seam could not drive it. Single call site (:1501) -> success default is safe (seams.md 2).
+// *level, so a result-only seam could not drive it. Single call site (:1501) -> a success default is safe;
+// see MICROTEST_README.md "Adding more controllable seams" for when to default a seam to failure instead.
 extern std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel;
 ncclResult_t ncclGetUserP2pLevel(int* level) { return g_ncclGetUserP2pLevel(level); }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }

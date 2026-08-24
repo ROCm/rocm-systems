@@ -71,11 +71,15 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 }
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // Controllable (was fail-loud). initTransportsRank's exit: block (:2403) calls ncclOsCpuCount on EVERY path, so
-// nothing in that function is testable until this is seamed; the counter distinguishes exit: from the bare return at :1488.
+// nothing in that function is testable until this is seamed; the counter separates exit: from the :1488 bare return.
+// Records the mask too: :1608 and exit::2403 both call this, and without the recorder either call site
+// could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity) with nothing noticing.
 extern int g_ncclOsCpuCountValue;
 extern int g_ncclOsCpuCountCalls;
+extern std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 int ncclOsCpuCount(const ncclAffinity& affinity) {
   g_ncclOsCpuCountCalls++;
+  g_ncclOsCpuCountMasks.push_back(affinity);
   return g_ncclOsCpuCountValue;
 }
 // Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
@@ -83,7 +87,7 @@ int ncclOsCpuCount(const ncclAffinity& affinity) {
 extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffinity(affinity); }
 // Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
-// comm->cpuAffinity vs any other mask is unobservable (seams.md: a fake that ignores an argument untests it).
+// comm->cpuAffinity vs any other mask is unobservable -- a fake that drops an argument untests it.
 // Keeps EVERY mask, not just the latest: :1610 and exit::2404 both call this, so a single "last"
 // slot lets the exit: write mask what :1610 forwarded -- which left a mutant swapping :1610 to
 // affinitySave alive. Tests index the call site they mean.

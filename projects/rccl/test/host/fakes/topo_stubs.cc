@@ -56,8 +56,9 @@ ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
 // Controllable (was fail-loud). This is the FIRST call after initTransportsRank's MNNVL/intra-proc block, so arming it
-// to fail terminates the error-injection ladder and makes :1462-1565 coverable. Default stays failure: both call sites
-// (:1573, :1576) are on paths no test drives to success yet (seams.md 2). Records dumpXmlFile so :1573 vs :1576 is visible.
+// to fail terminates the error-injection ladder and makes :1462-1565 coverable. Default stays failure because both call
+// sites (:1573, :1576) are on paths no test drives to success yet -- MICROTEST_README.md, "Adding more controllable
+// seams". Records dumpXmlFile so :1573 vs :1576 is visible.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem;
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system, const char* dumpXmlFile) {
   return g_ncclTopoGetSystem(comm, system, dumpXmlFile);
@@ -71,7 +72,9 @@ ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGr
 extern ncclResult_t g_ncclTopoSearchInitResult;
 ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) { return g_ncclTopoSearchInitResult; }
 extern ncclResult_t g_ncclTopoTrimSystemResult;
-ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm) { return g_ncclTopoTrimSystemResult; }
+ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm) {
+  return g_ncclTopoTrimSystemResult;
+}
 ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs) { ::abort(); }
 ncclResult_t ncclTopoPostset(struct ncclComm*, int*, int*, struct ncclTopoRanks**, int*, struct ncclTopoGraph**, struct ncclComm*, int) { ::abort(); }
 ncclResult_t ncclTopoPreset(struct ncclComm*, struct ncclTopoGraph* (&)[7], struct ncclTopoRanks*) { ::abort(); }

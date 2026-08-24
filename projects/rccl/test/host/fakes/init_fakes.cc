@@ -141,13 +141,14 @@ const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
 // External ncclParam* referenced by init.cc but NOT defined via NCCL_PARAM in
 // the UUT (the redirected NCCL_PARAM only covers params declared inside init.cc).
 // Route through g_loadParam so tests can flip them per-case; distinct env keys.
-// Defaults mirror the production NCCL_PARAM defaults.
+// Defaults mirror the production NCCL_PARAM defaults; the trailing comment on each names the
+// definition it copies, so a drift is checkable without leaving this file.
 // -------------------------------------------------------------------------
-int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }
-int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
-int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
-int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 2); }
-int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 1); }
+int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
+int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }                     // transport/nvls.cc:159
+int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }                   // init_nvtx.cc:16
+int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }                       // graph/tuning.cc:1105
+int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:605
 
 // -------------------------------------------------------------------------
 // Recorder: pure instrumentation -> no-op fake. Only the overloads reached by
@@ -315,6 +316,7 @@ unsigned int g_rocmVersionPatch = 0;
 // ncclOsCpuCount default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
 int g_ncclOsCpuCountValue                = 0;
 int g_ncclOsCpuCountCalls                = 0;
+std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 ncclResult_t g_ncclOsSetAffinityResult   = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
@@ -322,9 +324,11 @@ int g_ncclMnnvlCheckCalls                = 0;
 // Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
 std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
     [](int* level) { *level = 3; return ncclSuccess; };
-// Defaults to FAILURE -- it was the rung-1 terminator, and no test drives its call sites to success by default.
+// Defaults to FAILURE -- it is the rung-1 terminator, and no test drives its call sites to success by default.
+// ncclRemoteError is a SENTINEL: no other seam and no init.cc path produces it, so EXPECT_EQ on it proves
+// execution actually reached :1576 rather than dying earlier at AllGather1 or the :1554 intra-proc guard.
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem =
-    [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
+    [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
 
 // Topology-detection and CPU-affinity seams (:1576-1618). All succeed by default so a test can walk the
 // block and inject exactly one failure; ncclTopoCompute is the exception -- it is the rung-2 terminator.
@@ -410,12 +414,13 @@ void ResetInitFakes() {
   g_rocmVersionPatch = 0;
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
+  g_ncclOsCpuCountMasks.clear();
   g_ncclOsSetAffinityResult = ncclSuccess;
   g_ncclOsSetAffinityMasks.clear();
   g_ncclMnnvlCheckResult = ncclSuccess;
   g_ncclMnnvlCheckCalls = 0;
   g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
-  g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
+  g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
   g_ncclTopoComputePathsCalls = 0;
