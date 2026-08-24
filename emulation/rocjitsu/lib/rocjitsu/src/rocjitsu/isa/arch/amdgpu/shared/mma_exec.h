@@ -1352,6 +1352,33 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
+    const size_t a_count = static_cast<size_t>(M) * K * B;
+    const size_t b_count = static_cast<size_t>(N) * K * B;
+    std::vector<float> operand_values(a_count + b_count);
+    std::span<float> a_values(operand_values.data(), a_count);
+    std::span<float> b_values(operand_values.data() + a_count, b_count);
+
+    for (uint32_t b = 0; b < B; ++b) {
+      for (uint32_t row = 0; row < M; ++row) {
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = input_loc(M, K, B, row, k, b, a_bits);
+          if (cbsz != 0)
+            al.lane = permute_a_lane(al.lane, cbsz, abid);
+          a_values[(static_cast<size_t>(b) * M + row) * K + k] =
+              ea(cu, s0, physicalize_loc(al, wf));
+        }
+      }
+      for (uint32_t col = 0; col < N; ++col) {
+        for (uint32_t k = 0; k < K; ++k) {
+          auto bl = input_loc(N, K, B, col, k, b, b_bits);
+          if (blgp != 0)
+            bl.lane = permute_b_lane(bl.lane, blgp);
+          b_values[(static_cast<size_t>(b) * N + col) * K + k] =
+              eb(cu, s1, physicalize_loc(bl, wf));
+        }
+      }
+    }
+
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
@@ -1362,17 +1389,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            // Apply cbsz/abid lane permutation to A input.
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            // Apply blgp lane permutation to B input.
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            float a_val = ea(cu, s0, physicalize_loc(al, wf));
-            float b_val = eb(cu, s1, physicalize_loc(bl, wf));
-            acc += a_val * b_val;
+            acc += a_values[(static_cast<size_t>(b) * M + row) * K + k] *
+                   b_values[(static_cast<size_t>(b) * N + col) * K + k];
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
