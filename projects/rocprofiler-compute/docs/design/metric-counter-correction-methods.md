@@ -69,18 +69,18 @@ This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR revi
 
 ### Implementation status
 
-§3.2 shows **target patterns** — some are shipped today, others are planned in a follow-up implementation PR. Use this table when reading examples or reviewing PRs against this doc.
+This table tracks **implementation state of related components** — not a one-to-one list of §1.3. It includes the **four correction methods** designers choose, plus items that affect bounds but are not corrections: **multi-pass imputation** (root cause in §1.2), **`ValuDualIssueDetector`** (documented exception — §0 Rule 7), and **clamp diagnostics** (planned tooling). Rows marked **Proposed** or **Not started** are follow-up PR scope. Use this table when reading examples (§3.2) or reviewing PRs.
 
-| Component | Status | Where / notes |
-|---|---|---|
-| **`NOISE_CLAMP`** (`to_noise_clamp`) | **Shipped** | `noise_clamper.py`; Remote Read/Write and cache-split metrics (gfx940–950) |
-| **Single-pass grouping** (allocator, `--set`, `--block`) | **Shipped** | `soc_base.py`, `profiling_counter_grouping_policy.yaml`; gfx115x has tier-0 entries, many arches (e.g. gfx942) empty |
-| **Multi-pass imputation** | **Shipped** | `utils_analysis.py` — stitches counters across passes |
-| **`ValuDualIssueDetector`** (VALU > 100% exception) | **Shipped** | `utils/metrics/common.py` — warnings, no clamp |
-| **`BOUND_RATIO`** (`to_bound_ratio`) | **Proposed** | Helper + YAML registration — follow-up PR |
-| **`SUM(MIN(a,b))/SUM(b)`** on partition avg (e.g. HBM Read Traffic) | **Proposed** | `1700_l2_cache.yaml` — follow-up PR |
-| **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Proposed** | Panel YAML updates — follow-up PR |
-| **Clamp diagnostics** (`BOUND_RATIO`, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today |
+| Component | Status | Where / notes | Category |
+|---|---|---|---|
+| **`NOISE_CLAMP`** (`to_noise_clamp`) | **Shipped** | `noise_clamper.py`; Remote Read/Write and cache-split metrics (gfx940–950) | Correction method (§1.3) |
+| **Single-pass grouping** (allocator, `--set`, `--block`) | **Shipped** | `soc_base.py`, `profiling_counter_grouping_policy.yaml`; gfx115x has tier-0 entries, many arches (e.g. gfx942) empty | Correction method (§1.3) |
+| **Multi-pass imputation** | **Shipped** | `utils_analysis.py` — stitches counters across passes | Root-cause context (§1.2) — not a correction |
+| **`ValuDualIssueDetector`** (VALU > 100% exception) | **Shipped** | `utils/metrics/common.py` — warnings, no clamp | Documented exception (§0 Rule 7) |
+| **`BOUND_RATIO`** (`to_bound_ratio`) | **Proposed** | Helper + YAML registration — follow-up PR | Correction method (§1.3) |
+| **`SUM(MIN(a,b))/SUM(b)`** on partition avg (e.g. HBM Read Traffic) | **Proposed** | `1700_l2_cache.yaml` — follow-up PR | Correction method — avg rollout (§1.3) |
+| **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Proposed** | Panel YAML updates — follow-up PR | Correction method — min/max rollout (§1.3) |
+| **Clamp diagnostics** (`BOUND_RATIO`, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today | Planned tooling (§6) |
 
 ---
 
@@ -113,6 +113,8 @@ These symptoms appear across architectures more or less.
 **Noise vs hardware bug:** See §0 Definitions (*sporadic* vs *systematic*). Multi-pass variance and async sampling usually produce sporadic violations. Suspect a **potential hardware counter bug** when violations remain systematic after single-pass validation. Correction methods address sporadic noise; they must not become the only signal for systematic issues.
 
 ### 1.3 Correction methods (overview)
+
+**Scope:** §2–§3 below cover **four correction methods** — the levers designers apply to metric YAML. **Implementation status** (§0) lists additional related components (imputation, VALU exception, diagnostics); only the four rows below are correction methods. `BOUND_RATIO` and `SUM(MIN)/SUM(b)` appear twice in the status table (helper vs YAML rollout) but are one method each here.
 
 | Method | Layer | What it fixes | Primary lever |
 |---|---|---|---|
