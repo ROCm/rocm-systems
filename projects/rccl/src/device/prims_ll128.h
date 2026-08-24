@@ -22,18 +22,17 @@
 // hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
 // load128 which bypasses the cache.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-#if RCCL_LL_FIFO_SYS_SCOPE
   union {
     v4u v;
     uint64_t u64[2];
   } u;
+#if RCCL_LL_FIFO_SYS_SCOPE
   u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  u.v = __builtin_nontemporal_load((v4u_gptr)ptr);
+#endif
   v0 = u.u64[0];
   v1 = u.u64[1];
-#else
-  v0 = __builtin_nontemporal_load((u64_gptr)ptr);
-  v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
-#endif
 }
 
 // Plain (cacheable) 128-bit store. Used for non-registered user buffers, and off

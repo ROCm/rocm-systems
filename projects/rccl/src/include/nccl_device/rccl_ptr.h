@@ -73,6 +73,7 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
+#define RCCL_DEVICE_SYNCSCOPE "agent"
 
 // Observed on gfx1250: sibling DPX P2P into a cacheable comm FIFO is not
 // coherent under plain/nontemporal load or store. Default hipMalloc and
