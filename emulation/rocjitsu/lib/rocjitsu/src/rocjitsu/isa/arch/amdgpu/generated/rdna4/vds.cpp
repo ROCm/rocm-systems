@@ -5,28 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
-    : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU32Vds>()),
+    : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -41,30 +29,19 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU32Vds>(opcode);
 }
+} // namespace detail
 
 DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
-    : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsSubU32Vds>()),
+    : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -79,30 +56,19 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU32Vds>(opcode);
 }
+} // namespace detail
 
 DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
-    : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsRsubU32Vds>()),
+    : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -117,30 +83,19 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsRsubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::RSUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsRsubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU32Vds>(opcode);
 }
+} // namespace detail
 
 DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
-    : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsIncU32Vds>()),
+    : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -155,30 +110,19 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsIncU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsIncU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU32Vds>(opcode);
 }
+} // namespace detail
 
 DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
-    : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsDecU32Vds>()),
+    : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -193,30 +137,19 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsDecU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsDecU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
-    : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinI32Vds>()),
+    : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinI32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -231,30 +164,19 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinI32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
-    : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxI32Vds>()),
+    : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxI32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -269,30 +191,19 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxI32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
-    : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinU32Vds>()),
+    : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -307,30 +218,19 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
-    : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxU32Vds>()),
+    : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -345,30 +245,19 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU32Vds>(opcode);
 }
+} // namespace detail
 
 DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
-    : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAndB32Vds>()),
+    : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -383,30 +272,19 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAndB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAndB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB32Vds>(opcode);
 }
+} // namespace detail
 
 DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
-    : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrB32Vds>()),
+    : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -421,30 +299,19 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsOrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsOrB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB32Vds>(opcode);
 }
+} // namespace detail
 
 DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
-    : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsXorB32Vds>()),
+    : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -459,31 +326,19 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsXorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsXorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB32Vds>(opcode);
 }
+} // namespace detail
 
 DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMskorB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMskorB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -500,33 +355,19 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMskorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::MSKOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &mask0, 4);
-    uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &src0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMskorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
     : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -539,29 +380,19 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStore2addrB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -576,39 +407,20 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->store_data.resize(wf.wf_size() * 4);
-  d->ds2_store_data.resize(wf.wf_size() * 4);
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
-    uint32_t v0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
-    uint32_t v1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStore2addrB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStore2addrStride64B32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -623,39 +435,20 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->store_data.resize(wf.wf_size() * 4);
-  d->ds2_store_data.resize(wf.wf_size() * 4);
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
-    uint32_t v0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
-    uint32_t v1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B32Vds(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B32Vds>(opcode);
 }
+} // namespace detail
 
 DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCmpstoreB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -672,34 +465,20 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCmpstoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCmpstoreB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinNumF32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinNumF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -714,31 +493,19 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumF32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxNumF32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -753,38 +520,36 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumF32Vds>(opcode);
 }
+} // namespace detail
 
 DsNopVds::DsNopVds(const MachineInst *inst)
-    : Vds("ds_nop", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsNopVds>()) {
+    : Vds("ds_nop", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsNopVds)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void DsNopVds::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_nop_vds(*this, wf); }
+namespace detail {
+DecodeResult decodeDsNopVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_nop", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsNopVds>(opcode);
+}
+} // namespace detail
 
 DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
-    : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddF32Vds>()),
+    : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -799,30 +564,19 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddF32Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
-    : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB8Vds>()),
+    : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB8Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -835,29 +589,19 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB8Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
     : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -870,29 +614,19 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16Vds>(opcode);
 }
+} // namespace detail
 
 DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsAddRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -909,31 +643,19 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsSubRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsSubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -950,31 +672,19 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsRsubRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsRsubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -991,31 +701,20 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsRsubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::RSUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsRsubRtnU32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsIncRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsIncRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1032,31 +731,19 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsIncRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsIncRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsDecRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsDecRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1073,31 +760,19 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsDecRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsDecRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinRtnI32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnI32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1114,31 +789,19 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxRtnI32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnI32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1155,31 +818,19 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1196,31 +847,19 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1237,31 +876,19 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsAndRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsAndRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1278,31 +905,19 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAndRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAndRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsOrRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsOrRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1319,31 +934,19 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsOrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsOrRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsXorRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsXorRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1360,31 +963,19 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsXorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsXorRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMskorRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMskorRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1403,34 +994,20 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMskorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::MSKOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &mask0, 4);
-    uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &src0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMskorRtnB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchgRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1447,31 +1024,20 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchgRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB32Vds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchg2addrRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1490,31 +1056,20 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB32Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchg2addrStride64RtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1533,31 +1088,21 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB32Vds(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b32",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCmpstoreRtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1576,34 +1121,20 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCmpstoreRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinNumRtnF32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinNumRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1620,31 +1151,20 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinNumRtnF32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumRtnF32Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxNumRtnF32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1661,31 +1181,20 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxNumRtnF32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumRtnF32Vds>(opcode);
 }
+} // namespace detail
 
 DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
     : Vds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsSwizzleB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsSwizzleB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
@@ -1694,12 +1203,20 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsSwizzleB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_swizzle_b32_vds(*this, wf);
+namespace detail {
+DecodeResult decodeDsSwizzleB32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_swizzle_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSwizzleB32Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
-    : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB32Vds>()),
+    : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -1712,20 +1229,19 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB32Vds>(opcode);
 }
+} // namespace detail
 
 DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoad2addrB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -1738,33 +1254,20 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoad2addrB32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB32Vds>(opcode);
 }
+} // namespace detail
 
 DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoad2addrStride64B32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -1777,32 +1280,20 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B32Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B32Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
-    : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadI8Vds>()),
+    : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -1815,20 +1306,19 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadI8Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadI8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
-    : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadU8Vds>()),
+    : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -1841,19 +1331,19 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU8Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadU8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
-    : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadI16Vds>()),
+    : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -1866,20 +1356,19 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadI16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadI16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI16Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
-    : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadU16Vds>()),
+    : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -1892,19 +1381,19 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadU16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16Vds>(opcode);
 }
+} // namespace detail
 
 DsConsumeVds::DsConsumeVds(const MachineInst *inst)
-    : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsConsumeVds>()),
+    : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsConsumeVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1917,31 +1406,19 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CONSUME;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  uint64_t exec = wf.exec();
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->wg_id = wf.wg_id();
-  d->wf_id = wf.wf_id();
-  d->cu_path = wf.cu().full_path();
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (exec & (1ULL << lane))
-      d->per_lane_addr[lane] = addr;
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsConsumeVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_consume", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsConsumeVds>(opcode);
 }
+} // namespace detail
 
 DsAppendVds::DsAppendVds(const MachineInst *inst)
-    : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAppendVds>()),
+    : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAppendVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1954,31 +1431,19 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::APPEND;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  uint64_t exec = wf.exec();
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->wg_id = wf.wg_id();
-  d->wf_id = wf.wf_id();
-  d->cu_path = wf.cu().full_path();
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (exec & (1ULL << lane))
-      d->per_lane_addr[lane] = addr;
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAppendVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_append", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAppendVds>(opcode);
 }
+} // namespace detail
 
 DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
-    : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU64Vds>()),
+    : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1993,32 +1458,19 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU64Vds>(opcode);
 }
+} // namespace detail
 
 DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
-    : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsSubU64Vds>()),
+    : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2033,32 +1485,19 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU64Vds>(opcode);
 }
+} // namespace detail
 
 DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
-    : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsRsubU64Vds>()),
+    : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2073,32 +1512,19 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsRsubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::RSUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsRsubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU64Vds>(opcode);
 }
+} // namespace detail
 
 DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
-    : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsIncU64Vds>()),
+    : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2113,32 +1539,19 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsIncU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsIncU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU64Vds>(opcode);
 }
+} // namespace detail
 
 DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
-    : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsDecU64Vds>()),
+    : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2153,32 +1566,19 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsDecU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsDecU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
-    : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinI64Vds>()),
+    : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinI64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2193,32 +1593,19 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinI64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
-    : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxI64Vds>()),
+    : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxI64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2233,32 +1620,19 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxI64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
-    : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMinU64Vds>()),
+    : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2273,32 +1647,19 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
-    : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsMaxU64Vds>()),
+    : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2313,32 +1674,19 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU64Vds>(opcode);
 }
+} // namespace detail
 
 DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
-    : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAndB64Vds>()),
+    : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2353,32 +1701,19 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAndB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAndB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB64Vds>(opcode);
 }
+} // namespace detail
 
 DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
-    : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsOrB64Vds>()),
+    : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2393,32 +1728,19 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsOrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsOrB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB64Vds>(opcode);
 }
+} // namespace detail
 
 DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
-    : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsXorB64Vds>()),
+    : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2433,33 +1755,19 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsXorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsXorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB64Vds>(opcode);
 }
+} // namespace detail
 
 DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMskorB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMskorB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -2476,37 +1784,19 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMskorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::MSKOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &mask0, 4);
-    uint32_t mask1 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &mask1, 4);
-    uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &src0, 4);
-    uint32_t src1 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &src1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMskorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
     : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -2519,31 +1809,19 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t lo0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    uint32_t hi0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStore2addrB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -2558,43 +1836,20 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->store_data.resize(wf.wf_size() * 8);
-  d->ds2_store_data.resize(wf.wf_size() * 8);
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
-    uint32_t v0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
-    uint32_t v0_1 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
-    uint32_t v1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
-    uint32_t v1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
-    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStore2addrB64Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStore2addrStride64B64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -2609,43 +1864,20 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->store_data.resize(wf.wf_size() * 8);
-  d->ds2_store_data.resize(wf.wf_size() * 8);
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
-    uint32_t v0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
-    uint32_t v0_1 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
-    uint32_t v1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
-    uint32_t v1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
-    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B64Vds(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B64Vds>(opcode);
 }
+} // namespace detail
 
 DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCmpstoreB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -2662,38 +1894,20 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCmpstoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCmpstoreB64Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinNumF64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinNumF64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2708,33 +1922,19 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumF64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxNumF64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumF64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -2749,33 +1949,19 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumF64Vds>(opcode);
 }
+} // namespace detail
 
 DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsAddRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2792,33 +1978,19 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsSubRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsSubRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2835,33 +2007,19 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsRsubRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsRsubRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2878,33 +2036,20 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsRsubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::RSUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsRsubRtnU64Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsIncRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsIncRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2921,33 +2066,19 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsIncRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsIncRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsDecRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsDecRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2964,33 +2095,19 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsDecRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsDecRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinRtnI64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnI64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3007,33 +2124,19 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxRtnI64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnI64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3050,33 +2153,19 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3093,33 +2182,19 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxRtnU64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3136,33 +2211,19 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU64Vds>(opcode);
 }
+} // namespace detail
 
 DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsAndRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsAndRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3179,33 +2240,19 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAndRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAndRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsOrRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsOrRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3222,33 +2269,19 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsOrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsOrRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsXorRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsXorRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3265,33 +2298,19 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsXorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsXorRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMskorRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMskorRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3310,38 +2329,20 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMskorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::MSKOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t src_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t mask0 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &mask0, 4);
-    uint32_t mask1 = amdgpu::RegisterAccess(cu).read_vgpr(mask_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &mask1, 4);
-    uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &src0, 4);
-    uint32_t src1 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &src1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMskorRtnB64Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchgRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3358,33 +2359,20 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchgRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB64Vds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchg2addrRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3403,33 +2391,20 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB64Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStorexchg2addrStride64RtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3448,33 +2423,21 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   flags_ |= MEMORY_OP;
 }
 
-void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB64Vds(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b64",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCmpstoreRtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3493,38 +2456,20 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCmpstoreRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB64Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMinNumRtnF64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMinNumRtnF64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3541,33 +2486,20 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMinNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMinNumRtnF64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumRtnF64Vds>(opcode);
 }
+} // namespace detail
 
 DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsMaxNumRtnF64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3584,32 +2516,20 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsMaxNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsMaxNumRtnF64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumRtnF64Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
-    : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB64Vds>()),
+    : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -3622,20 +2542,19 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB64Vds>(opcode);
 }
+} // namespace detail
 
 DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoad2addrB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -3648,33 +2567,20 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoad2addrB64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB64Vds>(opcode);
 }
+} // namespace detail
 
 DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoad2addrStride64B64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -3687,33 +2593,20 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->exec_mask = exec;
-  d->lane_mask = exec;
-  d->ds2_active = true;
-  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
-  uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B64Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B64Vds>(opcode);
 }
+} // namespace detail
 
 DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsAddRtnF32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3730,31 +2623,19 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsAddRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsAddRtnF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnF32Vds>(opcode);
 }
+} // namespace detail
 
 DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
     : Vds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCondxchg32RtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCondxchg32RtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -3771,38 +2652,20 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCondxchg32RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCondxchg32RtnB64Vds(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_condxchg32_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondxchg32RtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCondSubU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCondSubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -3817,31 +2680,20 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCondSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCondSubU32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cond_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondSubU32Vds>(opcode);
 }
+} // namespace detail
 
 DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsSubClampU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsSubClampU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -3856,31 +2708,20 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubClampU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubClampU32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_clamp_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubClampU32Vds>(opcode);
 }
+} // namespace detail
 
 DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsPkAddF16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsPkAddF16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -3895,31 +2736,19 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsPkAddF16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsPkAddF16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddF16Vds>(opcode);
 }
+} // namespace detail
 
 DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsPkAddBf16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsPkAddBf16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -3934,31 +2763,19 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsPkAddBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsPkAddBf16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddBf16Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB8D16HiVds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB8D16HiVds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -3971,30 +2788,20 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB8D16HiVds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8D16HiVds>(opcode);
 }
+} // namespace detail
 
 DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB16D16HiVds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB16D16HiVds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -4007,30 +2814,20 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB16D16HiVds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16D16HiVds>(opcode);
 }
+} // namespace detail
 
 DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
     : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadU8D16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -4042,6 +2839,16 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadU8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16Vds>(opcode);
+}
+} // namespace detail
 
 void DsLoadU8D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
@@ -4049,21 +2856,9 @@ void DsLoadU8D16Vds::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void DsLoadU8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->d16_lo = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadU8D16HiVds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -4075,6 +2870,17 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadU8D16HiVds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16HiVds>(opcode);
+}
+} // namespace detail
 
 void DsLoadU8D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
@@ -4082,21 +2888,9 @@ void DsLoadU8D16HiVds::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void DsLoadU8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->d16_hi = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
     : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadI8D16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -4108,6 +2902,16 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16Vds>(opcode);
+}
+} // namespace detail
 
 void DsLoadI8D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
@@ -4115,22 +2919,9 @@ void DsLoadI8D16Vds::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void DsLoadI8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->sign_extend = true;
-  d->d16_lo = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadI8D16HiVds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -4143,28 +2934,26 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadI8D16HiVds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16HiVds>(opcode);
+}
+} // namespace detail
+
 void DsLoadI8D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void DsLoadI8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->sign_extend = true;
-  d->d16_hi = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
     : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadU16D16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -4176,6 +2965,17 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadU16D16Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16Vds>(opcode);
+}
+} // namespace detail
 
 void DsLoadU16D16Vds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
@@ -4183,21 +2983,9 @@ void DsLoadU16D16Vds::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void DsLoadU16D16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->d16_lo = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadU16D16HiVds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -4210,27 +2998,26 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU16D16HiVds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16HiVds>(opcode);
+}
+} // namespace detail
+
 void DsLoadU16D16HiVds::implicit_uses(RegisterSet &uses) const {
   Vds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void DsLoadU16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  d->d16_hi = true;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsCondSubRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsCondSubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4247,31 +3034,20 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsCondSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsCondSubRtnU32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cond_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondSubRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsSubClampRtnU32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsSubClampRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4288,31 +3064,20 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsSubClampRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsSubClampRtnU32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_clamp_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubClampRtnU32Vds>(opcode);
 }
+} // namespace detail
 
 DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsPkAddRtnF16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsPkAddRtnF16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4329,31 +3094,20 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsPkAddRtnF16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsPkAddRtnF16Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_rtn_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddRtnF16Vds>(opcode);
 }
+} // namespace detail
 
 DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsPkAddRtnBf16Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsPkAddRtnBf16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4370,31 +3124,20 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsPkAddRtnBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsPkAddRtnBf16Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_rtn_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddRtnBf16Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreAddtidB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreAddtidB32Vds)),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &data0;
@@ -4407,29 +3150,20 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreAddtidB32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreAddtidB32Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadAddtidB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadAddtidB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -4442,35 +3176,20 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  {
-    uint64_t exec = wf.exec();
-    d->lane_mask = exec;
-    d->exec_mask = exec;
-    d->wg_id = wf.wg_id();
-    d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
-    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
-    uint32_t m0 = wf.m0();
-    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
-    }
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadAddtidB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadAddtidB32Vds>(opcode);
 }
+} // namespace detail
 
 DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
     : Vds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsPermuteB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsPermuteB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -4481,13 +3200,20 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsPermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_permute_b32_vds(*this, wf);
+namespace detail {
+DecodeResult decodeDsPermuteB32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_permute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPermuteB32Vds>(opcode);
 }
+} // namespace detail
 
 DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsBpermuteB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsBpermuteB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -4498,13 +3224,20 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsBpermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_b32_vds(*this, wf);
+namespace detail {
+DecodeResult decodeDsBpermuteB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_bpermute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBpermuteB32Vds>(opcode);
 }
+} // namespace detail
 
 DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_fi_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsBpermuteFiB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsBpermuteFiB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -4515,13 +3248,20 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_fi_b32_vds(*this, wf);
+namespace detail {
+DecodeResult decodeDsBpermuteFiB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_bpermute_fi_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBpermuteFiB32Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
     : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB96Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB96Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
@@ -4534,33 +3274,19 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB96Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB96Vds>(opcode);
 }
+} // namespace detail
 
 DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
     : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsStoreB128Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsStoreB128Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
@@ -4573,35 +3299,19 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsStoreB128Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsStoreB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB128Vds>(opcode);
 }
+} // namespace detail
 
 DsBvhStackPush4Pop1RtnB32Vds::DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *inst)
     : Vds("ds_bvh_stack_push4_pop1_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsBvhStackPush4Pop1RtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsBvhStackPush4Pop1RtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4615,14 +3325,21 @@ DsBvhStackPush4Pop1RtnB32Vds::DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush4Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeDsBvhStackPush4Pop1RtnB32Vds(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_bvh_stack_push4_pop1_rtn_b32",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBvhStackPush4Pop1RtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *inst)
     : Vds("ds_bvh_stack_push8_pop1_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsBvhStackPush8Pop1RtnB32Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsBvhStackPush8Pop1RtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4636,14 +3353,21 @@ DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush8Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeDsBvhStackPush8Pop1RtnB32Vds(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_bvh_stack_push8_pop1_rtn_b32",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBvhStackPush8Pop1RtnB32Vds>(opcode);
 }
+} // namespace detail
 
 DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *inst)
     : Vds("ds_bvh_stack_push8_pop2_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsBvhStackPush8Pop2RtnB64Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsBvhStackPush8Pop2RtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -4657,13 +3381,21 @@ DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush8Pop2RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeDsBvhStackPush8Pop2RtnB64Vds(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_bvh_stack_push8_pop2_rtn_b64",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBvhStackPush8Pop2RtnB64Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
-    : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB96Vds>()),
+    : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB96Vds)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
@@ -4676,20 +3408,19 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadB96Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB96Vds>(opcode);
 }
+} // namespace detail
 
 DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
     : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-          make_exec_fn<DsLoadB128Vds>()),
+          selected_exec_fn(InstructionExecutionId::DsLoadB128Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
@@ -4702,16 +3433,15 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadB128Vds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
-  ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeDsLoadB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB128Vds>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

@@ -43,8 +43,20 @@ struct IndirectCallFixup {
   uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
   uint64_t source_call_offset = 0;           ///< Source offset of the setpc/swappc consumer.
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
-  uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
-  bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  uint16_t source_call_sreg = 0;             ///< Low SGPR the consumer reads the PC pair from.
+  /// @brief Low SGPR of the pair the builder range itself writes.
+  ///
+  /// @details Usually the same pair the consumer reads, and for a plain getpc/add/swappc chain
+  /// it always is. A lane-banked dispatcher breaks the two apart: it builds the address in a
+  /// scratch pair, stashes it with `v_writelane_b32`, and restores it into the consumer's pair
+  /// with `v_readlane_b32` much later. patch_recovered_builder_fixups regenerates only the add
+  /// half of the builder and leaves the original `s_getpc_b64` where it is, so the replacement
+  /// has to name the pair that getpc writes. Naming the consumer's pair instead emits an add
+  /// against a getpc that wrote a different register: it corrupts the consumer's pair, breaks
+  /// the stash the dispatcher still reads back, and leaves a getpc/add pairing that the next
+  /// translation's relocation lattice reads as a code address naming no body at all.
+  uint16_t source_builder_sreg = 0;
+  bool source_is_call = false; ///< Whether the consumer is a call-like swappc.
   /// @brief True when the recovered fact for this consumer was incomplete: at least
   /// one predecessor path left the PC pair at an unconstrained value. The concrete
   /// targets are still valid for relocation and liveness, but the consumer must NOT
@@ -56,6 +68,14 @@ struct IndirectCallFixup {
   /// the same SGPR pair the drain was ordering, so dropping the wait would let the
   /// pair be rewritten while an operation still has the old value in flight.
   bool source_requires_xcnt_drain = false;
+  /// @brief True when this builder's consumer was replaced by a direct transfer window.
+  ///
+  /// @details The window recomputes the address, so the builder survives only as dead code -- and
+  /// with no consumer left, a later translation pass can account for it only if the rewrite
+  /// lattice can see it. That obliges the rewrite to use the literal64 add form, which is the only
+  /// one the lattice models. A builder whose consumer remains needs no such constraint: the
+  /// consumer is recovered again on the next pass and accounts for the builder through that.
+  bool consumer_replaced_by_window = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
@@ -109,6 +129,26 @@ struct PcAddressBuilder {
   friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };
 
+/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
+///
+/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
+/// there is still the caller's after the callee returns. @p phys_vgpr is the
+/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
+/// ABI table only covers v0-v255, so a banked register above that range is not
+/// proven callee-saved and reports false. The default device and graphics
+/// conventions share this VGPR set, so unlike the SGPR rule below no explicit
+/// intersection is necessary.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
+
+/// @brief Whether an SGPR is preserved by every AMDGPU calling convention the
+/// translator may encounter for a device function.
+///
+/// @details Code objects do not record whether a particular helper uses the
+/// default device convention or the graphics convention. This predicate uses
+/// their intersection, so an unsummarized call cannot preserve a stale value
+/// merely because one convention saves the register.
+[[nodiscard]] bool is_callee_saved_sgpr(uint16_t sgpr);
+
 /// @brief Discover concrete targets for statically-built setpc/swappc consumers.
 ///
 /// @details This pass runs before BasicBlock storage is finalized because any
@@ -133,27 +173,26 @@ struct PcAddressBuilder {
 /// @param insts Decoded instructions with Instruction::src_loc() populated.
 /// @param text Raw .text bytes matching @p insts.
 /// @param arch ISA architecture used for scalar instruction matching.
-/// @param extra_leaders Additional known block starts, usually kernel entries.
+/// @param extra_leaders Additional known block starts that are also EXTERNAL ENTRIES. Under
+///        ExplicitOnly every one of these is treated as externally entered, which discards the
+///        incoming SGPR-pair facts a caller would establish, so pass only offsets that really are
+///        entered from outside the decoded graph. Offsets that merely need to start a block belong
+///        in @p extra_split_points.
 /// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
 /// @param pc_builders Optional sink for every discovered PC-relative address
 ///        producer, sorted by `source_getpc_offset`. Populated only when the
 ///        section actually contains a recoverable indirect consumer, because a
 ///        section with no dynamic transfer has no stale-PC branch hazard to
 ///        prove anything about.
-/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
-///
-/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
-/// there is still the caller's after the callee returns. @p phys_vgpr is the
-/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
-/// ABI table only covers v0-v255, so a banked register above that range is not
-/// proven callee-saved and reports false.
-[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
-
 /// @returns Recovered indirect branch/call metadata.
+/// @param extra_split_points Offsets that must start a block without being treated as external
+///        entries. Function-entry symbols and stored-pointer targets belong here: they are real
+///        boundaries, but most of them are ordinary helpers their callers reach by a decoded edge.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders = {},
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
-    std::vector<PcAddressBuilder> *pc_builders = nullptr);
+    std::vector<PcAddressBuilder> *pc_builders = nullptr,
+    std::span<const uint64_t> extra_split_points = {});
 
 } // namespace rocjitsu

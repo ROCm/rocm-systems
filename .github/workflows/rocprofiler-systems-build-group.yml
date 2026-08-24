@@ -130,11 +130,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems/
         run: |
-          if [ "${{ matrix.os_major }}" = "8" ]; then
-            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-            chmod +x /opt/trace_processor/bin/trace_processor_shell
-            echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
-          fi
           if [ "${{ matrix.os_major }}" = "10" ]; then
             dnf install -y --enablerepo=crb mpich mpich-devel
             echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
@@ -345,7 +340,9 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           set +e
-          RUNNING_PROCS=$(pgrep trace_processor_shell)
+          # -f is required: the process name is truncated to 15 characters, so
+          # pgrep refuses this pattern unless it matches the full command line
+          RUNNING_PROCS=$(pgrep -f trace_processor_shell)
           if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
       - &_step-ctest-artifacts

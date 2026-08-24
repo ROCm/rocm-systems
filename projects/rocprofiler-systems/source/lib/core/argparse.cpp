@@ -11,7 +11,6 @@
 #include <cstdint>
 
 #include <timemory/settings/types.hpp>
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
@@ -25,10 +24,6 @@ namespace argparse
 {
 namespace
 {
-namespace filepath = ::tim::filepath;
-namespace path     = rocprofsys::common::path;
-using rocprofsys::common::remove_env;
-
 auto
 get_clock_id_choices()
 {
@@ -133,8 +128,10 @@ parser_data&
 add_ld_library_path(parser_data& _data)
 {
     auto libdir = path::parent_path(_data.env.dl_libpath);
-    if(filepath::exists(libdir))
+    if(path::is_directory(libdir))
+    {
         update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::APPEND);
+    }
     return _data;
 }
 

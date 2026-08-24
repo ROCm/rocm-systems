@@ -296,9 +296,9 @@ private:
         cpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
 
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(trimmed.begin(), trimmed.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(trimmed.begin(), trimmed.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -340,7 +340,7 @@ private:
             return result;
         }
 
-        std::regex validator{
+        const std::regex validator{
             R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
             R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
@@ -381,10 +381,10 @@ private:
 
         gpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(settings_trimmed.begin(), settings_trimmed.end(),
-                                tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(settings_trimmed.begin(), settings_trimmed.end(),
+                                      tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -410,9 +410,9 @@ private:
             return result;
         }
 
-        std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
-        std::sregex_iterator it(input_range.begin(), input_range.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
+        std::sregex_iterator       it(input_range.begin(), input_range.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
