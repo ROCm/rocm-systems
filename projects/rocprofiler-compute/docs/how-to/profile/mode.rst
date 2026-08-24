@@ -19,13 +19,7 @@ Profiling
 Use the ``rocprof-compute`` executable to acquire all necessary performance monitoring
 data through analysis of compute workloads.
 
-Profiling with ROCm Compmkdir build && cd build
-
-cmake -D CMAKE_INSTALL_PREFIX=${INSTALL_DIR}/rocprofiler-compute -D PYTHON_DEPS=${INSTALL_DIR}/python-libs -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D MOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
-
-make install
-
-ctest -R "torch" --verboseute Profiler provides the following benefits:
+Profiling with ROCm Compute Profiler provides the following benefits:
 
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
