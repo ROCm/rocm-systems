@@ -10,22 +10,25 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
-set(RJ_AMDGPU_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated")
-
 function(rj_add_split_amdgpu_isa_library arch)
     set(options NO_BUILTIN)
     set(one_value_args GENERATED_ROOT INCLUDE_BASE)
     cmake_parse_arguments(ARG "${options}" "${one_value_args}" "" ${ARGN})
 
+    file(
+        RELATIVE_PATH
+        _provider_header_dir
+        "${ROCJITSU_SRC_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
     if(ARG_GENERATED_ROOT)
         set(_generated_root "${ARG_GENERATED_ROOT}")
     else()
-        set(_generated_root "${RJ_AMDGPU_GENERATED_DIR}")
+        set(_generated_root "${CMAKE_CURRENT_SOURCE_DIR}/../generated")
     endif()
     if(ARG_INCLUDE_BASE)
-        set(_include_base "${ARG_INCLUDE_BASE}")
-    else()
-        set(_include_base "rocjitsu/isa/arch/amdgpu")
+        set(_provider_header_dir "${ARG_INCLUDE_BASE}/${arch}")
     endif()
 
     set(_target rocjitsu_isa_${arch})
@@ -59,18 +62,18 @@ function(rj_add_split_amdgpu_isa_library arch)
     if(ARG_NO_BUILTIN)
         rj_add_isa_target_provider(
             ${_target}
-            HEADER ${_include_base}/${arch}/target_provider.h
+            HEADER ${_provider_header_dir}/target_provider.h
         )
     else()
         rj_add_isa_target_provider(
             ${_target}
-            HEADER ${_include_base}/${arch}/target_provider.h
+            HEADER ${_provider_header_dir}/target_provider.h
             BUILTIN
         )
     endif()
     rj_add_isa_target_provider(
         ${_target}_model
-        HEADER ${_include_base}/${arch}/model_target_provider.h
+        HEADER ${_provider_header_dir}/model_target_provider.h
     )
     if(NOT ARG_NO_BUILTIN)
         set_property(
