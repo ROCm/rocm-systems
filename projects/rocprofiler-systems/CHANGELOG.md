@@ -14,7 +14,11 @@ output must now be explicitly enabled via `--output-format proto`. Requires
 ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
 - `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
 replaces Perfetto as the primary trace output.
-- The `--balanced` preset now enables rocpd output instead of Perfetto by default.
+- All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
+  `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
+  `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
+  library default. The `--profile-only` and `--profile-mpi` presets explicitly disable
+  rocpd output to preserve their lightweight, flat-profile-only character.
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
 - The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
