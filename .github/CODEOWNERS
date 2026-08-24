@@ -13,6 +13,7 @@
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
 /projects/rccl/                                                       @ROCm/rccl-reviewers
 /projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/ROCM-DevTools-Team
+/projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json   @ROCm/rccl-ci
 /projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
@@ -22,7 +23,7 @@
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
 /projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners
-/projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier
+/projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier @shwetagkhatri
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
 /projects/rocdbgapi/                                                  @ROCm/rocm-devtools-debugger

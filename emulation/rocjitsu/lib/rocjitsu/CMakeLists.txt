@@ -29,12 +29,21 @@ set_target_properties(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Private fixed-profile archive for the gfx1250 B0-to-A0 hotswap hook. Its
-    # default registry contains only the gfx1250 model provider, excluding the
-    # full simulator aggregate and execution objects.
+    # Fixed-profile gfx1250 B0-to-A0 translator. Its default registry contains
+    # only the gfx1250 model provider, excluding the full simulator aggregate and
+    # execution objects.
+    #
+    # Shared rather than static because the translation cache keys entries on the
+    # build id of the module that produced them. A static archive is copied into
+    # every consumer, so each would carry a different build id and none could read
+    # another's entries -- which is exactly what a translation performed ahead of
+    # time needs to be able to do. One shared object gives every consumer the same
+    # identity, derived by the linker from emitted content, so a rebuild that
+    # changes translation output invalidates the cache with nobody maintaining a
+    # version number.
     add_library(
         rocjitsu_gfx1250_b0_to_a0
-        STATIC
+        SHARED
         src/rocjitsu/code/dbt/gfx1250_b0_to_a0_library.cpp
     )
     foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
@@ -48,11 +57,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PROPERTIES
             OUTPUT_NAME rocjitsu_gfx1250_b0_to_a0
             POSITION_INDEPENDENT_CODE ON
+            VERSION ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR}
     )
     target_link_libraries(
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             util
             Threads::Threads
@@ -62,6 +73,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE_INCLUDES
         WARNINGS
         HIDDEN
+    )
+    # --build-id is load bearing: the translation cache keys every entry on this
+    # note. Without it the store finds no identity for the translator and turns
+    # itself off, which would look like a cache that simply never hits.
+    #
+    # The version script is what keeps the exported surface to the C API. HIDDEN
+    # above only governs this target's own sources; the object libraries linked in
+    # are not built that way, so unscripted this library exports 126 symbols.
+    set(_gfx1250_map ${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_gfx1250_b0_to_a0.map)
+    set_property(
+        TARGET rocjitsu_gfx1250_b0_to_a0
+        APPEND
+        PROPERTY LINK_DEPENDS ${_gfx1250_map}
+    )
+    target_link_options(
+        rocjitsu_gfx1250_b0_to_a0
+        PRIVATE
+            "LINKER:--build-id=sha1"
+            "LINKER:--version-script=${_gfx1250_map}"
     )
 endif()
 
