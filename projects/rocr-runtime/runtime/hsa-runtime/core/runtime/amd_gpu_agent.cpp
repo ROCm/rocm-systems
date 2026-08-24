@@ -861,7 +861,13 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
     case 11:
     case 12:
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
+        // DXG wraps SDMA packets in GCR itself, so useGCR=false for both. But gfx12
+        // requires explicit SDMA_MEMORY_SCOPE_SYS on writes to system memory (e.g. the
+        // completion-signal atomic) to be visible to the host CPU; without it the host
+        // poll never observes the decrement. gfx11 does not need the scope field.
+        sdma = (supported_isas()[0]->GetMajorVersion() >= 12)
+                   ? static_cast<BlitSdmaBase*>(new BlitSdmaV6())
+                   : static_cast<BlitSdmaBase*>(new BlitSdmaV4());
       } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
       } else {
@@ -2229,7 +2235,11 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
                                                                         BlitDevToHost);
 
+  fprintf(stderr, "[dmacpy] DmaCopyRect dir=%d blit_is_sdma=%d\n", (int)dir, (int)blit->isSDMA());
+  fflush(stderr);
   if (!blit->isSDMA()) {
+    fprintf(stderr, "[dmacpy] DmaCopyRect: blit is not SDMA, returning error\n");
+    fflush(stderr);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -2240,8 +2250,34 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   }
 
   BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  fprintf(stderr, "[dmacpy] DmaCopyRect calling SubmitCopyRectCommand out_signal_val=%lld\n",
+          (long long)out_signal.LoadRelaxed());
+  fflush(stderr);
   hsa_status_t stat = sdmaBlit->SubmitCopyRectCommand(dst, dst_offset, src, src_offset, range,
                                                       dep_signals, out_signal);
+  fprintf(stderr, "[dmacpy] DmaCopyRect SubmitCopyRectCommand returned %d\n", (int)stat);
+  fflush(stderr);
+
+  // Poll signal for 2 seconds to see if GPU decrement arrives.
+  for (int i = 0; i < 2000; i++) {
+    hsa_signal_value_t v = out_signal.LoadRelaxed();
+    if (v != 1 && v != 0) {
+      fprintf(stderr, "[dmacpy] signal changed after %d ms: val=%lld\n", i, (long long)v);
+      fflush(stderr);
+      break;
+    }
+    if (i % 200 == 0) {
+      fprintf(stderr, "[dmacpy] signal poll %d ms: val=%lld loc=%p\n",
+              i, (long long)v, out_signal.ValueLocation());
+      fflush(stderr);
+    } 
+    if (v==0) break;
+#ifdef _WIN32
+    Sleep(1);
+#else
+    usleep(1000);
+#endif
+  }
 
   return stat;
 }

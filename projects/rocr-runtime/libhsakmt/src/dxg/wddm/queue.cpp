@@ -1147,24 +1147,133 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       thread_stop_(false),
       ib_size(0),
       ib_start_addr(0) {
+  // Native SDMA user queue: submit through the WDDM HwQueue path instead of the
+  // SWS translation thread when HWS is enabled and the KMD advertises support.
+  // Env override for A/B testing: HSA_ENABLE_SDMA_USER_QUEUE=0 forces the legacy
+  // SWS path even when the native HwQueue path is available (unset/1 = native).
+  // This single gate also drives HsaQueueResource::SdmaHwQueueEpilogueBytes and the
+  // producer's epilogue reservation, so both paths stay self-consistent.
+  bool env_native = true;
+  if (const char* e = getenv("HSA_ENABLE_SDMA_USER_QUEUE")) env_native = (atoi(e) != 0);
+  native_sdma_ = use_hws && device->IsSdmaSupported() && env_native;
+
+  // The KMD's SDMA-AQL user queue requires a valid AmdQueueT (amd_queue_t) allocation for
+  // its read_dispatch_id (rptr) report; ROCr does not provide one for SDMA queues. Allocate
+  // a private page here, BEFORE CreateQueue (which runs CreateHwQueue), so its KMT handle is
+  // available to pass as AmdQueueT. Without it CreateHwQueue fails with STATUS_UNSUCCESSFUL.
+  if (native_sdma_) {
+    GpuMemoryCreateInfo create_info{};
+    create_info.size = dxg_runtime->page_size;
+    create_info.domain = Wkmi::kSystem;
+    // Must be a queue-object allocation so wkmi sets AllocRequest3Flags.AmdQueueT; the KMD
+    // rejects the SDMA-AQL HwQueue ("AmdQueueT flag not set") unless the amd_queue_t
+    // allocation carries that flag (CS_Context.cpp GetAllocRequestFlags()->flags3.AmdQueueT).
+    create_info.mem_flags = Wkmi::kQueueObject;
+    GpuMemory* gpu_mem = nullptr;
+    auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+    assert(code == ErrorCode::Success);
+    amd_queue_memory_ = gpu_mem;
+    amd_queue_addr_ = gpu_mem->GpuAddress();
+    std::memset(reinterpret_cast<void*>(amd_queue_addr_), 0, dxg_runtime->page_size);
+    pr_err("[sdma] alloc amd_queue_t gpu_va=0x%" PRIx64 " handle=0x%x\n",
+           amd_queue_addr_, (unsigned)gpu_mem->KmtHandle());
+  }
+
   bool ret = device->CreateQueue(this);
   assert(ret);
 
-  thread_ = std::thread(SdmaThread, this);
+  if (!native_sdma_)
+    thread_ = std::thread(SdmaThread, this);
 }
 
 SDMAQueue::~SDMAQueue() {
-  thread_cond_lock_.lock();
-  thread_stop_ = true;
-  thread_cond_lock_.unlock();
-  thread_cond_.notify_one();
-  thread_.join();
+  if (!native_sdma_) {
+    thread_cond_lock_.lock();
+    thread_stop_ = true;
+    thread_cond_lock_.unlock();
+    thread_cond_.notify_one();
+    thread_.join();
+  }
 
   device->DestroyQueue(this);
+
+  if (amd_queue_memory_) {
+    delete amd_queue_memory_;
+    amd_queue_memory_ = nullptr;
+  }
+}
+
+// Write SDMA NOP fill to pad the ring to a boundary.
+static void SdmaNopFill(void* dst, size_t size_bytes) {
+  std::memset(dst, 0, size_bytes);
+  *reinterpret_cast<uint32_t*>(dst) = static_cast<uint32_t>((size_bytes / 4 - 1) << 16);
+}
+
+// Write a single Navi4+ SDMA FENCE_CONDITIONAL_INTERRUPT packet (8 dwords / 32 bytes) at dst.
+// Per the "SDMA User Queue for native ROCr" spec (Sheng Ming En): on Navi4+ (gfx12) one packet
+// both writes the 64-bit progress fence and raises the queue's fence interrupt (pre-Navi4 needs
+// a separate TRAP). Header is exactly 0x80000105: op=FENCE(5), sub_op=CONDITIONAL_INTERRUPT(1),
+// ddw=1 (64-bit fence write); sys/snp/gpa/mall_policy all 0. Per the spec pseudo-code:
+//   FENCE_ADDR = FENCE_REF_ADDR = INTERRUPT_CONTEXT = HwQueueProgressFenceGPUVirtualAddress
+//   FENCE_DATA = HwQueueProgressFenceId
+// The HW writes FENCE_DATA to FENCE_ADDR, then (FENCE_DATA >= *FENCE_REF_ADDR) raises the
+// interrupt so the KMD's existing WDDM fence-reporting path advances the OS fence.
+static size_t SdmaFenceCondIntPacket(void* dst, uint64_t fence_va, uint64_t fence_val) {
+  uint32_t* dw = reinterpret_cast<uint32_t*>(dst);
+  dw[0] = 0x80000105u;                               // op=5, sub_op=1, ddw=1 (sys=0)
+  dw[1] = static_cast<uint32_t>(fence_va);          // FENCE_ADDR lo
+  dw[2] = static_cast<uint32_t>(fence_va >> 32);    // FENCE_ADDR hi
+  dw[3] = static_cast<uint32_t>(fence_val);         // FENCE_DATA lo
+  dw[4] = static_cast<uint32_t>(fence_val >> 32);   // FENCE_DATA hi
+  dw[5] = static_cast<uint32_t>(fence_va);          // FENCE_REF_ADDR lo
+  dw[6] = static_cast<uint32_t>(fence_va >> 32);    // FENCE_REF_ADDR hi
+  dw[7] = static_cast<uint32_t>(fence_va);          // INTERRUPT_CONTEXT (low 32 of fence VA)
+  return 32;
 }
 
 void SDMAQueue::RingDoorbell(uint64_t value) {
-  pr_debug("ringdoorbell %#" PRIx64 " %#" PRIx64 "\n", wptr_pre_, wptr_next_);
+  if (native_sdma_) {
+    // BlitSdma writes the DMA payload into the ring, reserves kHwQueueEpilogueBytes of
+    // trailing headroom (advertised to it via HsaQueueResource::SdmaHwQueueEpilogueBytes),
+    // and lands here through hsaKmtQueueRingDoorbell with `value` already past that
+    // reserved region. We fill [value-epilogue, value) with the FENCE+FENCE+TRAP
+    // progress-fence epilogue and submit `value` UNCHANGED. The producer already
+    // accounted for these bytes, so we must NOT advance the wptr independently —
+    // doing so would drift the producer's write index and corrupt the ring.
+    const uint32_t epilogue = kHwQueueEpilogueBytes;
+    const uint64_t ring_size = cmdbuf_size;
+    char* ring_base = reinterpret_cast<char*>(cmdbuf_addr);
+    const uint64_t fence_va = hwqueue_progress_fence_va_;
+    const uint64_t fence_id = ++hwqueue_fence_id_;
+    const int gfx_major = device->Major();
+
+    // The producer reserves [.., value) contiguously (PadRingToEnd), so the epilogue
+    // region never straddles the ring end; write it directly, no NOP padding.
+    assert(value >= epilogue && "SDMA submit smaller than reserved epilogue");
+    const size_t base = static_cast<size_t>((value - epilogue) % ring_size);
+    assert(base + epilogue <= ring_size && "reserved SDMA epilogue straddles ring end");
+    char* ep = ring_base + base;
+    size_t n = 0;
+    // One Navi4+ FENCE_CONDITIONAL_INTERRUPT packet writes the 64-bit HwQueueProgressFenceId
+    // and raises the queue's fence interrupt (INTERRUPT_CONTEXT = fence VA per spec), so the
+    // KMD's existing WDDM fence-reporting path advances the OS fence for this HwQueue.
+    n += SdmaFenceCondIntPacket(ep + n, fence_va, fence_id);
+
+    pr_err("[sdma] RingDoorbell native epilogue@0x%" PRIx64 " wptr=0x%" PRIx64
+           " fence_va=0x%" PRIx64 " fence_id=%" PRIu64 " gfx%d\n",
+           value - epilogue, value, fence_va, fence_id, gfx_major);
+
+    // Overrun is prevented at the producer: its AcquireWriteAddress free-space check
+    // now includes the reserved epilogue, so it never submits a span larger than the
+    // ring. wptr_next_ already equals `value` (aliases the producer's queue_wptr_).
+    wptr_next_ = value;
+
+    if (!device->SubmitToSdmaHwQueue(this, value))
+      assert(!"SDMA doorbell failed!");
+    return;
+  }
+
+  pr_err("[sdma] RingDoorbell SWS wptr_pre=0x%" PRIx64 " wptr_next=0x%" PRIx64 "\n", wptr_pre_, wptr_next_);
   thread_cond_lock_.lock();
 
   wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
@@ -1175,11 +1284,16 @@ void SDMAQueue::RingDoorbell(uint64_t value) {
 }
 
 hsa_status_t SDMAQueue::Init(void) {
-  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
-  if (ret) return ret;
+  if (native_sdma_)
+    pr_rocr_info("SDMA queue: native user queue (WDDM HwQueue submit)\n");
+  else
+    pr_rocr_info("SDMA queue: legacy SWS translation thread\n");
 
+  // Zero the ring before HwsInit so the init FENCE+TRAP written by CreateHwQueue
+  // is not overwritten.  For the SWS path the order doesn't matter.
   std::memset((char*)cmdbuf_addr, 0, cmdbuf_size);
 
+  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
   return ret;
 }
 
@@ -1194,6 +1308,8 @@ int SDMAQueue::PreparePacket(uint32_t offset, uint64_t size) {
 }
 
 hsa_status_t SDMAQueue::Submit(void) {
+  pr_err("[sdma] Submit native=%d hws=%d ib_start=0x%" PRIx64 " ib_size=0x%" PRIx64 " rptr_next=0x%" PRIx64 "\n",
+         (int)native_sdma_, (int)use_hws, ib_start_addr, ib_size, rptr_next);
   if (!device->WaitPagingFence(this)) return HSA_STATUS_ERROR;
 
   int ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, rptr_next)
