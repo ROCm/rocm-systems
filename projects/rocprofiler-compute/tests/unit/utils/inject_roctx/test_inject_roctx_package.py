@@ -59,33 +59,20 @@ def captured_install(monkeypatch):
     return calls
 
 
-def test_install_global_wraps_empty_inputs_are_noop(captured_install):
+def test_install_global_wraps_empty_input_is_noop(captured_install):
     from utils.inject_roctx.core import install_global_wraps
 
-    install_global_wraps("")
     install_global_wraps([])
+    install_global_wraps(())
     assert captured_install == []
 
 
-def test_install_global_wraps_single_name(captured_install):
+def test_install_global_wraps_list_input(captured_install):
     from utils.inject_roctx.core import install_global_wraps
 
-    install_global_wraps("torch")
-    assert captured_install == [["torch"]]
-
-
-def test_install_global_wraps_comma_split_with_whitespace(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
-    install_global_wraps("torch , , triton")
-    assert captured_install == [["torch", "triton"]]
-
-
-def test_install_global_wraps_iterable_input(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
+    install_global_wraps(["torch"])
     install_global_wraps(["torch", "triton"])
-    assert captured_install == [["torch", "triton"]]
+    assert captured_install == [["torch"], ["torch", "triton"]]
 
 
 # ---------------------------------------------------------------------------
