@@ -736,6 +736,12 @@ protected:
             int status;
             ncclNetHandle_t handle;
         } handshake = {};
+        // ncclIbListen writes a uint64_t magic through the handle pointer it's
+        // given, so listen()/connect() need an 8-byte-aligned buffer rather
+        // than &handshake.handle (which sits at a 4-byte offset after status).
+        // This local is aligned; the handshake only ever carries a byte-copy
+        // of it, same as SetupConnection's pair.handle.
+        alignas(8) ncclNetHandle_t handle{};
         // Tracks this rank's own outcome, kept separate from the peer's status
         // in the handshake so the assertion message below can tell "my own
         // accept/connect failed" apart from "the peer's listen failed", instead
@@ -744,10 +750,11 @@ protected:
         const char* localReason = "ok";
 
         if (rank == 0) {
-            localOk = (CreateListenComm(dev, &handshake.handle, listenComm) == ncclSuccess)
+            localOk = (CreateListenComm(dev, &handle, listenComm) == ncclSuccess)
                       && *listenComm != nullptr;
             handshake.status = localOk ? 1 : 0;
             if (!localOk) localReason = "listen failed";
+            if (localOk) memcpy(handshake.handle, handle, sizeof(handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
@@ -766,8 +773,9 @@ protected:
                 localOk = false;
                 localReason = "peer's listen failed";
             } else {
+                memcpy(handle, handshake.handle, sizeof(handle));
                 for (int i = 0; localOk && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
-                    if (ConnectToRemote(dev, &handshake.handle, sendComm) != ncclSuccess) {
+                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
                         localOk = false;
                         localReason = "connect failed";
                     }

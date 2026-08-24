@@ -842,19 +842,27 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
         // MPI_Recv below has no timeout, so it would block until the suite
         // timeout instead of failing with this test. The status word makes the
         // failure observable to both ranks instead.
+        //
+        // handshake.handle sits at a 4-byte offset (after `status`), but
+        // ncclIbListen writes a uint64_t magic through the pointer it's given,
+        // so listen()/connect() must see pair.handle (8-byte aligned, same
+        // layout SetupConnection relies on) rather than &handshake.handle
+        // directly; the handshake only carries a byte-copy of it.
         struct ListenHandshake {
             int status;  // 1 when rank 0's listener is ready and the handle is valid
             ncclNetHandle_t handle;
         } handshake = {};
 
         if (rank == 0) {
-            ncclResult_t local = CreateListenComm(mergedDev, &handshake.handle, &pair.listenComm);
+            ncclResult_t local = CreateListenComm(mergedDev, &pair.handle, &pair.listenComm);
             handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            if (handshake.status) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
         } else {
             MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (handshake.status) memcpy(pair.handle, handshake.handle, sizeof(pair.handle));
         }
 
         int connectFailed = 0;
@@ -873,7 +881,7 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
             } else {
                 ncclResult_t r = ncclSuccess;
                 while (!pair.sendComm && r == ncclSuccess)
-                    r = ConnectToRemote(mergedDev, &handshake.handle, &pair.sendComm);
+                    r = ConnectToRemote(mergedDev, &pair.handle, &pair.sendComm);
                 if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
             }
         }
